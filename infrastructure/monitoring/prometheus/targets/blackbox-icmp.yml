@@ -1,0 +1,8 @@
+# Dedicated servers: reachability is the only signal the platform has for a
+# machine it does not run an agent on, and the customer owns the OS.
+- targets:
+    - 198.51.100.10
+    - 198.51.100.11
+  labels:
+    service: dedicated
+    role: dedicated

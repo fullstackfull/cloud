@@ -1,0 +1,32 @@
+---
+pxe_dhcp_package: dnsmasq
+pxe_dhcp_service: dnsmasq
+pxe_tftp_root: /srv/tftp
+
+# The provisioning network. Declared per host, never discovered.
+pxe_provisioning_cidr: ~
+pxe_dhcp_range_start: ~
+pxe_dhcp_range_end: ~
+pxe_dhcp_lease_time: 10m
+
+# Where installers fetch their images and answer files from. Served over HTTP
+# on the provisioning VLAN only.
+pxe_http_root: /srv/provisioning
+
+# Every one of these is bound to the NAMED PROVISIONING INTERFACE rather than to
+# a source network, and the DHCP port is here because without it the service
+# runs and answers nothing.
+#
+# The hardening role builds a default-deny inbound ruleset on this host too. A
+# PXE server whose port 67 is dropped by its own firewall boots nothing: the
+# machine on the provisioning VLAN sends a DISCOVER, dnsmasq never sees it, and
+# the failure looks like broken hardware or a bad cable rather than a firewall.
+# Source-address matching cannot express this rule at all — a DISCOVER comes
+# from 0.0.0.0, before the client has any address — which is why these carry an
+# interface instead of a CIDR. `iface` also keeps TFTP and the installer HTTP
+# root off the management network, where the default would otherwise have put
+# them.
+pxe_inbound_rules:
+  - {port: 67, proto: udp, iface: "{{ pxe_provisioning_interface }}", comment: 'pxe: DHCP, provisioning VLAN only'}
+  - {port: 69, proto: udp, iface: "{{ pxe_provisioning_interface }}", comment: 'pxe: TFTP, provisioning VLAN only'}
+  - {port: 80, proto: tcp, iface: "{{ pxe_provisioning_interface }}", comment: 'pxe: installer images and answer files'}

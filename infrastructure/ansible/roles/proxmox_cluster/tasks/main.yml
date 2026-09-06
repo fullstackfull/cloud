@@ -1,0 +1,191 @@
+---
+# ============================================================================
+# CLUSTER JOIN. READ THIS BEFORE CHANGING ANYTHING IN THIS FILE.
+# ============================================================================
+#
+# What breaks if this runs against the wrong machine:
+#
+#   `pvecm add` rewrites corosync.conf on the joining node AND on every existing
+#   member. A node that joins the wrong cluster is not simply "in the wrong
+#   place" — it changes the quorum expectation of the cluster it joined, and it
+#   destroys its own /etc/pve, which is where the definitions of every virtual
+#   machine on it live. If that node had customer machines, their configuration
+#   is gone; the disks remain, and reconstructing which disk belonged to which
+#   customer is a manual archaeology exercise.
+#
+#   `pvecm create` on a node that should have joined an existing cluster forms a
+#   second, one-node cluster with the same name. Two clusters that believe they
+#   are the same cluster is the worst of the available outcomes.
+#
+# Recovery in either case requires quorum the cluster no longer has, and takes
+# every customer machine on every affected node offline for the duration.
+#
+# Therefore: this role runs only where a NAMED HOST declares it, it re-checks
+# every precondition itself rather than trusting the caller, and it refuses on
+# anything ambiguous instead of guessing.
+# ============================================================================
+
+- name: Refuse unless this exact host declares that it joins a cluster
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_join_enabled | bool
+      - proxmox_cluster_name is not none
+      - proxmox_cluster_name | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} does not declare `proxmox_cluster_join_enabled` and
+      `proxmox_cluster_name`. Cluster membership is declared per host, in
+      inventory host_vars, and never for a group — "every node in this
+      environment joins a cluster" is how a node joins the wrong one.
+    quiet: true
+
+- name: Refuse an ambiguous instruction to both form and join a cluster
+  ansible.builtin.assert:
+    that:
+      - (proxmox_cluster_create | bool) != (proxmox_cluster_peer is not none)
+    fail_msg: >-
+      {{ inventory_hostname }} must declare exactly one of `proxmox_cluster_create`
+      (form a new cluster here) or `proxmox_cluster_peer` (join the cluster
+      through that member). Both set, or neither, is ambiguous — and the wrong
+      guess forms a second cluster with the same name as the real one.
+    quiet: true
+
+- name: Read the cluster this node is currently in, if any
+  ansible.builtin.command:
+    cmd: pvecm status
+  register: proxmox_cluster_status
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  become: true
+
+- name: Determine the current cluster name
+  ansible.builtin.set_fact:
+    proxmox_cluster_current_name: >-
+      {{ (proxmox_cluster_status.stdout | regex_search('Name:\s+(\S+)', '\\1') | first)
+         if proxmox_cluster_status.rc == 0 else '' }}
+
+# THE MISMATCH CHECK. A node already in cluster A, declared as belonging to
+# cluster B, is a configuration error somebody must resolve by hand. Acting on
+# it — leaving A, joining B — would destroy /etc/pve on this node, and with it
+# the definition of every customer machine it is running.
+- name: Refuse a node that is already in a different cluster
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_current_name == '' or proxmox_cluster_current_name == proxmox_cluster_name
+    fail_msg: >-
+      {{ inventory_hostname }} is already a member of cluster
+      '{{ proxmox_cluster_current_name }}' but the inventory declares
+      '{{ proxmox_cluster_name }}'. This role will not move a node between
+      clusters: doing so destroys /etc/pve on this node, which is where the
+      configuration of every virtual machine on it lives. The disks would
+      survive; the record of which disk belongs to which customer would not.
+      Resolve this by hand, with the customer machines migrated off first.
+    quiet: true
+
+- name: Report a node that is already correctly clustered
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is already a member of '{{ proxmox_cluster_name }}'.
+      Nothing to do — this role is idempotent and never re-runs `pvecm`.
+  when: proxmox_cluster_current_name == proxmox_cluster_name
+
+# BOTH guest types are counted. A container's configuration lives in /etc/pve
+# exactly as a virtual machine's does, so enumerating only `qemu` would let a
+# node full of customer containers pass a check whose entire purpose is to stop
+# /etc/pve being replaced while something's configuration is in it.
+- name: Count the guests on this node
+  ansible.builtin.command:
+    cmd: pvesh get /nodes/{{ inventory_hostname_short }}/{{ guest_kind }} --output-format json
+  register: proxmox_cluster_guest_list
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  become: true
+  loop: [qemu, lxc]
+  loop_control:
+    loop_var: guest_kind
+  when: proxmox_cluster_current_name == ''
+
+# "COULD NOT COUNT THE GUESTS" IS NOT "THERE ARE NO GUESTS".
+#
+# `pvesh` is allowed to fail (a broken pvedaemon, a node mid-upgrade, an API
+# permission change) and the count is the only thing standing between `pvecm
+# add` and a node whose customers' configuration is about to be replaced. If the
+# enumeration did not succeed the role refuses, because the failure mode of
+# guessing wrong here is unrecoverable: the disks survive and the record of
+# which disk belongs to which customer does not.
+- name: Refuse to join when the guests on this node could not be enumerated
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_guest_list.results | rejectattr('skipped', 'defined') | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      Could not read the guest list on {{ inventory_hostname }}
+      ({{ proxmox_cluster_guest_list.results | rejectattr('skipped', 'defined')
+         | selectattr('rc', 'ne', 0) | map(attribute='guest_kind') | join(', ') }} failed).
+      Nothing has been changed. A check that could not run is not a check that
+      passed, and this is the one that decides whether `pvecm` may replace
+      /etc/pve — which is where the configuration of every machine on this node
+      lives. Fix pvesh and re-run.
+    quiet: true
+  when: proxmox_cluster_current_name == ''
+
+# Proxmox itself refuses to join a node that has guests, and it is right to.
+# The check is repeated here so the refusal names the reason rather than
+# surfacing as an exit code from pvecm halfway through a play.
+- name: Refuse to join a cluster with customer machines on this node
+  ansible.builtin.assert:
+    that:
+      - (proxmox_cluster_guest_list.results | rejectattr('skipped', 'defined')
+         | map(attribute='stdout') | map('from_json') | map('length') | sum) == 0
+    fail_msg: >-
+      {{ inventory_hostname }} has
+      {{ proxmox_cluster_guest_list.results | rejectattr('skipped', 'defined')
+         | map(attribute='stdout') | map('from_json') | map('length') | sum }} guest(s).
+      Joining a cluster replaces this node's /etc/pve with the cluster's, and
+      the guests' configuration is in /etc/pve. Migrate or remove them first.
+    quiet: true
+  when: proxmox_cluster_current_name == ''
+
+# --------------------------------------------------------------------------
+# The two irreversible commands.
+#
+# Both are skipped in --check, which is correct: there is no dry run for
+# `pvecm`, and a task that pretended to have one would be lying about the only
+# thing an operator uses --check to find out.
+# --------------------------------------------------------------------------
+- name: Form a new cluster on this node
+  ansible.builtin.command:
+    cmd: >-
+      pvecm create {{ proxmox_cluster_name }}
+      {{ ('--link0 ' ~ proxmox_cluster_link0) if proxmox_cluster_link0 else '' }}
+  become: true
+  when:
+    - proxmox_cluster_current_name == ''
+    - proxmox_cluster_create | bool
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Join the existing cluster
+  ansible.builtin.command:
+    cmd: >-
+      pvecm add {{ proxmox_cluster_peer }}
+      {{ ('--link0 ' ~ proxmox_cluster_link0) if proxmox_cluster_link0 else '' }}
+      --use_ssh 1
+  become: true
+  when:
+    - proxmox_cluster_current_name == ''
+    - proxmox_cluster_peer is not none
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Report what a check run would have done
+  ansible.builtin.debug:
+    msg: >-
+      CHECK MODE: {{ inventory_hostname }} would
+      {{ (proxmox_cluster_create | bool) | ternary('FORM cluster ' ~ proxmox_cluster_name,
+      'JOIN cluster ' ~ proxmox_cluster_name ~ ' via ' ~ (proxmox_cluster_peer | default('?'))) }}.
+      This is irreversible and has no dry run; the command is skipped here rather
+      than simulated.
+  when:
+    - ansible_check_mode
+    - proxmox_cluster_current_name == ''

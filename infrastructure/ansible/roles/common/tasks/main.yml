@@ -1,0 +1,86 @@
+---
+# Baseline configuration every Lynomia host receives.
+#
+# Nothing here is destructive: it installs packages, sets the clock source and
+# makes the journal survive a reboot. It is still guarded, because the one thing
+# that must never happen is platform automation touching a customer's dedicated
+# server — the customer administers that machine, the platform does not back it
+# up, and an overwritten config there has nothing to restore from.
+
+- name: Refuse to configure a machine the platform must never configure
+  ansible.builtin.assert:
+    that:
+      - not (lynomia_never_configure | default(false) | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} is flagged `lynomia_never_configure`. That flag is
+      carried by customer dedicated servers, which run the customer's operating
+      system and the customer's data. The platform's interest in them is
+      inventory, monitoring and out-of-band power — never configuration
+      management. Remove the host from the play, not the flag from the host.
+    quiet: true
+
+- name: Install baseline packages
+  ansible.builtin.package:
+    name: "{{ common_base_packages }}"
+    state: present
+  become: true
+
+- name: Install the NTP client
+  ansible.builtin.package:
+    name: "{{ common_ntp_package }}"
+    state: present
+  become: true
+
+# The timezone is set by managing the two files that define it rather than by
+# shelling out to timedatectl. Both are idempotent, both show up in --diff, and
+# neither reports a change on a host that is already correct — a `command:` task
+# would report "changed" on every single run and train operators to ignore the
+# change count, which is the number that matters in a --check run.
+- name: Point /etc/localtime at the configured zone
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ lynomia_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+  become: true
+
+- name: Record the timezone name where Debian-family tooling reads it
+  ansible.builtin.copy:
+    content: "{{ lynomia_timezone }}\n"
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Configure the NTP client
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: "{{ (ansible_facts.os_family == 'Debian') | ternary('/etc/chrony/chrony.conf', '/etc/chrony.conf') }}"
+    owner: root
+    group: root
+    mode: "0644"
+    # A malformed chrony.conf leaves the daemon dead and the clock free-running,
+    # which is invisible until TLS starts failing hours later. Validate before
+    # the file lands rather than discovering it in the handler.
+    validate: chronyd -Q -f %s
+  become: true
+  notify: Restart chrony
+
+- name: Enable and start the NTP client
+  ansible.builtin.systemd_service:
+    name: "{{ common_ntp_service }}"
+    enabled: true
+    state: started
+  become: true
+
+- name: Make the journal survive a reboot
+  ansible.builtin.template:
+    src: journald-lynomia.conf.j2
+    dest: /etc/systemd/journald.conf.d/10-lynomia.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart journald

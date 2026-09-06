@@ -1,0 +1,45 @@
+{{/*
+  Notification templates.
+
+  The design constraint is that the first line of a notification is often the
+  only line that gets read — on a phone, on a watch, in a channel that is
+  already busy. So the severity, the count and the subject go first, and the
+  prose goes underneath.
+*/}}
+
+{{ define "lynomia.slack.title" -}}
+{{ if eq .Status "firing" }}{{ if eq .CommonLabels.severity "critical" }}:rotating_light:{{ else }}:warning:{{ end }}{{ else }}:white_check_mark:{{ end }}
+{{- " " }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}]
+{{- " " }}{{ .CommonLabels.alertname }}
+{{- if .CommonLabels.instance }} — {{ .CommonLabels.instance }}{{ end }}
+{{- end }}
+
+{{ define "lynomia.slack.text" -}}
+{{ range .Alerts -}}
+*{{ .Annotations.summary }}*
+{{ .Annotations.description }}
+
+{{ if .Labels.instance }}• *Host:* `{{ .Labels.instance }}`
+{{ end }}{{ if .Labels.component }}• *Component:* {{ .Labels.component }}
+{{ end }}{{ if .Labels.cluster_name }}• *Cluster:* {{ .Labels.cluster_name }}
+{{ end }}{{ if .Labels.pool }}• *Pool:* {{ .Labels.pool }}
+{{ end }}{{ if .Labels.datastore }}• *Datastore:* {{ .Labels.datastore }}
+{{ end }}{{ if .Labels.queue }}• *Queue:* {{ .Labels.queue }}
+{{ end }}• *Since:* {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+{{ if .Annotations.runbook_url }}• *Runbook:* {{ .Annotations.runbook_url }}
+{{ end }}
+{{ end -}}
+{{- end }}
+
+{{ define "lynomia.pagerduty.description" -}}
+{{ .CommonLabels.alertname }}{{ if .CommonLabels.instance }} on {{ .CommonLabels.instance }}{{ end }}
+{{- if gt (len .Alerts.Firing) 1 }} ({{ len .Alerts.Firing }} firing in this group){{ end }}
+{{- end }}
+
+{{ define "lynomia.pagerduty.details" -}}
+{{ range .Alerts.Firing -}}
+{{ .Annotations.summary }}
+{{ .Annotations.description }}
+---
+{{ end -}}
+{{- end }}

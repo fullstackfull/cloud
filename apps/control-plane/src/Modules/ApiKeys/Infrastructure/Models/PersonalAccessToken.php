@@ -1,0 +1,85 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lynomia\Modules\ApiKeys\Infrastructure\Models;
+
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Laravel\Sanctum\PersonalAccessToken as SanctumPersonalAccessToken;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+
+/**
+ * A scoped API token for the public customer API.
+ *
+ * Extends Sanctum's model to add:
+ *  - ULID keys, matching the rest of the schema;
+ *  - the customer the token acts for, so a token belonging to a user who is a
+ *    member of several accounts can never act outside the one it was issued
+ *    for;
+ *  - a per-token rate limit and CIDR allow-list;
+ *  - revocation that is recorded rather than performed by deletion, so the
+ *    audit trail survives.
+ *
+ * @property string $id
+ * @property ?string $customer_id
+ * @property ?int $rate_limit_per_minute
+ * @property ?array<int, string> $allowed_ip_ranges
+ * @property ?CarbonImmutable $revoked_at
+ */
+class PersonalAccessToken extends SanctumPersonalAccessToken
+{
+    use HasUlids;
+
+    public $incrementing = false;
+
+    protected $keyType = 'string';
+
+    protected $guarded = ['id'];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'abilities' => 'json',
+            'allowed_ip_ranges' => 'array',
+            'last_used_at' => 'immutable_datetime',
+            'expires_at' => 'immutable_datetime',
+            'revoked_at' => 'immutable_datetime',
+        ];
+    }
+
+    /**
+     * @return BelongsTo<Customer, $this>
+     */
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    public function isRevoked(): bool
+    {
+        return $this->revoked_at !== null;
+    }
+
+    public function isExpired(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->isPast();
+    }
+
+    public function isUsable(): bool
+    {
+        return ! $this->isRevoked() && ! $this->isExpired();
+    }
+
+    public function revoke(string $reason): void
+    {
+        $this->forceFill([
+            'revoked_at' => now(),
+            'revoked_reason' => substr($reason, 0, 128),
+        ])->save();
+    }
+}

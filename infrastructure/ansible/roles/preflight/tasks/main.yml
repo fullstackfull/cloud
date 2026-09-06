@@ -1,0 +1,165 @@
+---
+# READ-ONLY INSPECTION. This role must never change anything, in any mode.
+#
+# That is not a stylistic preference. preflight.yml is the playbook an operator
+# runs against production when something is already wrong, and it is the one
+# playbook they must be able to run without thinking about consequences. The
+# moment it acquires a task that writes, it stops being safe to run during an
+# incident — and a preflight nobody dares run during an incident is a preflight
+# that never runs when it matters.
+#
+# Mechanically: every fact-gathering `command` here carries `check_mode: false`
+# so it produces real output under `--check`, and `changed_when: false` so it
+# never reports a change. A read that reports "changed" is indistinguishable
+# from a write in the run summary.
+
+- name: Collect service state
+  ansible.builtin.service_facts:
+  check_mode: false
+
+- name: Collect installed packages
+  ansible.builtin.package_facts:
+    manager: auto
+  check_mode: false
+  failed_when: false
+
+- name: Read the controller's view of this host's clock
+  ansible.builtin.command:
+    cmd: date -u +%s
+  register: preflight_remote_epoch
+  changed_when: false
+  check_mode: false
+
+- name: Read listening sockets
+  ansible.builtin.command:
+    cmd: ss -H -tulpn
+  register: preflight_sockets
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Read mounted filesystems and their free space
+  ansible.builtin.command:
+    cmd: df -P -k
+  register: preflight_disk
+  changed_when: false
+  check_mode: false
+
+# --------------------------------------------------------------------------
+# Findings are accumulated, not raised one at a time.
+#
+# An operator running this before a maintenance window needs the whole list. A
+# preflight that dies on the first problem sends them round the loop once per
+# fault, and the fourth lap is where they start skipping checks.
+# --------------------------------------------------------------------------
+- name: Start with no findings
+  ansible.builtin.set_fact:
+    preflight_findings: []
+
+- name: Check that this host is running a supported operating system
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['UNSUPPORTED_OS: ' ~ ansible_facts.distribution ~ ' '
+         ~ ansible_facts.distribution_major_version ~ ' is not in preflight_supported_os.'] }}
+  when: >-
+    preflight_supported_os
+    | selectattr('distribution', 'equalto', ansible_facts.distribution)
+    | selectattr('major', 'equalto', ansible_facts.distribution_major_version)
+    | list | length == 0
+
+# THE CO-LOCATION CHECK.
+#
+# A control plane on a hypervisor cannot be used to recover that hypervisor: the
+# tool and the thing it fixes fail together. A control plane on a hosting node
+# shares a blast radius with customer PHP — one runaway account takes the
+# platform down with the sites. A control plane on the firewall means losing the
+# firewall loses the only thing that could reconfigure it.
+- name: Check that the control plane does not share a machine with an incompatible role
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['ROLE_COLLISION: host is in `control_plane` and also in '
+         ~ (group_names | intersect(lynomia_control_plane_incompatible_groups) | join(', '))
+         ~ '. The control plane must not share a machine with any of these — see '
+         ~ 'infrastructure/README.md.'] }}
+  when:
+    - "'control_plane' in group_names"
+    - group_names | intersect(lynomia_control_plane_incompatible_groups) | length > 0
+
+- name: Check the clock against the controller
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['CLOCK_SKEW: ' ~ preflight_clock_skew ~ 's from the controller '
+         ~ '(limit ' ~ preflight_max_clock_skew_seconds ~ 's). Log correlation across hosts '
+         ~ 'is unreliable beyond this and TLS starts failing intermittently.'] }}
+  vars:
+    preflight_clock_skew: >-
+      {{ ((preflight_remote_epoch.stdout | int)
+          - (lookup('pipe', 'date -u +%s') | int)) | abs }}
+  when: >-
+    ((preflight_remote_epoch.stdout | int) - (lookup('pipe', 'date -u +%s') | int)) | abs
+    > (preflight_max_clock_skew_seconds | int)
+
+- name: Check free space on every mounted filesystem
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['DISK_LOW: ' ~ mount.mount ~ ' has '
+         ~ ((mount.size_available / mount.size_total * 100) | round(1))
+         ~ '% free (limit ' ~ preflight_min_free_disk_percent ~ '%).'] }}
+  loop: "{{ ansible_facts.mounts | default([]) | selectattr('size_total', 'gt', 0) | list }}"
+  loop_control:
+    loop_var: mount
+    label: "{{ mount.mount }}"
+  when: (mount.size_available / mount.size_total * 100) < (preflight_min_free_disk_percent | float)
+
+# The destructive flags are reported wherever they are set, whether or not a
+# destructive playbook is being run. A host left carrying `allow_reimage: true`
+# after last month's maintenance is a host one mistyped `-l` away from being
+# rebuilt, and nothing else in the system will ever mention it again.
+- name: Report any destructive guard flag left switched on
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['GUARD_LEFT_OPEN: `allow_reimage` is true on this host. '
+         ~ 'It should be set for one scheduled piece of work and removed afterwards; '
+         ~ 'left on, it is a default with extra steps.'] }}
+  when: allow_reimage | default(false) | bool
+
+- name: Report a Proxmox node configured to join a cluster
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['CLUSTER_JOIN_ARMED: this node declares '
+         ~ '`proxmox_cluster_join_enabled: true` for cluster "'
+         ~ (proxmox_cluster_name | default('<unnamed>')) ~ '". Confirm that is the cluster '
+         ~ 'it belongs to before running proxmox-postinstall.yml — joining the wrong one '
+         ~ 'is not recoverable without downtime for every node already in it.'] }}
+  when:
+    - "'proxmox' in group_names"
+    - proxmox_cluster_join_enabled | default(false) | bool
+
+- name: Report a PXE host armed to serve DHCP
+  ansible.builtin.set_fact:
+    preflight_findings: >-
+      {{ preflight_findings + ['DHCP_ARMED: this host will serve DHCP on '
+         ~ (pxe_provisioning_interface | default('<undeclared>'))
+         ~ '. Confirm that interface is on the provisioning VLAN and nothing else.'] }}
+  when:
+    - "'pxe' in group_names"
+    - pxe_allow_serve_dhcp | default(false) | bool
+
+- name: Report the findings for this host
+  ansible.builtin.debug:
+    msg: >-
+      {{ preflight_findings | length }} finding(s) on {{ inventory_hostname }}
+      ({{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }},
+      groups: {{ group_names | join(', ') }}):
+      {{ preflight_findings | default(['none'], true) | join(' | ') }}
+
+- name: Fail if this host has findings and the run is configured to stop on them
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} failed preflight with {{ preflight_findings | length }}
+      finding(s): {{ preflight_findings | join(' | ') }}.
+      Re-run with `-e preflight_fail_on_violation=false` to survey the whole fleet
+      instead of stopping here.
+  when:
+    - preflight_findings | length > 0
+    - preflight_fail_on_violation | bool

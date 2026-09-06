@@ -1,0 +1,119 @@
+---
+# =============================================================================
+# Fleet-wide policy.
+# =============================================================================
+# WHERE THIS FILE SITS IN THE PRECEDENCE ORDER, AND WHY THAT IS DELIBERATE
+#
+# `playbooks/group_vars` is a symlink to this directory, so Ansible loads these
+# files as *playbook* group_vars. In Ansible's precedence order that puts them
+# ABOVE inventory group_vars and BELOW inventory host_vars:
+#
+#   role defaults  <  inventory group_vars  <  THIS FILE  <  inventory host_vars
+#
+# The ordering is the point, and the division of labour follows from it:
+#
+#   role defaults/       tunables. Anything an operator may reasonably want to
+#                        change per environment lives here, at the bottom.
+#   group_vars/ (here)   invariants. Values an inventory must not be able to
+#                        weaken across a whole environment by adding one line.
+#   inventory host_vars/ per-machine facts and per-machine opt-in to the
+#                        guarded, destructive behaviour.
+#
+# So a blanket "allow_reimage: true" in an environment's group_vars does not
+# take effect, while a named host that genuinely is being re-imaged can still
+# declare it. Every destructive capability in this repository is therefore
+# opt-in per machine and cannot be switched on per fleet.
+#
+# NO SECRET APPEARS IN THIS FILE OR ANY FILE IN THIS DIRECTORY. Secrets are
+# referenced by variable name and supplied from a Vault-encrypted file that is
+# not committed; see infrastructure/README.md, "Secrets and Ansible Vault".
+
+# -----------------------------------------------------------------------------
+# Identity of the platform on disk
+# -----------------------------------------------------------------------------
+lynomia_owner_user: lynomia
+lynomia_owner_group: lynomia
+lynomia_base_dir: /opt/lynomia
+
+# UTC everywhere, without exception. Correlating a provisioning failure across
+# the control plane, a hypervisor and a backup server means comparing three
+# timestamps; three local timezones with three DST rules makes that arithmetic,
+# and arithmetic during an incident is how the wrong node gets rebooted.
+lynomia_timezone: UTC
+
+# -----------------------------------------------------------------------------
+# Role separation — enforced, not merely documented
+# -----------------------------------------------------------------------------
+# Roles that must never share a machine with the control plane. A control plane
+# on a hypervisor cannot be used to recover that hypervisor; a control plane on
+# a hosting node shares a blast radius with customer PHP; a control plane on the
+# firewall means losing the firewall loses the tool you would fix it with.
+# playbooks/preflight.yml asserts this and playbooks/control-plane.yml refuses.
+lynomia_control_plane_incompatible_groups:
+  - proxmox
+  - pbs
+  - hosting
+  - firewall
+  - pxe
+  - dedicated
+
+# -----------------------------------------------------------------------------
+# Destructive-action guards — the default for every one of them is "no"
+# -----------------------------------------------------------------------------
+# Each of these is re-stated in the role that reads it, together with what
+# breaks if it runs on the wrong machine. They are collected here so that the
+# answer to "what can this repository destroy?" is one file, not a grep.
+
+# Reformat, repartition, reset RAID, reinstall or reconfigure-from-scratch.
+# Set per host, for one scheduled piece of work, and removed afterwards.
+allow_reimage: false
+
+# Machines that platform automation must never configure at all. Customer
+# dedicated servers carry this: they run the customer's operating system and
+# the platform's only interest in them is inventory and out-of-band control.
+lynomia_never_configure: false
+
+# -----------------------------------------------------------------------------
+# The timeout rule
+# -----------------------------------------------------------------------------
+# A timeout means the platform stopped waiting. It does NOT mean the provider
+# stopped working. Nothing in this repository retries a timed-out operation
+# automatically, and nothing releases a resource because an operation timed out
+# — the resource may exist. Where a task can time out against an API (Proxmox,
+# PBS), the failure is reported for an operator and the resource is left in
+# place to be reconciled, because the alternative is a customer with two of
+# something they paid for once.
+lynomia_api_timeout_seconds: 30
+lynomia_api_retries: 0
+
+# -----------------------------------------------------------------------------
+# SSH access policy — see roles/hardening
+# -----------------------------------------------------------------------------
+# Passwords are disabled everywhere. A password-authenticated SSH port on a
+# public address is brute-forced continuously; the only question is how long the
+# password holds. Key material is supplied through the inventory, never here.
+hardening_permit_root_login: prohibit-password
+hardening_password_authentication: false
+hardening_kbd_interactive_authentication: false
+hardening_pubkey_authentication: true
+
+# nftables is default-deny inbound on every platform host. Ports are opened by
+# the role that needs them and by nothing else, so an open port always has an
+# owner that can be named.
+hardening_default_inbound_policy: drop
+
+# -----------------------------------------------------------------------------
+# Observability
+# -----------------------------------------------------------------------------
+# Every platform host ships metrics. A host that is not scraped is a host whose
+# disk fills silently, and on a hypervisor a full disk stops every running
+# machine on it.
+monitoring_node_exporter_port: 9100
+
+# -----------------------------------------------------------------------------
+# Vault-encrypted material — referenced here, supplied at run time
+# -----------------------------------------------------------------------------
+# These paths are NOT committed. Each playbook that needs one loads it with
+# `vars_files` and fails with an explicit message if it is absent, rather than
+# proceeding with an empty password. See infrastructure/README.md.
+lynomia_vault_file: "{{ inventory_dir }}/group_vars/vault.yml"

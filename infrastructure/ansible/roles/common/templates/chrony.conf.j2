@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+# Managed by infrastructure/ansible/roles/common. Local edits are reverted on
+# the next run; change the role or the inventory instead.
+
+{% for server in common_ntp_servers %}
+pool {{ server }} iburst
+{% endfor %}
+
+driftfile /var/lib/chrony/chrony.drift
+makestep 1.0 3
+rtcsync
+
+# Never act as a time server. A platform host answering NTP for the customer
+# network is an amplification reflector with the provider's address on it.
+port 0
+cmdport 0

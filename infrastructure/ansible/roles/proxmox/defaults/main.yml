@@ -1,0 +1,51 @@
+---
+# Networking ---------------------------------------------------------------
+# Declared per host. There is no discovery here on purpose: "the interface with
+# the default route" is the answer auto-detection gives and the wrong answer for
+# a machine with a management interface, a storage interface and a customer
+# bridge.
+proxmox_management_interface: ~
+proxmox_bridges: []
+
+# VLAN IDs a VLAN-aware bridge will carry. No VLAN ID is hard-coded anywhere in
+# this repository: a VLAN that is management in one datacentre is somebody's
+# production network in another (docs/networking.md).
+proxmox_bridge_vids: "2-4094"
+
+# APPLYING A NETWORK CHANGE ON A LIVE HYPERVISOR IS DESTRUCTIVE.
+#
+# `ifreload -a` re-evaluates every interface. On a node with running customer
+# machines a mistake in a bridge definition drops their connectivity, and a
+# mistake on the management interface drops the connection this play is running
+# over — leaving the node half-configured with no way back in except the
+# datacentre's console.
+#
+# So the role always WRITES the configuration (visible in --diff, reviewable)
+# and applies it only when a host declares this. The normal workflow is: run,
+# read the diff, schedule the apply.
+proxmox_apply_network: false
+
+# Hostname and DNS ---------------------------------------------------------
+proxmox_dns_servers: []
+proxmox_dns_search: ~
+
+# Repositories -------------------------------------------------------------
+proxmox_no_subscription_repo: true
+
+# API access ---------------------------------------------------------------
+proxmox_create_api_token: true
+# Where the freshly created token secret is left on the node, readable by root
+# only. Proxmox shows a token's secret exactly once, at creation; there is no
+# way to read it back. It is written here so an operator can move it into the
+# platform's secret store, and this role never prints it and never stores it in
+# the repository.
+proxmox_api_token_secret_path: /root/.lynomia-api-token
+
+# Monitoring ---------------------------------------------------------------
+proxmox_install_node_exporter: true
+proxmox_node_exporter_packages:
+  - prometheus-node-exporter
+
+proxmox_inbound_rules:
+  - {port: 8006, proto: tcp, comment: 'proxmox: web UI and API, management network only'}
+  - {port: 9100, proto: tcp, comment: 'proxmox: node_exporter scrape'}

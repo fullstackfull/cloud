@@ -1,0 +1,9 @@
+# Shared hosting nodes. A full disk here does not degrade the box, it breaks
+# every site and every mailbox on it simultaneously — which is why the hosting
+# disk threshold in the rules is lower than anywhere else on the platform.
+- targets:
+    - web-01.kw.lynomia.internal:9100
+    - web-02.kw.lynomia.internal:9100
+  labels:
+    role: hosting
+    service: shared-hosting

@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Schedule the Lynomia restore test
+
+[Timer]
+OnCalendar={{ pbs_restore_test_schedule }}
+
+# Run it if the machine was down when it was due. A restore test skipped
+# silently because of a reboot is a month with no evidence the backups work.
+Persistent=true
+
+# Spread the start so a fleet of backup servers does not all begin a full
+# restore at the same minute, which would saturate the backup network and make
+# every test look slow.
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target

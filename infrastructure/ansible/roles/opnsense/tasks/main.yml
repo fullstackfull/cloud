@@ -1,0 +1,275 @@
+---
+# ============================================================================
+# THE EDGE FIREWALL. THIS IS THE MOST DANGEROUS ROLE IN THE REPOSITORY.
+# ============================================================================
+#
+# What breaks if this runs against the wrong machine, or with the wrong
+# ruleset:
+#
+#   The edge firewall carries the management path. A wrong interface
+#   assignment, a rule that shadows the management allow, or a half-applied
+#   ruleset disconnects the entire datacentre — including the route the
+#   operator would use to fix it. Every hypervisor, every hosting node and
+#   every customer machine behind it becomes unreachable at the same instant,
+#   and monitoring goes quiet in a way that is indistinguishable from a power
+#   failure. Recovery is a physical console, or a drive to the facility.
+#
+#   Applied to a machine that is NOT the edge firewall — a router running
+#   OPNsense for one segment, say — it replaces that device's ruleset with the
+#   edge's, which is both wrong for the segment and missing everything the
+#   segment actually needed.
+#
+# Three independent conditions must hold, and none of them can be set for a
+# group: what the machine is, that an operator accepted the consequence, and
+# that somebody has a console open right now.
+# ============================================================================
+
+- name: Refuse unless this host declares itself the edge firewall
+  ansible.builtin.assert:
+    that:
+      - (lynomia_role | default('')) == 'firewall'
+    fail_msg: >-
+      {{ inventory_hostname }} declares `lynomia_role: {{ lynomia_role | default('<unset>') }}`,
+      not 'firewall'. This role rewrites the edge ruleset. Applied to anything
+      else it replaces that device's policy with the edge's — wrong for the
+      device, and missing everything the device needed.
+    quiet: true
+
+- name: Refuse unless an operator has explicitly accepted the consequences
+  ansible.builtin.assert:
+    that:
+      - allow_reimage | bool
+    fail_msg: >-
+      {{ inventory_hostname }} does not declare `allow_reimage: true`.
+      Reconfiguring the edge firewall can disconnect the entire datacentre
+      including the management path needed to fix it. That is a scheduled
+      decision recorded against a named host for one piece of work — not a line
+      left committed in an inventory.
+    quiet: true
+
+- name: Refuse unless somebody has a console open right now
+  ansible.builtin.assert:
+    that:
+      - opnsense_console_access_confirmed | bool
+    fail_msg: >-
+      `opnsense_console_access_confirmed` is false. Confirm an out-of-band or
+      physical console to {{ inventory_hostname }} is OPEN before applying a
+      ruleset to it. The difference between a five-minute mistake and a
+      four-hour outage is whether the console was already up when the management
+      path went away — afterwards is too late to open one.
+    quiet: true
+
+- name: Refuse without API credentials
+  ansible.builtin.assert:
+    that:
+      - opnsense_api_url is not none
+      - opnsense_api_key is not none
+      - opnsense_api_secret is not none
+    fail_msg: >-
+      OPNsense API credentials are not supplied. They come from the
+      Vault-encrypted file; see infrastructure/README.md. Nothing in this
+      repository contains them.
+    quiet: true
+  no_log: true
+
+# --------------------------------------------------------------------------
+# BACK UP FIRST. ALWAYS. INCLUDING IN CHECK MODE.
+#
+# OPNsense keeps its own configuration history, and during an incident that
+# history is on the appliance you cannot reach. The copy that matters is the one
+# on the operator's machine, taken before the change.
+# --------------------------------------------------------------------------
+- name: Create the local backup directory
+  ansible.builtin.file:
+    path: "{{ opnsense_backup_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  check_mode: false
+
+- name: Export the current configuration before touching anything
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_url }}/api/core/backup/download/this"
+    method: GET
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    return_content: true
+    timeout: "{{ lynomia_api_timeout_seconds }}"
+    # Timestamped on the CONTROLLER. `ansible_date_time` is a fact from the
+    # target, and this play deliberately gathers no facts from the appliance —
+    # see the note in playbooks/firewall.yml.
+    dest: "{{ opnsense_backup_dir }}/{{ inventory_hostname }}-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}.xml"
+    mode: "0600"
+    validate_certs: true
+  delegate_to: localhost
+  become: false
+  register: opnsense_backup
+  # Taken even under --check: a backup is not a change, and an operator running
+  # --check to see what would happen should end up holding the rollback.
+  check_mode: false
+  no_log: true
+
+- name: Confirm the backup was written
+  ansible.builtin.assert:
+    that:
+      - opnsense_backup is not failed
+    fail_msg: >-
+      Could not export {{ inventory_hostname }}'s current configuration. Nothing
+      has been changed. Do not proceed: applying a ruleset with no rollback copy
+      means a mistake is recovered by rebuilding the firewall from memory.
+    quiet: true
+
+# --------------------------------------------------------------------------
+# Aliases and rules
+#
+# This role manages the PROVIDER's own edge policy. It never carries per-VM
+# customer policy: that lives on the hypervisor, which is the only place a
+# customer with root inside their own guest cannot override it
+# (docs/networking.md).
+# --------------------------------------------------------------------------
+- name: Refuse a ruleset that looks like per-VM customer policy
+  ansible.builtin.assert:
+    that:
+      - not (firewall_never_carries_vm_policy | bool) or (rule.scope | default('edge')) == 'edge'
+    fail_msg: >-
+      Rule "{{ rule.description | default('unnamed') }}" declares scope
+      '{{ rule.scope | default('edge') }}'. Per-VM policy belongs on the
+      hypervisor's firewall, where a customer with root in their guest cannot
+      remove it, and where anti-spoofing is bound to the addresses actually
+      assigned to that machine. An edge rule naming one customer's VM is a rule
+      that stops working the moment that VM migrates.
+    quiet: true
+  loop: "{{ opnsense_rules }}"
+  loop_control:
+    loop_var: rule
+    label: "{{ rule.description | default('unnamed') }}"
+
+# THIS ROLE DOES NOT WRITE FILTER RULES, AND SAYS SO RATHER THAN PRETENDING TO.
+#
+# Only aliases are pushed below. An operator who declares `opnsense_rules` and
+# gets a green run would reasonably conclude the edge now carries them — and on
+# a firewall the difference between "the rule is there" and "the run said OK" is
+# whether a network somebody believes is blocked is actually reachable. Silently
+# ignoring a declared ruleset on the edge is the worst available behaviour, so
+# the role refuses instead. Manage filter rules on the appliance until this is
+# implemented and verified against a real OPNsense, not from documentation.
+- name: Refuse to silently ignore declared filter rules
+  ansible.builtin.assert:
+    that:
+      - opnsense_rules | length == 0
+    fail_msg: >-
+      {{ opnsense_rules | length }} filter rule(s) are declared for
+      {{ inventory_hostname }}, and this role only manages ALIASES — it has no
+      code path that writes a filter rule. Nothing has been changed. A run that
+      accepted them would report success for an edge ruleset that was never
+      applied, which is how a network everyone believes is blocked stays open.
+    quiet: true
+
+- name: Apply the declared aliases
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_url }}/api/firewall/alias/{{ (alias.uuid is defined) | ternary('setItem/' ~ (alias.uuid | default('')), 'addItem') }}"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      alias:
+        name: "{{ alias.name }}"
+        type: "{{ alias.type | default('network') }}"
+        content: "{{ alias.content | join('\n') }}"
+        description: "{{ alias.description | default('managed by Lynomia Ansible') }}"
+    timeout: "{{ lynomia_api_timeout_seconds }}"
+    validate_certs: true
+    status_code: [200]
+  delegate_to: localhost
+  become: false
+  loop: "{{ opnsense_aliases }}"
+  loop_control:
+    loop_var: alias
+    label: "{{ alias.name }}"
+  when: not ansible_check_mode
+  register: opnsense_alias_results
+  no_log: true
+
+# HTTP 200 IS NOT SUCCESS ON THIS API.
+#
+# OPNsense answers a rejected write with 200 and `{"result": "failed",
+# "validations": {...}}` in the body. `status_code: [200]` alone therefore
+# reports a green run for an alias that was never created — and the apply below
+# then runs against a ruleset referencing a name the firewall does not have,
+# which is a rule that matches nothing on the box that is supposed to be
+# enforcing it.
+- name: Refuse to treat a rejected alias write as success
+  ansible.builtin.assert:
+    that:
+      - (write.json.result | default('') | lower) in ['saved', 'ok', 'done']
+    fail_msg: >-
+      OPNsense returned HTTP {{ write.status | default('?') }} for alias
+      '{{ write.alias.name | default('?') }}' with result
+      '{{ write.json.result | default('<no result field>') }}'
+      {{ ('validations: ' ~ (write.json.validations | default({}) | string))
+         if (write.json.validations is defined) else '' }}.
+      A 200 from this API means the request was understood, not that the alias
+      exists. Nothing further has been applied.
+    quiet: true
+  loop: "{{ opnsense_alias_results.results | default([]) }}"
+  loop_control:
+    loop_var: write
+    label: "{{ write.alias.name | default('?') }}"
+  when: not ansible_check_mode
+
+# The apply is a separate, explicit call. OPNsense stages changes and applies
+# them on request; keeping the two apart means an interrupted run leaves the
+# live ruleset untouched rather than half-applied — and half-applied on the
+# edge is the state with no management path.
+- name: Apply the staged ruleset
+  ansible.builtin.uri:
+    url: "{{ opnsense_api_url }}/api/firewall/filter/apply"
+    method: POST
+    url_username: "{{ opnsense_api_key }}"
+    url_password: "{{ opnsense_api_secret }}"
+    force_basic_auth: true
+    body_format: json
+    body: {}
+    timeout: "{{ lynomia_api_timeout_seconds }}"
+    validate_certs: true
+  delegate_to: localhost
+  become: false
+  when: not ansible_check_mode
+  register: opnsense_apply_result
+  no_log: true
+
+# Same envelope, same reason. `filter/apply` answers 200 with
+# `{"status": "OK\n\n"}` when it applied and 200 with something else when it
+# did not, so the HTTP code says nothing about whether the edge is now enforcing
+# what was staged.
+- name: Refuse to treat a rejected apply as an applied ruleset
+  ansible.builtin.assert:
+    that:
+      - (opnsense_apply_result.json.status | default('')) is search('OK')
+    fail_msg: >-
+      OPNsense accepted the apply request (HTTP
+      {{ opnsense_apply_result.status | default('?') }}) and answered
+      '{{ opnsense_apply_result.json.status | default('<no status field>') }}'.
+      The staged ruleset has NOT been confirmed as applied. Do not assume it
+      was: check the appliance from the console before treating this edge as
+      configured.
+    quiet: true
+  when: not ansible_check_mode
+
+# A timeout here does NOT mean the apply failed. It means the platform stopped
+# waiting — quite possibly because the new ruleset just cut the path this call
+# was travelling over, which is the successful-and-catastrophic case. Retrying
+# would apply it again; the right move is a human on the console.
+- name: Report what to do if the apply timed out
+  ansible.builtin.debug:
+    msg: >-
+      If the apply above timed out, DO NOT RE-RUN. A timeout means this
+      controller stopped waiting, not that the firewall stopped working — and
+      the most likely reason the answer never arrived is that the ruleset was
+      applied successfully and removed the path the answer would have come back
+      on. Go to the console. The pre-change export is at
+      {{ opnsense_backup_dir }}/{{ inventory_hostname }}-*.xml.

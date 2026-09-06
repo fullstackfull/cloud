@@ -1,0 +1,22 @@
+---
+# The panel this node is being prepared for. Declared per host; there is no
+# default, because the supported-OS matrix and the licence check both depend on
+# it and guessing wrong produces a node that passes preflight for the wrong
+# product.
+hosting_panel: ~
+
+# Presence of a licence identity for the panel. Supplied from the Vault file.
+# This role does NOT contact the vendor's licensing service and does not
+# validate the licence: it establishes that one has been provisioned. The
+# installer performs the real check, and without a valid licence it stops
+# cleanly and reports LICENSE_REQUIRED — this repository contains nothing that
+# bypasses, patches or circumvents licensing, and no flag here enables one.
+hosting_license_identity: ~
+
+# Directories whose presence means a panel is already installed. A second panel
+# on the same machine is not a supported configuration by any of them.
+hosting_existing_panel_paths:
+  - /usr/local/cpanel
+  - /usr/local/directadmin
+  - /opt/psa
+  - /usr/local/psa

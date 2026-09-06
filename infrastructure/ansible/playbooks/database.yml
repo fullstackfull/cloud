@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# database.yml — PostgreSQL 18, data checksums, WAL archiving, base backups.
+# =============================================================================
+#
+#   ansible-playbook -i inventories/staging playbooks/database.yml --check --diff
+#
+# Three refusals fire before anything is written:
+#
+#   1. The host must declare `postgresql_role: primary` or `replica`. There is no
+#      safe default — every host assuming primary is a split brain with two
+#      divergent copies of the billing data.
+#   2. The WAL archive must not be inside the data directory. An archive that
+#      dies with the primary provides nothing for the disaster it was for.
+#   3. The list of networks allowed to connect must be explicit and must not
+#      contain a default route.
+#
+# The one genuinely destructive task — `initdb`, which destroys an existing
+# cluster — is guarded twice: by `creates:` on the data directory and by
+# `postgresql_allow_initdb`, which no environment sets and only a host being
+# built from nothing should.
+#
+# Data checksums cannot be enabled after the fact without an offline rewrite, so
+# a cluster already running without them is REPORTED loudly rather than silently
+# accepted. That report is the only chance anyone gets to schedule the fix.
+
+- name: Build the database hosts
+  hosts: database
+  gather_facts: true
+  become: true
+
+  # The primary is configured first and alone. A change that stops PostgreSQL is
+  # an outage; discovering it on the primary while the replica is still up is
+  # the difference between a failover and an incident.
+  serial: 1
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (postgresql_inbound_rules | default([])) }}
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: postgresql

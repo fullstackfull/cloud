@@ -1,0 +1,250 @@
+---
+# PostgreSQL 18: data checksums, WAL archiving, and base backups off the host.
+
+- name: Refuse a database host that has not declared whether it is primary or replica
+  ansible.builtin.assert:
+    that:
+      - postgresql_role in ['primary', 'replica']
+    fail_msg: >-
+      {{ inventory_hostname }} does not declare `postgresql_role`. It must be
+      'primary' or 'replica'. There is no safe default: if every host assumes
+      primary the cluster splits brain and two divergent copies of the billing
+      data exist; if none does, nothing accepts a write.
+    quiet: true
+
+# THE ARCHIVE MUST NOT LIVE ON THE MACHINE BEING ARCHIVED.
+#
+# An archive_command that copies WAL into a directory under the data directory
+# passes every test, produces a green backup job, and provides nothing at all
+# when the host is lost — which is one of exactly two disasters this is for. The
+# other is a bad migration at 14:07, which the archive does cover, and which is
+# why the mistake survives so long undetected.
+- name: Refuse a WAL archive that would die with the primary
+  ansible.builtin.assert:
+    that:
+      - postgresql_archive_dir is defined
+      - not (postgresql_archive_dir | regex_search('^' ~ postgresql_data_dir))
+      - postgresql_archive_dir != '/'
+    fail_msg: >-
+      `postgresql_archive_dir` ({{ postgresql_archive_dir }}) is inside the data
+      directory ({{ postgresql_data_dir }}). WAL archived next to the data it
+      protects is lost with it. Point this at a mount from separate storage.
+    quiet: true
+  when: postgresql_wal_archiving | bool
+
+- name: Refuse to expose the database to networks that have no business reaching it
+  ansible.builtin.assert:
+    that:
+      - postgresql_allowed_client_cidrs | length > 0
+      - "'0.0.0.0/0' not in postgresql_allowed_client_cidrs"
+      - "'::/0' not in postgresql_allowed_client_cidrs"
+    fail_msg: >-
+      `postgresql_allowed_client_cidrs` is empty or contains a default route.
+      The control plane's database holds every customer, invoice and encrypted
+      provider credential the platform has. Name the networks the control plane
+      connects from.
+    quiet: true
+
+- name: Install the PostgreSQL APT repository signing key
+  ansible.builtin.get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: /usr/share/keyrings/postgresql.asc
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Configure the PostgreSQL APT repository
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    types: [deb]
+    uris: https://apt.postgresql.org/pub/repos/apt
+    suites: "{{ ansible_facts.distribution_release }}-pgdg"
+    components: [main]
+    signed_by: /usr/share/keyrings/postgresql.asc
+    state: present
+  become: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Install PostgreSQL {{ postgresql_version }}
+  ansible.builtin.package:
+    name: "postgresql-{{ postgresql_version }}"
+    state: present
+  become: true
+
+- name: Create the WAL archive and base backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0700"
+  loop:
+    - "{{ postgresql_archive_dir }}"
+    - "{{ postgresql_basebackup_dir }}"
+  become: true
+  when: postgresql_wal_archiving | bool
+
+# --------------------------------------------------------------------------
+# initdb — the one genuinely destructive task in this role.
+#
+# initdb against a directory that already holds a cluster destroys it: every
+# customer, every invoice, every service record. `creates:` makes the task a
+# no-op once PG_VERSION exists, and the guard flag means the task cannot run at
+# all on a host that has not been declared as being built from nothing.
+#
+# Both are needed. `creates:` alone protects an existing cluster; the flag also
+# protects a host where an operator has just deleted the data directory by hand
+# while trying to fix something else.
+# --------------------------------------------------------------------------
+- name: Initialise the cluster with data checksums
+  ansible.builtin.command:
+    cmd: >-
+      /usr/lib/postgresql/{{ postgresql_version }}/bin/initdb
+      --pgdata={{ postgresql_data_dir }}
+      --data-checksums
+      --encoding=UTF8
+      --locale=C.UTF-8
+    creates: "{{ postgresql_data_dir }}/PG_VERSION"
+  become: true
+  become_user: postgres
+  when:
+    - postgresql_allow_initdb | bool
+    - postgresql_data_checksums | bool
+
+# Checksums cannot be turned on later without taking the cluster offline for a
+# full rewrite. If this host was built before the policy existed, the only
+# honest thing the role can do is say so loudly — silently continuing leaves a
+# cluster where storage corruption in the billing data is discovered by a
+# customer disputing an invoice.
+- name: Read whether the running cluster has data checksums
+  ansible.builtin.command:
+    cmd: "/usr/lib/postgresql/{{ postgresql_version }}/bin/pg_controldata {{ postgresql_data_dir }}"
+  register: postgresql_controldata
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  become: true
+  become_user: postgres
+
+- name: Report a cluster running without data checksums
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} runs a cluster WITHOUT data checksums, and policy
+      (group_vars/database.yml) requires them. They cannot be enabled online:
+      fixing this means `pg_checksums --enable` with the cluster stopped, which
+      rewrites every page. Schedule it. Until then, silent storage corruption in
+      this database is undetectable.
+  when:
+    - postgresql_data_checksums | bool
+    - postgresql_controldata.rc == 0
+    - "'Data page checksum version:            0' in postgresql_controldata.stdout"
+
+- name: Apply the PostgreSQL configuration
+  ansible.builtin.template:
+    src: lynomia.conf.j2
+    dest: "{{ postgresql_conf_dir }}/conf.d/10-lynomia.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  become: true
+  notify: Reload postgresql
+
+- name: Apply the client authentication rules
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgresql_conf_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  become: true
+  notify: Reload postgresql
+
+- name: Enable and start PostgreSQL
+  ansible.builtin.systemd_service:
+    name: "{{ postgresql_service }}"
+    enabled: true
+    state: started
+  become: true
+
+# --------------------------------------------------------------------------
+# A RELOAD DOES NOT ENABLE ARCHIVING. THIS IS THE CHECK THAT SAYS SO.
+#
+# The handler on the two template tasks above is `reloaded`, which is correct
+# for a primary — a restart is an outage for every request in flight. But
+# `archive_mode`, `wal_level`, `listen_addresses` and `shared_buffers` are
+# postmaster-level settings: PostgreSQL reads them at startup and a SIGHUP does
+# not adopt them. Without this check the role writes archive_mode = on, reports
+# a green run, and the cluster carries on with archiving OFF — so the WAL the
+# whole point-in-time recovery story depends on is not being archived at all,
+# and nothing says so until somebody needs to rewind to 14:06 and finds there is
+# nothing to rewind through.
+#
+# The handlers are flushed first so this reads the state after the reload, not
+# before it. The refusal is loud rather than automatic because restarting the
+# primary is a scheduled decision, exactly like the data-checksums rewrite above.
+# --------------------------------------------------------------------------
+- name: Apply the pending configuration reload before checking what it picked up
+  ansible.builtin.meta: flush_handlers
+
+- name: Read settings the running cluster has not adopted
+  ansible.builtin.command:
+    cmd: psql -Atc "SELECT name FROM pg_settings WHERE pending_restart"
+  register: postgresql_pending_restart
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  become: true
+  become_user: postgres
+  when: not ansible_check_mode
+
+- name: Refuse to report success while archiving is configured but not running
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} has configuration that the running cluster has
+      NOT adopted and cannot adopt without a restart:
+      {{ postgresql_pending_restart.stdout_lines | join(', ') }}.
+      If `archive_mode` or `wal_level` is in that list, this cluster is NOT
+      archiving WAL right now no matter what {{ postgresql_conf_dir }} says —
+      point-in-time recovery does not exist until PostgreSQL is restarted.
+      Schedule `systemctl restart {{ postgresql_service }}` on this host; the
+      reload this play performed cannot do it.
+  when:
+    - not ansible_check_mode
+    - postgresql_pending_restart.rc | default(1) == 0
+    - postgresql_pending_restart.stdout | default('') | trim | length > 0
+
+- name: Refuse to report success when the cluster could not be queried
+  ansible.builtin.fail:
+    msg: >-
+      Could not query {{ inventory_hostname }}'s running configuration
+      (`psql` exited {{ postgresql_pending_restart.rc | default('n/a') }}), so
+      this play cannot tell whether archiving is actually running. That is not a
+      pass — an unarchived primary looks identical to an archived one until a
+      recovery is attempted.
+  when:
+    - not ansible_check_mode
+    - postgresql_pending_restart.rc | default(1) != 0
+
+- name: Install the base backup script
+  ansible.builtin.template:
+    src: basebackup.sh.j2
+    dest: /usr/local/sbin/lynomia-pg-basebackup
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+
+# Base backups run on the primary only. A replica can serve one, but a schedule
+# that runs on both produces two unrelated backup lineages and an operator
+# restoring in an incident has to work out which is which.
+- name: Schedule the base backup on the primary and remove it elsewhere
+  ansible.builtin.cron:
+    name: lynomia-pg-basebackup
+    hour: "{{ postgresql_basebackup_schedule_hour }}"
+    minute: "{{ postgresql_basebackup_schedule_minute }}"
+    user: postgres
+    job: /usr/local/sbin/lynomia-pg-basebackup
+    state: "{{ (postgresql_role == 'primary') | ternary('present', 'absent') }}"
+  become: true

@@ -1,0 +1,199 @@
+---
+# READ-ONLY. This role inspects a candidate hosting node and REFUSES if a panel
+# installer would half-break it. It changes nothing, in any mode.
+#
+# Every check below is a refusal rather than a warning, and that is the design.
+# A hosting panel takes over a machine: its firewall, its mail stack, its web
+# server, its user accounts. Installed onto a host that is already doing
+# something else it does not fail cleanly — it produces a node that looks
+# installed, serves some requests, breaks others, and is easier to reinstall
+# than to repair. By the time that is discovered there are customer sites on it.
+
+- name: Refuse a node that has not declared which panel it is for
+  ansible.builtin.assert:
+    that:
+      - hosting_panel in ['cpanel', 'directadmin']
+    fail_msg: >-
+      {{ inventory_hostname }} does not declare `hosting_panel`. The supported-OS
+      matrix and the licence check both depend on it; guessing produces a node
+      that passes preflight for a product it is not going to run.
+    quiet: true
+
+- name: Collect installed packages
+  ansible.builtin.package_facts:
+    manager: auto
+  check_mode: false
+  failed_when: false
+
+# "Could not enumerate the installed packages" must never be reported as "the
+# machine is clean". The cleanliness check is the one that decides whether a
+# panel installer is allowed to take over this machine's web server, mail stack
+# and user accounts; a check that silently did not run is worse than no check,
+# because the report says PASSED.
+- name: Refuse a node whose installed packages could not be read
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.packages is defined
+    fail_msg: >-
+      The package inventory of {{ inventory_hostname }} could not be read, so this
+      preflight cannot tell whether the machine is clean. That is not a pass. Fix
+      the package manager or the host's Python environment and re-run — a panel
+      installed onto a machine that is already running a web server does not fail
+      cleanly, it produces a node that looks installed and is broken.
+    quiet: true
+
+- name: Read listening TCP sockets
+  ansible.builtin.command:
+    cmd: ss -H -ltn
+  register: hosting_listening
+  changed_when: false
+  check_mode: false
+
+- name: Look for an existing control panel
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ hosting_existing_panel_paths }}"
+  register: hosting_panel_paths
+  check_mode: false
+
+- name: Resolve this host's name forward
+  ansible.builtin.command:
+    cmd: "getent hosts {{ inventory_hostname }}"
+  register: hosting_forward_dns
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Resolve this host's address backward
+  ansible.builtin.command:
+    cmd: "getent hosts {{ ansible_host }}"
+  register: hosting_reverse_dns
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Start with no findings
+  ansible.builtin.set_fact:
+    hosting_findings: []
+
+# --- 1. Operating system --------------------------------------------------
+# A panel installed on an unsupported release does not fail on installation day.
+# It fails months later, during a panel update, on a node full of customer sites,
+# and the vendor's support answer is "that release is not supported".
+- name: Check the operating system against the panel's supported matrix
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['UNSUPPORTED_OS: ' ~ ansible_facts.distribution ~ ' '
+         ~ ansible_facts.distribution_major_version ~ ' is not supported by '
+         ~ hosting_panel ~ '. Supported: '
+         ~ (hosting_supported_os[hosting_panel] | map(attribute='distribution') | zip(
+             hosting_supported_os[hosting_panel] | map(attribute='major'))
+            | map('join', ' ') | join(', ')) ~ '.'] }}
+  when: >-
+    hosting_supported_os[hosting_panel]
+    | selectattr('distribution', 'equalto', ansible_facts.distribution)
+    | selectattr('major', 'equalto', ansible_facts.distribution_major_version)
+    | list | length == 0
+
+# --- 2. The machine is clean ---------------------------------------------
+- name: Check for software that conflicts with a panel installation
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['NOT_CLEAN: '
+         ~ (hosting_conflicting_packages | select('in', ansible_facts.packages) | join(', '))
+         ~ ' already installed. The panel installs and configures its own web server, '
+         ~ 'mail stack and database; it will fight whatever is here, and the result is a '
+         ~ 'node that looks installed and serves half its requests.'] }}
+  when: hosting_conflicting_packages | select('in', ansible_facts.packages) | list | length > 0
+
+- name: Check for an existing control panel
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['PANEL_PRESENT: '
+         ~ (hosting_panel_paths.results | selectattr('stat.exists') | map(attribute='item') | join(', '))
+         ~ ' exists. No panel supports being installed alongside another, and the '
+         ~ 'failure is not an error message — it is two products both believing they '
+         ~ 'own the mail stack.'] }}
+  when: hosting_panel_paths.results | selectattr('stat.exists') | list | length > 0
+
+# --- 3. Hostname and DNS --------------------------------------------------
+# Panels require a fully-qualified hostname that resolves, and mail delivery
+# requires forward and reverse DNS to agree. A node whose PTR does not match its
+# hostname has its outbound mail treated as suspicious by every large provider,
+# which for a shared-hosting node means every customer on it loses mail.
+- name: Check that the hostname is fully qualified
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['BAD_HOSTNAME: "' ~ inventory_hostname ~ '" is not a '
+         ~ 'fully-qualified domain name. Panels require one, and a short hostname '
+         ~ 'breaks their certificate issuance and their mail configuration.'] }}
+  when: inventory_hostname.split('.') | length < 3
+
+- name: Check that the hostname resolves
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['DNS_FORWARD_MISSING: ' ~ inventory_hostname
+         ~ ' does not resolve. The panel cannot issue a certificate for a name '
+         ~ 'that does not exist, and its own service URLs are built from it.'] }}
+  when: hosting_forward_dns.rc != 0
+
+- name: Check that forward and reverse DNS agree
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['DNS_MISMATCH: ' ~ ansible_host ~ ' reverse-resolves to "'
+         ~ (hosting_reverse_dns.stdout.split()[1:] | join(' ') | default('nothing', true))
+         ~ '", which does not include ' ~ inventory_hostname
+         ~ '. Every large mail provider treats a mismatch as a spam signal, and on a '
+         ~ 'shared node that means every customer on it loses mail delivery.'] }}
+  when:
+    - hosting_reverse_dns.rc == 0
+    - inventory_hostname not in hosting_reverse_dns.stdout
+
+# --- 4. Ports -------------------------------------------------------------
+- name: Check that the ports the panel needs are free
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + ['PORT_BOUND: ' ~ port ~ ' is already listening. The panel '
+         ~ 'binds it during installation; something else holding it makes the install '
+         ~ 'fail partway, after it has already replaced the mail and web configuration.'] }}
+  loop: "{{ hosting_required_free_ports }}"
+  loop_control:
+    loop_var: port
+  when: hosting_listening.stdout is search(':' ~ port ~ '\s')
+
+# --- 5. Licence -----------------------------------------------------------
+# cPanel/WHM, DirectAdmin, CloudLinux and LiteSpeed Enterprise are commercial
+# products. Without a licence the preflight stops cleanly and reports
+# LICENSE_REQUIRED, and the subsystem is reported as IMPLEMENTATION_COMPLETE and
+# DEPLOYMENT_BLOCKED_LICENSE_REQUIRED — never as done.
+- name: Check that a licence has been provisioned for this panel
+  ansible.builtin.set_fact:
+    hosting_findings: >-
+      {{ hosting_findings + [hosting_license_missing_status ~ ': no licence identity is '
+         ~ 'configured for ' ~ hosting_panel ~ ' on this node. '
+         ~ hosting_panel ~ ' is a commercial product; this repository contains a guarded '
+         ~ 'installer for it and nothing that bypasses its licensing. Provision the '
+         ~ 'licence, then re-run.'] }}
+  when:
+    - hosting_license_required | bool
+    - hosting_license_identity is none or (hosting_license_identity | default('') | length == 0)
+
+- name: Report the preflight result for this node
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} ({{ hosting_panel }}):
+      {{ (hosting_findings | length == 0) | ternary('PASSED', 'REFUSED with '
+      ~ (hosting_findings | length) ~ ' finding(s)') }}.
+      {{ hosting_findings | join(' | ') }}
+
+- name: Refuse this node
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is NOT ready for a {{ hosting_panel }} installation:
+      {{ hosting_findings | join(' | ') }}.
+      Every one of these is a check rather than a warning because each produces a
+      node that looks installed and is broken — and by the time that shows, there
+      are customer sites on it.
+  when:
+    - hosting_findings | length > 0
+    - hosting_preflight_refuse_on_failure | bool

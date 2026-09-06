@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# Restores the most recent snapshot from each datastore into a scratch path and
+# records how long it took.
+#
+# WHY THIS EXISTS: PBS reports that a backup job succeeded. It does not report
+# that the data can be restored. Those are different claims, and the gap between
+# them is where a hosting provider discovers — during an incident, in front of a
+# customer — that the restore path has been broken for months. Verification
+# re-reads chunks and catches corruption; it does not exercise the restore
+# itself, the credentials it needs, or the scratch space it requires.
+#
+# WHAT THIS SCRIPT WILL NOT DO:
+#   - restore anywhere except underneath the scratch path;
+#   - retry a restore that timed out. A timeout means this script stopped
+#     waiting, not that PBS stopped working. Retrying doubles the load on a
+#     server that is already slow, and the honest signal is "the restore test
+#     did not complete in {{ pbs_restore_test_timeout_seconds }}s", which is
+#     exactly the alert wanted.
+set -euo pipefail
+
+SCRATCH="{{ pbs_restore_test_scratch_path }}"
+TIMEOUT="{{ pbs_restore_test_timeout_seconds }}"
+STATE="/var/lib/lynomia/restore-test"
+mkdir -p "${STATE}"
+
+# A restore target outside the scratch path would overwrite something real.
+# Restore to a scratch location first, verify, then swap — restoring directly
+# over the live copy turns a recoverable problem into two problems.
+case "${SCRATCH}" in
+    /|/etc*|/var/lib/proxmox-backup*|/mnt/datastore*)
+        echo "REFUSING: scratch path ${SCRATCH} is not a scratch path." >&2
+        exit 78
+        ;;
+esac
+
+overall_rc=0
+
+for STORE in $(proxmox-backup-manager datastore list --output-format json | jq -r '.[].name'); do
+    # The scratch datastore is not itself under test.
+    if [[ "${STORE}" == "{{ pbs_restore_test_scratch_datastore }}" ]]; then
+        continue
+    fi
+
+    # `|| true` inside the substitution, deliberately: `set -e` with `pipefail`
+    # would otherwise abort the whole script the moment ONE datastore could not
+    # be listed, and the remaining datastores would never be tested — silently,
+    # because an aborted script writes no per-store line. Every failure here has
+    # to end up in history.log as a failure for that store.
+    SNAPSHOT="$(proxmox-backup-client snapshot list --repository "${STORE}" --output-format json 2>/dev/null \
+        | jq -r 'sort_by(."backup-time") | last | "\(."backup-type")/\(."backup-id")/\(."backup-time")"' || true)"
+
+    if [[ -z "${SNAPSHOT}" || "${SNAPSHOT}" == "null/null/null" ]]; then
+        # A datastore with no snapshots is not a passing restore test. It is a
+        # datastore that is not receiving backups, which is worse.
+        echo "$(date -u +%FT%TZ) ${STORE} NO_SNAPSHOTS" >> "${STATE}/history.log"
+        overall_rc=1
+        continue
+    fi
+
+    # THE ARCHIVE IS READ FROM THE SNAPSHOT, NEVER ASSUMED.
+    #
+    # `root.pxar` only exists in a file-level (host) backup. A snapshot taken by
+    # Proxmox VE from a virtual machine contains `drive-scsi0.img.fidx` and
+    # `qemu-server.conf.blob` and no pxar at all — so a restore test hard-coded
+    # to root.pxar reports FAILED forever on exactly the datastore this platform
+    # actually fills. A restore test that can never pass is worse than none: it
+    # trains whoever reads the alert to ignore the one signal that says the
+    # backups are unrestorable.
+    ARCHIVE="$(proxmox-backup-client snapshot files "${SNAPSHOT}" --repository "${STORE}" \
+        --output-format json 2>/dev/null \
+        | jq -r '[.[] | .filename // .] | map(select(endswith(".pxar.didx") or endswith(".img.fidx")))
+                 | first // empty' \
+        | sed -E 's/\.(di|fi)dx$//' || true)"
+
+    if [[ -z "${ARCHIVE}" ]]; then
+        # Could not read the archive list, or the snapshot holds no restorable
+        # data archive. Either way the restore path is unproven, and unproven is
+        # reported as a failure rather than passed over.
+        echo "$(date -u +%FT%TZ) ${STORE} NO_RESTORABLE_ARCHIVE ${SNAPSHOT}" >> "${STATE}/history.log"
+        overall_rc=1
+        continue
+    fi
+
+    TARGET="${SCRATCH}/${STORE}"
+    rm -rf "${TARGET}"
+    mkdir -p "${TARGET}"
+
+    START="$(date -u +%s)"
+    if timeout "${TIMEOUT}" proxmox-backup-client restore \
+            --repository "${STORE}" "${SNAPSHOT}" "${ARCHIVE}" "${TARGET}/${ARCHIVE}" >/dev/null 2>&1; then
+        ELAPSED=$(( $(date -u +%s) - START ))
+
+        # The date of the last SUCCESSFUL RESTORE is the number the platform
+        # reports. The date of the last successful backup is the number that
+        # makes an unrestorable datastore look healthy.
+        date -u +%FT%TZ > "${STATE}/${STORE}.last-successful-restore"
+        echo "${ELAPSED}" > "${STATE}/${STORE}.last-restore-seconds"
+        echo "$(date -u +%FT%TZ) ${STORE} OK ${ELAPSED}s ${SNAPSHOT} ${ARCHIVE}" >> "${STATE}/history.log"
+    else
+        # No retry. See the header.
+        echo "$(date -u +%FT%TZ) ${STORE} FAILED ${SNAPSHOT} ${ARCHIVE}" >> "${STATE}/history.log"
+        overall_rc=1
+    fi
+
+    # The scratch copy is a full copy of a customer's machine. It is removed as
+    # soon as the measurement is taken, because backup storage is a copy of
+    # production with none of production's access controls — and a scratch
+    # restore left on disk is the same thing with even fewer.
+    rm -rf "${TARGET}"
+done
+
+exit "${overall_rc}"

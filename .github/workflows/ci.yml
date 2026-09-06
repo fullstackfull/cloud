@@ -1,0 +1,239 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PHP_VERSION: '8.4'
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: Backend (PHP ${{ matrix.php }}, PostgreSQL ${{ matrix.postgres }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+        postgres: ['18']
+        include:
+          # The platform targets PostgreSQL 18, but many operators are still on
+          # 16. Prove migrations and queries work on both rather than assuming.
+          - php: '8.4'
+            postgres: '16'
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_DB: lynomia_test
+          POSTGRES_USER: lynomia
+          POSTGRES_PASSWORD: lynomia_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U lynomia -d lynomia_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+      redis:
+        image: redis:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # bcmath is required in production: without it (or gmp) brick/math
+          # falls back to a slower pure-PHP calculator.
+          extensions: pdo_pgsql, redis, intl, mbstring, bcmath, sodium, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate composer.json
+        working-directory: apps/control-plane
+        run: composer validate --strict --no-check-publish
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ matrix.php }}-${{ hashFiles('apps/control-plane/composer.lock') }}
+          restore-keys: composer-${{ matrix.php }}-
+
+      - name: Install dependencies
+        working-directory: apps/control-plane
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare environment
+        working-directory: apps/control-plane
+        run: |
+          cp .env.testing.example .env.testing
+          sed -i 's/^DB_PASSWORD=$/DB_PASSWORD=lynomia_ci/' .env.testing
+          php artisan key:generate --env=testing
+
+      - name: Check code style
+        working-directory: apps/control-plane
+        run: ./vendor/bin/pint --test
+
+      - name: Verify migrations run from an empty database
+        working-directory: apps/control-plane
+        env:
+          DB_PASSWORD: lynomia_ci
+        run: php artisan migrate:fresh --seed --env=testing --force
+
+      - name: Verify migrations are reversible
+        working-directory: apps/control-plane
+        env:
+          DB_PASSWORD: lynomia_ci
+        run: |
+          php artisan migrate:rollback --env=testing --force --step=100
+          php artisan migrate --env=testing --force
+
+      - name: Run tests
+        working-directory: apps/control-plane
+        env:
+          DB_PASSWORD: lynomia_ci
+        run: php artisan test
+
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: pdo_pgsql, redis, intl, mbstring, bcmath
+          coverage: none
+          tools: composer:v2
+
+      - name: Install application dependencies
+        working-directory: apps/control-plane
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      # Analyser dependencies live in their own manifest so they can never
+      # constrain the application's runtime dependency graph.
+      - name: Install analysis toolchain
+        run: composer install --working-dir=tools/phpstan --no-interaction --prefer-dist --no-progress
+
+      - name: Run PHPStan
+        run: tools/phpstan/vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test --workspace=apps/web -- --run
+
+      - name: Production build
+        run: npm run build
+
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Audit PHP dependencies
+        working-directory: apps/control-plane
+        run: composer audit --no-interaction
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Audit JavaScript dependencies
+        run: npm audit --audit-level=high
+
+      - name: Fail if a secret or environment file was committed
+        run: |
+          set -euo pipefail
+          echo "Scanning tracked files for committed secrets..."
+
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -v '\.example$'; then
+            echo "::error::A .env file is tracked in git."
+            exit 1
+          fi
+
+          if git ls-files | grep -E '\.(pem|key|p12|pfx)$|(^|/)id_(rsa|ed25519|ecdsa)$'; then
+            echo "::error::A private key appears to be tracked in git."
+            exit 1
+          fi
+
+          # Credential shapes that must never appear in tracked source.
+          if git grep -nIE '(sk_live_[A-Za-z0-9]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
+              -- ':!*.example' ':!docs/*' ':!**/SecretRedactor.php' ':!**/SecretRedactorTest.php'; then
+            echo "::error::A live credential appears to be committed."
+            exit 1
+          fi
+
+          echo "No committed secrets found."
+
+  production-guards:
+    name: Production guards
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fail if a fake provider is referenced as a production default
+        run: |
+          set -euo pipefail
+          # Fake providers must never be the default anywhere outside the
+          # development and testing templates.
+          if grep -RnE "_PROVIDER=fake" deployments/production 2>/dev/null; then
+            echo "::error::A fake provider is configured for production."
+            exit 1
+          fi
+          echo "No fake provider configured for production."
+
+      - name: Fail on unresolved placeholders in application source
+        run: |
+          set -euo pipefail
+          if git grep -nIE 'TODO: implement|FIXME: required|NotImplementedException' \
+              -- 'apps/control-plane/src' 'apps/web/src'; then
+            echo "::error::Unresolved implementation placeholder in application source."
+            exit 1
+          fi
+          echo "No unresolved placeholders."

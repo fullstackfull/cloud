@@ -1,0 +1,41 @@
+# =============================================================================
+# EXAMPLE backend configuration — staging.
+# =============================================================================
+# Copy to backend.hcl (which is NOT committed) and fill in real values, or
+# supply each key with `-backend-config=key=value` from your secret store:
+#
+#   cd infrastructure/tofu
+#   tofu init -reconfigure -backend-config=environments/staging/backend.hcl
+#
+# WHY THE BACKEND IS PER ENVIRONMENT AND NOT A WORKSPACE
+#
+# Workspaces share one backend configuration and one set of credentials, and the
+# only thing separating production from staging is a string somebody has to have
+# selected correctly. A separate backend config per environment means running a
+# staging plan against production state requires passing production's backend
+# file — which is a different command, not a forgotten `workspace select`.
+#
+# STATE IS A SECRET. It holds cloud-init user data, generated values and the
+# full topology of the provider's networks in plaintext. The backend must be
+# encrypted at rest, versioned (so a corrupted state can be rolled back),
+# access-controlled, and LOCKING — two concurrent applies against unlocked state
+# create two sets of machines and one record of them.
+
+bucket = "REPLACE-ME-lynomia-tofu-state-staging"
+key    = "staging/platform.tfstate"
+region = "REPLACE-ME"
+
+# Object-lock based state locking. Without locking, a colleague running `apply`
+# while you are running `apply` is a coin flip over whose state survives.
+use_lockfile = true
+
+# Encryption at rest is not optional for this content.
+encrypt = true
+
+# For an S3-compatible provider that is not AWS, set the endpoint and skip the
+# AWS-specific preflights. Credentials come from the environment or the secret
+# store — never from this file.
+# endpoints                   = { s3 = "https://REPLACE-ME.example" }
+# skip_credentials_validation = true
+# skip_region_validation      = true
+# skip_requesting_account_id  = true

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
 
     /*
@@ -79,6 +81,21 @@ return [
     */
 
     'locale' => env('APP_LOCALE', 'en'),
+
+    /*
+     * Locales the platform serves. Arabic is first-class from the outset
+     * rather than retrofitted: the UI is built with logical CSS properties and
+     * a direction-aware layout, not mirrored after the fact.
+     */
+    /*
+     * Origin of the React SPA. Notification links and post-verification
+     * redirects target it.
+     */
+    'frontend_url' => rtrim((string) env('FRONTEND_URL', 'http://localhost:5173'), '/'),
+
+    'supported_locales' => array_values(array_filter(
+        array_map('trim', explode(',', (string) env('APP_SUPPORTED_LOCALES', 'en,ar')))
+    )),
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 

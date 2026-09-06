@@ -1,0 +1,80 @@
+# Recording rules.
+#
+# Only expressions that are either expensive enough to hurt a dashboard refresh
+# or subtle enough that two panels would otherwise compute them slightly
+# differently. Everything else is left as an ad-hoc query: a recording rule is a
+# permanent cost and a second place to be wrong.
+#
+# Names follow the Prometheus convention level:metric:operation.
+
+groups:
+  - name: recording.nodes
+    interval: 30s
+    rules:
+      - record: instance:node_cpu_utilisation:ratio5m
+        expr: >-
+          1 - avg by (instance, role, service) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+
+      - record: instance:node_memory_utilisation:ratio
+        expr: >-
+          1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+
+      - record: instance:node_filesystem_usage:ratio
+        expr: >-
+          1 - (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+            / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+          )
+
+  - name: recording.platform
+    interval: 30s
+    rules:
+      # The provisioning success ratio, computed once. Two dashboards and one
+      # alert used to derive this independently and disagreed at the edges,
+      # because one of them forgot that needs_review is a failure from the
+      # customer's point of view even though it is not called one.
+      - record: platform:provisioning_success:ratio30m
+        expr: >-
+          sum(delta(lynomia_provisioning_jobs_total{status="succeeded"}[30m]))
+          /
+          clamp_min(sum(delta(lynomia_provisioning_jobs_total{status=~"succeeded|failed|needs_review"}[30m])), 1)
+
+      - record: platform:provisioning_outcomes:delta30m
+        expr: >-
+          sum by (kind, status) (delta(lynomia_provisioning_jobs_total{status=~"succeeded|failed|needs_review"}[30m]))
+
+      - record: platform:queue_depth:sum
+        expr: sum(lynomia_queue_depth)
+
+  - name: recording.business
+    interval: 60s
+    rules:
+      - record: business:mrr_major:sum
+        # Minor units are the storage format, not the reading format. Dividing
+        # once here keeps the "is this fils or dinar" question out of every
+        # panel — and out of the one panel that would eventually get it wrong.
+        #
+        # The divisor is a property of the CURRENCY, not of the platform: KWD,
+        # BHD, OMR, JOD and TND have three decimal places, and almost everything
+        # else has two. A blanket /1000 would therefore report a USD figure at a
+        # tenth of its real value with nothing on the panel to suggest anything
+        # was wrong — the failure mode this rule exists to prevent, applied to a
+        # different currency. So the rule is restricted to the three-decimal
+        # currencies: a currency that is not listed here gets no series at all,
+        # which is visible, rather than a plausible wrong number, which is not.
+        # Selling in a two-decimal currency means adding a /100 rule beside this
+        # one, not widening this matcher.
+        expr: sum by (currency) (lynomia_mrr_minor{currency=~"KWD|BHD|OMR|JOD|TND"}) / 1000
+
+      - record: business:services_active:sum
+        expr: sum by (kind) (lynomia_services_active)
+
+      - record: business:webhook_failure:ratio1h
+        # delta(), not increase(): the family is a state count, so a retried
+        # event leaving `failed` is a decrease, which increase() would misread
+        # as a counter reset. The numerator is clamped at zero because a net
+        # decrease is a recovery, not a negative failure rate.
+        expr: >-
+          clamp_min(sum by (provider) (delta(lynomia_webhook_events_total{status="failed"}[1h])), 0)
+          /
+          clamp_min(sum by (provider) (delta(lynomia_webhook_events_total[1h])), 1)

@@ -1,0 +1,127 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens.
+ *
+ * Every colour is a token, and the dark palette redefines only the tokens.
+ * Nothing in a component names a raw colour, so the two themes cannot drift
+ * apart as the product grows.
+ */
+@theme {
+  --font-sans: 'Inter', 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-brand-50: oklch(0.97 0.02 250);
+  --color-brand-100: oklch(0.94 0.04 250);
+  --color-brand-200: oklch(0.88 0.07 250);
+  --color-brand-300: oklch(0.79 0.11 250);
+  --color-brand-400: oklch(0.70 0.15 250);
+  --color-brand-500: oklch(0.62 0.18 250);
+  --color-brand-600: oklch(0.54 0.19 250);
+  --color-brand-700: oklch(0.46 0.17 250);
+  --color-brand-800: oklch(0.38 0.14 250);
+  --color-brand-900: oklch(0.30 0.10 250);
+}
+
+:root {
+  --surface: oklch(0.99 0.002 250);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.96 0.004 250);
+  --border-subtle: oklch(0.90 0.006 250);
+  --border-strong: oklch(0.80 0.010 250);
+  --text-primary: oklch(0.22 0.01 250);
+  --text-secondary: oklch(0.48 0.012 250);
+  --text-muted: oklch(0.62 0.010 250);
+
+  --status-running: oklch(0.65 0.15 150);
+  --status-stopped: oklch(0.62 0.02 250);
+  --status-provisioning: oklch(0.72 0.14 85);
+  --status-failed: oklch(0.58 0.19 25);
+  --status-suspended: oklch(0.65 0.16 55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --surface: oklch(0.17 0.008 250);
+    --surface-raised: oklch(0.21 0.010 250);
+    --surface-sunken: oklch(0.14 0.008 250);
+    --border-subtle: oklch(0.28 0.012 250);
+    --border-strong: oklch(0.38 0.014 250);
+    --text-primary: oklch(0.95 0.004 250);
+    --text-secondary: oklch(0.74 0.010 250);
+    --text-muted: oklch(0.58 0.010 250);
+
+    --status-running: oklch(0.72 0.15 150);
+    --status-stopped: oklch(0.60 0.02 250);
+    --status-provisioning: oklch(0.78 0.14 85);
+    --status-failed: oklch(0.66 0.19 25);
+    --status-suspended: oklch(0.72 0.16 55);
+  }
+}
+
+:root[data-theme='dark'] {
+  --surface: oklch(0.17 0.008 250);
+  --surface-raised: oklch(0.21 0.010 250);
+  --surface-sunken: oklch(0.14 0.008 250);
+  --border-subtle: oklch(0.28 0.012 250);
+  --border-strong: oklch(0.38 0.014 250);
+  --text-primary: oklch(0.95 0.004 250);
+  --text-secondary: oklch(0.74 0.010 250);
+  --text-muted: oklch(0.58 0.010 250);
+
+  --status-running: oklch(0.72 0.15 150);
+  --status-stopped: oklch(0.60 0.02 250);
+  --status-provisioning: oklch(0.78 0.14 85);
+  --status-failed: oklch(0.66 0.19 25);
+  --status-suspended: oklch(0.72 0.16 55);
+}
+
+html {
+  background-color: var(--surface);
+  color: var(--text-primary);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Arabic needs slightly more line height than Latin at the same size to stay
+ * comfortable, because of its taller ascenders and descenders.
+ */
+:root:lang(ar) {
+  line-height: 1.75;
+}
+
+/* Numerals stay Western in both languages: an IPv4 address, a vCPU count and
+   an invoice total must be copy-pasteable and unambiguous. */
+[dir='rtl'] .tabular,
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* Technical identifiers — IP addresses, hostnames, ULIDs — are always LTR even
+   inside Arabic prose, or the octets render in the wrong order. */
+.technical {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: var(--font-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}

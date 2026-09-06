@@ -1,0 +1,32 @@
+#!ipxe
+# {{ ansible_managed }}
+#
+# This script is fetched by a machine that has just been told to network-boot.
+# It is the last point at which the platform decides what happens to that
+# machine's disks.
+
+# ---------------------------------------------------------------------------
+# NO DEFAULT INSTALL TARGET.
+#
+# If the platform has not published an installation profile for this machine's
+# MAC address, this script MUST fall through to a local boot. An iPXE script
+# with a default installer entry reinstalls any machine that happens to
+# network-boot — a server that failed to find its disk, a node whose boot order
+# was changed by a firmware update, a machine somebody power-cycled.
+#
+# Falling through to the local disk is the safe failure. Installing is not.
+# ---------------------------------------------------------------------------
+
+set base http://{{ ansible_host }}/profiles
+set profile ${base}/${mac:hexhyp}.ipxe
+
+echo Lynomia provisioning — {{ pxe_provisioning_cidr }}
+echo MAC ${mac} · looking for an installation profile
+
+chain --autofree ${profile} || goto localboot
+
+:localboot
+echo No installation profile published for ${mac}. Booting from local disk.
+echo A machine reaching this line was NOT scheduled for installation.
+sleep 3
+exit 1

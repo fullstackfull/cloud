@@ -1,0 +1,30 @@
+---
+# Proxmox Backup Server invariants.
+
+# A backup that has never been restored is a hypothesis (docs/backups.md).
+# Verification and a scheduled restore test are therefore not optional extras
+# configured later — the role refuses to leave a datastore without both.
+#
+# Deduplicating storage is the specific reason: PBS stores one copy of a chunk
+# shared by many backups, so a single corrupted chunk can silently break every
+# backup that references it. Only verification finds that before a restore does,
+# and only a restore test proves the restore path itself still works.
+pbs_verification_required: true
+pbs_restore_test_required: true
+
+# Garbage collection reclaims space from pruned chunks. Without it the datastore
+# fills, backups begin failing, and the alert fires — but by then the most
+# recent backups are the ones that did not happen.
+pbs_garbage_collect_schedule: "sat 02:00"
+pbs_verify_schedule: "sun 03:00"
+pbs_restore_test_schedule: "sun 05:00"
+
+# The restore test restores into a scratch datastore, never over anything.
+# Restoring directly onto the live copy turns a recoverable problem into two.
+pbs_restore_test_scratch_datastore: restore-test-scratch
+
+# PBS runs on dedicated hardware with its own storage — not on a hypervisor, and
+# not on storage shared with the machines it protects. A backup that dies with
+# the thing it backs up is not a backup. The role asserts the datastore path is
+# not on the root filesystem for exactly this reason.
+pbs_datastore_must_be_separate_mount: true

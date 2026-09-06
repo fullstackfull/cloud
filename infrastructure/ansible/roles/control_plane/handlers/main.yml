@@ -1,0 +1,19 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+
+# `restart`, not `reload`. A queue worker holds the code it started with, so a
+# worker that is not restarted keeps executing the previous release against the
+# new schema — the subtlest class of deploy bug there is (docs/deployment.md).
+#
+# Conditional on a release existing: restarting Horizon on a host the pipeline
+# has not deployed to yet fails the unit and fails the play, on a machine that
+# was configured correctly.
+- name: Restart horizon
+  ansible.builtin.systemd_service:
+    name: "{{ control_plane_horizon_service }}"
+    state: restarted
+  become: true
+  when: control_plane_release.stat.exists | default(false)

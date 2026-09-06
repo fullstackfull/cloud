@@ -1,0 +1,21 @@
+# Backend configuration names the state bucket and, for some backends, carries
+# credentials. Only the .example files are tracked.
+backend.hcl
+environments/*/backend.hcl
+
+# Real variable values. environments/*/terraform.tfvars.example is tracked; the
+# real file is not.
+terraform.tfvars
+environments/*/terraform.tfvars
+*.auto.tfvars
+
+# STATE IS A SECRET: cloud-init user data, generated values, and the full
+# topology of the provider's networks, all in plaintext.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.tfstate.lock.info
+
+# Saved plans. A plan file embeds the values it was planned with, including
+# sensitive ones.
+*.tfplan

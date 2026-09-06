@@ -1,0 +1,22 @@
+---
+# Customer dedicated servers.
+#
+# THIS GROUP EXISTS FOR INVENTORY AND MONITORING ONLY. No play in this
+# repository targets it, and none should be written that does.
+#
+# A dedicated server runs the customer's operating system and the customer's
+# data. The platform's legitimate interest in it is: does it answer, is the
+# hardware healthy, and can it be power-cycled out of band. Configuration
+# management on a machine the customer administers would overwrite their work,
+# and the platform does not back these machines up (docs/backups.md) — so there
+# is nothing to restore afterwards.
+#
+# roles/preflight asserts this flag is honoured and every other role's target
+# guard refuses a host that carries it.
+lynomia_never_configure: true
+
+# Access to the out-of-band controller is access to the machine, completely, at
+# the hardware level. BMC endpoints live on the isolated management network,
+# are never routable from a customer network, and their credentials are not
+# stored in this repository in any form — encrypted or otherwise.
+dedicated_bmc_on_management_network_only: true

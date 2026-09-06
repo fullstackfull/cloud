@@ -1,0 +1,83 @@
+---
+# =============================================================================
+# preflight.yml — READ-ONLY. Runs first. Changes nothing, in any mode.
+# =============================================================================
+#
+# This is the playbook an operator runs against production when something is
+# already wrong, and it is the one playbook they must be able to run without
+# thinking about the consequences. Nothing in it writes. It reports what the
+# fleet looks like and refuses to be quiet about the things that will bite:
+# a control plane sharing a machine with a hypervisor, a clock that has drifted,
+# a filesystem about to fill, a destructive guard flag somebody left switched on
+# after last month's maintenance.
+#
+#   make infra-check ENV=production
+#   ansible-playbook -i inventories/production playbooks/preflight.yml --check --diff
+#
+# Survey the whole fleet instead of stopping at the first bad host:
+#   ansible-playbook -i inventories/production playbooks/preflight.yml \
+#       -e preflight_fail_on_violation=false
+#
+# `--check` and `--diff` are accepted and change nothing about what this does,
+# because there is nothing here for them to suppress. That is the point.
+
+# `firewall` is excluded alongside `dedicated`, for a different reason. The
+# checks below are Linux checks run over a Python interpreter — `service_facts`,
+# `package_facts`, `ss`, `df` — and the edge is a FreeBSD appliance the platform
+# deliberately does not install an interpreter on (see firewall.yml). Including
+# it would make the one playbook that must always be runnable during an incident
+# fail on its first host. The firewall's own guards live in roles/opnsense.
+- name: Inspect every declared host
+  hosts: all:!dedicated:!firewall
+  gather_facts: true
+  become: false
+
+  # Findings on one host must not stop the survey of the others. The role's own
+  # failure task is what stops the run, after every host has reported.
+  any_errors_fatal: false
+
+  roles:
+    - role: preflight
+
+- name: Summarise the fleet
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  become: false
+
+  tasks:
+    # This one covers EVERY host in the inventory, including the groups the
+    # first play cannot connect to. A firewall or a dedicated server left
+    # carrying a destructive flag is exactly the case that must not fall through
+    # a gap between two host patterns — it is read out of the inventory here, on
+    # the controller, without touching the machine.
+    - name: Report every host left carrying allow_reimage
+      ansible.builtin.debug:
+        msg: >-
+          {{ (preflight_armed_hosts | length == 0)
+          | ternary('No host in this inventory carries `allow_reimage`. That is the intended steady state.',
+          'GUARD_LEFT_OPEN on ' ~ (preflight_armed_hosts | join(', ')) ~
+          '. `allow_reimage` authorises one scheduled piece of work and is
+          removed afterwards. Left in the inventory it is a default with extra
+          steps, and on the edge firewall it is one mistyped --limit away from
+          the datacentre.') }}
+      vars:
+        preflight_armed_hosts: >-
+          {{ groups['all'] | default([]) | map('extract', hostvars)
+             | selectattr('allow_reimage', 'defined')
+             | selectattr('allow_reimage', 'truthy')
+             | map(attribute='inventory_hostname') | list }}
+
+    - name: Report the shape of the inventory that was inspected
+      ansible.builtin.debug:
+        msg:
+          - "control_plane: {{ groups['control_plane'] | default([]) | length }} host(s)"
+          - "database:      {{ groups['database'] | default([]) | length }} host(s)"
+          - "redis:         {{ groups['redis'] | default([]) | length }} host(s)"
+          - "monitoring:    {{ groups['monitoring'] | default([]) | length }} host(s)"
+          - "proxmox:       {{ groups['proxmox'] | default([]) | length }} host(s)"
+          - "pbs:           {{ groups['pbs'] | default([]) | length }} host(s)"
+          - "hosting:       {{ groups['hosting'] | default([]) | length }} host(s)"
+          - "pxe:           {{ groups['pxe'] | default([]) | length }} host(s)"
+          - "firewall:      {{ groups['firewall'] | default([]) | length }} host(s)"
+          - "dedicated:     {{ groups['dedicated'] | default([]) | length }} host(s) — inventory only, never configured"

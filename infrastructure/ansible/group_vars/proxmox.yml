@@ -1,0 +1,71 @@
+---
+# Proxmox VE node invariants.
+
+# CLUSTER JOIN IS NEVER AUTOMATIC AND NEVER GROUP-WIDE.
+#
+# `pvecm add` against the wrong cluster, or `pvecm create` on a node that should
+# have joined an existing one, corrupts the corosync configuration of every node
+# involved. Recovery is manual, requires quorum the cluster no longer has, and
+# takes every customer machine on every affected node offline for the duration.
+#
+# This default sits at playbook-group_vars precedence specifically so that an
+# environment cannot enable it for a whole group. Only a named host, in
+# inventory host_vars, can opt in — and it must also name the cluster it is
+# joining, so "join" can never mean "join whichever cluster is nearest".
+proxmox_cluster_join_enabled: false
+
+# The control plane authenticates with an API token, scoped to what provisioning
+# needs. Never a root password: a compromised control plane must not be a
+# compromised cluster (docs/proxmox.md). The role creates the role and the token
+# holder; the secret is generated on the node and never written to this repo.
+proxmox_api_user: lynomia@pve
+proxmox_api_token_name: control-plane
+proxmox_api_role: LynomiaProvisioning
+
+# Privileges the provisioning token needs, and nothing beyond them. Notably
+# absent: Sys.PowerMgmt on the node itself and any Realm or User privilege — a
+# provisioning token has no business rebooting a hypervisor or creating accounts.
+proxmox_api_role_privileges:
+  - VM.Allocate
+  - VM.Audit
+  - VM.Clone
+  - VM.Config.CDROM
+  - VM.Config.CPU
+  - VM.Config.Cloudinit
+  - VM.Config.Disk
+  - VM.Config.HWType
+  - VM.Config.Memory
+  - VM.Config.Network
+  - VM.Config.Options
+  - VM.Console
+  - VM.Migrate
+  - VM.Monitor
+  - VM.PowerMgmt
+  - VM.Snapshot
+  - Datastore.Audit
+  - Datastore.AllocateSpace
+  - Sys.Audit
+  - Pool.Allocate
+
+# PACKAGE UPGRADES ON A LIVE HYPERVISOR ARE A SCHEDULED ACTION.
+#
+# `apt upgrade` on a node with running customer machines restarts whatever it
+# replaces: pve-cluster (which is /etc/pve — every guest's configuration becomes
+# briefly unreadable), pveproxy, qemu-server, corosync. None of that is a
+# rollback away, and none of it is something a configuration run should decide
+# to do on its own at 11:40 on a Tuesday because somebody was fixing a DNS
+# entry. The role reports that updates are pending and applies them only where a
+# named host declares this for a maintenance window.
+#
+# This is not a licence to skip patching: an unpatched hypervisor is its own
+# incident. It is a requirement that patching happens when somebody is watching.
+proxmox_apply_updates: false
+
+# The enterprise repository requires a subscription. Configuring it without one
+# makes every `apt update` fail with a 401, which operators learn to ignore —
+# and an operator who ignores apt output misses the security updates too.
+proxmox_use_enterprise_repo: false
+
+# TLS verification on the API link stays on. Install the certificate; do not
+# disable the check on the link that creates and destroys customer machines.
+proxmox_api_verify_tls: true

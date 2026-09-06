@@ -1,0 +1,25 @@
+# Vault-encrypted material is referenced by the playbooks and NEVER committed.
+# The repository-root .gitignore covers host_vars/*/vault.yml; the platform's
+# secrets are group-scoped (a Redis password belongs to the redis group, not to
+# one machine), so those paths are excluded here as well. An encrypted file in
+# git is still a file an attacker gets to attack offline, for as long as they
+# like, against whatever password was chosen in a hurry.
+inventories/*/group_vars/vault.yml
+inventories/*/group_vars/*/vault.yml
+inventories/*/host_vars/*/vault.yml
+inventories/*/host_vars/vault.yml
+vault-password*
+*.vault
+
+# A real inventory is a map of the provider's management network, its BMC
+# endpoints and its topology. Only the documented examples are tracked.
+inventories/*/hosts.local.yml
+
+# Controller-side scratch: fact cache, SSH control sockets, collection path.
+.ansible/
+
+# Exports taken from the edge firewall before a change. They are a complete
+# ruleset including any secret in it.
+opnsense-backups/
+
+*.retry

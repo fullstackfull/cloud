@@ -1,0 +1,86 @@
+---
+# =============================================================================
+# firewall.yml — OPNsense. THE MOST DANGEROUS PLAYBOOK IN THIS REPOSITORY.
+# =============================================================================
+#
+#   ansible-playbook -i inventories/staging playbooks/firewall.yml --check --diff
+#
+# WHAT BREAKS IF THIS RUNS AGAINST THE WRONG MACHINE OR WITH THE WRONG RULESET
+#
+#   The edge firewall carries the management path. A wrong interface assignment,
+#   a rule that shadows the management allow, or a half-applied ruleset
+#   disconnects the entire datacentre — INCLUDING the route the operator would
+#   use to fix it. Every hypervisor, every hosting node and every customer
+#   machine behind it goes unreachable at the same instant, and monitoring goes
+#   quiet in a way indistinguishable from a power failure. Recovery is a
+#   physical console, or a drive to the facility.
+#
+#   Applied to a machine that is not the edge — a router running OPNsense for
+#   one segment — it replaces that device's policy with the edge's: wrong for
+#   the segment, and missing everything the segment needed.
+#
+# THREE CONDITIONS, ALL PER-HOST, NONE OF WHICH CAN BE SET FOR A GROUP
+#
+#   lynomia_role: firewall              what the machine is
+#   allow_reimage: true                 an operator accepted the consequence
+#                                       above for this scheduled piece of work
+#   opnsense_console_access_confirmed  somebody has a console open RIGHT NOW
+#
+# The third is not paperwork. The difference between a five-minute mistake and a
+# four-hour outage is whether the console was already up when the management
+# path went away; afterwards is too late to open one.
+#
+# The current configuration is exported to the controller before anything is
+# changed — including under --check. OPNsense keeps its own history, and during
+# an incident that history is on the appliance you cannot reach.
+#
+# IF THE APPLY TIMES OUT, DO NOT RE-RUN. A timeout means the controller stopped
+# waiting, not that the firewall stopped working — and the most likely reason
+# the answer never came back is that the ruleset applied successfully and
+# removed the path it would have come back on. Go to the console.
+
+- name: Configure the edge firewall
+  hosts: firewall
+
+  # NO FACT GATHERING, AND THAT IS NOT AN OPTIMISATION.
+  #
+  # The OPNsense API is driven from the controller. OPNsense is FreeBSD with a
+  # curated package set; installing a Python interpreter on it to satisfy a
+  # configuration-management tool puts the appliance outside the vendor's
+  # supported configuration — on the one box where "unsupported" means the
+  # datacentre's edge. Gathering facts would contradict that in the first
+  # second of the play: `setup` needs a Python interpreter on the target, and
+  # root's SSH shell on a stock OPNsense is the configuration menu, not a shell.
+  # The play would die before reaching a single one of the guards below.
+  #
+  # Every task in this play is either delegated to the controller or an action
+  # that runs on it (assert, debug, include_vars), so nothing here needs a fact
+  # or a connection to the appliance. The one value that used to come from a
+  # fact — the timestamp on the pre-change export — is taken on the controller.
+  gather_facts: false
+  become: false
+
+  # One firewall at a time, and stop on the first failure. Two edges
+  # reconfigured in parallel is two ways to lose the management path at once.
+  serial: 1
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: State plainly what is about to happen
+      ansible.builtin.debug:
+        msg:
+          - "TARGET: {{ inventory_hostname }} (role={{ lynomia_role | default('<unset>') }})"
+          - "allow_reimage: {{ allow_reimage | default(false) }}"
+          - "console confirmed: {{ opnsense_console_access_confirmed | default(false) }}"
+          - "A ruleset applied to the edge can remove the path used to undo it."
+
+  roles:
+    - role: opnsense

@@ -1,0 +1,49 @@
+---
+# =============================================================================
+# redis.yml — requirepass, persistence, and an eviction policy that cannot
+#             silently delete a customer's paid provisioning.
+# =============================================================================
+#
+#   ansible-playbook -i inventories/staging playbooks/redis.yml --check --diff
+#
+# The refusal this playbook exists for: an instance carrying the queues may not
+# run any `allkeys-*` maxmemory-policy. Under memory pressure such a policy
+# deletes queued jobs — with no error, no failed job, no retry and no alert. The
+# customer paid, the order was accepted, the job was enqueued, and then it
+# stopped existing. `noeviction` turns that silent deletion into a visible
+# write failure the platform can act on.
+#
+# Every Redis tuning guide recommends `allkeys-lru`. It is right for a cache and
+# wrong here, which is why the refusal is machine-enforced.
+#
+# NOTE ON --diff: the configuration template contains the instance's password,
+# so the task that writes it runs with `no_log`. `--diff` will therefore show
+# that redis.conf changed without printing its contents. That is deliberate.
+
+- name: Build the Redis hosts
+  hosts: redis
+  gather_facts: true
+  become: true
+
+  serial: 1
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (redis_inbound_rules | default([])) }}
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: redis

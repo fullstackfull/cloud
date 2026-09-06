@@ -1,0 +1,40 @@
+---
+# Redis invariants.
+
+# THE EVICTION POLICY IS THE WHOLE REASON THIS FILE EXISTS.
+#
+# Redis under maxmemory with an `allkeys-*` policy deletes whatever it likes to
+# make room. On a cache that is a slow request. On the instance holding the
+# queues it deletes queued jobs — and a deleted job produces no error, no failed
+# job, no retry and no alert. A customer paid, the order was accepted, the job
+# was enqueued, and then it simply ceased to exist. The first person to find out
+# is the customer asking where their server is, days later.
+#
+# The queue instance therefore uses `noeviction`: when it is full, writes fail
+# loudly and the platform surfaces an error it can act on. An outage you can see
+# is strictly better than provisioning that silently evaporates.
+redis_queue_maxmemory_policy: noeviction
+
+# Policies the role will accept on an instance carrying queues. Anything else,
+# and especially the Redis default of `allkeys-lru` that every tuning guide
+# recommends, is refused.
+redis_queue_allowed_policies:
+  - noeviction
+
+# Cache-only instances may evict, and LRU is the right choice there.
+redis_cache_maxmemory_policy: allkeys-lru
+
+# Whether this instance carries the queues. Declared per host in the inventory.
+redis_hosts_queues: false
+
+# Queues must survive a restart of the Redis host. AOF with per-second fsync
+# loses at most a second of enqueues; RDB alone can lose the entire interval
+# since the last snapshot, which for a five-minute save window is five minutes
+# of paid provisioning.
+redis_appendonly: true
+redis_appendfsync: everysec
+
+# Redis has no user model worth the name and binds to every interface out of the
+# box. `requirepass` plus a bind list is the minimum; the password comes from
+# Vault and never from this file.
+redis_requirepass_required: true

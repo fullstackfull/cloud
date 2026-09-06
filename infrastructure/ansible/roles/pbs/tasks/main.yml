@@ -1,0 +1,296 @@
+---
+# Proxmox Backup Server: datastores, prune, garbage collection, VERIFICATION and
+# a scheduled restore test.
+#
+# The last two are the reason this role is longer than "create a datastore".
+# A backup that has never been restored is a hypothesis, and PBS deduplicates —
+# one corrupted chunk can be shared by many backups at once, so a datastore full
+# of green backup jobs can be entirely unrestorable and nothing says so until
+# somebody needs it.
+
+- name: Refuse to run against a machine that is not a Proxmox Backup Server
+  ansible.builtin.stat:
+    path: /etc/proxmox-backup
+  register: pbs_config_dir
+  check_mode: false
+
+- name: Assert this host is a Proxmox Backup Server
+  ansible.builtin.assert:
+    that:
+      - pbs_config_dir.stat.exists
+    fail_msg: >-
+      /etc/proxmox-backup is not present on {{ inventory_hostname }}. This role
+      creates datastores and schedules jobs through proxmox-backup-manager; on a
+      machine that is not PBS, every task fails halfway and leaves scheduling
+      state nobody expects to find.
+    quiet: true
+
+- name: Refuse a PBS host with no datastores declared
+  ansible.builtin.assert:
+    that:
+      - pbs_datastores | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} declares no datastores. A PBS host with none
+      reports healthy, answers its API, appears on the dashboard, and backs
+      nothing up. That is the most expensive failure mode a backup system has.
+    quiet: true
+
+# PBS runs on dedicated hardware with its own storage — not on a hypervisor, and
+# not on storage shared with the machines it protects. A datastore on the root
+# filesystem is the shape that mistake usually takes: it works, it fills the
+# system disk, and it dies with the machine it was protecting.
+- name: Read the mounted filesystems
+  ansible.builtin.command:
+    cmd: findmnt --json --list --output TARGET,SOURCE,FSTYPE
+  register: pbs_mounts
+  changed_when: false
+  check_mode: false
+
+- name: List every mount point that is not the root filesystem
+  ansible.builtin.set_fact:
+    pbs_non_root_mounts: >-
+      {{ (pbs_mounts.stdout | from_json).filesystems
+         | map(attribute='target') | reject('equalto', '/') | list }}
+
+- name: Refuse a datastore that shares storage with the root filesystem
+  ansible.builtin.assert:
+    that:
+      - pbs_non_root_mounts | length > 0
+      - >-
+        item.path is search('^(?:' ~ (pbs_non_root_mounts | map('regex_escape') | join('|'))
+        ~ ')(?:/|$)')
+    fail_msg: >-
+      Datastore '{{ item.name }}' at {{ item.path }} is not on a mount of its own;
+      it would land on the root filesystem. Two things go wrong at once: the
+      backups fill the system disk until the host stops, and the backups die
+      with the machine they were protecting. PBS runs on dedicated hardware with
+      its own storage — a backup that shares a failure domain with the thing it
+      backs up is not a backup. Mounted filesystems seen here:
+      {{ pbs_non_root_mounts | join(', ') }}.
+    quiet: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: pbs_datastore_must_be_separate_mount | bool
+
+- name: Refuse a datastore with no verification or no restore test
+  ansible.builtin.assert:
+    that:
+      - pbs_verification_required | bool
+      - pbs_restore_test_required | bool
+    fail_msg: >-
+      Verification and restore testing are not optional on this platform.
+      Verification re-reads stored chunks and is the only thing that turns "the
+      job reported success" into "the data is readable" — which matters more on
+      PBS than elsewhere, because deduplication means one bad chunk can break
+      many backups at once. The restore test is what proves the restore PATH
+      still works, which verification does not check at all.
+    quiet: true
+
+- name: Read the datastores that already exist
+  ansible.builtin.command:
+    cmd: proxmox-backup-manager datastore list --output-format json
+  register: pbs_existing_datastores
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Create the declared datastores
+  ansible.builtin.command:
+    cmd: "proxmox-backup-manager datastore create {{ item.name }} {{ item.path }}"
+  become: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - item.name not in (pbs_existing_datastores.stdout | from_json | map(attribute='name') | list)
+    - not ansible_check_mode
+  changed_when: true
+
+# Prune keeps what was SOLD. Retention configured shorter than the plan
+# advertises is a commitment the platform fails to honour at exactly the worst
+# moment — when a customer asks for the restore the plan promised.
+#
+# `prune-job update` fails on a job that does not exist yet, and `prune-job
+# create` fails on one that does. The existing jobs are therefore read first and
+# each datastore takes the branch that applies to it. Without this the very
+# first run against a fresh PBS host dies here — after the datastores were
+# created — leaving a backup server that accepts backups and prunes nothing,
+# which fills the datastore until backups start failing.
+- name: Read the prune jobs that already exist
+  ansible.builtin.command:
+    cmd: proxmox-backup-manager prune-job list --output-format json
+  register: pbs_existing_prune_jobs
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Create the prune job for a datastore that has none
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager prune-job create lynomia-prune-{{ item.name }}
+      --store {{ item.name }}
+      --schedule "{{ item.prune.schedule | default('daily 01:00') }}"
+      --keep-daily {{ item.prune.keep_daily | default(7) }}
+      --keep-weekly {{ item.prune.keep_weekly | default(4) }}
+      --keep-monthly {{ item.prune.keep_monthly | default(6) }}
+      --keep-yearly {{ item.prune.keep_yearly | default(1) }}
+  become: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - ('lynomia-prune-' ~ item.name) not in (pbs_existing_prune_jobs.stdout | from_json | map(attribute='id') | list)
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Keep an existing prune job's retention exactly as declared
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager prune-job update lynomia-prune-{{ item.name }}
+      --schedule "{{ item.prune.schedule | default('daily 01:00') }}"
+      --keep-daily {{ item.prune.keep_daily | default(7) }}
+      --keep-weekly {{ item.prune.keep_weekly | default(4) }}
+      --keep-monthly {{ item.prune.keep_monthly | default(6) }}
+      --keep-yearly {{ item.prune.keep_yearly | default(1) }}
+  become: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - ('lynomia-prune-' ~ item.name) in (pbs_existing_prune_jobs.stdout | from_json | map(attribute='id') | list)
+    - not ansible_check_mode
+  changed_when: false
+
+# Garbage collection reclaims space from pruned chunks. Without it the datastore
+# fills, backups start failing, and the alert fires — but the backups that did
+# not happen are the most recent ones, which are the ones a restore would want.
+- name: Configure garbage collection for each datastore
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager datastore update {{ item.name }}
+      --gc-schedule "{{ pbs_garbage_collect_schedule }}"
+  become: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: not ansible_check_mode
+  changed_when: false
+
+# Same create-or-update split as prune, and for a worse reason: a `verify-job
+# update` that fails on the first run leaves a datastore with backups nobody
+# ever re-reads. PBS deduplicates, so one corrupted chunk can break every backup
+# that references it, and only verification finds that before a restore does.
+- name: Read the verify jobs that already exist
+  ansible.builtin.command:
+    cmd: proxmox-backup-manager verify-job list --output-format json
+  register: pbs_existing_verify_jobs
+  changed_when: false
+  check_mode: false
+  become: true
+  when: pbs_verification_required | bool
+
+- name: Create the verify job for a datastore that has none
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager verify-job create lynomia-verify-{{ item.name }}
+      --store {{ item.name }}
+      --schedule "{{ pbs_verify_schedule }}"
+      --ignore-verified false
+      --outdated-after 30
+  become: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - pbs_verification_required | bool
+    - ('lynomia-verify-' ~ item.name) not in (pbs_existing_verify_jobs.stdout | default('[]') | from_json | map(attribute='id') | list)
+    - not ansible_check_mode
+  changed_when: true
+
+- name: Keep an existing verify job exactly as declared
+  ansible.builtin.command:
+    cmd: >-
+      proxmox-backup-manager verify-job update lynomia-verify-{{ item.name }}
+      --schedule "{{ pbs_verify_schedule }}"
+      --ignore-verified false
+      --outdated-after 30
+  become: true
+  loop: "{{ pbs_datastores }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - pbs_verification_required | bool
+    - ('lynomia-verify-' ~ item.name) in (pbs_existing_verify_jobs.stdout | default('[]') | from_json | map(attribute='id') | list)
+    - not ansible_check_mode
+  changed_when: false
+
+# --------------------------------------------------------------------------
+# The restore test.
+#
+# PBS has no built-in restore test, and its absence is why so many providers
+# discover their restore path is broken during an incident. This installs one:
+# a timer that restores the most recent snapshot into a scratch datastore,
+# records how long it took, and writes the date of the last SUCCESSFUL restore —
+# which is the number the platform reports, not the date of the last successful
+# backup.
+# --------------------------------------------------------------------------
+- name: Create the restore-test scratch directory
+  ansible.builtin.file:
+    path: "{{ pbs_restore_test_scratch_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  become: true
+  when: pbs_restore_test_required | bool
+
+- name: Install the restore-test script
+  ansible.builtin.template:
+    src: restore-test.sh.j2
+    dest: /usr/local/sbin/lynomia-pbs-restore-test
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+  when: pbs_restore_test_required | bool
+
+- name: Install the restore-test service unit
+  ansible.builtin.template:
+    src: restore-test.service.j2
+    dest: /etc/systemd/system/lynomia-pbs-restore-test.service
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: pbs_restore_test_required | bool
+
+- name: Install the restore-test timer
+  ansible.builtin.template:
+    src: restore-test.timer.j2
+    dest: /etc/systemd/system/lynomia-pbs-restore-test.timer
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: pbs_restore_test_required | bool
+
+- name: Enable the restore-test timer
+  ansible.builtin.systemd_service:
+    name: lynomia-pbs-restore-test.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+  when: pbs_restore_test_required | bool
+
+- name: Report what is scheduled
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ pbs_datastores | length }} datastore(s);
+      GC {{ pbs_garbage_collect_schedule }};
+      verify {{ pbs_verify_schedule }};
+      restore test {{ pbs_restore_test_schedule }} into
+      {{ pbs_restore_test_scratch_path }}.
+      The platform reports the date of the last SUCCESSFUL RESTORE, not the last
+      successful backup.

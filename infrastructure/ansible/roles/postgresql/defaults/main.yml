@@ -1,0 +1,43 @@
+---
+postgresql_data_dir: "/var/lib/postgresql/{{ postgresql_version }}/main"
+postgresql_conf_dir: "/etc/postgresql/{{ postgresql_version }}/main"
+postgresql_service: postgresql
+postgresql_port: 5432
+
+# Declared per host in the inventory. There is no default: a cluster where every
+# host thinks it is the primary is a split brain, and a cluster where none does
+# accepts no writes.
+postgresql_role: ~
+
+# Where WAL segments are archived to. This MUST be a mount backed by storage
+# that survives the loss of this machine — the role asserts it is not under the
+# data directory, because an archive that dies with the primary provides exactly
+# the recovery you needed it for and none of the recovery you thought you had.
+postgresql_archive_dir: /srv/wal-archive
+
+# Base backups. WAL alone is not a backup: replaying from the beginning of time
+# is not a recovery plan, and the archive is only useful measured from the most
+# recent base.
+postgresql_basebackup_dir: /srv/base-backups
+postgresql_basebackup_schedule_hour: 1
+postgresql_basebackup_schedule_minute: 30
+postgresql_basebackup_retain_days: 8
+
+# Networks allowed to open a database connection. The control plane and nothing
+# else — not the monitoring host (it scrapes an exporter), not a developer's
+# laptop, and never 0.0.0.0/0.
+postgresql_allowed_client_cidrs: []
+
+postgresql_max_connections: 200
+postgresql_shared_buffers: 4GB
+postgresql_effective_cache_size: 12GB
+postgresql_work_mem: 16MB
+postgresql_maintenance_work_mem: 512MB
+
+# Log every statement that takes longer than this. Not every statement: full
+# statement logging on a busy control plane fills the disk faster than the
+# database grows, and a full disk on the primary is an outage.
+postgresql_log_min_duration_ms: 500
+
+postgresql_inbound_rules:
+  - {port: 5432, proto: tcp, comment: 'postgresql: control-plane client connections'}

@@ -1,0 +1,11 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+
+- name: Restart the monitoring stack
+  ansible.builtin.systemd_service:
+    name: "{{ monitoring_service_name }}"
+    state: restarted
+  become: true

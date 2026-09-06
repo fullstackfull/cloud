@@ -1,0 +1,48 @@
+# {{ ansible_managed }}
+#
+# Rewriting this file changes how a hypervisor with running customer machines
+# reaches the network. The role writes it but does NOT apply it unless the host
+# declares `proxmox_apply_network` — read the diff first.
+
+auto lo
+iface lo inet loopback
+
+# The management interface. It is named in the inventory rather than discovered,
+# because the interface carrying the default route on a correctly built node is
+# the customer bridge, not this one.
+auto {{ proxmox_management_interface }}
+iface {{ proxmox_management_interface }} inet manual
+
+{% for bridge in proxmox_bridges %}
+auto {{ bridge.name }}
+iface {{ bridge.name }} inet {{ bridge.address is defined | ternary('static', 'manual') }}
+{% if bridge.address is defined %}
+    address {{ bridge.address }}
+{% endif %}
+{% if bridge.gateway is defined %}
+    gateway {{ bridge.gateway }}
+{% endif %}
+    bridge-ports {{ bridge.interface }}
+    bridge-stp off
+    bridge-fd 0
+{% if bridge.vlan_aware | default(false) %}
+    # VLAN-aware. Guest interfaces carry a tag from the platform's inventory;
+    # no VLAN ID is hard-coded in this repository, because a VLAN that is
+    # management in one datacentre is somebody's production network in another.
+    bridge-vlan-aware yes
+    bridge-vids {{ bridge.vids | default(proxmox_bridge_vids) }}
+{% else %}
+    bridge-vlan-aware no
+{% endif %}
+{% if bridge.mtu is defined %}
+    mtu {{ bridge.mtu }}
+{% endif %}
+{% if bridge.comment is defined %}
+    # {{ bridge.comment }}
+{% endif %}
+
+{% endfor %}
+# Nothing below this line. In particular there is no bridge that both carries
+# customer traffic and holds the management address: a guest on the management
+# bridge can reach every BMC in the rack, and a BMC is a complete out-of-band
+# computer with power control and virtual media.

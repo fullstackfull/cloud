@@ -1,0 +1,177 @@
+---
+# The control plane: API host, Horizon workers, and — on exactly one host — the
+# scheduler.
+
+# --------------------------------------------------------------------------
+# GUARD 1: the control plane does not share a machine with infrastructure it
+# is supposed to be able to recover.
+#
+# On a hypervisor: when the hypervisor fails, the tool that would migrate its
+# machines fails with it. On a hosting node: one customer's runaway PHP takes
+# the platform down alongside the sites. On the firewall: losing the firewall
+# loses the only thing that could reconfigure it. On the PXE host: the machine
+# that can reinstall servers is also the machine holding the credentials for
+# every server.
+#
+# This is an assert rather than a note in the README because the collision is
+# introduced by adding one line to an inventory, and the person adding it is
+# usually solving a hardware shortage rather than thinking about recovery.
+# --------------------------------------------------------------------------
+- name: Refuse to install the control plane alongside an incompatible role
+  ansible.builtin.assert:
+    that:
+      - group_names | intersect(lynomia_control_plane_incompatible_groups) | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} is in `control_plane` and also in
+      {{ group_names | intersect(lynomia_control_plane_incompatible_groups) | join(', ') }}.
+      The control plane must be able to operate and recover that infrastructure,
+      which it cannot do from inside it. Give it its own machine — see
+      infrastructure/README.md, "Why the control plane runs nowhere else".
+    quiet: true
+
+# --------------------------------------------------------------------------
+# GUARD 2: exactly one scheduler.
+#
+# Laravel's scheduler is a per-minute cron entry that dispatches every due
+# recurring job. Two hosts running it dispatch everything twice:
+#
+#   - the billing run issues a second set of invoices against real customers;
+#   - the reservation reaper races itself and can release an address that the
+#     other run has just handed to a machine being built;
+#   - reconciliation doubles the API call volume against every hypervisor.
+#
+# Zero hosts running it is quieter and worse: nothing recurring happens at all,
+# and a scheduler that never runs produces no errors to notice.
+#
+# The count is taken across the whole group, not this host, so the failure is
+# caught on the first host of the play rather than after half the fleet has
+# been configured.
+# --------------------------------------------------------------------------
+- name: Determine which control-plane hosts declare themselves the scheduler
+  ansible.builtin.set_fact:
+    control_plane_scheduler_hosts: >-
+      {{ groups['control_plane'] | default([])
+         | map('extract', hostvars)
+         | selectattr('lynomia_scheduler_host', 'defined')
+         | selectattr('lynomia_scheduler_host', 'truthy')
+         | map(attribute='inventory_hostname')
+         | list }}
+  run_once: true
+
+- name: Refuse unless exactly one control-plane host runs the scheduler
+  ansible.builtin.assert:
+    that:
+      - control_plane_scheduler_hosts | length == 1
+    fail_msg: >-
+      {{ control_plane_scheduler_hosts | length }} host(s) in `control_plane` declare
+      `lynomia_scheduler_host: true` ({{ control_plane_scheduler_hosts | join(', ') | default('none', true) }}).
+      Exactly one is required. Two schedulers run every recurring job twice — for
+      the billing run that means invoicing a customer twice. Zero means no
+      recurring job ever runs, silently.
+    quiet: true
+  run_once: true
+
+- name: Create the platform group
+  ansible.builtin.group:
+    name: "{{ lynomia_owner_group }}"
+    state: present
+  become: true
+
+- name: Create the platform user
+  ansible.builtin.user:
+    name: "{{ lynomia_owner_user }}"
+    group: "{{ lynomia_owner_group }}"
+    home: "{{ lynomia_base_dir }}"
+    shell: /bin/bash
+    system: true
+    state: present
+  become: true
+
+- name: Create the release and shared directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ lynomia_owner_user }}"
+    group: "{{ lynomia_owner_group }}"
+    mode: "0750"
+  loop:
+    - "{{ lynomia_base_dir }}"
+    - "{{ control_plane_shared_dir }}"
+  become: true
+
+- name: Install the Redis client tooling
+  ansible.builtin.package:
+    name: "{{ control_plane_redis_client_packages }}"
+    state: present
+  become: true
+
+# HORIZON IS NOT STARTED BEFORE THERE IS SOMETHING FOR IT TO RUN.
+#
+# This role builds the machine; the release is deployed by the CI/CD pipeline
+# (`control_plane_manage_release: false`). On the first build of a host the unit
+# below is new, which notifies the restart handler, which runs
+# `{{ control_plane_php_binary }} .../artisan horizon` against a directory that
+# does not exist yet — systemd reports a failed start and the whole play fails
+# at the end, on a host where nothing was actually wrong. The handler is
+# therefore conditional on a release being present, and the absence is reported
+# rather than passed over in silence.
+- name: Look for a deployed release
+  ansible.builtin.stat:
+    path: "{{ control_plane_release_dir }}/artisan"
+  register: control_plane_release
+  check_mode: false
+
+- name: Install the Horizon systemd unit
+  ansible.builtin.template:
+    src: horizon.service.j2
+    dest: "/etc/systemd/system/{{ control_plane_horizon_service }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - Reload systemd
+    - Restart horizon
+
+- name: Enable Horizon
+  ansible.builtin.systemd_service:
+    name: "{{ control_plane_horizon_service }}"
+    enabled: true
+    daemon_reload: true
+  become: true
+
+# --------------------------------------------------------------------------
+# The scheduler crontab.
+#
+# `state` is computed rather than the task being skipped with `when:`, and that
+# difference is the whole point. A skipped task leaves whatever was there
+# before — so moving the scheduler from cp-1 to cp-2 by editing the inventory
+# would give the fleet TWO schedulers until somebody remembered to log into
+# cp-1 and delete a crontab by hand. Declaring absence explicitly makes the
+# move a one-line inventory change that is correct after one run.
+# --------------------------------------------------------------------------
+- name: Install or remove the scheduler crontab according to the inventory
+  ansible.builtin.cron:
+    name: lynomia-scheduler
+    minute: "*"
+    user: "{{ lynomia_owner_user }}"
+    job: "{{ control_plane_php_binary }} {{ control_plane_release_dir }}/artisan schedule:run >> /dev/null 2>&1"
+    state: "{{ (inventory_hostname in control_plane_scheduler_hosts) | ternary('present', 'absent') }}"
+  become: true
+
+- name: Report a host that is built but has no release on it yet
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is configured, but {{ control_plane_release_dir }}
+      holds no release, so Horizon was installed and enabled without being
+      started. That is the expected state for a freshly built host: the release
+      is deployed by the CI/CD pipeline, and Horizon starts with it. Nothing is
+      processing the queues on this host until that happens.
+  when: not control_plane_release.stat.exists
+
+- name: Report where the scheduler runs
+  ansible.builtin.debug:
+    msg: >-
+      Scheduler host: {{ control_plane_scheduler_hosts | join(', ') }}.
+      This host ({{ inventory_hostname }}) {{ (inventory_hostname in control_plane_scheduler_hosts)
+      | ternary('runs it', 'does not run it, and any previous crontab has been removed') }}.

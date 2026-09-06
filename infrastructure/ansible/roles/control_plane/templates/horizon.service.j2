@@ -1,0 +1,42 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Lynomia Cloud queue workers (Laravel Horizon)
+# Horizon cannot do useful work without Redis, but it must not give up if Redis
+# is slow to come back after a reboot — Restart=always below handles that. This
+# is ordering, not a hard dependency.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ control_plane_horizon_user }}
+Group={{ lynomia_owner_group }}
+WorkingDirectory={{ control_plane_release_dir }}
+ExecStart={{ control_plane_php_binary }} {{ control_plane_release_dir }}/artisan horizon
+
+# `horizon:terminate` asks Horizon to finish the job in flight and exit. SIGKILL
+# on a worker halfway through provisioning is how a machine gets created on a
+# hypervisor with nothing in the database recording that it exists: invisible to
+# billing, to monitoring and to the destroy path.
+ExecStop={{ control_plane_php_binary }} {{ control_plane_release_dir }}/artisan horizon:terminate
+TimeoutStopSec={{ control_plane_horizon_stop_timeout }}
+KillSignal=SIGTERM
+
+Restart=always
+RestartSec={{ control_plane_horizon_restart_sec }}
+
+# Horizon reads its configuration from the environment the deploy wrote. Nothing
+# in this unit carries a secret, and the environment file is owned by the
+# platform user and unreadable by anyone else.
+EnvironmentFile=-{{ control_plane_shared_dir }}/.env
+
+# Hardening. A worker calls out to hypervisors, BMCs and payment providers; it
+# has no reason to write outside its own tree or to gain privileges.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths={{ lynomia_base_dir }}
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+---
+# Derived, not configurable. The policy an instance runs under follows from what
+# the instance is for, so there is no way to declare "carries queues" and then
+# separately declare an eviction policy that contradicts it.
+#
+# This lives in vars/ rather than defaults/ precisely because it must not be
+# overridable: role vars sit above inventory host_vars in Ansible's precedence
+# order, so no inventory line can set `allkeys-lru` on a queue instance.
+redis_effective_maxmemory_policy: >-
+  {{ redis_queue_maxmemory_policy if (redis_hosts_queues | bool) else redis_cache_maxmemory_policy }}

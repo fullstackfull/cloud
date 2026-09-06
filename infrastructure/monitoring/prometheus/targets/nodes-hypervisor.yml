@@ -1,0 +1,11 @@
+# Proxmox VE hypervisors. `role: hypervisor` selects the strictest disk and
+# memory thresholds in the alert rules: when one of these fills up, running
+# guests stop rather than degrade.
+- targets:
+    - pve-01.kw.lynomia.internal:9100
+    - pve-02.kw.lynomia.internal:9100
+    - pve-03.kw.lynomia.internal:9100
+  labels:
+    role: hypervisor
+    service: compute
+    cluster_name: kw-central-1

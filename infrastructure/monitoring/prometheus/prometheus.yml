@@ -1,0 +1,242 @@
+# Lynomia Cloud — Prometheus server configuration.
+#
+# Every target list lives in prometheus/targets/*.yml and is loaded through
+# file_sd_configs rather than being written inline here. The reason is
+# operational, not stylistic: adding a hypervisor should not require restarting
+# the thing that watches the hypervisors. Prometheus re-reads a file_sd file
+# within seconds and without dropping a scrape, whereas an inline static_config
+# needs a SIGHUP at best and a restart at worst — and a monitoring restart
+# during an incident is exactly when you lose the graph you were reading.
+
+global:
+  # Fifteen seconds is the shortest interval at which the control plane's
+  # metrics endpoint is comfortably cheap (its collectors are SQL aggregates
+  # measured in single-digit milliseconds). Anything faster buys resolution
+  # nobody reads and turns the scrape into load.
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+  # Rules are cheap; evaluating them more often than scraping is pointless, and
+  # less often delays every "for:" clause by a full period.
+  evaluation_interval: 15s
+
+  external_labels:
+    # Stamped onto every sample that leaves this server (alerts, remote write,
+    # federation). Without them an alert forwarded from a second region is
+    # indistinguishable from a local one.
+    cluster: lynomia
+    environment: production
+    region: kw-central
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+      # Alerts must survive a slow Alertmanager. Ten seconds is well inside the
+      # evaluation interval, so a wedged Alertmanager delays alerts rather than
+      # stalling rule evaluation behind it.
+      timeout: 10s
+
+scrape_configs:
+  # ---------------------------------------------------------------------------
+  # Prometheus itself.
+  #
+  # Self-scraping is not vanity: prometheus_rule_evaluation_failures_total and
+  # prometheus_target_scrape_pool_exceeded_target_limit_total are the only way
+  # to learn that the monitoring is silently degraded rather than the platform
+  # being healthy.
+  # ---------------------------------------------------------------------------
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: monitoring
+
+  # ---------------------------------------------------------------------------
+  # The control plane's own metrics.
+  #
+  # These are the numbers no exporter can produce: orders, provisioning
+  # outcomes, IP runway, MRR. The endpoint is bearer-token protected and the
+  # token is read from a file at scrape time, never inlined here — this file is
+  # in git and Prometheus's own /api/v1/status/config would otherwise serve the
+  # token back to anyone who reached the web UI.
+  # ---------------------------------------------------------------------------
+  - job_name: control-plane
+    metrics_path: /metrics
+    scheme: https
+    # Deliberately longer than the global timeout. The endpoint is designed to
+    # answer in well under a second, but a scrape that times out during a
+    # database hiccup should not also cost us the queue-depth and failed-job
+    # series that explain the hiccup.
+    scrape_timeout: 10s
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/control-plane-metrics-token
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/control-plane.yml
+        refresh_interval: 30s
+
+  # ---------------------------------------------------------------------------
+  # node_exporter — every physical machine: hypervisors, hosting nodes,
+  # database and Redis hosts, the load balancers.
+  #
+  # The `role` label comes from the target file and is what the alert rules
+  # branch on. A hypervisor at 92% disk is an emergency; a log-shipping box at
+  # 92% is a Tuesday, and one threshold cannot serve both.
+  # ---------------------------------------------------------------------------
+  - job_name: node
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/nodes-*.yml
+        refresh_interval: 30s
+    relabel_configs:
+      # `instance` defaults to host:port, which puts ":9100" in every alert
+      # title and every dashboard legend. Strip it once, here, rather than in
+      # forty label_replace() calls spread across the rules.
+      - source_labels: [__address__]
+        regex: '([^:]+)(?::\d+)?'
+        target_label: instance
+        replacement: '${1}'
+
+  # ---------------------------------------------------------------------------
+  # Proxmox VE — cluster, node and guest state straight from the PVE API.
+  #
+  # The exporter is a proxy: it is scraped with the PVE host as a `target`
+  # parameter, in the same shape as blackbox_exporter. One exporter therefore
+  # covers every node in the cluster, and the credential lives in the
+  # exporter's config file rather than being distributed to Prometheus.
+  # ---------------------------------------------------------------------------
+  - job_name: proxmox
+    metrics_path: /pve
+    params:
+      module: [default]
+      # Guest metrics are the expensive half of a PVE scrape and the half that
+      # matters least here: per-VM detail belongs to the customer-facing
+      # graphs, while capacity and node health belong to alerting.
+      cluster: ['1']
+      node: ['1']
+    # PVE's API serialises cluster status behind a lock; under load a scrape can
+    # take several seconds without anything being wrong.
+    scrape_interval: 30s
+    scrape_timeout: 25s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/proxmox.yml
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: pve-exporter:9221
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL.
+  # ---------------------------------------------------------------------------
+  - job_name: postgres
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: control-plane-db
+          role: database
+
+  # ---------------------------------------------------------------------------
+  # Redis — queue backend and cache. When this is down, provisioning stops.
+  # ---------------------------------------------------------------------------
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: control-plane-queue
+          role: redis
+
+  # ---------------------------------------------------------------------------
+  # blackbox_exporter — reachability and TLS expiry from outside the box.
+  #
+  # Split into three jobs rather than one, because the probe module and the
+  # meaning of a failure differ. An HTTP 200 from the portal is a statement
+  # about the whole request path; a TCP connect to a hosting node is a
+  # statement about the machine.
+  # ---------------------------------------------------------------------------
+  - job_name: blackbox-http
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/blackbox-http.yml
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: blackbox-tls
+    metrics_path: /probe
+    params:
+      module: [tls_connect]
+    # Certificates expire on a scale of days, so probing every fifteen seconds
+    # would be thirty thousand pointless TLS handshakes a day against our own
+    # endpoints. Two minutes rather than five: Prometheus marks a series stale
+    # after five minutes without a sample, so a five-minute interval leaves the
+    # expiry series flickering in and out of existence and the alert's `for:`
+    # clause resetting every time it does.
+    scrape_interval: 2m
+    scrape_timeout: 30s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/blackbox-tls.yml
+        refresh_interval: 60s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: blackbox-icmp
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    scrape_interval: 30s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/blackbox-icmp.yml
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ---------------------------------------------------------------------------
+  # Loki and Alloy.
+  #
+  # The log pipeline is monitored like anything else. A silent Alloy looks
+  # exactly like a quiet application, and "we have no logs from the hour of the
+  # incident" is a thing you only want to discover once.
+  # ---------------------------------------------------------------------------
+  - job_name: loki
+    static_configs:
+      - targets: ['loki:3100']
+        labels:
+          service: monitoring
+
+  - job_name: alloy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['alloy:12345']
+        labels:
+          service: monitoring

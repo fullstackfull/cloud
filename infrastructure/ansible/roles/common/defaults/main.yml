@@ -1,0 +1,35 @@
+---
+# Tunables. These sit at the LOWEST precedence in Ansible's order, so an
+# inventory can override any of them per environment or per host. Contrast with
+# group_vars/, which holds the values an inventory must not be able to weaken.
+
+common_base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - htop
+  - jq
+  - lsof
+  - rsync
+  - tar
+  - unzip
+
+# chrony rather than systemd-timesyncd: timesyncd is an SNTP client and cannot
+# discipline a clock that has drifted under load. On a hypervisor a skewed clock
+# breaks TLS to the API, makes migration decisions on stale metrics, and makes
+# two nodes' logs impossible to interleave during an incident.
+common_ntp_package: chrony
+common_ntp_service: chrony
+common_ntp_servers:
+  # Pool addresses, not IPs. An NTP source pinned to an address that changes
+  # hands is a machine that quietly stops syncing.
+  - 0.pool.ntp.org
+  - 1.pool.ntp.org
+  - 2.pool.ntp.org
+  - 3.pool.ntp.org
+
+# Journald keeps logs across a reboot. The failure this prevents: a host panics,
+# reboots, and the only record of why it panicked was in a tmpfs.
+common_journald_persistent: true
+common_journald_max_use: 2G
+common_journald_max_file_sec: 1day

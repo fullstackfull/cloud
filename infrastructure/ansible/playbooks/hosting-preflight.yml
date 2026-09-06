@@ -1,0 +1,55 @@
+---
+# =============================================================================
+# hosting-preflight.yml — READ-ONLY. Refuses a node a panel installer would
+#                         half-break.
+# =============================================================================
+#
+#   make hosting-preflight ENV=production
+#   ansible-playbook -i inventories/production playbooks/hosting-preflight.yml --check --diff
+#
+# This playbook writes nothing. It refuses, and every check is a refusal rather
+# than a warning, because each one produces a node that LOOKS installed:
+#
+#   unsupported OS      the panel installs today and fails months later, during
+#                       an update, on a node full of customer sites — and the
+#                       vendor's answer is "that release is not supported".
+#   not clean           an existing web server, database or panel. No panel
+#                       supports being installed alongside another; the result
+#                       is two products both believing they own the mail stack.
+#   hostname / DNS      panels need a resolvable FQDN, and forward and reverse
+#                       DNS must agree. A mismatch makes every large provider
+#                       treat the node's mail as suspicious, so every customer
+#                       on it loses mail delivery.
+#   bound ports         the install fails partway, after it has already replaced
+#                       the mail and web configuration.
+#   no licence          cPanel/WHM, DirectAdmin, CloudLinux and LiteSpeed are
+#                       commercial products. Without a licence the preflight
+#                       stops cleanly and reports LICENSE_REQUIRED. This
+#                       repository contains guarded installers for them and
+#                       nothing that bypasses, patches or circumvents licensing,
+#                       and no flag here enables such a thing.
+#
+# A node that fails this is not "nearly ready". It is a node that will look
+# installed and be broken, and by the time that shows there are customer sites
+# on it.
+
+- name: Validate hosting nodes before any panel installation
+  hosts: hosting
+  gather_facts: true
+  become: true
+
+  # Survey every node before failing, so an operator preparing a batch gets the
+  # whole list rather than one fault per lap.
+  any_errors_fatal: false
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+  roles:
+    - role: hosting

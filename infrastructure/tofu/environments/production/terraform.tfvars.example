@@ -1,0 +1,31 @@
+# =============================================================================
+# EXAMPLE variable values — production.
+# =============================================================================
+# This file is an EXAMPLE. The real production values are not in this
+# repository: they name the provider's own management addresses and the
+# topology of its networks, which is a map of everything worth attacking.
+#
+# NO SECRET APPEARS HERE. The sensitive variables come from the environment:
+#
+#   export TF_VAR_proxmox_api_token="$(secret-store get production/proxmox-token)"
+#   export TF_VAR_cloudflare_api_token="$(secret-store get production/cloudflare-token)"
+#
+# Production is applied only after a reviewed plan. See infrastructure/README.md,
+# "Plan, review, then apply" — there is no automation that runs `tofu apply`.
+
+environment = "production"
+
+proxmox_endpoint   = "https://pve-1.prod.example:8006/"
+cloudflare_zone_id = "REPLACE-ME-32-hex-zone-id"
+
+ssh_authorized_keys = [
+  "ssh-ed25519 AAAA_REPLACE_ME_THIS_IS_NOT_A_REAL_KEY platform@lynomia.example",
+]
+
+# Production platform machines are added here one at a time, each with a plan
+# reviewed before it is applied. Note what is NOT in this map and never will be:
+# customer virtual machines. Those are created by the control plane through the
+# Proxmox API and recorded in its database. Holding them in OpenTofu state as
+# well would put a `tofu destroy` one command away from deleting them, and would
+# make every plan propose to revert resizes that customers paid for.
+platform_vms = {}

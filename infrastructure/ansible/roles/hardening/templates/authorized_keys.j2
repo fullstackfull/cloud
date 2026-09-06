@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+#
+# This file is the COMPLETE set of keys allowed to log in as
+# {{ hardening_ssh_user }}. It is rewritten on every run, so a key removed from
+# the inventory is revoked on the next play — and a key added by hand on the
+# host disappears. That is deliberate: the inventory is the only record of who
+# has access, and a second record nobody reads is how a departed engineer keeps
+# a shell.
+{% for key in hardening_authorized_keys %}
+{{ key }}
+{% endfor %}

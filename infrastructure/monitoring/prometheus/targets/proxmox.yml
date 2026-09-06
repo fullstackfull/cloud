@@ -1,0 +1,9 @@
+# PVE API endpoints, passed to prometheus-pve-exporter as ?target=.
+# The credential is not here: it lives in the exporter's own pve.yml.
+- targets:
+    - pve-01.kw.lynomia.internal
+    - pve-02.kw.lynomia.internal
+    - pve-03.kw.lynomia.internal
+  labels:
+    cluster_name: kw-central-1
+    service: compute

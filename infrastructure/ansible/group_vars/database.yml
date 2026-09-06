@@ -1,0 +1,29 @@
+---
+# PostgreSQL invariants.
+
+postgresql_version: 18
+
+# Data checksums can only be enabled at initdb time (or by a full offline
+# rewrite with pg_checksums). Turning them on later means downtime measured in
+# the size of the database, so the only chance to get this right is the first
+# five seconds of the cluster's life. Without checksums, silent corruption on
+# the storage under a hosting provider's billing data is discovered by a
+# customer disputing an invoice.
+postgresql_data_checksums: true
+
+# WAL archiving is what makes point-in-time recovery possible. The realistic
+# database disaster is not "the host died" but "a bad migration ran at 14:07",
+# and recovery means rewinding to 14:06 — which nightly dumps cannot do
+# (docs/backups.md).
+postgresql_wal_archiving: true
+postgresql_wal_level: replica
+
+# Archiving to a directory on the same machine is not archiving. If the host is
+# gone, so is the archive. The destination is a mount from separate storage and
+# the role refuses a path under the data directory.
+postgresql_archive_must_be_offhost: true
+
+# initdb on a directory that already holds a cluster is a total data loss event.
+# The role will not run it unless a specific host declares this, which is only
+# correct on a machine being built for the first time or rebuilt from a restore.
+postgresql_allow_initdb: false

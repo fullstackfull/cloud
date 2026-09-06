@@ -1,0 +1,28 @@
+---
+control_plane_release_dir: "{{ lynomia_base_dir }}/current"
+control_plane_shared_dir: "{{ lynomia_base_dir }}/shared"
+control_plane_php_binary: /usr/bin/php
+
+# Horizon under systemd. Not supervisord, not a nohup loop, not a screen
+# session: systemd is the only supervisor that is already running before anyone
+# logs in, restarts the workers after a reboot without being asked, and can be
+# queried for "is it actually running" by the monitoring agent.
+control_plane_horizon_user: "{{ lynomia_owner_user }}"
+control_plane_horizon_restart_sec: 5
+
+# Horizon's own shutdown is graceful: it finishes the job in flight and then
+# exits. The timeout must exceed the longest job the platform runs, because
+# SIGKILL on a worker mid-provisioning kills it after the hypervisor was told to
+# create a machine and before anything recorded that it was — which is the exact
+# state that produces a VM nobody bills for and nobody deletes.
+control_plane_horizon_stop_timeout: 300
+
+# Redis client tooling only. The control plane connects to the redis group; it
+# does not run a server. A Redis server on the API host is a Redis server that
+# is not the one Horizon is configured against, and the day someone points at
+# localhost by accident the queues silently split in two.
+control_plane_redis_client_packages:
+  - redis-tools
+
+control_plane_inbound_rules:
+  - {port: 9100, proto: tcp, comment: 'control_plane: node_exporter scrape'}

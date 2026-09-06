@@ -1,0 +1,61 @@
+# blackbox_exporter modules.
+#
+# Each module answers a different question, which is why there are three rather
+# than one clever one:
+#
+#   http_2xx     — can a customer complete a request end to end?
+#   tls_connect  — how long until this certificate takes the site down?
+#   icmp         — is this machine, whose OS we do not control, alive?
+
+modules:
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200]
+      method: GET
+      # IPv4 for now: the platform's public endpoints are dual-stacked but the
+      # probe should test one family deterministically, or an intermittent v6
+      # path failure shows up as a flapping alert with no reproducible cause.
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+      follow_redirects: false
+      # Certificate verification stays on. A probe that ignores TLS errors
+      # cannot tell you your certificate is broken, which is half the reason
+      # the probe exists.
+      tls_config:
+        insecure_skip_verify: false
+      headers:
+        User-Agent: lynomia-blackbox-exporter/1.0
+
+  tls_connect:
+    prober: tcp
+    timeout: 10s
+    tcp:
+      tls: true
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+      tls_config:
+        # Verification is off for THIS module only, and deliberately: the job of
+        # this probe is to report probe_ssl_earliest_cert_expiry even when the
+        # certificate has already expired. With verification on, an expired
+        # certificate fails the handshake and the expiry series disappears
+        # exactly when the alert needs it — the outage would be invisible to the
+        # alert designed to prevent it.
+        insecure_skip_verify: true
+
+  icmp:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: ip4
+      ip_protocol_fallback: false
+
+  # A TCP connect for services that speak neither HTTP nor ICMP usefully — a
+  # hosting node's control panel port, for example, where ICMP is filtered.
+  tcp_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      preferred_ip_protocol: ip4

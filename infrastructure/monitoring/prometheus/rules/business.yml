@@ -1,0 +1,227 @@
+# Money and capacity: the alerts that fire before support tickets do.
+#
+# Everything here is derived from the control plane's own metrics endpoint,
+# because these are facts no exporter can observe from outside — a webhook that
+# was never recorded produces no HTTP error anywhere, and an IP pool that is
+# about to run dry looks perfectly healthy at the network layer right up until
+# provisioning starts failing after payment.
+
+groups:
+  - name: business.payments
+    rules:
+      - alert: PaymentWebhookFailures
+        # A failed webhook is not a failed payment. The customer has been
+        # charged; the platform simply does not know it yet, so the order sits
+        # unpaid and the service is never provisioned. This is the alert that
+        # catches money moving without being recorded.
+        #
+        # delta(), not increase(). lynomia_webhook_events_total is a state count
+        # exported as a gauge: a failed event is retried by the provider's own
+        # redelivery, and when that succeeds the row leaves `failed` and the
+        # series goes down. increase() would read that decrease as a counter
+        # reset and report the pre-reset value as new failures — paging the
+        # on-call at the exact moment the problem resolved itself.
+        expr: >-
+          delta(lynomia_webhook_events_total{status="failed"}[15m]) > 3
+        for: 5m
+        labels:
+          severity: critical
+          component: payments
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} {{ $labels.provider }} webhook events failed in 15 minutes'
+          description: >-
+            Webhook processing from {{ $labels.provider }} is failing. Each failure is a
+            payment event the platform has not recorded: customers charged with orders
+            still showing unpaid. Reconcile against the provider dashboard rather than
+            waiting for their retries, and expect the tickets before the retries finish.
+          runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
+
+      - alert: PaymentWebhooksStopped
+        # Silence from a payment provider is ambiguous and always worth a look:
+        # either nobody is buying anything, or the endpoint is unreachable and
+        # every purchase is being lost. Both are worth knowing about within the
+        # hour; neither produces an error anywhere in this system.
+        # Summed across every status first: the per-status series move between
+        # each other as events are processed and retried, but their sum is the
+        # row count of webhook_events, which only ever grows. sum(delta(...)) is
+        # therefore exactly "how many events arrived in six hours", and is not
+        # disturbed by a received event becoming a processed one.
+        expr: >-
+          sum(delta(lynomia_webhook_events_total[6h])) == 0
+        for: 1h
+        labels:
+          severity: warning
+          component: payments
+        annotations:
+          summary: 'No payment webhook events have been received for six hours'
+          description: >-
+            Either no payments are being attempted, or the provider can no longer reach
+            the webhook endpoint. Check the provider's delivery log: a run of 5xx or
+            timeouts there means the platform is losing payment events silently, and the
+            provider will eventually stop retrying them.
+          runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
+
+      - alert: FailedPaymentsElevated
+        expr: increase(lynomia_failed_payments_total[1h]) > 10
+        for: 15m
+        labels:
+          severity: warning
+          component: payments
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} payment attempts failed in the last hour'
+          description: >-
+            An elevated rate of declines. Distinguish a provider or gateway problem from
+            genuine customer declines before acting — a spike concentrated in one method
+            (KNET, one card network) is ours; a spread across all of them is usually not.
+          runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
+
+      - alert: RevenueRecognitionStalled
+        # MRR that does not move at all across a full day, on a platform with
+        # active subscriptions, means the billing run is not running. Nothing
+        # else notices: no job fails, no request errors, invoices simply are not
+        # produced.
+        expr: >-
+          sum by (currency) (delta(lynomia_mrr_minor[24h])) == 0
+          and
+          sum by (currency) (lynomia_mrr_minor) > 0
+        for: 6h
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: 'MRR in {{ $labels.currency }} has not changed in 24 hours'
+          description: >-
+            Recurring revenue has been perfectly static for a day while subscriptions
+            exist. On a platform with any churn or growth at all this means the
+            subscription renewal run has stopped rather than that the number is stable.
+          runbook_url: https://docs.lynomia.internal/runbooks/billing-run
+
+  - name: business.capacity
+    rules:
+      - alert: IpPoolRunwayLow
+        # Runway in days, not free addresses as a percentage. Acquiring more
+        # address space is an RIR justification and a routing change measured in
+        # weeks, so the only threshold that means anything is one expressed in
+        # the time it takes to fix. A pool with no measured consumption exports
+        # +Inf and never trips this.
+        expr: lynomia_ip_pool_runway_days < 30
+        for: 30m
+        labels:
+          severity: warning
+          component: ipam
+        annotations:
+          summary: 'IP pool {{ $labels.pool }} has {{ $value | printf "%.1f" }} days of runway'
+          description: >-
+            At the rate addresses have actually been consumed over the last fortnight,
+            {{ $labels.pool }} runs out in {{ $value | printf "%.1f" }} days. Obtaining
+            more space takes longer than that. Start now: reclaim quarantined addresses,
+            audit assignments to terminated services, and open the RIR request in
+            parallel rather than in sequence.
+          runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+
+      - alert: IpPoolRunwayCritical
+        expr: lynomia_ip_pool_runway_days < 7
+        for: 15m
+        labels:
+          severity: critical
+          component: ipam
+        annotations:
+          summary: 'IP pool {{ $labels.pool }} has under a week of runway ({{ $value | printf "%.1f" }} days)'
+          description: >-
+            {{ $labels.pool }} is close to exhaustion. Once it is empty, orders fail
+            AFTER the customer has paid — the address is reserved during provisioning,
+            not at checkout. Stop selling into the affected region if reclamation cannot
+            close the gap today.
+          runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
+
+      - alert: IpPoolNearlyEmpty
+        # The absolute floor, as a companion to runway rather than a substitute
+        # for it: a pool that was quiet for a fortnight has infinite runway and
+        # eleven addresses left, and one burst of orders empties it.
+        expr: lynomia_ip_pool_available < 16
+        for: 15m
+        labels:
+          severity: critical
+          component: ipam
+        annotations:
+          summary: 'IP pool {{ $labels.pool }} has only {{ $value | printf "%.0f" }} addresses left'
+          description: >-
+            Fewer than sixteen usable addresses remain in {{ $labels.pool }}, regardless
+            of what the consumption rate suggests. A single batch of orders exhausts this.
+          runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
+
+      - alert: ComputeNodeCapacityExhausted
+        # Allocated versus installed, from the control plane's own placement
+        # accounting — not from what the hypervisor reports as used. The
+        # scheduler places against allocation, so allocation is what determines
+        # whether the next order can be filled.
+        expr: lynomia_node_capacity_ratio > 0.90
+        for: 30m
+        labels:
+          severity: warning
+          component: compute
+        annotations:
+          summary: 'Node {{ $labels.node }} is {{ $value | humanizePercentage }} allocated on {{ $labels.dimension }}'
+          description: >-
+            {{ $labels.node }} has little {{ $labels.dimension }} left to allocate. The
+            scheduler will start refusing placements here, and if every node in the
+            cluster looks like this, orders fail with no capacity available. Add hardware
+            or rebalance before that happens.
+          runbook_url: https://docs.lynomia.internal/runbooks/capacity-planning
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+
+      - alert: HostingNodeDiskRatioHigh
+        # The control plane's own view of hosting disk, which exists separately
+        # from node_exporter's because placement decisions are made from this
+        # number. If the two disagree, the panel showing both is the fastest way
+        # to find a node whose sync has stopped.
+        expr: lynomia_hosting_node_disk_ratio > 0.80
+        for: 30m
+        labels:
+          severity: warning
+          component: shared-hosting
+        annotations:
+          summary: 'Hosting node {{ $labels.node }} is {{ $value | humanizePercentage }} full'
+          description: >-
+            {{ $labels.node }} has crossed the disk ratio at which the platform stops
+            placing new accounts. If node_exporter disagrees with this figure, the node's
+            sync into the control plane has stalled and placement is deciding on stale
+            data.
+          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
+
+  - name: business.orders
+    rules:
+      - alert: OrdersStuckAwaitingProvisioning
+        # Paid, and not yet a working service. This is the one number in the
+        # platform that is directly a customer waiting for something they have
+        # already been charged for.
+        expr: sum(lynomia_orders_total{status="queued_for_provisioning"}) > 5
+        for: 30m
+        labels:
+          severity: warning
+          component: orders
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} paid orders have been awaiting provisioning for 30 minutes'
+          description: >-
+            These customers have paid and have nothing. Check the provisioning queue and
+            the worker pool first — an order stuck here with a healthy queue means the
+            dispatch step failed, which is a different fault from a failing provider.
+          runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
+
+      - alert: OrdersInManualReview
+        expr: sum(lynomia_orders_total{status="manual_review"}) > 0
+        for: 2h
+        labels:
+          severity: warning
+          component: orders
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} order(s) have been in manual review for two hours'
+          description: >-
+            Manual review holds an order until a human clears it. Two hours is long
+            enough that nobody is coming on their own — this alert exists because the
+            review queue is otherwise a page nobody opens.
+          runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck

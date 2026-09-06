@@ -1,0 +1,38 @@
+# {{ ansible_managed }}
+# Dropped into sshd_config.d rather than replacing sshd_config, so a distribution
+# upgrade that rewrites the main file does not silently revert this policy.
+
+Port {{ hardening_ssh_port }}
+
+# Passwords off. A password-authenticated SSH port on a routable address is
+# brute-forced continuously; the only variable is how long the password holds.
+PasswordAuthentication {{ hardening_password_authentication | ternary('yes', 'no') }}
+KbdInteractiveAuthentication {{ hardening_kbd_interactive_authentication | ternary('yes', 'no') }}
+PubkeyAuthentication {{ hardening_pubkey_authentication | ternary('yes', 'no') }}
+
+# Root may connect with a key for break-glass and for Ansible's own escalation
+# path on hosts that have no other account yet, but never with a password.
+PermitRootLogin {{ hardening_permit_root_login }}
+
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+
+# Neither of these is needed by anything the platform runs, and both turn a
+# compromised customer-facing host into a pivot into the management network.
+AllowAgentForwarding no
+AllowTcpForwarding no
+GatewayPorts no
+X11Forwarding no
+
+# A session that survives its operator's laptop closing is a session an attacker
+# on that laptop inherits.
+ClientAliveInterval 300
+ClientAliveCountMax 2
+
+LoginGraceTime 30
+MaxAuthTries 3
+MaxSessions 10
+
+# Only the operations account and root. Any service account that appears on the
+# box later — a panel's user, a backup agent's user — is not a login.
+AllowUsers {{ hardening_ssh_user }} root

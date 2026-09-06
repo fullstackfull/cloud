@@ -65,3 +65,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Laravel bootstrap cache is regenerated on every boot
+apps/control-plane/bootstrap/cache/*.php
+dump.rdb

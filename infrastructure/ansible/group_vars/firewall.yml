@@ -1,0 +1,37 @@
+---
+# Edge firewall (OPNsense) invariants.
+
+# THIS IS THE MOST DANGEROUS PLAYBOOK IN THE REPOSITORY.
+#
+# The edge firewall carries the management path. A mistaken ruleset, a wrong
+# interface assignment or a half-applied configuration disconnects the entire
+# datacentre — including the route the operator would use to fix it. Recovery is
+# then a physical console, or a drive to the facility.
+#
+# roles/opnsense therefore requires BOTH of the following to be true on the
+# specific host, and neither can be set for a group:
+#
+#   lynomia_role: firewall   the machine is an edge firewall and not, say, a
+#                            router that happens to run OPNsense for one segment
+#   allow_reimage: true      an operator has accepted the consequence above for
+#                            this specific, scheduled piece of work
+#
+# Both default to a refusal. `allow_reimage` is defined in group_vars/all.yml
+# because several roles read it; `lynomia_role` has no default at all, so a host
+# that does not declare what it is cannot be treated as a firewall by accident.
+# The role reads `opnsense_console_access_confirmed`, which is declared per host
+# for one scheduled piece of work. This policy flag records that the platform
+# requires it at all — an operator cannot decide, per environment, that the
+# console check is optional.
+firewall_require_console_access_confirmed: true
+
+# A ruleset is applied only after the current one has been exported. OPNsense
+# keeps its own configuration history, but the copy that matters during an
+# incident is the one on the operator's machine, taken before the change.
+firewall_backup_before_change: true
+
+# Firewalling exists at three levels with three different jobs
+# (docs/networking.md). The edge protects the provider's own networks; it never
+# carries per-VM customer policy. That lives on the hypervisor, which is the one
+# place a customer with root in their own guest cannot override it.
+firewall_never_carries_vm_policy: true

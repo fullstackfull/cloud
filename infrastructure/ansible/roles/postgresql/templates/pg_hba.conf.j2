@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+#
+# THIS FILE REPLACES THE DISTRIBUTION'S pg_hba.conf ENTIRELY. That is
+# deliberate: appending rules leaves whatever the package shipped at the top,
+# and the first matching line wins. A permissive default left above a strict
+# addition means the strict addition never applies.
+
+# Local socket for maintenance and for the base backup job. `peer` means the
+# operating-system user must match the database user, so this grants nothing to
+# anyone who is not already root or postgres on this machine.
+local   all             postgres                                peer
+local   all             all                                     peer
+
+# Replication over the local socket for pg_basebackup.
+local   replication     all                                     peer
+
+{% for cidr in postgresql_allowed_client_cidrs %}
+# Control-plane clients. `hostssl` and not `host`: a `host` line accepts a
+# plaintext connection, and a client that can fall back to plaintext will,
+# silently, the first time TLS negotiation has a problem.
+hostssl all             all             {{ cidr }}              scram-sha-256
+{% endfor %}
+
+{% for cidr in postgresql_allowed_client_cidrs %}
+hostssl replication     all             {{ cidr }}              scram-sha-256
+{% endfor %}
+
+# Nothing else. There is no trailing "host all all 0.0.0.0/0" line, and adding
+# one is how a hosting provider's customer database ends up in a breach report.

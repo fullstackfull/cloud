@@ -1,0 +1,28 @@
+# The machines the control plane itself runs on, plus its data stores.
+- targets:
+    - cp-app-01.kw.lynomia.internal:9100
+    - cp-app-02.kw.lynomia.internal:9100
+  labels:
+    role: application
+    service: control-plane
+
+- targets:
+    - cp-db-01.kw.lynomia.internal:9100
+  labels:
+    role: database
+    service: control-plane-db
+
+- targets:
+    - cp-redis-01.kw.lynomia.internal:9100
+  labels:
+    role: redis
+    service: control-plane-queue
+
+- targets:
+    # Proxmox Backup Server. This host also runs the node_exporter textfile
+    # collector that publishes backup and verification results — see
+    # rules/backups.yml and the README.
+    - pbs-01.kw.lynomia.internal:9100
+  labels:
+    role: backup
+    service: backups

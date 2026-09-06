@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# hardening.yml — SSH keys only, fail2ban, nftables default-deny inbound.
+# =============================================================================
+#
+# THIS PLAYBOOK CAN LOCK YOU OUT. It disables password authentication and builds
+# a default-deny inbound ruleset. The role refuses to run at all if no
+# management network is declared or no public key is supplied — but the run that
+# succeeds with the WRONG management network is the one to be careful about.
+#
+# Run it against one host first, and keep the session you ran it from open until
+# you have opened a second one:
+#
+#   ansible-playbook -i inventories/staging playbooks/hardening.yml \
+#       --limit web-stg-1.stg.example --check --diff
+#   ansible-playbook -i inventories/staging playbooks/hardening.yml \
+#       --limit web-stg-1.stg.example --diff
+#
+# `--diff` on this playbook is worth reading line by line: it shows exactly
+# which keys are being installed and exactly which networks will still be able
+# to reach port 22.
+
+- name: Harden platform hosts
+  hosts: all:!dedicated:!firewall
+  gather_facts: true
+  become: true
+
+  # One host at a time. A mistake in the ruleset that locks out the fleet is
+  # unrecoverable at scale; the same mistake on one host is a console session.
+  serial: 1
+
+  # And stop the moment one host fails, rather than working through the rest
+  # with a ruleset that has already been shown to be wrong.
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+  roles:
+    - role: common
+    - role: hardening

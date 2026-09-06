@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 return [
 
     /*
@@ -33,6 +35,27 @@ return [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
+    ],
+
+    /*
+     * Stripe.
+     *
+     * The webhook tolerance bounds replay: an event whose timestamp is older
+     * than this is rejected even when its signature is valid, so a captured
+     * request cannot be replayed indefinitely.
+     */
+    'stripe' => [
+        'key' => env('STRIPE_KEY'),
+        'secret' => env('STRIPE_SECRET'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+        'webhook_tolerance' => (int) env('STRIPE_WEBHOOK_TOLERANCE_SECONDS', 300),
+        'api_version' => env('STRIPE_API_VERSION'),
+    ],
+
+    'myfatoorah' => [
+        'api_key' => env('MYFATOORAH_API_KEY'),
+        'base_url' => env('MYFATOORAH_BASE_URL', 'https://apitest.myfatoorah.com'),
+        'webhook_secret' => env('MYFATOORAH_WEBHOOK_SECRET'),
     ],
 
 ];

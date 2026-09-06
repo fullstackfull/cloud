@@ -1,0 +1,24 @@
+---
+# EVERY DEFAULT IN THIS FILE IS A REFUSAL.
+#
+# Nothing here may acquire a working default value. A default that lets the role
+# do something is a default that lets it do that thing to the wrong node.
+
+# Set per host in inventory host_vars. Never for a group: "every node in staging
+# joins a cluster" is a sentence that ends with the wrong cluster.
+proxmox_cluster_join_enabled: false
+
+# The cluster this node belongs to, named in full. The role compares it against
+# the cluster the node is actually in and refuses on a mismatch.
+proxmox_cluster_name: ~
+
+# Exactly one of these. `create` forms a new cluster on this node; `peer` joins
+# the existing cluster through that member's address.
+proxmox_cluster_create: false
+proxmox_cluster_peer: ~
+
+# The corosync link. On a cluster of any size this should be a dedicated
+# interface: corosync is latency-sensitive and a saturated link — a migration, a
+# backup — causes false failure detection, and false failure detection in a
+# cluster with fencing reboots healthy nodes.
+proxmox_cluster_link0: ~

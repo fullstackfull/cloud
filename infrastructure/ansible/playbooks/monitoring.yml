@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# monitoring.yml — deploys the stack from infrastructure/monitoring.
+# =============================================================================
+#
+#   make monitoring-deploy ENV=production
+#   ansible-playbook -i inventories/production playbooks/monitoring.yml --check --diff
+#
+# The configuration in infrastructure/monitoring is the source of truth and is
+# deployed from git. Editing a Prometheus rule on the box means the next run
+# reverts an operator's fix — during the incident they made it for.
+#
+# Two refusals fire first: Prometheus and Alertmanager must not be bound to a
+# public address (Prometheus exposes every metric the platform has; Alertmanager
+# can silence alerts), and Grafana must not allow anonymous access.
+#
+# The Prometheus configuration is validated with promtool from the same image
+# the stack runs BEFORE the containers are restarted, because Prometheus refuses
+# to start on a malformed rule file — and a monitoring stack that will not start
+# is discovered during the next incident.
+
+- name: Deploy the observability stack
+  hosts: monitoring
+  gather_facts: true
+  become: true
+
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (monitoring_inbound_rules | default([])) }}
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: monitoring
