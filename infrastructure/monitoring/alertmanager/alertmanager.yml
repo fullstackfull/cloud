@@ -1,0 +1,282 @@
+# Lynomia Cloud — Alertmanager.
+#
+# Three jobs, in order of how often they are got wrong:
+#
+#  1. **Grouping.** A hypervisor failing takes forty guests with it. The
+#     on-call needs one notification that says "pve-02 is down", not forty that
+#     say "a guest is unreachable". Everything about the grouping keys below is
+#     chosen so that one cause produces one message.
+#
+#  2. **Inhibition.** A cause suppresses its own symptoms. When a node is down,
+#     its CPU, disk and probe alerts are not additional information, they are
+#     the same fact restated — and they arrive at exactly the moment there is
+#     least attention to spare.
+#
+#  3. **Routing.** Severity decides the channel, not the component. A critical
+#     backup verification failure and a critical database outage both wake
+#     somebody; which team reads the follow-up is a matter for the message, not
+#     for whether it is delivered.
+#
+# There is deliberately no "muted" or "low priority" receiver. An alert nobody
+# acts on is deleted, not routed to a channel nobody reads: a muted alert still
+# fires, still adds noise, and still trains the on-call to ignore the channel
+# that the real one will arrive in.
+
+global:
+  resolve_timeout: 5m
+
+  # Credentials are read from files, never inlined. Rotating a Slack webhook is
+  # then a file write and a SIGHUP rather than a commit, and this file stays
+  # safe to keep in git.
+  slack_api_url_file: /etc/alertmanager/secrets/slack-api-url
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  # The default grouping. `alertname` alone would merge a disk alert on a
+  # hypervisor with one on a hosting node into a single notification whose
+  # summary is true of neither; adding component and instance keeps each
+  # notification about one thing.
+  group_by: ['alertname', 'cluster', 'component']
+
+  # Thirty seconds of collection before the first notification. Long enough for
+  # the other twelve alerts caused by one dead switch to arrive and be grouped;
+  # short enough that nobody notices the delay.
+  group_wait: 30s
+
+  # Five minutes before telling you that a group you already know about has
+  # grown. Shorter than this and a spreading incident becomes its own denial of
+  # service on the channel.
+  group_interval: 5m
+
+  # Four hours before repeating an unresolved alert. Long enough not to nag,
+  # short enough that an alert which arrived at shift change is not silently
+  # inherited by nobody.
+  repeat_interval: 4h
+
+  receiver: platform-team
+
+  routes:
+    # Alertmanager's own health goes to the monitoring channel and never to
+    # PagerDuty. Paging about the pager is a loop with no exit.
+    - matchers:
+        - component = monitoring
+      receiver: monitoring-team
+      group_by: ['alertname']
+      repeat_interval: 12h
+
+    # Anything critical pages. Grouped by instance as well, because during a
+    # multi-node failure the responder needs to be able to tell at a glance how
+    # many machines are involved.
+    - matchers:
+        - severity = critical
+      receiver: pagerduty-critical
+      group_by: ['alertname', 'cluster', 'component', 'instance']
+      group_wait: 15s
+      group_interval: 5m
+      repeat_interval: 1h
+
+      routes:
+        # Backup verification is critical AND needs the storage team's eyes on
+        # the follow-up, because the remediation is a datastore investigation
+        # rather than an on-call fix. It pages first and copies them second.
+        - matchers:
+            - component = backups
+          receiver: pagerduty-critical-backups
+          continue: false
+
+        # Money problems page and simultaneously land in the finance channel:
+        # every minute a webhook failure goes unrecorded is a customer who has
+        # paid and has nothing, and billing will hear about it before we do.
+        - matchers:
+            - component = payments
+          receiver: pagerduty-critical-payments
+          continue: false
+
+    # Warnings from customer-facing capacity go to the platform channel with a
+    # slower repeat: these are things to fix this week, not tonight.
+    - matchers:
+        - severity = warning
+      receiver: platform-team
+      repeat_interval: 12h
+
+inhibit_rules:
+  # A critical and a warning of the SAME alert on the same object are one
+  # problem. Send the worse one.
+  #
+  # `alertname` is in `equal`, so this only ever matches a rule that emits both
+  # severities under one name. It does nothing at all for the tiered pairs
+  # below, which are separate rules with separate names — that is what the
+  # explicit pairs after it are for. Without them, a node at 97% memory
+  # delivers NodeMemoryHigh to Slack and NodeMemoryCritical to PagerDuty about
+  # the same number, and a certificate that has already expired delivers three
+  # notifications about the same certificate.
+  - source_matchers:
+      - severity = critical
+    target_matchers:
+      - severity = warning
+    equal: ['alertname', 'instance']
+
+  # Tiered thresholds: the higher tier is the same fact, measured worse.
+  - source_matchers:
+      - alertname = NodeMemoryCritical
+    target_matchers:
+      - alertname = NodeMemoryHigh
+    equal: ['instance']
+
+  - source_matchers:
+      - alertname = QueueBacklogSevere
+    target_matchers:
+      - alertname = QueueBacklogGrowing
+    equal: ['queue']
+
+  - source_matchers:
+      - alertname = IpPoolRunwayCritical
+    target_matchers:
+      - alertname = IpPoolRunwayLow
+    equal: ['pool']
+
+  # An empty pool is the reason its runway is short. One notification, about
+  # the pool being empty, which is the one with the immediate action in it.
+  - source_matchers:
+      - alertname = IpPoolNearlyEmpty
+    target_matchers:
+      - alertname =~ "IpPoolRunwayLow|IpPoolRunwayCritical"
+    equal: ['pool']
+
+  - source_matchers:
+      - alertname = CertificateExpired
+    target_matchers:
+      - alertname =~ "CertificateExpiringSoon|CertificateExpiringCritical"
+    equal: ['instance']
+
+  - source_matchers:
+      - alertname = CertificateExpiringCritical
+    target_matchers:
+      - alertname = CertificateExpiringSoon
+    equal: ['instance']
+
+  # A dead node explains everything measured on that node. Without this, one
+  # failed hypervisor delivers CPU, memory, disk, storage and probe alerts for
+  # a machine that is simply not there.
+  - source_matchers:
+      - alertname = NodeDown
+    target_matchers:
+      - component =~ "node|storage|compute|shared-hosting"
+    equal: ['instance']
+
+  - source_matchers:
+      - alertname = HostingNodeUnavailable
+    target_matchers:
+      - component = shared-hosting
+    equal: ['instance']
+
+  # A cluster that has fenced a node will also report its storage as
+  # unavailable. One notification, about the node.
+  - source_matchers:
+      - alertname = HypervisorNodeOffline
+    target_matchers:
+      - alertname = ProxmoxStorageUnavailable
+    equal: ['cluster_name']
+
+  # When the database is down, the application is down, and every alert derived
+  # from the application's own metrics is a restatement of that. Not equal'd on
+  # anything: a database outage is platform-wide by definition.
+  - source_matchers:
+      - alertname = DatabaseUnavailable
+    target_matchers:
+      - component =~ "provisioning|orders|queue|ipam|billing|payments|control-plane"
+
+  # Likewise for the queue backend: no Redis means no dispatch, so the
+  # provisioning stall and the growing backlog are symptoms, not news.
+  - source_matchers:
+      - alertname = RedisUnavailable
+    target_matchers:
+      - alertname =~ "ProvisioningStalled|QueueBacklogGrowing|QueueBacklogSevere|OrdersStuckAwaitingProvisioning"
+
+  # A metrics endpoint that cannot be scraped explains the silence of every
+  # business alert — and, through absent()-style rules, some of their firing.
+  - source_matchers:
+      - alertname = ControlPlaneMetricsDown
+    target_matchers:
+      - component =~ "provisioning|orders|ipam|billing"
+
+  # An expired certificate makes the HTTP probe fail. The certificate is the
+  # cause and the one with the fix in its runbook.
+  - source_matchers:
+      - alertname = CertificateExpired
+    target_matchers:
+      - alertname =~ "EndpointDown|EndpointSlow"
+    equal: ['instance']
+
+receivers:
+  - name: platform-team
+    slack_configs:
+      - channel: '#alerts-platform'
+        send_resolved: true
+        title: '{{ template "lynomia.slack.title" . }}'
+        text: '{{ template "lynomia.slack.text" . }}'
+        # The runbook is the first thing the responder needs and the last thing
+        # anyone can find at 3am. It goes in the message, as a button.
+        actions:
+          - type: button
+            text: 'Runbook'
+            url: '{{ (index .Alerts 0).Annotations.runbook_url }}'
+          - type: button
+            text: 'Dashboard'
+            url: '{{ (index .Alerts 0).Annotations.dashboard_url }}'
+          - type: button
+            text: 'Silence'
+            url: '{{ template "__alert_silence_link" . }}'
+
+  - name: monitoring-team
+    slack_configs:
+      - channel: '#alerts-monitoring'
+        send_resolved: true
+        title: '{{ template "lynomia.slack.title" . }}'
+        text: '{{ template "lynomia.slack.text" . }}'
+
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
+        severity: critical
+        description: '{{ template "lynomia.pagerduty.description" . }}'
+        details:
+          firing: '{{ template "lynomia.pagerduty.details" . }}'
+          runbook: '{{ (index .Alerts 0).Annotations.runbook_url }}'
+          component: '{{ .CommonLabels.component }}'
+          cluster: '{{ .CommonLabels.cluster }}'
+    slack_configs:
+      - channel: '#alerts-platform'
+        send_resolved: true
+        title: '{{ template "lynomia.slack.title" . }}'
+        text: '{{ template "lynomia.slack.text" . }}'
+
+  - name: pagerduty-critical-backups
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
+        severity: critical
+        description: '{{ template "lynomia.pagerduty.description" . }}'
+        details:
+          firing: '{{ template "lynomia.pagerduty.details" . }}'
+          runbook: '{{ (index .Alerts 0).Annotations.runbook_url }}'
+    slack_configs:
+      - channel: '#alerts-storage'
+        send_resolved: true
+        title: '{{ template "lynomia.slack.title" . }}'
+        text: '{{ template "lynomia.slack.text" . }}'
+
+  - name: pagerduty-critical-payments
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-routing-key
+        severity: critical
+        description: '{{ template "lynomia.pagerduty.description" . }}'
+        details:
+          firing: '{{ template "lynomia.pagerduty.details" . }}'
+          runbook: '{{ (index .Alerts 0).Annotations.runbook_url }}'
+    slack_configs:
+      - channel: '#alerts-billing'
+        send_resolved: true
+        title: '{{ template "lynomia.slack.title" . }}'
+        text: '{{ template "lynomia.slack.text" . }}'

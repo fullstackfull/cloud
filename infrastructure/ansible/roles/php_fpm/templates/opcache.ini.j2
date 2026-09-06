@@ -1,0 +1,11 @@
+; {{ ansible_managed }}
+opcache.enable={{ php_fpm_opcache_enable | ternary(1, 0) }}
+opcache.enable_cli=0
+opcache.memory_consumption={{ php_fpm_opcache_memory_mb }}
+opcache.interned_strings_buffer=16
+opcache.max_accelerated_files=20000
+
+; Timestamp validation off: the fastest configuration, and the one that makes a
+; pool restart part of the deploy rather than optional. Skipping the restart
+; leaves workers running the previous release's code — see docs/deployment.md.
+opcache.validate_timestamps={{ php_fpm_opcache_validate_timestamps }}

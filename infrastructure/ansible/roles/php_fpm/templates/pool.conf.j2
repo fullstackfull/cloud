@@ -1,0 +1,40 @@
+; {{ ansible_managed }}
+[{{ php_fpm_pool_name }}]
+
+user  = {{ php_fpm_user }}
+group = {{ php_fpm_group }}
+
+listen = {{ php_fpm_listen }}
+listen.owner = www-data
+listen.group = www-data
+listen.mode  = 0660
+
+pm                   = {{ php_fpm_pm }}
+pm.max_children      = {{ php_fpm_pm_max_children }}
+pm.start_servers     = {{ php_fpm_pm_start_servers }}
+pm.min_spare_servers = {{ php_fpm_pm_min_spare_servers }}
+pm.max_spare_servers = {{ php_fpm_pm_max_spare_servers }}
+
+; Recycle workers periodically. This is not about leaks in the framework; it is
+; about a single request that allocated 200MB leaving that resident forever.
+pm.max_requests = 500
+
+request_terminate_timeout = {{ php_fpm_request_timeout }}
+php_admin_value[memory_limit] = {{ php_fpm_memory_limit }}
+
+; Errors go to the journal as text, never to the response body. A stack trace
+; rendered to a customer names file paths, framework versions and — in the
+; wrong exception — a connection string.
+php_admin_flag[display_errors] = off
+php_admin_flag[log_errors] = on
+php_admin_value[error_log] = /proc/self/fd/2
+catch_workers_output = yes
+decorate_workers_output = no
+
+; The pool sees only the variables the deploy put in the environment. Clearing
+; the rest means a stray value in root's shell cannot reach the application.
+clear_env = yes
+
+; expose_php prints the PHP version in every response header, which tells a
+; scanner exactly which CVE list to work through.
+php_admin_flag[expose_php] = off

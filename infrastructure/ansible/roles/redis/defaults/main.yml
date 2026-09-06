@@ -1,0 +1,23 @@
+---
+redis_service: redis-server
+redis_conf_path: /etc/redis/redis.conf
+redis_port: 6379
+
+# Bound to named addresses, never left at the default. Redis with no bind list
+# and no password is an unauthenticated remote shell in every practical sense:
+# CONFIG SET dir plus CONFIG SET dbfilename writes an arbitrary file as the
+# redis user, which is a well-trodden path to a root shell.
+redis_bind_addresses:
+  - 127.0.0.1
+
+# Networks allowed to connect. The control plane and nothing else.
+redis_allowed_client_cidrs: []
+
+# Supplied from the Vault-encrypted file, never from this repository. The role
+# refuses to configure an instance without one.
+redis_password: ~
+
+redis_maxmemory: 2gb
+
+redis_inbound_rules:
+  - {port: 6379, proto: tcp, comment: 'redis: control-plane client connections'}

@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# Ansible dependencies: NONE.
+# =============================================================================
+#
+# Every module, filter and test used in this repository ships with ansible-core.
+# That is a deliberate constraint, not an accident of scope.
+#
+# Configuration management is what an operator reaches for when infrastructure
+# is broken. A control repository that cannot run until it has downloaded
+# something from galaxy.ansible.com is a repository that cannot be run on the
+# day the network, the proxy or the firewall is the thing being fixed — which is
+# precisely the day it is needed. It also removes a supply-chain surface: no
+# third-party collection executes with root on every host in the fleet.
+#
+# The cost is real and paid in a few places, each commented where it occurs:
+#
+#   - nftables and fail2ban are configured with templates and validated with the
+#     tools' own `-c` / `--test` flags, instead of a community module;
+#   - Proxmox and PBS are driven through `pveum`, `pvecm` and
+#     `proxmox-backup-manager` with explicit idempotency checks, instead of the
+#     community.general Proxmox modules;
+#   - CIDR containment in roles/pxe is checked with Python's `ipaddress` module
+#     on the controller, instead of ansible.netcommon's `ipaddr` filter.
+#
+# If a collection is ever added, this file stops being a statement and becomes a
+# dependency — and `ansible-galaxy collection install -r requirements.yml`
+# becomes a required step in every runbook that currently has none.
+
+collections: []
+roles: []

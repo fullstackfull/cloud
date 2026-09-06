@@ -1,0 +1,43 @@
+---
+php_fpm_version: '8.4'
+php_fpm_pool_name: lynomia
+php_fpm_user: "{{ lynomia_owner_user }}"
+php_fpm_group: "{{ lynomia_owner_group }}"
+php_fpm_listen: /run/php/lynomia.sock
+
+# The control plane's requests are short and database-bound, and its long work
+# lives in Horizon rather than in a request. `dynamic` with a low idle floor
+# fits that: enough workers to absorb a burst, not so many that a database
+# connection is held per idle child.
+php_fpm_pm: dynamic
+php_fpm_pm_max_children: 40
+php_fpm_pm_start_servers: 6
+php_fpm_pm_min_spare_servers: 4
+php_fpm_pm_max_spare_servers: 12
+
+# A request that has run for a minute is not going to finish. Letting it run
+# holds a worker and, more expensively, a database connection — and a pool
+# exhausted by stuck requests takes the whole API down, not just the endpoint
+# that hung. Provider calls that legitimately take minutes belong in a queued
+# job, which is what Horizon is for.
+php_fpm_request_timeout: 60s
+php_fpm_memory_limit: 256M
+
+php_fpm_extensions:
+  - bcmath
+  - curl
+  - intl
+  - mbstring
+  - pgsql
+  - redis
+  - sodium
+  - xml
+  - zip
+
+# OPcache is not a nice-to-have in production: without it every request
+# recompiles the framework. `validate_timestamps=0` means a deploy MUST reset
+# the cache, which the deploy does by restarting the pool — see
+# docs/deployment.md step 7.
+php_fpm_opcache_enable: true
+php_fpm_opcache_validate_timestamps: 0
+php_fpm_opcache_memory_mb: 192

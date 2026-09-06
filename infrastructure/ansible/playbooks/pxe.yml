@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# pxe.yml — iPXE and TFTP, with DHCP bound to the provisioning VLAN ONLY.
+# =============================================================================
+#
+#   ansible-playbook -i inventories/production playbooks/pxe.yml --check --diff
+#
+# WHAT BREAKS IF THIS SERVES DHCP ON THE WRONG INTERFACE
+#
+#   A DHCP server on a production LAN takes that network down: clients start
+#   taking leases with the wrong gateway and the wrong DNS from whichever server
+#   answers first, and it looks like a failing switch rather than a server
+#   somebody just configured — so the search starts in the wrong place.
+#
+#   A PXE server on a production LAN does that AND reinstalls whatever reboots
+#   on it. On a hypervisor that is every customer machine it was running.
+#
+# Four refusals fire before anything is installed: the provisioning interface
+# must be named (never discovered), it must NOT be the interface carrying the
+# default route, it must actually exist on the host, and the DHCP range must
+# fall inside the declared provisioning network.
+#
+# Even then, the DHCP service is only STARTED where a host declares
+# `pxe_allow_serve_dhcp: true`. Everywhere else the configuration is written and
+# reviewable and the service is explicitly stopped — not skipped, so removing
+# the flag actually stops a server that was previously serving.
+#
+# The iPXE script has NO default install target. A machine that reaches it with
+# no published profile boots from its local disk. An iPXE script with a default
+# installer entry reinstalls any machine that happens to network-boot: one that
+# failed to find its disk, one whose boot order a firmware update changed, one
+# somebody power-cycled.
+
+- name: Configure the provisioning-VLAN boot services
+  hosts: pxe
+  gather_facts: true
+  become: true
+
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (pxe_inbound_rules | default([])) }}
+
+    - name: Report whether DHCP will be served
+      ansible.builtin.debug:
+        msg: >-
+          {{ (pxe_allow_serve_dhcp | default(false) | bool)
+          | ternary('DHCP WILL BE SERVED on ' ~ (pxe_provisioning_interface | default('<undeclared>')),
+          'DHCP will NOT be served — configuration is written, the service stays stopped') }}
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: pxe

@@ -1,0 +1,82 @@
+---
+# =============================================================================
+# proxmox-postinstall.yml — repos, updates, hostname, DNS, NTP, bridges, VLAN
+#                           awareness, SSH hardening, API token, monitoring.
+# =============================================================================
+#
+#   make proxmox-postinstall ENV=production
+#   ansible-playbook -i inventories/production playbooks/proxmox-postinstall.yml --check --diff
+#
+# Proxmox is bare-metal software and this playbook does not install it. It
+# configures a node that already exists, and it is idempotent: running it twice
+# against a node with running customer machines must leave it exactly as found.
+#
+# THE THREE THINGS THIS PLAYBOOK WILL NOT DO ON ITS OWN
+#
+#   1. JOIN A CLUSTER. Cluster join runs only where a NAMED HOST declares
+#      `proxmox_cluster_join_enabled` and names the cluster. `pvecm add` against
+#      the wrong cluster destroys /etc/pve on the joining node — which is where
+#      the configuration of every virtual machine on it lives. The disks would
+#      survive; the record of which disk belongs to which customer would not.
+#      Recovery needs quorum the cluster no longer has and takes every node
+#      already in it offline for the duration.
+#
+#   2. APPLY A NETWORK CHANGE. The interfaces file is written and shown in
+#      --diff, but `ifreload -a` runs only where a host declares
+#      `proxmox_apply_network`. Re-evaluating every interface on a node with
+#      running customer machines drops their connectivity if a bridge is wrong,
+#      and drops the management link if the management interface is wrong —
+#      leaving a half-configured node with no way back in but the console.
+#
+#   3. RE-CREATE AN EXISTING API TOKEN. Proxmox shows a token secret once.
+#      Re-creating a token issues a new secret and invalidates the one the
+#      running control plane is holding, which stops every provisioning call
+#      against the cluster and looks like the cluster is down.
+#
+# Read the --check --diff output before every real run. The whole design assumes
+# somebody does.
+
+- name: Configure Proxmox VE nodes
+  hosts: proxmox
+  gather_facts: true
+  become: true
+
+  # ONE NODE AT A TIME, ALWAYS.
+  #
+  # A cluster is a quorum. Touching several nodes at once — updates, a network
+  # change, a restart of pve-cluster — can drop enough of them simultaneously to
+  # lose quorum, at which point the remaining nodes stop being able to change
+  # anything, including changing back.
+  serial: 1
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (proxmox_inbound_rules | default([])) }}
+
+    - name: Report the guards that are armed on this node
+      ansible.builtin.debug:
+        msg:
+          - "cluster join: {{ (proxmox_cluster_join_enabled | default(false) | bool)
+             | ternary('ARMED for cluster ' ~ (proxmox_cluster_name | default('<unnamed>')),
+             'not armed — the node will not join or form a cluster') }}"
+          - "package updates: {{ (proxmox_apply_updates | default(false) | bool)
+             | ternary('ARMED — apt upgrade will run and may restart pve-cluster',
+             'not armed — pending updates are reported, not installed') }}"
+          - "network apply: {{ (proxmox_apply_network | default(false) | bool)
+             | ternary('ARMED — ifreload -a will run if the interfaces file changes',
+             'not armed — changes are written and shown in --diff but not applied') }}"
+
+  roles:
+    - role: proxmox

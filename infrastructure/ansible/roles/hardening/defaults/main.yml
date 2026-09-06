@@ -1,0 +1,47 @@
+---
+# SSH ---------------------------------------------------------------------
+hardening_ssh_port: 22
+
+# Networks allowed to reach SSH. THIS LIST IS NOT OPTIONAL AND MUST NOT BE
+# EMPTY: the role builds a default-deny inbound ruleset, and a default-deny
+# ruleset with no SSH exception is a locked door with the key inside. On a
+# hypervisor in a remote facility that is a drive, not a rollback.
+#
+# The placeholder below is an RFC 5737 documentation range, so a copied
+# inventory that never set this produces a host nobody can reach — noisy and
+# recoverable — rather than a host everybody can reach.
+hardening_management_cidrs:
+  - 192.0.2.0/24
+
+# Public keys for the operations account, supplied through the inventory or a
+# Vault-encrypted file. No key material is committed to this repository.
+hardening_authorized_keys: []
+hardening_ssh_user: "{{ lynomia_owner_user }}"
+
+# fail2ban ----------------------------------------------------------------
+hardening_fail2ban_enabled: true
+hardening_fail2ban_bantime: 3600
+hardening_fail2ban_findtime: 600
+hardening_fail2ban_maxretry: 5
+
+# The management networks are never banned. fail2ban banning the operator's own
+# jump host — because a colleague fat-fingered a key five times — locks the team
+# out of the fleet during whatever incident they were responding to.
+hardening_fail2ban_ignoreip: "{{ ['127.0.0.1/8', '::1'] + hardening_management_cidrs }}"
+
+# nftables ----------------------------------------------------------------
+# Inbound exceptions. Each entry names the port, the protocol, the source
+# networks and — importantly — who asked for it, so an open port always has an
+# owner. Roles append to this; nothing opens a port anonymously.
+hardening_allowed_inbound: []
+
+# ICMP is allowed. Dropping it does not improve security in any meaningful way
+# and it does break path-MTU discovery, which produces intermittent, hard to
+# diagnose stalls on exactly the large transfers a backup makes.
+hardening_allow_icmp: true
+
+# Outbound is not filtered by default on platform hosts. The exception the
+# platform genuinely needs — blocking outbound port 25 from customer machines —
+# is enforced on the hypervisor, where a customer with root in their own guest
+# cannot remove it (docs/networking.md).
+hardening_default_outbound_policy: accept

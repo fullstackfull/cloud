@@ -1,0 +1,24 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Lynomia Cloud observability stack
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+WorkingDirectory={{ monitoring_target_dir }}
+
+ExecStart=/usr/bin/docker compose -f {{ monitoring_compose_file }} up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f {{ monitoring_compose_file }} down
+
+# A reload sends SIGHUP to Prometheus and Alertmanager rather than restarting
+# them. A restart during an incident loses the graph the responder was reading
+# and resets every alert's `for:` clause, which delays the next notification by
+# a full evaluation window.
+ExecReload=/usr/bin/docker compose -f {{ monitoring_compose_file }} kill -s SIGHUP prometheus alertmanager
+
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

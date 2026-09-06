@@ -1,0 +1,153 @@
+# Alerts from blackbox_exporter: reachability and TLS, observed from outside the
+# application rather than reported by it.
+#
+# The distinction matters. An application that reports itself healthy through
+# its own metrics endpoint has proved that PHP is running. A probe that gets a
+# 200 through DNS, the load balancer and TLS has proved that a customer can
+# reach it, which is a different and larger claim.
+
+groups:
+  - name: probes.reachability
+    rules:
+      - alert: EndpointDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: edge
+        annotations:
+          summary: '{{ $labels.instance }} is failing its external probe'
+          description: >-
+            The {{ $labels.service }} endpoint has failed every probe for two minutes.
+            Compare against the control-plane scrape: if the application is scraping fine
+            but the probe fails, the fault is in DNS, the load balancer or TLS, not in
+            the application.
+          runbook_url: https://docs.lynomia.internal/runbooks/endpoint-down
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+
+      - alert: EndpointSlow
+        expr: probe_duration_seconds{job="blackbox-http"} > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: edge
+        annotations:
+          summary: '{{ $labels.instance }} is taking {{ $value | printf "%.1f" }}s to respond'
+          description: >-
+            External response time for {{ $labels.service }} has been above five seconds
+            for ten minutes. Customers experience this as a broken site long before
+            anything actually returns an error.
+          runbook_url: https://docs.lynomia.internal/runbooks/endpoint-down
+
+      - alert: ProbeFailingWithHttpError
+        # Split from EndpointDown because the responses mean different things: a
+        # 5xx is the application answering badly, while a connection failure is
+        # the application not answering at all.
+        expr: probe_http_status_code{job="blackbox-http"} >= 500
+        for: 5m
+        labels:
+          severity: critical
+          component: edge
+        annotations:
+          summary: '{{ $labels.instance }} is returning HTTP {{ $value | printf "%.0f" }}'
+          description: >-
+            The endpoint is reachable and answering with a server error, so the load
+            balancer and TLS are fine and the fault is inside the application. The
+            correlation ID in the response body finds the request in Loki.
+          runbook_url: https://docs.lynomia.internal/runbooks/endpoint-down
+
+  - name: probes.tls
+    rules:
+      - alert: CertificateExpiringSoon
+        # Twenty-one days: comfortably more than two failed ACME renewal cycles,
+        # so this fires while automation still has several chances to fix itself
+        # and long before anyone has to do it by hand.
+        expr: >-
+          (probe_ssl_earliest_cert_expiry - time()) / 86400 < 21
+        for: 1h
+        labels:
+          severity: warning
+          component: tls
+        annotations:
+          summary: 'Certificate for {{ $labels.instance }} expires in {{ $value | printf "%.1f" }} days'
+          description: >-
+            Renewal has not happened yet. This is the most predictable outage there is
+            and it takes the portal down completely when it lands, usually on a weekend.
+            Check the ACME client's last run before assuming it will sort itself out.
+          runbook_url: https://docs.lynomia.internal/runbooks/certificate-expiry
+
+      - alert: CertificateExpiringCritical
+        expr: >-
+          (probe_ssl_earliest_cert_expiry - time()) / 86400 < 7
+        for: 15m
+        labels:
+          severity: critical
+          component: tls
+        annotations:
+          summary: 'Certificate for {{ $labels.instance }} expires in {{ $value | printf "%.1f" }} days'
+          description: >-
+            Automatic renewal has had two weeks and has not worked. Renew by hand today.
+            Once it expires, every customer sees a browser interstitial and every API
+            client fails TLS verification at once.
+          runbook_url: https://docs.lynomia.internal/runbooks/certificate-expiry
+
+      - alert: CertificateExpired
+        expr: probe_ssl_earliest_cert_expiry - time() <= 0
+        for: 1m
+        labels:
+          severity: critical
+          component: tls
+        annotations:
+          summary: 'Certificate for {{ $labels.instance }} has EXPIRED'
+          description: >-
+            Customers are seeing a security warning right now and every API integration
+            is failing verification.
+          runbook_url: https://docs.lynomia.internal/runbooks/certificate-expiry
+
+  - name: probes.monitoring
+    rules:
+      - alert: PrometheusRuleEvaluationFailing
+        # The monitoring watching itself. A rule that fails to evaluate is an
+        # alert that will never fire, and nothing else in the system reports it.
+        expr: increase(prometheus_rule_evaluation_failures_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: 'Prometheus rule evaluations are failing in group {{ $labels.rule_group }}'
+          description: >-
+            One or more rules in {{ $labels.rule_group }} cannot be evaluated, so the
+            alerts they define cannot fire. Their silence currently means nothing.
+          runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
+
+      - alert: AlertmanagerNotificationsFailing
+        expr: increase(alertmanager_notifications_failed_total[15m]) > 0
+        for: 10m
+        labels:
+          severity: critical
+          component: monitoring
+        annotations:
+          summary: 'Alertmanager cannot deliver to {{ $labels.integration }}'
+          description: >-
+            Alerts are firing and not reaching anyone. Every other alert in this system
+            is currently unable to do its job.
+          runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
+
+      - alert: LokiIngestionStopped
+        # The logs half of the pipeline. Alloy going quiet looks exactly like an
+        # idle application, and "we have no logs from the hour of the incident"
+        # is a thing you only want to discover once.
+        expr: >-
+          sum(rate(loki_distributor_lines_received_total[15m])) == 0
+        for: 30m
+        labels:
+          severity: warning
+          component: monitoring
+        annotations:
+          summary: 'Loki has received no log lines for 30 minutes'
+          description: >-
+            Either Alloy has stopped shipping or the application has stopped logging.
+            Both are worth knowing before the next incident, when the logs are the first
+            thing anyone reaches for.
+          runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health

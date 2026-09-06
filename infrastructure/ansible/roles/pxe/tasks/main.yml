@@ -1,0 +1,170 @@
+---
+# iPXE, TFTP and DHCP — bound to the provisioning VLAN and nothing else.
+#
+# ==========================================================================
+# WHAT BREAKS IF THIS RUNS AGAINST THE WRONG INTERFACE
+#
+# A DHCP server on a production LAN takes that network down. Clients begin
+# taking leases with the wrong gateway and the wrong DNS from whichever server
+# answers first, and the symptom looks like a failing switch rather than a
+# server somebody just configured — so the search starts in the wrong place and
+# stays there.
+#
+# A PXE server on a production LAN does the same thing AND reinstalls whatever
+# reboots. On a hypervisor that is every customer machine on it. On a hosting
+# node it is every site.
+#
+# The provisioning VLAN exists so that this can be a cabling mistake but never a
+# configuration mistake. This role therefore binds to ONE named interface,
+# refuses if that interface is the one carrying the default route, and does not
+# start the DHCP service at all unless the host has explicitly opted in.
+# ==========================================================================
+
+- name: Refuse a PXE host that has not named its provisioning interface
+  ansible.builtin.assert:
+    that:
+      - pxe_provisioning_interface is not none
+      - pxe_provisioning_interface | length > 0
+      - pxe_provisioning_cidr is not none
+    fail_msg: >-
+      {{ inventory_hostname }} declares no `pxe_provisioning_interface` or no
+      `pxe_provisioning_cidr`. Neither is discovered, because the answer
+      auto-detection gives — the interface with the default route — is the one
+      interface DHCP must never be served on.
+    quiet: true
+
+- name: Refuse to serve DHCP on the interface carrying the default route
+  ansible.builtin.assert:
+    that:
+      - pxe_provisioning_interface != (ansible_facts.default_ipv4.interface | default(''))
+    fail_msg: >-
+      `pxe_provisioning_interface` is {{ pxe_provisioning_interface }}, which is the
+      interface carrying this host's default route. That is the production path,
+      not the provisioning VLAN. Serving DHCP there takes the network down and
+      PXE-boots whatever reboots on it.
+    quiet: true
+
+# Fails closed in both directions: an interface that is genuinely absent is a
+# typo, and network facts that could not be gathered mean the check could not be
+# performed — which is not the same as passing it. Binding DHCP to an interface
+# nobody has verified is the whole failure this role exists to prevent, so
+# "could not verify" refuses too.
+- name: Refuse an interface this host does not have, or that could not be verified
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.interfaces is defined
+      - pxe_provisioning_interface in (ansible_facts.interfaces | default([]))
+    fail_msg: >-
+      {{ inventory_hostname }} has no interface named
+      "{{ pxe_provisioning_interface }}". Interfaces seen:
+      {{ ansible_facts.interfaces | default(['<network facts unavailable>']) | join(', ') }}.
+      A typo here is not harmless — dnsmasq with `bind-interfaces` and a missing
+      interface fails to start, which is the good outcome; without that setting
+      it would listen on all of them and answer DHCP on the customer network.
+    quiet: true
+
+# Containment is checked with Python's `ipaddress` module on the CONTROLLER
+# rather than with a CIDR filter. Those filters live in the ansible.netcommon
+# collection, and a bootstrap that depends on Galaxy being reachable is a
+# bootstrap that fails on the day the network is what you are trying to fix.
+# Nothing in this repository requires a collection outside ansible-core.
+- name: Test whether the DHCP range falls inside the provisioning network
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import ipaddress, sys
+        net = ipaddress.ip_network(sys.argv[1], strict=False)
+        ok = all(ipaddress.ip_address(a) in net for a in sys.argv[2:])
+        print('inside' if ok else 'outside')
+      - "{{ pxe_provisioning_cidr }}"
+      - "{{ pxe_dhcp_range_start }}"
+      - "{{ pxe_dhcp_range_end }}"
+  delegate_to: localhost
+  become: false
+  register: pxe_range_check
+  changed_when: false
+  check_mode: false
+  when: pxe_dhcp_range_start is not none
+
+- name: Refuse a DHCP range that is not inside the provisioning network
+  ansible.builtin.assert:
+    that:
+      - pxe_range_check.stdout == 'inside'
+    fail_msg: >-
+      The DHCP range {{ pxe_dhcp_range_start }}-{{ pxe_dhcp_range_end }} is not
+      inside {{ pxe_provisioning_cidr }}. A range that spills into another
+      network hands out addresses that belong to it — which is the same outage
+      as a rogue DHCP server, arriving one lease at a time.
+    quiet: true
+  when: pxe_dhcp_range_start is not none
+
+- name: Install dnsmasq and the iPXE boot files
+  ansible.builtin.package:
+    name:
+      - "{{ pxe_dhcp_package }}"
+      - ipxe
+    state: present
+  become: true
+
+- name: Create the TFTP and HTTP roots
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ pxe_tftp_root }}"
+    - "{{ pxe_http_root }}"
+  become: true
+
+- name: Configure dnsmasq for the provisioning VLAN
+  ansible.builtin.template:
+    src: dnsmasq-provisioning.conf.j2
+    dest: /etc/dnsmasq.d/10-lynomia-provisioning.conf
+    owner: root
+    group: root
+    mode: "0644"
+    # dnsmasq refuses to start on a malformed config. Validating first means a
+    # bad edit fails the task rather than leaving the service down — and a PXE
+    # server that is down during a dedicated-server build stalls a paid order.
+    validate: "dnsmasq --test --conf-file=%s"
+  become: true
+  notify: Restart dnsmasq
+
+- name: Install the iPXE boot script
+  ansible.builtin.template:
+    src: boot.ipxe.j2
+    dest: "{{ pxe_tftp_root }}/boot.ipxe"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+# --------------------------------------------------------------------------
+# The service state is computed from the opt-in flag, not skipped with `when:`.
+#
+# Skipping would leave a previously-enabled DHCP server running after the flag
+# was removed — which is exactly the state the flag exists to prevent, and it
+# would survive every subsequent run silently. Declaring the stopped state makes
+# turning DHCP off a one-line inventory change that is true after one run.
+# --------------------------------------------------------------------------
+- name: Set the DHCP service state from the inventory's opt-in
+  ansible.builtin.systemd_service:
+    name: "{{ pxe_dhcp_service }}"
+    enabled: "{{ pxe_allow_serve_dhcp | bool }}"
+    state: "{{ (pxe_allow_serve_dhcp | bool) | ternary('started', 'stopped') }}"
+  become: true
+
+- name: Report the DHCP state
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: DHCP is
+      {{ (pxe_allow_serve_dhcp | bool) | ternary('SERVING on ' ~ pxe_provisioning_interface
+      ~ ' (' ~ pxe_provisioning_cidr ~ ')', 'configured but STOPPED — set
+      `pxe_allow_serve_dhcp: true` on this host to serve it') }}.
+      One-time PXE boot only: a machine left with PXE first in its boot order
+      reinstalls itself the next time it reboots for any reason, which is a
+      customer's entire server erased by a power cut.

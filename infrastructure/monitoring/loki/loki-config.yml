@@ -1,0 +1,111 @@
+# Loki — single-binary, filesystem-backed.
+#
+# Sized for one region's control plane, not for a multi-tenant log SaaS. If the
+# platform outgrows this, the migration is to object storage and a read/write
+# split, and the schema below (TSDB, v13) is already the one that supports it —
+# which is the whole reason not to start on the older boltdb-shipper schema
+# that would have to be migrated away from later.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: info
+  # A stack trace in a JSON log line is easily past the 4MB default.
+  grpc_server_max_recv_msg_size: 8388608
+  grpc_server_max_send_msg_size: 8388608
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2025-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+  filesystem:
+    directory: /loki/chunks
+
+limits_config:
+  # Refusing out-of-order writes is the default that bites everyone: an
+  # application host whose clock drifted by a few seconds silently loses every
+  # line it ships. Two hours of tolerance covers clock skew and a backlogged
+  # Alloy replaying a queue after an outage — the exact moments the logs matter.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+  # Ingestion headroom for a burst. A provisioning incident produces orders of
+  # magnitude more log lines than a quiet hour, and that is precisely when
+  # dropping lines is least acceptable.
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+  per_stream_rate_limit: 8MB
+  per_stream_rate_limit_burst: 16MB
+
+  max_query_series: 5000
+  max_query_parallelism: 16
+  # Thirty days on disk. Long enough to investigate a billing dispute, short
+  # enough that the volume stays a volume rather than an archive; anything that
+  # needs to outlive it belongs in the audit log, which is in Postgres.
+  retention_period: 720h
+
+  # High-cardinality correlation IDs arrive as structured metadata rather than
+  # as labels (see alloy/config.alloy). This is the cap on that.
+  max_structured_metadata_size: 64kb
+  max_structured_metadata_entries_count: 128
+
+  # A label per request id would be a stream per request. This is the guard
+  # rail that turns that mistake into a rejected write instead of an index that
+  # never recovers.
+  max_label_names_per_series: 20
+  max_global_streams_per_user: 10000
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+  compaction_interval: 10m
+  # Retention is enforced by the compactor. Without retention_enabled the
+  # retention_period above is a comment: Loki keeps everything and the volume
+  # fills, which then takes the logs down at the moment they are needed.
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules-temp
+  # Log-derived alerts are forwarded to the same Alertmanager as metric alerts,
+  # so an on-call sees one stream of notifications rather than two systems with
+  # separate ideas about what is wrong.
+  alertmanager_url: http://alertmanager:9093
+  enable_api: true
+
+# Anonymous usage reporting is off. This is infrastructure for a business whose
+# stream names disclose its customers and its scale.
+analytics:
+  reporting_enabled: false
+
+querier:
+  max_concurrent: 8

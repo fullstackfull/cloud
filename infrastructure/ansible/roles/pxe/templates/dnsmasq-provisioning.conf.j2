@@ -1,0 +1,48 @@
+# {{ ansible_managed }}
+#
+# DHCP AND TFTP ON THE PROVISIONING VLAN ONLY.
+
+# --------------------------------------------------------------------------
+# The three lines that keep this off every other network.
+#
+# `interface` names the only interface dnsmasq may use. `bind-interfaces` makes
+# it actually bind there instead of to the wildcard address — WITHOUT IT,
+# dnsmasq listens on 0.0.0.0 and answers DHCP on every network the host can
+# reach, which is the outage this whole VLAN exists to make impossible.
+# `except-interface=lo` keeps it off the loopback, where nothing should be
+# PXE-booting.
+# --------------------------------------------------------------------------
+interface={{ pxe_provisioning_interface }}
+bind-interfaces
+except-interface=lo
+
+# Not a DNS server. dnsmasq is a resolver by default, and a resolver on a
+# provisioning network with a route to the internet is an open resolver — a DNS
+# amplification reflector with the provider's address on it.
+port=0
+
+# --------------------------------------------------------------------------
+# DHCP
+# --------------------------------------------------------------------------
+dhcp-range={{ pxe_dhcp_range_start }},{{ pxe_dhcp_range_end }},{{ pxe_dhcp_lease_time }}
+
+# Short leases. A machine is on this network for the length of an installation;
+# a long lease keeps the address tied up long after the server has moved to its
+# production VLAN, and the pool is small.
+dhcp-authoritative
+
+# --------------------------------------------------------------------------
+# Boot
+# --------------------------------------------------------------------------
+enable-tftp
+tftp-root={{ pxe_tftp_root }}
+
+# Chain-load: the firmware fetches iPXE, iPXE fetches the script over HTTP. The
+# tag test stops the loop — without it, iPXE would be told to fetch iPXE.
+dhcp-match=set:ipxe,175
+dhcp-boot=tag:!ipxe,{{ 'ipxe.efi' }}
+dhcp-boot=tag:ipxe,http://{{ ansible_host }}/boot.ipxe
+
+# Log every lease and every boot request. When a machine installs the wrong
+# image, this file is the only record of what it was told to fetch.
+log-dhcp

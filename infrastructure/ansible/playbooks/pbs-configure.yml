@@ -1,0 +1,59 @@
+---
+# =============================================================================
+# pbs-configure.yml — datastores, prune, garbage collection, VERIFICATION and a
+#                     scheduled restore test.
+# =============================================================================
+#
+#   make pbs-configure ENV=production
+#   ansible-playbook -i inventories/production playbooks/pbs-configure.yml --check --diff
+#
+# The last two items are why this playbook is not just "create a datastore".
+#
+#   VERIFICATION re-reads stored chunks. PBS deduplicates, so one corrupted
+#   chunk can be shared by many backups at once — a datastore full of green
+#   backup jobs can be entirely unrestorable, and only verification finds that
+#   before a restore does.
+#
+#   THE RESTORE TEST proves the restore PATH still works, which verification
+#   does not check at all: the credentials, the scratch space, the client
+#   version, the network. A backup that has never been restored is a hypothesis.
+#
+# The platform reports the date of the last SUCCESSFUL RESTORE, not the date of
+# the last successful backup. Those are different claims and only one of them is
+# worth anything.
+#
+# The playbook refuses a datastore that is not on its own mount: PBS runs on
+# dedicated hardware with its own storage, because a backup that dies with the
+# thing it backs up is not a backup — and a datastore on the system disk fills
+# it until the host stops.
+#
+# Nothing here deletes a datastore, a snapshot or a job. Retention is enforced
+# by prune, which is declarative and reviewable in --diff.
+
+- name: Configure Proxmox Backup Server
+  hosts: pbs
+  gather_facts: true
+  become: true
+
+  serial: 1
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (pbs_inbound_rules | default([])) }}
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: pbs

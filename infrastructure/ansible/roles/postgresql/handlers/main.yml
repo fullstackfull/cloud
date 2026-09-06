@@ -1,0 +1,9 @@
+---
+# `reloaded` for configuration that supports it. A restart of the primary is an
+# outage for every request in flight, and most of what this role changes —
+# archive_command, logging thresholds, pg_hba — is reloadable.
+- name: Reload postgresql
+  ansible.builtin.systemd_service:
+    name: "{{ postgresql_service }}"
+    state: reloaded
+  become: true

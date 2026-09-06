@@ -1,0 +1,53 @@
+---
+# Shared-hosting node invariants.
+
+# A hosting panel takes over a machine: its firewall, its mail stack, its web
+# server, its user accounts. Installing one onto a host that is already doing
+# something else does not fail cleanly — it produces a half-broken node that
+# looks installed, and is easier to reinstall than to repair.
+#
+# Every check below therefore REFUSES rather than warns. See
+# roles/hosting and docs/shared-hosting.md.
+hosting_preflight_refuse_on_failure: true
+
+# Supported panel versions per OS. A panel installed on an unsupported release
+# fails months later, during an update, on a node full of customer sites.
+hosting_supported_os:
+  cpanel:
+    - {distribution: AlmaLinux, major: '9'}
+    - {distribution: AlmaLinux, major: '8'}
+    - {distribution: Rocky, major: '9'}
+    - {distribution: Rocky, major: '8'}
+  directadmin:
+    - {distribution: AlmaLinux, major: '9'}
+    - {distribution: Rocky, major: '9'}
+    - {distribution: Debian, major: '12'}
+    - {distribution: Ubuntu, major: '24'}
+
+# Software whose presence means the machine is not clean. Any one of these and
+# the panel installer must not run.
+hosting_conflicting_packages:
+  - httpd
+  - apache2
+  - nginx
+  - mysql-server
+  - mariadb-server
+  - postgresql
+  - dovecot
+  - exim4
+  - postfix
+  - cpanel
+  - directadmin
+  - plesk
+
+# Ports the panel needs to bind. Anything already listening on one of these is
+# another service that will fight the panel for it.
+hosting_required_free_ports: [80, 443, 21, 25, 110, 143, 465, 587, 993, 995, 2083, 2087]
+
+# cPanel/WHM, DirectAdmin, CloudLinux and LiteSpeed Enterprise are commercial
+# products. This repository contains integrations and guarded installers for
+# them and nothing that bypasses, patches or circumvents their licensing — and
+# no flag here enables such a thing. Without a licence the preflight stops
+# cleanly and reports LICENSE_REQUIRED.
+hosting_license_required: true
+hosting_license_missing_status: LICENSE_REQUIRED

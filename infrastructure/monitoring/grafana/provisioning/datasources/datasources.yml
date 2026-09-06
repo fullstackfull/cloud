@@ -1,0 +1,69 @@
+# Datasources, provisioned from a file.
+#
+# Fixed UIDs are the point of this file. A dashboard JSON refers to its
+# datasource by UID, and a datasource created through the UI gets a random one —
+# so a dashboard exported from a hand-configured Grafana silently points at
+# nothing on any other install. Pinning the UIDs here is what makes the
+# dashboards in ../dashboards reproducible from git.
+
+apiVersion: 1
+
+# Anything previously provisioned and now removed from this file is deleted
+# rather than orphaned, so a datasource cannot outlive the commit that removed it.
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    uid: lynomia-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match the global scrape_interval, or Grafana's $__rate_interval
+      # computes a window too short for rate() and every graph shows gaps that
+      # look like an outage and are not.
+      timeInterval: 15s
+      httpMethod: POST
+      manageAlerts: false
+      prometheusType: Prometheus
+      prometheusVersion: 3.6.0
+
+  - name: Loki
+    uid: lynomia-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 2000
+      # Turns a correlation ID in a log line into a clickable link that pulls up
+      # every other line from the same request — across the HTTP edge, the queued
+      # job and the provider call. This is the feature that makes "the order
+      # failed around 14:02" one query instead of three.
+      derivedFields:
+        - name: request_id
+          matcherType: label
+          matcherRegex: request_id
+          datasourceUid: lynomia-loki
+          url: '{service="control-plane"} | request_id=`${__value.raw}`'
+          urlDisplayLabel: 'All lines for this request'
+        - name: provisioning_job_id
+          matcherType: label
+          matcherRegex: provisioning_job_id
+          datasourceUid: lynomia-loki
+          url: '{service="control-plane"} | provisioning_job_id=`${__value.raw}`'
+          urlDisplayLabel: 'All lines for this provisioning job'
+
+  - name: Alertmanager
+    uid: lynomia-alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false

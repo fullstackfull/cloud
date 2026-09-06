@@ -1,0 +1,55 @@
+# =============================================================================
+# EXAMPLE variable values — staging.
+# =============================================================================
+# Copy to terraform.tfvars (NOT committed — see .gitignore) or, better, supply
+# these from the secret store at plan time. Every address below is an RFC 5737
+# documentation range and every name ends in `.example`: a copied placeholder
+# fails to connect rather than reaching a stranger's machine.
+#
+# NO SECRET APPEARS IN THIS FILE OR IN ANY *.tfvars.example. The two sensitive
+# variables are read from the environment instead:
+#
+#   export TF_VAR_proxmox_api_token="$(secret-store get staging/proxmox-token)"
+#   export TF_VAR_cloudflare_api_token="$(secret-store get staging/cloudflare-token)"
+#
+# A tfvars file holding a token is a token in your shell history, your editor's
+# swap file and your backup of your home directory.
+
+environment = "staging"
+
+# Reached over the management network. Proxmox administrative interfaces are not
+# publicly exposed; this address is only routable from the management VLAN or
+# through the VPN.
+proxmox_endpoint = "https://pve-stg-1.stg.example:8006/"
+
+cloudflare_zone_id = "REPLACE-ME-32-hex-zone-id"
+
+ssh_authorized_keys = [
+  # Public keys only. Replace with the operations team's real keys; this one is
+  # syntactically shaped like a key and is not one.
+  "ssh-ed25519 AAAA_REPLACE_ME_THIS_IS_NOT_A_REAL_KEY platform@lynomia.example",
+]
+
+platform_vms = {
+  monitoring = {
+    node_name    = "pve-stg-1"
+    template_id  = 9000
+    cores        = 4
+    memory_mb    = 8192
+    disk_gb      = 200
+    datastore_id = "local-nvme"
+    bridge       = "vmbr0"
+    # No vlan_id here: the staging management segment is untagged on this
+    # bridge. Where a tag is needed it comes from inventory, never from a
+    # constant in a module — a VLAN that is management in one datacentre is
+    # somebody's production network in another.
+    ipv4_address = "198.51.100.41/24"
+    ipv4_gateway = "198.51.100.1"
+    dns_name     = "mon-stg-1.stg.example"
+    # This machine holds the Prometheus TSDB and the Loki chunks, and a replace
+    # frees the disk and takes the metrics history with it. There is no flag to
+    # set for that: EVERY machine from modules/proxmox-vm carries
+    # `prevent_destroy = true`, because `lifecycle` cannot read a variable and a
+    # per-machine flag would be a safety control that silently did nothing.
+  }
+}

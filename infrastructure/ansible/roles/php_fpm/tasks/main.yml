@@ -1,0 +1,46 @@
+---
+- name: Install PHP-FPM and the extensions the control plane requires
+  ansible.builtin.package:
+    name: >-
+      {{ ['php' ~ php_fpm_version ~ '-fpm']
+         + php_fpm_extensions | map('regex_replace', '^', 'php' ~ php_fpm_version ~ '-') | list }}
+    state: present
+  become: true
+
+- name: Configure the control-plane FPM pool
+  ansible.builtin.template:
+    src: pool.conf.j2
+    dest: "/etc/php/{{ php_fpm_version }}/fpm/pool.d/{{ php_fpm_pool_name }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart php-fpm
+
+# The distribution's `www` pool is removed rather than left disabled. Left in
+# place it listens on its own socket with its own user, and the next person to
+# add a vhost points at it by accident and gets a pool with none of the limits
+# below.
+- name: Remove the distribution's default pool
+  ansible.builtin.file:
+    path: "/etc/php/{{ php_fpm_version }}/fpm/pool.d/www.conf"
+    state: absent
+  become: true
+  notify: Restart php-fpm
+
+- name: Configure OPcache
+  ansible.builtin.template:
+    src: opcache.ini.j2
+    dest: "/etc/php/{{ php_fpm_version }}/fpm/conf.d/10-lynomia-opcache.ini"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Restart php-fpm
+
+- name: Enable and start PHP-FPM
+  ansible.builtin.systemd_service:
+    name: "php{{ php_fpm_version }}-fpm"
+    enabled: true
+    state: started
+  become: true

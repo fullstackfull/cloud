@@ -1,0 +1,20 @@
+---
+# Declared per host. A PBS host with no datastores configured is a PBS host that
+# reports healthy and backs nothing up.
+pbs_datastores: []
+
+# Where the restore test writes. It is a scratch path and nothing else ever
+# reads it. Restoring directly over a live copy turns a recoverable problem into
+# two problems (docs/backups.md), so the restore-test script refuses any target
+# that is not underneath this.
+pbs_restore_test_scratch_path: /mnt/restore-test
+
+# How long a restore test may run before it is considered failed. This is a
+# limit on the TEST, not a retry: a restore test that times out is reported as a
+# failed restore test, which is exactly the signal wanted. It is never retried
+# automatically — see the timeout rule in group_vars/all.yml.
+pbs_restore_test_timeout_seconds: 7200
+
+pbs_inbound_rules:
+  - {port: 8007, proto: tcp, comment: 'pbs: backup traffic and management API'}
+  - {port: 9100, proto: tcp, comment: 'pbs: node_exporter scrape'}

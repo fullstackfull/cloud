@@ -1,0 +1,58 @@
+# {{ ansible_managed }}
+# Dropped into conf.d rather than editing postgresql.conf, so a package upgrade
+# that rewrites the main file does not quietly revert archiving.
+
+listen_addresses = '*'
+port = {{ postgresql_port }}
+max_connections = {{ postgresql_max_connections }}
+
+shared_buffers = {{ postgresql_shared_buffers }}
+effective_cache_size = {{ postgresql_effective_cache_size }}
+work_mem = {{ postgresql_work_mem }}
+maintenance_work_mem = {{ postgresql_maintenance_work_mem }}
+
+{% if postgresql_wal_archiving %}
+# ---------------------------------------------------------------- archiving
+# This is what makes point-in-time recovery possible. The realistic database
+# disaster is not "the host died" but "a bad migration ran at 14:07", and
+# recovery means rewinding to 14:06 — which a nightly dump cannot do.
+wal_level = {{ postgresql_wal_level }}
+archive_mode = on
+
+# The command MUST refuse to overwrite. PostgreSQL treats a zero exit as "this
+# segment is safely archived" and is then free to recycle it. An archive_command
+# that silently overwrites an existing file (`cp -f`) turns a retried archive
+# into a hole in the WAL chain, and the hole is discovered during the restore.
+archive_command = 'test ! -f {{ postgresql_archive_dir }}/%f && cp %p {{ postgresql_archive_dir }}/%f'
+archive_timeout = 300
+
+# Keep enough WAL for a replica that falls behind briefly. Slots would guarantee
+# it, but an abandoned slot pins WAL forever and fills the disk — which is an
+# outage on the primary caused by a replica nobody is using.
+wal_keep_size = 4GB
+max_wal_senders = 8
+{% endif %}
+
+# ------------------------------------------------------------------- logging
+logging_collector = on
+log_destination = 'stderr'
+log_line_prefix = '%m [%p] %q%u@%d %a '
+
+# Slow queries only. Logging every statement on a busy control plane fills the
+# disk faster than the data grows, and a full disk on the primary is an outage.
+log_min_duration_statement = {{ postgresql_log_min_duration_ms }}
+
+log_checkpoints = on
+log_connections = on
+log_disconnections = on
+log_lock_waits = on
+log_temp_files = 0
+log_autovacuum_min_duration = 0
+
+# ------------------------------------------------------------------ security
+# Encrypted columns and hashed recovery codes are protected by the application
+# key; the transport is protected here. A control plane talking to its database
+# over plaintext on a shared network hands over every query it makes.
+ssl = on
+
+password_encryption = scram-sha-256

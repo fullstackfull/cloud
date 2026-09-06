@@ -1,0 +1,136 @@
+# Backup and backup-verification alerts.
+#
+# These rules read metrics written by the node_exporter textfile collector on
+# the Proxmox Backup Server (see infrastructure/pbs and the README in this
+# directory for the collector contract). The names are ours, not PBS's, because
+# PBS has no Prometheus endpoint of its own and the shape of the data — one
+# series per backup group with a status and a timestamp — is a decision this
+# platform makes rather than one it inherits.
+#
+# The ordering of severity in this file is deliberate and is the reason it is a
+# separate file at all:
+#
+#   a failed backup   -> recoverability is degraded, and everyone knows it
+#   a failed VERIFY   -> recoverability is degraded, and nothing else shows it
+#
+# The second is worse. An unverified backup looks exactly like a backup — same
+# row in the UI, same size, same green tick on the job that produced it — right
+# up until the restore, which is the single worst moment to discover the chunk
+# store is corrupt. So verification failures page at critical while backup
+# failures page at warning, even though the words sound the other way round.
+
+groups:
+  - name: backups.jobs
+    rules:
+      - alert: BackupJobFailed
+        expr: lynomia_backup_task_last_status != 0
+        # Fifteen minutes lets a retry inside PBS succeed and clear this
+        # without anyone being woken. Beyond that, the retry is not coming.
+        for: 15m
+        labels:
+          severity: warning
+          component: backups
+        annotations:
+          summary: 'Backup failed for {{ $labels.guest_type }}/{{ $labels.guest_id }} on datastore {{ $labels.datastore }}'
+          description: >-
+            The most recent backup task for {{ $labels.guest_type }}/{{ $labels.guest_id }}
+            ({{ $labels.guest_name }}) failed. Recoverability for this guest is now as old
+            as its last successful snapshot — check that age before deciding how urgent
+            this is, because a failed run on top of a week of successes is very different
+            from a failed run on top of nothing.
+          runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+
+      - alert: BackupTooOld
+        # A job that never runs never fails, so a status-only alert cannot see
+        # the most common backup failure of all: the schedule silently stopped.
+        expr: >-
+          (time() - lynomia_backup_last_success_timestamp_seconds) > 36 * 3600
+        for: 30m
+        labels:
+          severity: warning
+          component: backups
+        annotations:
+          summary: 'No successful backup of {{ $labels.guest_type }}/{{ $labels.guest_id }} for {{ $value | humanizeDuration }}'
+          description: >-
+            The last successful backup of {{ $labels.guest_type }}/{{ $labels.guest_id }}
+            on {{ $labels.datastore }} was {{ $value | humanizeDuration }} ago, against a
+            daily schedule. Thirty-six hours rather than twenty-four so that one late or
+            skipped nightly run does not page, but two consecutive misses do.
+          runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
+
+      - alert: BackupCollectorStale
+        # The metric that watches the metrics. Without this, a dead collector
+        # looks identical to a platform where every backup is fine: the failure
+        # series simply stop existing and every rule above evaluates to nothing.
+        expr: >-
+          (time() - lynomia_backup_collector_last_run_timestamp_seconds) > 3600
+          or
+          absent(lynomia_backup_collector_last_run_timestamp_seconds)
+        for: 15m
+        labels:
+          severity: warning
+          component: backups
+        annotations:
+          summary: 'The PBS metrics collector has not reported for over an hour'
+          description: >-
+            Either the textfile collector on the backup server has stopped, or its
+            output is no longer being scraped. Until it is fixed, every other backup
+            alert in this file is blind and their silence means nothing.
+          runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
+
+  - name: backups.verification
+    rules:
+      - alert: BackupVerificationFailed
+        # Critical, and higher than a failed backup, for the reason at the top
+        # of this file: this is the alert that distinguishes "we have backups"
+        # from "we have files named after backups".
+        expr: lynomia_backup_verify_last_status != 0
+        for: 5m
+        labels:
+          severity: critical
+          component: backups
+        annotations:
+          summary: 'Backup VERIFICATION failed for {{ $labels.snapshot_group }} on {{ $labels.datastore }}'
+          description: >-
+            PBS verification of {{ $labels.snapshot_group }} on datastore
+            {{ $labels.datastore }} failed, which means the stored chunks do not match
+            their checksums. The snapshot exists and looks healthy in every listing, and
+            it will not restore. Treat this guest as having NO usable backup at this
+            snapshot: take a fresh backup immediately, then find out whether the datastore
+            itself is damaged before trusting anything else on it.
+          runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+
+      - alert: BackupVerificationStale
+        # An unverified backup is an unproven backup. This fires when
+        # verification has not run at all, which is indistinguishable from
+        # "verification passed" in every UI that shows only the backup job.
+        expr: >-
+          (time() - lynomia_backup_verify_last_run_timestamp_seconds) > 8 * 86400
+        for: 1h
+        labels:
+          severity: warning
+          component: backups
+        annotations:
+          summary: 'Datastore {{ $labels.datastore }} has not been verified for {{ $value | humanizeDuration }}'
+          description: >-
+            Verification on {{ $labels.datastore }} last ran {{ $value | humanizeDuration }}
+            ago, against a weekly schedule. Nothing is known to be wrong — and nothing is
+            known to be right either, which is the entire point of the alert.
+          runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
+
+      - alert: UnverifiedSnapshotsAccumulating
+        expr: lynomia_backup_unverified_snapshots > 25
+        for: 6h
+        labels:
+          severity: warning
+          component: backups
+        annotations:
+          summary: '{{ $value }} unverified snapshots on datastore {{ $labels.datastore }}'
+          description: >-
+            Verification is falling behind the backup schedule on {{ $labels.datastore }}.
+            This usually means the verify job is timing out rather than failing, so
+            nothing reports an error while the proportion of the datastore that has
+            actually been proven restorable quietly shrinks.
+          runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed

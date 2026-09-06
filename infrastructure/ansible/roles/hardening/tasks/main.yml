@@ -1,0 +1,154 @@
+---
+# SSH keys only, fail2ban, nftables default-deny inbound.
+#
+# This role can lock an operator out of a machine in a remote facility. Every
+# guard below exists because of a specific way that happens, and each one runs
+# BEFORE anything is written — a check that runs after the ruleset is applied is
+# a check performed from outside the building.
+
+- name: Refuse to configure a machine the platform must never configure
+  ansible.builtin.assert:
+    that:
+      - not (lynomia_never_configure | default(false) | bool)
+    fail_msg: >-
+      {{ inventory_hostname }} is flagged `lynomia_never_configure`. Hardening a
+      customer's dedicated server would replace their sshd configuration and
+      their firewall with the platform's, locking the customer out of a machine
+      the platform has no backup of.
+    quiet: true
+
+# --------------------------------------------------------------------------
+# The lockout guards
+# --------------------------------------------------------------------------
+- name: Refuse to build a default-deny ruleset with no way back in
+  ansible.builtin.assert:
+    that:
+      - hardening_management_cidrs | default([]) | length > 0
+      - hardening_default_inbound_policy == 'drop'
+    fail_msg: >-
+      `hardening_management_cidrs` is empty. This role sets the inbound policy to
+      drop; with no management network allowed to reach port
+      {{ hardening_ssh_port }}, the ruleset takes effect and the next connection
+      to this host fails — including the one that would remove the rule.
+      Recovery is a physical console. Declare the networks operators actually
+      connect from.
+    quiet: true
+
+- name: Refuse to disable password authentication with no key to replace it
+  ansible.builtin.assert:
+    that:
+      - hardening_authorized_keys | default([]) | length > 0
+    fail_msg: >-
+      `hardening_authorized_keys` is empty and this role is about to set
+      PasswordAuthentication no. A host with no password login and no authorized
+      key has no interactive login at all. Supply the operations team's public
+      keys through the inventory or the Vault file before hardening this host.
+    quiet: true
+
+# --------------------------------------------------------------------------
+# SSH
+# --------------------------------------------------------------------------
+- name: Ensure the operations account exists
+  ansible.builtin.user:
+    name: "{{ hardening_ssh_user }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+  become: true
+
+- name: Create the operations account SSH directory
+  ansible.builtin.file:
+    path: "~{{ hardening_ssh_user }}/.ssh"
+    state: directory
+    owner: "{{ hardening_ssh_user }}"
+    group: "{{ hardening_ssh_user }}"
+    mode: "0700"
+  become: true
+
+# Written as a whole file rather than appended key by key. An authorized_keys
+# managed by append never forgets a key: a departed engineer's key stays until
+# someone remembers to remove it by hand, which is precisely the removal that
+# gets forgotten. Declaring the full set means revocation is deleting a line
+# from the inventory, and --diff shows exactly whose access changed.
+- name: Install the authorised keys as the complete allowed set
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "~{{ hardening_ssh_user }}/.ssh/authorized_keys"
+    owner: "{{ hardening_ssh_user }}"
+    group: "{{ hardening_ssh_user }}"
+    mode: "0600"
+  become: true
+
+- name: Apply the SSH daemon policy
+  ansible.builtin.template:
+    src: sshd-lynomia.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-lynomia.conf
+    owner: root
+    group: root
+    mode: "0600"
+    # An sshd that fails to parse its configuration does not start. Validating
+    # the candidate file before it replaces the live one turns "the host is
+    # unreachable" into "the task failed and nothing changed".
+    validate: /usr/sbin/sshd -t -f %s
+  become: true
+  notify: Reload sshd
+
+# --------------------------------------------------------------------------
+# fail2ban
+# --------------------------------------------------------------------------
+- name: Install fail2ban
+  ansible.builtin.package:
+    name: fail2ban
+    state: present
+  become: true
+  when: hardening_fail2ban_enabled | bool
+
+- name: Configure fail2ban
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: hardening_fail2ban_enabled | bool
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    enabled: true
+    state: started
+  become: true
+  when: hardening_fail2ban_enabled | bool
+
+# --------------------------------------------------------------------------
+# nftables
+# --------------------------------------------------------------------------
+- name: Install nftables
+  ansible.builtin.package:
+    name: nftables
+    state: present
+  become: true
+
+- name: Write the firewall ruleset
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0640"
+    # `nft -c` parses and type-checks the ruleset without loading it. Loading a
+    # ruleset that references a missing table flushes what was there and then
+    # fails halfway, which on a default-deny policy means a host with no rules
+    # and no route in.
+    validate: nft -c -f %s
+  become: true
+  notify: Reload nftables
+
+- name: Enable and start nftables
+  ansible.builtin.systemd_service:
+    name: nftables
+    enabled: true
+    state: started
+  become: true

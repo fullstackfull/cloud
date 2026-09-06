@@ -1,0 +1,19 @@
+---
+# Pinning the profile so the bar is the same on every machine and in CI. Without
+# it, ansible-lint applies whichever profile the installed version defaults to,
+# and "it passed on my laptop" becomes a version comparison.
+profile: production
+
+# Never reach out to Galaxy while linting. This repository requires no
+# collection outside ansible-core (see requirements.yml), and a lint that
+# depends on network access is a lint that fails during the incident where the
+# network is what you are fixing.
+offline: true
+
+exclude_paths:
+  - .ansible/          # fact cache, control sockets, local scratch
+  - inventories/*/group_vars/vault.yml
+  - inventories/*/host_vars/vault.yml
+
+# No rules are skipped. If a violation appears here later, fix the play rather
+# than adding a line to this list — a skip_list is where a standard goes to die.

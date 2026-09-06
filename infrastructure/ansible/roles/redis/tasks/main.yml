@@ -1,0 +1,108 @@
+---
+# Redis: requirepass, persistence, and an eviction policy that cannot silently
+# delete a customer's paid provisioning.
+
+# --------------------------------------------------------------------------
+# THE EVICTION POLICY GUARD.
+#
+# This is the assertion the role exists for.
+#
+# Redis under `maxmemory` with an `allkeys-*` policy deletes whatever it likes
+# to make room. On a cache that is a slow request and nothing worse. On the
+# instance holding the queues it deletes QUEUED JOBS — and the deletion produces
+# no error, no failed job, no retry, no alert and no log line. The customer
+# paid, the order was accepted, the job was enqueued, and then it stopped
+# existing. The first person to discover it is the customer asking where their
+# server is, days later, and by then there is no record that the work was ever
+# scheduled.
+#
+# Every Redis tuning guide on the internet recommends `allkeys-lru`. It is the
+# right answer for a cache and the wrong answer here, which is exactly why the
+# refusal is machine-enforced rather than written in a runbook.
+# --------------------------------------------------------------------------
+- name: Refuse an eviction policy that can drop queued jobs
+  ansible.builtin.assert:
+    that:
+      - redis_effective_maxmemory_policy in redis_queue_allowed_policies
+    fail_msg: >-
+      {{ inventory_hostname }} carries the queues (`redis_hosts_queues: true`) but
+      is configured with maxmemory-policy '{{ redis_effective_maxmemory_policy }}'.
+      Allowed: {{ redis_queue_allowed_policies | join(', ') }}.
+      An eviction policy on the queue instance deletes queued jobs silently —
+      a customer's paid provisioning simply ceases to exist, with no failed job
+      and no alert. With `noeviction` a full instance rejects writes loudly and
+      the platform surfaces an error it can act on.
+    quiet: true
+  when: redis_hosts_queues | bool
+
+- name: Refuse an instance with no password
+  ansible.builtin.assert:
+    that:
+      - redis_password is not none
+      - redis_password | default('') | length >= 32
+    fail_msg: >-
+      `redis_password` is unset or shorter than 32 characters. Redis has no user
+      model worth the name, and an instance reachable without a password allows
+      CONFIG SET — which lets a client write an arbitrary file as the redis user.
+      Supply it from the Vault-encrypted file; see infrastructure/README.md.
+    quiet: true
+  when: redis_requirepass_required | bool
+  no_log: true
+
+- name: Refuse persistence settings that would lose enqueued work on restart
+  ansible.builtin.assert:
+    that:
+      - redis_appendonly | bool
+      - redis_appendfsync in ['everysec', 'always']
+    fail_msg: >-
+      The queue instance must run with appendonly on and appendfsync everysec or
+      always. RDB snapshots alone lose everything enqueued since the last save —
+      for the default five-minute window that is five minutes of paid
+      provisioning gone on an unclean restart.
+    quiet: true
+  when: redis_hosts_queues | bool
+
+- name: Refuse to expose Redis to networks that have no business reaching it
+  ansible.builtin.assert:
+    that:
+      - "'0.0.0.0/0' not in redis_allowed_client_cidrs"
+      - "'::/0' not in redis_allowed_client_cidrs"
+    fail_msg: >-
+      `redis_allowed_client_cidrs` contains a default route. The queue instance
+      holds every pending provisioning job and the session store holds every
+      logged-in customer's session.
+    quiet: true
+
+- name: Install Redis
+  ansible.builtin.package:
+    name: redis-server
+    state: present
+  become: true
+
+- name: Configure Redis
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: "{{ redis_conf_path }}"
+    owner: redis
+    group: redis
+    mode: "0640"
+  become: true
+  # The password is rendered into this file. Without no_log, --diff prints the
+  # old and new contents of every changed file to the console and into whatever
+  # captures the play's output.
+  no_log: true
+  notify: Restart redis
+
+- name: Enable and start Redis
+  ansible.builtin.systemd_service:
+    name: "{{ redis_service }}"
+    enabled: true
+    state: started
+  become: true
+
+- name: Report the policy this instance runs under
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: maxmemory-policy={{ redis_effective_maxmemory_policy }},
+      appendonly={{ redis_appendonly | ternary('yes', 'no') }},
+      carries queues={{ redis_hosts_queues | bool }}.

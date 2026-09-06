@@ -1,0 +1,33 @@
+---
+# PXE / provisioning-VLAN invariants.
+
+# DHCP RUNS ON THE PROVISIONING VLAN AND NOWHERE ELSE.
+#
+# A rogue DHCP server on a production LAN takes that network down: clients start
+# taking leases with the wrong gateway and the wrong DNS, and the failure looks
+# like a broken switch rather than a broken server. A PXE server on a production
+# LAN is worse — it takes the network down *while reinstalling whatever happens
+# to reboot*, which for a hypervisor means every customer machine on it.
+#
+# The provisioning VLAN exists so this can be a cabling mistake but never a
+# configuration mistake. The role binds DHCP to one named interface, asserts
+# that interface is not the one carrying the default route, and refuses to start
+# the service at all unless the host opts in.
+pxe_allow_serve_dhcp: false
+
+# Named per host, never discovered. "The interface with the default route" is
+# exactly the wrong answer and is the one auto-detection gives.
+pxe_provisioning_interface: ~
+
+# PXE boot is set ONE TIME per installation, through the BMC, and is not a
+# permanent boot-order change. A machine left with PXE first in its boot order
+# reinstalls itself the next time it reboots for any reason — a power cut erases
+# a customer's entire server (docs/dedicated.md).
+pxe_one_time_boot_only: true
+
+# Unattended installers the provisioning VLAN serves.
+pxe_supported_installers:
+  - ubuntu-autoinstall
+  - debian-preseed
+  - almalinux-kickstart
+  - rocky-kickstart

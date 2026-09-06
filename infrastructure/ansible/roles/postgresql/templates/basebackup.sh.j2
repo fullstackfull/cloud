@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# A base backup is the anchor the WAL archive is measured from. Without a recent
+# one, "point-in-time recovery" means replaying every segment since the cluster
+# was created, which is not a recovery plan.
+set -euo pipefail
+
+ARCHIVE_ROOT="{{ postgresql_basebackup_dir }}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+TARGET="${ARCHIVE_ROOT}/${STAMP}"
+
+# Write to a temporary name and rename on success. A backup directory that
+# exists but is incomplete looks exactly like a good one to whoever is picking
+# the most recent backup during an incident.
+STAGING="${TARGET}.incomplete"
+
+mkdir -p "${STAGING}"
+
+/usr/lib/postgresql/{{ postgresql_version }}/bin/pg_basebackup \
+    --pgdata="${STAGING}" \
+    --format=tar \
+    --gzip \
+    --checkpoint=fast \
+    --write-recovery-conf \
+    --progress \
+    --verbose
+
+mv "${STAGING}" "${TARGET}"
+
+# Record the elapsed time and the size. docs/disaster-recovery.md publishes an
+# RTO figure, and the only honest source for it is measurements from real runs.
+echo "$(date -u +%FT%TZ) basebackup completed ${TARGET} $(du -sh "${TARGET}" | cut -f1)" \
+    >> "${ARCHIVE_ROOT}/basebackup.log"
+
+# Retention. Old base backups are pruned only AFTER a new one has been renamed
+# into place, so a failed run never leaves the cluster with no anchor at all.
+find "${ARCHIVE_ROOT}" -maxdepth 1 -type d -name '20*Z' -mtime +{{ postgresql_basebackup_retain_days }} \
+    -exec rm -rf {} +
+
+# WAL older than the oldest surviving base backup is unusable and would
+# otherwise fill the archive volume — which stops archive_command, which stops
+# WAL recycling, which stops the primary.
+OLDEST_BASE="$(find "${ARCHIVE_ROOT}" -maxdepth 1 -type d -name '20*Z' | sort | head -n1)"
+if [[ -n "${OLDEST_BASE}" ]]; then
+    find "{{ postgresql_archive_dir }}" -type f ! -newer "${OLDEST_BASE}" -delete
+fi

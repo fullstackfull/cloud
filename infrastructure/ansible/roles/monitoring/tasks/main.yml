@@ -1,0 +1,201 @@
+---
+# Deploys the observability stack from infrastructure/monitoring.
+#
+# The configuration in that tree is the source of truth. This role copies it and
+# restarts the containers; it does not generate rules, dashboards or scrape
+# configuration, because a rule that exists only as a Jinja template is a rule
+# nobody can read during an incident.
+
+- name: Refuse to expose Prometheus or Alertmanager
+  ansible.builtin.assert:
+    that:
+      - monitoring_bind_address not in ['0.0.0.0', '::', '']
+    fail_msg: >-
+      `monitoring_bind_address` is {{ monitoring_bind_address }}. Prometheus and
+      Alertmanager must not be publicly reachable at all: Prometheus exposes
+      every metric the platform has — capacity, customer counts, which node is
+      nearly full — and Alertmanager can silence alerts, which is the first
+      thing an intruder does. Bind them to the management interface and reach
+      them through the VPN or a bastion.
+    quiet: true
+
+- name: Refuse anonymous access to Grafana
+  ansible.builtin.assert:
+    that:
+      - not (monitoring_grafana_anonymous_access | bool)
+    fail_msg: >-
+      Grafana is never publicly reachable without authentication. The business
+      dashboard alone shows MRR, churn and provisioning failure rate.
+    quiet: true
+
+# The source tree is checked on the CONTROLLER, before anything is copied. A
+# missing compose file discovered halfway through leaves the host with new rule
+# files and an old, running Prometheus that has not read them — which looks like
+# a successful deploy and monitors the wrong thing.
+- name: Verify the monitoring configuration exists on the controller
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../../{{ monitoring_source_dir }}/{{ monitoring_compose_file }}"
+  delegate_to: localhost
+  become: false
+  register: monitoring_compose_stat
+  check_mode: false
+
+- name: Refuse to deploy a monitoring stack that is not in the repository
+  ansible.builtin.assert:
+    that:
+      - monitoring_compose_stat.stat.exists
+    fail_msg: >-
+      {{ monitoring_source_dir }}/{{ monitoring_compose_file }} is not in the
+      repository. The monitoring stack is deployed from git so that its
+      configuration survives the host and so that a change is reviewable. There
+      is nothing to deploy.
+    quiet: true
+
+- name: Install the Docker APT repository signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /usr/share/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Configure the Docker APT repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}"
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: [stable]
+    signed_by: /usr/share/keyrings/docker.asc
+    state: present
+  become: true
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Install Docker and the compose plugin
+  ansible.builtin.package:
+    name: "{{ monitoring_docker_packages }}"
+    state: present
+  become: true
+
+- name: Enable and start Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    enabled: true
+    state: started
+  become: true
+
+- name: Create the monitoring directory
+  ansible.builtin.file:
+    path: "{{ monitoring_target_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+
+# `copy` rather than a git checkout on the host. The host does not get a
+# credential for the repository, and what is deployed is exactly what the
+# operator running the play has checked out and can see in --diff.
+#
+# THE MODE IS NOT AN OVERSIGHT AND MUST NOT BE TIGHTENED TO ROOT-ONLY.
+#
+# Every container in this stack runs as an unprivileged, non-root uid —
+# Prometheus and Alertmanager as 65534, Grafana as 472, Loki as 10001 — and a
+# bind mount carries the host's permissions straight through. A tree written
+# 0640 root:root is a tree none of them can read, so Prometheus exits at start
+# with "permission denied" on its own configuration and the stack never comes
+# up. This tree is version-controlled, non-secret configuration; the credentials
+# live in prometheus/secrets and alertmanager/secrets, which are not committed
+# and whose ownership is the operator's to set for the uid that reads them.
+- name: Deploy the monitoring configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../{{ monitoring_source_dir }}/"
+    dest: "{{ monitoring_target_dir }}/"
+    owner: root
+    group: root
+    mode: "0644"
+    directory_mode: "0755"
+  become: true
+  notify: Restart the monitoring stack
+
+# The image is read out of the compose file rather than written here as
+# `:latest`. promtool's job is to prove the configuration loads in the version
+# that will actually load it; validating with a different build is a check that
+# can pass while the running Prometheus refuses to start — which is exactly the
+# failure this task exists to catch, discovered during the next incident.
+- name: Read the compose file the stack is deployed from
+  ansible.builtin.slurp:
+    src: "{{ playbook_dir }}/../../{{ monitoring_source_dir }}/{{ monitoring_compose_file }}"
+  delegate_to: localhost
+  become: false
+  register: monitoring_compose_raw
+  check_mode: false
+
+- name: Determine the exact Prometheus image the stack is pinned to
+  ansible.builtin.set_fact:
+    monitoring_prometheus_image: >-
+      {{ (monitoring_compose_raw.content | b64decode | from_yaml).services.prometheus.image }}
+
+- name: Refuse to validate against an unpinned Prometheus image
+  ansible.builtin.assert:
+    that:
+      - monitoring_prometheus_image is search(':')
+      - not (monitoring_prometheus_image is search(':latest$'))
+    fail_msg: >-
+      The compose file pins Prometheus to '{{ monitoring_prometheus_image }}'.
+      A floating tag means the alerting rules can change semantics on the
+      Tuesday somebody runs `docker compose pull`, and the first sign of it is
+      an alert that no longer fires. Pin an exact version.
+    quiet: true
+
+# Prometheus refuses to start on a malformed rule file, and a Prometheus that
+# will not start during an incident is the worst possible time to discover a
+# typo. promtool runs from the same image the stack runs, so the check is
+# against the version that will actually load the file.
+- name: Validate the Prometheus configuration before restarting anything
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm
+      -v {{ monitoring_target_dir }}/prometheus:/etc/prometheus:ro
+      --entrypoint promtool
+      {{ monitoring_prometheus_image }}
+      check config /etc/prometheus/prometheus.yml
+  become: true
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Install the monitoring stack unit
+  ansible.builtin.template:
+    src: monitoring.service.j2
+    dest: "/etc/systemd/system/{{ monitoring_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify:
+    - Reload systemd
+    - Restart the monitoring stack
+
+- name: Enable and start the monitoring stack
+  ansible.builtin.systemd_service:
+    name: "{{ monitoring_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+
+# Two checks that are easy to skip and expensive to have skipped
+# (docs/monitoring.md). Neither can be automated honestly from here: the first
+# needs a real alert to reach a real on-call channel, and the second needs a log
+# line to travel the whole pipeline. Printing them is not ceremony — an
+# alerting pipeline that has never fired end to end is untested, and the first
+# time it matters is the wrong time to find out the webhook URL was wrong.
+- name: Report the two verifications a deploy cannot perform for you
+  ansible.builtin.debug:
+    msg:
+      - "NOT VERIFIED BY THIS PLAY: trigger a real alert and confirm it arrives on-call."
+      - "NOT VERIFIED BY THIS PLAY: log a fake secret and confirm it reaches Loki masked."
+      - "Both are in docs/monitoring.md. Redaction proven only by unit tests has not been
+         proven against the real serialiser, handler and shipper."

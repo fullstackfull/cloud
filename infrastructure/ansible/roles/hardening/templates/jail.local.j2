@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+
+[DEFAULT]
+bantime  = {{ hardening_fail2ban_bantime }}
+findtime = {{ hardening_fail2ban_findtime }}
+maxretry = {{ hardening_fail2ban_maxretry }}
+
+# The operators' own networks are never banned. fail2ban locking the team out of
+# the fleet — because someone mistyped a passphrase during an incident — costs
+# more than the brute-force attempts it would have stopped from those addresses.
+ignoreip = {{ hardening_fail2ban_ignoreip | join(' ') }}
+
+# fail2ban writes into the same nftables ruleset this role manages, in its own
+# table, so a `nft -f /etc/nftables.conf` reload cannot flush live bans and a ban
+# cannot flush the platform's rules.
+banaction = nftables[type=multiport]
+backend = systemd
+
+[sshd]
+enabled = true
+port    = {{ hardening_ssh_port }}

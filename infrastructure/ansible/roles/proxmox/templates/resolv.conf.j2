@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+{% if proxmox_dns_search %}
+search {{ proxmox_dns_search }}
+{% endif %}
+{% for server in proxmox_dns_servers %}
+nameserver {{ server }}
+{% endfor %}
+
+# Two resolvers minimum. A hypervisor that cannot resolve names cannot reach the
+# package repositories, cannot verify a certificate chain that needs an OCSP
+# lookup, and cannot resolve the backup server it is about to write to.
+options timeout:2 attempts:2

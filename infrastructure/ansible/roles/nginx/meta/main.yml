@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  author: Lynomia Cloud platform team
+  description: "Nginx in front of the control plane, no directory listing, no server tokens"
+  company: Lynomia Cloud
+  license: proprietary
+  min_ansible_version: '2.16'
+  platforms:
+    - name: Debian
+      versions: [bookworm, trixie]
+    - name: Ubuntu
+      versions: [jammy, noble]
+    - name: EL
+      versions: ['8', '9']
+
+dependencies: []

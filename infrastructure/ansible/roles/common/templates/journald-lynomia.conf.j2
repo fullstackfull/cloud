@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+[Journal]
+Storage={{ common_journald_persistent | ternary('persistent', 'auto') }}
+SystemMaxUse={{ common_journald_max_use }}
+MaxFileSec={{ common_journald_max_file_sec }}
+# Compression and sealing are cheap; the disk they save is disk that a full
+# hypervisor would otherwise have stopped every running machine over.
+Compress=yes

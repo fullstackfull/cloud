@@ -1,0 +1,68 @@
+# {{ ansible_managed }}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ nginx_server_name }};
+
+    # Everything is redirected, including the API. A client that reaches the
+    # API over plaintext has already sent its bearer token in the clear, and a
+    # 301 afterwards does not un-send it — but it does stop the next request.
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name {{ nginx_server_name }};
+
+    root {{ nginx_root }};
+    index index.php;
+
+    ssl_certificate     {{ nginx_tls_certificate }};
+    ssl_certificate_key {{ nginx_tls_certificate_key }};
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_tickets off;
+
+    # HSTS is set here rather than in the application because it must be sent
+    # even on responses the application never generates — a 502 from a failed
+    # deploy included.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # The version number tells a scanner which advisories to read.
+    server_tokens off;
+
+    client_max_body_size {{ nginx_client_max_body_size }};
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:{{ nginx_fpm_socket }};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_hide_header X-Powered-By;
+        fastcgi_read_timeout {{ php_fpm_request_timeout | default('60s') | regex_replace('s$', '') }};
+    }
+
+    # Laravel keeps .env, storage and the vendor tree above the document root,
+    # but a misplaced file or a future deploy layout should not become a
+    # download. Dotfiles are refused outright.
+    location ~ /\. {
+        deny all;
+    }
+
+    # Directory listing would enumerate the build's asset filenames, which for a
+    # source-mapped bundle is the source tree.
+    autoindex off;
+
+    access_log /var/log/nginx/lynomia-access.log;
+    error_log  /var/log/nginx/lynomia-error.log warn;
+}

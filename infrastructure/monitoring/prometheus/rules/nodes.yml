@@ -1,0 +1,300 @@
+# Machine-level alerts: hypervisors, hosting nodes, platform hosts.
+#
+# Two conventions run through this file.
+#
+# 1. Thresholds are per `role`, not global. A hypervisor at 92% disk cannot
+#    take a snapshot and its running guests freeze; a log box at 92% is
+#    unremarkable. One number for both either pages at 3am for nothing or
+#    arrives after the guests have already stopped.
+#
+# 2. Every alert names the machine and the measured value in its annotation.
+#    An alert that says "disk is nearly full" without saying which filesystem
+#    and how full costs the responder a login before they can even triage.
+
+groups:
+  - name: nodes.availability
+    rules:
+      - alert: NodeDown
+        # `up` is the scrape result, not something the exporter reports, so it
+        # exists even when the machine is entirely gone — which is the only
+        # case that matters here.
+        expr: up{job="node"} == 0
+        # Two minutes, not thirty seconds: a reboot for a kernel update is not
+        # an incident, and a monitoring system that pages for every planned
+        # restart gets muted, which is how a real outage goes unanswered.
+        for: 2m
+        labels:
+          severity: critical
+          component: node
+        annotations:
+          summary: 'Node {{ $labels.instance }} is not responding to scrapes'
+          description: >-
+            {{ $labels.instance }} ({{ $labels.role }}, service {{ $labels.service }})
+            has failed every scrape for 2 minutes. If this is a hypervisor, the guests
+            on it are affected right now; if it is a hosting node, every account on it
+            is offline.
+          runbook_url: https://docs.lynomia.internal/runbooks/node-down
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+
+      - alert: HypervisorNodeOffline
+        # The cluster's own opinion, which can disagree with ours: a node whose
+        # node_exporter is reachable but which PVE has fenced is still unable
+        # to run a guest.
+        expr: pve_up{id=~"node/.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: compute
+        annotations:
+          summary: 'Proxmox reports {{ $labels.id }} offline in cluster {{ $labels.cluster_name }}'
+          description: >-
+            The PVE cluster considers {{ $labels.id }} offline. HA guests will be
+            relocated if HA is configured; guests that are not HA-managed are down.
+            Check quorum before touching anything — restarting a node in a cluster
+            that has lost quorum can fence the survivors.
+          runbook_url: https://docs.lynomia.internal/runbooks/node-down
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+
+      - alert: HostingNodeUnavailable
+        # Deliberately separate from NodeDown even though the expression is
+        # nearly the same. The blast radius is different (every site and mailbox
+        # on the box, at once), the routing is different, and the runbook is
+        # different — it starts with "stop placement on this node".
+        expr: up{job="node", role="hosting"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: shared-hosting
+        annotations:
+          summary: 'Hosting node {{ $labels.instance }} is unavailable'
+          description: >-
+            Every website, mailbox and database on {{ $labels.instance }} is offline.
+            Mark the node as not accepting new accounts in the control plane before
+            starting recovery, so provisioning does not place fresh accounts onto a
+            machine that is being rebuilt.
+          runbook_url: https://docs.lynomia.internal/runbooks/hosting-node-down
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
+
+      - alert: DedicatedServerUnreachable
+        # ICMP is all the platform has: the customer owns the OS and there is
+        # no agent. Fifteen minutes because a customer rebooting their own box,
+        # or reinstalling it, is normal and is not ours to page about.
+        expr: probe_success{job="blackbox-icmp"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: dedicated
+        annotations:
+          summary: 'Dedicated server {{ $labels.instance }} has not answered ICMP for 15 minutes'
+          description: >-
+            {{ $labels.instance }} is unreachable. The customer controls this operating
+            system, so this is only actionable once network and power are ruled out:
+            check the switch port and the BMC before contacting the customer.
+          runbook_url: https://docs.lynomia.internal/runbooks/dedicated-unreachable
+
+  - name: nodes.saturation
+    rules:
+      - alert: NodeCpuSaturated
+        # Averaged across cores and measured over five minutes. A single core
+        # pinned by one guest is normal; every core busy for half an hour means
+        # the next placement makes it worse for everyone already there.
+        expr: >-
+          100 * (1 - avg by (instance, role, service) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 30m
+        labels:
+          severity: warning
+          component: node
+        annotations:
+          summary: 'CPU on {{ $labels.instance }} has been above 90% for 30 minutes'
+          description: >-
+            {{ $labels.instance }} is at {{ printf "%.0f" $value }}% CPU averaged across
+            all cores. On a hypervisor this shows up to customers as steal time.
+            Stop placing new guests here before investigating which guest is responsible.
+          runbook_url: https://docs.lynomia.internal/runbooks/node-saturation
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+
+      - alert: NodeMemoryHigh
+        # MemAvailable, not MemFree. Free memory on a busy Linux box is close to
+        # zero by design because the page cache uses it; alerting on MemFree
+        # would fire constantly on a perfectly healthy machine.
+        expr: >-
+          100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 15m
+        labels:
+          severity: warning
+          component: node
+        annotations:
+          summary: 'Memory on {{ $labels.instance }} is {{ printf "%.0f" $value }}% used'
+          description: >-
+            Available memory on {{ $labels.instance }} has been below 10% for 15 minutes.
+            On a hypervisor the next thing that happens is the OOM killer choosing a
+            guest, which looks to that customer like an unexplained hard reset.
+          runbook_url: https://docs.lynomia.internal/runbooks/node-saturation
+
+      - alert: NodeMemoryCritical
+        expr: >-
+          100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 96
+        for: 5m
+        labels:
+          severity: critical
+          component: node
+        annotations:
+          summary: 'Memory on {{ $labels.instance }} is critically low ({{ printf "%.0f" $value }}% used)'
+          description: >-
+            {{ $labels.instance }} has under 4% available memory. Guests are about to be
+            killed. Migrate or stop the largest guest rather than waiting for the kernel
+            to pick one at random.
+          runbook_url: https://docs.lynomia.internal/runbooks/node-saturation
+
+  - name: nodes.disk
+    rules:
+      - alert: HypervisorDiskAlmostFull
+        # Hypervisors get the strictest threshold on the platform. Below ~12%
+        # free, qcow2 growth and snapshot metadata start failing, and a guest
+        # whose disk cannot grow pauses rather than erroring — which reaches the
+        # customer as a hung machine with no message.
+        expr: >-
+          node_filesystem_avail_bytes{job="node", role="hypervisor", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+            / node_filesystem_size_bytes{job="node", role="hypervisor", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+          < 0.12
+        for: 10m
+        labels:
+          severity: critical
+          component: compute
+        annotations:
+          summary: 'Hypervisor {{ $labels.instance }} has {{ $value | humanizePercentage }} free on {{ $labels.mountpoint }}'
+          description: >-
+            {{ $labels.mountpoint }} on {{ $labels.instance }} is nearly full. Running
+            guests stop when a thin volume cannot grow, and snapshots and backups fail
+            first. Free space or migrate guests now; do not delete a backup to make room.
+          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+
+      - alert: HostingNodeDiskAlmostFull
+        # 20%, higher than a hypervisor's, because a shared node fills from the
+        # inside: one customer's runaway log or mailbox can consume the last
+        # 10% faster than anyone can respond, and when it lands every site on
+        # the node breaks at once.
+        expr: >-
+          node_filesystem_avail_bytes{job="node", role="hosting", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+            / node_filesystem_size_bytes{job="node", role="hosting", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+          < 0.20
+        for: 10m
+        labels:
+          severity: warning
+          component: shared-hosting
+        annotations:
+          summary: 'Hosting node {{ $labels.instance }} has {{ $value | humanizePercentage }} free on {{ $labels.mountpoint }}'
+          description: >-
+            {{ $labels.mountpoint }} on {{ $labels.instance }} is filling. Stop placing
+            new accounts here, then find the account responsible — it is almost always
+            one mailbox or one unrotated log, not gradual growth.
+          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
+
+      - alert: NodeDiskAlmostFull
+        expr: >-
+          node_filesystem_avail_bytes{job="node", role!~"hypervisor|hosting", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+            / node_filesystem_size_bytes{job="node", role!~"hypervisor|hosting", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+          < 0.10
+        for: 15m
+        labels:
+          severity: warning
+          component: node
+        annotations:
+          summary: '{{ $labels.instance }} has {{ $value | humanizePercentage }} free on {{ $labels.mountpoint }}'
+          description: >-
+            {{ $labels.mountpoint }} on {{ $labels.instance }} ({{ $labels.role }}) is
+            below 10% free.
+          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+
+      - alert: NodeDiskWillFillIn4Hours
+        # The rate-of-change alert that the threshold alerts cannot replace. A
+        # volume going from 60% to 0% inside four hours is an incident in
+        # progress; by the time it trips a static threshold there is no time
+        # left to act on it.
+        expr: >-
+          predict_linear(node_filesystem_avail_bytes{job="node", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}[2h], 4 * 3600) < 0
+          and
+          node_filesystem_avail_bytes{job="node", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"}
+            / node_filesystem_size_bytes{job="node", fstype!~"tmpfs|ramfs|overlay|squashfs|fuse.lxcfs"} < 0.40
+        for: 30m
+        labels:
+          severity: warning
+          component: node
+        annotations:
+          summary: '{{ $labels.mountpoint }} on {{ $labels.instance }} is projected to fill within 4 hours'
+          description: >-
+            Extrapolating the last two hours of consumption, {{ $labels.mountpoint }} on
+            {{ $labels.instance }} runs out of space within four hours. The second half of
+            the expression suppresses this on volumes that are still mostly empty, where
+            a short burst of writes projects alarmingly and means nothing.
+          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+
+  - name: nodes.storage
+    rules:
+      - alert: FilesystemReadOnly
+        # A filesystem remounting read-only is the kernel telling you it has
+        # already given up on the device. Nothing above this in the stack will
+        # report a clean error; writes simply fail everywhere at once.
+        expr: node_filesystem_readonly{job="node", fstype!~"tmpfs|ramfs|squashfs"} == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: '{{ $labels.mountpoint }} on {{ $labels.instance }} has gone read-only'
+          description: >-
+            The kernel remounted {{ $labels.mountpoint }} read-only, which it does after
+            an I/O error it cannot recover from. Treat the underlying device as failing.
+            Do not remount read-write to "test" it — take the workload off first.
+          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
+
+      - alert: RaidArrayDegraded
+        expr: node_md_disks{state="failed"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: 'RAID array {{ $labels.device }} on {{ $labels.instance }} has {{ $value }} failed disk(s)'
+          description: >-
+            {{ $labels.device }} is running degraded. The array is one more failure from
+            data loss, and rebuild is itself the most likely moment for the second
+            failure — verify backups are current before replacing the disk.
+          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
+
+      - alert: ProxmoxStorageUnavailable
+        # The PVE view of storage, which covers the cases node_exporter cannot
+        # see at all: an NFS or Ceph pool that is unreachable from the node but
+        # whose local mount still looks fine.
+        expr: pve_up{id=~"storage/.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: 'Proxmox storage {{ $labels.id }} is unavailable'
+          description: >-
+            PVE cannot reach {{ $labels.id }}. Guests with disks on it will stall on the
+            next write, backups to it will fail, and provisioning onto it will fail after
+            the customer has already paid.
+          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+
+      - alert: SmartHealthFailing
+        # Written by the smartmon textfile collector. Predictive rather than
+        # reactive: this is the one storage signal that arrives before the data
+        # is at risk instead of after.
+        expr: smartmon_device_smart_healthy == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: 'SMART reports {{ $labels.disk }} on {{ $labels.instance }} as unhealthy'
+          description: >-
+            {{ $labels.disk }} has failed its SMART health assessment. Schedule a
+            replacement during a maintenance window rather than waiting for it to fail
+            into a degraded array at 3am.
+          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure

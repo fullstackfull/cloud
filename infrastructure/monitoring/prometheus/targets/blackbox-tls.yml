@@ -1,0 +1,9 @@
+# Certificate expiry. Every name that terminates TLS for a customer, including
+# the ones nobody thinks about until they expire on a Saturday.
+- targets:
+    - portal.lynomia.com:443
+    - api.lynomia.com:443
+    - admin.lynomia.com:443
+    - webmail.lynomia.com:443
+  labels:
+    service: tls

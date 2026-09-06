@@ -1,0 +1,253 @@
+// Grafana Alloy — log shipping for the Lynomia control plane.
+//
+// Promtail is deliberately not used anywhere in this platform. It is
+// end-of-life, and starting a new platform on a component that is already past
+// its support window means scheduling a migration before the first year is out.
+//
+// The pipeline is: tail the application's structured JSON log, parse it, keep a
+// small fixed set of stream labels, attach the correlation IDs as structured
+// metadata, and push to Loki.
+//
+// ---------------------------------------------------------------------------
+// Why the correlation IDs are structured metadata and not labels
+// ---------------------------------------------------------------------------
+// Every log line carries request_id, and often order_id, service_id,
+// provisioning_job_id and customer_id. In Loki, the set of label values defines
+// the set of streams, and every distinct combination is a separate index entry
+// and a separate set of chunks. Promoting request_id to a label would create
+// one stream per HTTP request: millions of streams, an index larger than the
+// logs, and queries that time out — the failure mode where the logging system
+// becomes unusable exactly in proportion to how much traffic there is to
+// investigate.
+//
+// Structured metadata (Loki 3.x) attaches the same key/value pairs to each
+// individual line without touching the stream cardinality, and they are queried
+// the same way an operator expects:
+//
+//     {service="control-plane"} | request_id="01JB2K..."
+//
+// So this pipeline does exactly what the monitoring documentation promises —
+// "a customer's VPS order failed around 14:02" becomes one query — without the
+// cardinality bill.
+
+logging {
+	level  = "info"
+	format = "logfmt"
+}
+
+// ---------------------------------------------------------------------------
+// The control plane's structured JSON log.
+//
+// One JSON object per line, written by the Monolog channel built in
+// Lynomia\Modules\Shared\Infrastructure\Logging\StructuredLogger.
+// ---------------------------------------------------------------------------
+local.file_match "control_plane" {
+	path_targets = [{
+		__path__ = "/var/log/lynomia/lynomia.json",
+		job      = "control-plane",
+		service  = "control-plane",
+		env      = sys.env("LYNOMIA_ENV"),
+		host     = sys.env("HOSTNAME"),
+	}]
+
+	// Ten seconds to notice a rotated or newly created file. Faster than the log
+	// rotation window, slower than a stat storm.
+	sync_period = "10s"
+}
+
+loki.source.file "control_plane" {
+	targets    = local.file_match.control_plane.targets
+	forward_to = [loki.process.control_plane.receiver]
+
+	// Start from the beginning of a file Alloy has not seen before. After a
+	// restart the position file resumes where it left off; on a brand new file
+	// the alternative would silently drop everything written before Alloy
+	// happened to start, which is the window an incident most often lands in.
+	tail_from_end = false
+}
+
+loki.process "control_plane" {
+	forward_to = [loki.write.default.receiver]
+
+	// --- 1. Parse the envelope. -----------------------------------------------
+	//
+	// Monolog's JsonFormatter emits: message, context, level, level_name,
+	// channel, datetime, extra. Only the fields that are actually used
+	// downstream are extracted; pulling the whole object into the pipeline would
+	// copy every stack trace through every subsequent stage.
+	stage.json {
+		expressions = {
+			level     = "level_name",
+			channel   = "channel",
+			timestamp = "datetime",
+			output    = "message",
+		}
+	}
+
+	// --- 2. Parse the correlation IDs out of the context. ----------------------
+	//
+	// Laravel's Context facade merges into the record's `context` key, so these
+	// are nested one level down. A missing key yields an empty value rather than
+	// an error, which is what should happen: a console command has no request_id
+	// and that is not a fault.
+	stage.json {
+		expressions = {
+			request_id          = "context.request_id",
+			order_id            = "context.order_id",
+			service_id          = "context.service_id",
+			customer_id         = "context.customer_id",
+			provisioning_job_id = "context.provisioning_job_id",
+			correlation_id      = "context.correlation_id",
+			exception_class     = "context.exception.class",
+		}
+	}
+
+	// --- 3. Stream labels: low cardinality only. -------------------------------
+	//
+	// Bounded sets, all of them: a handful of levels, a handful of channels. The
+	// service/env/host labels come from the file target above and are equally
+	// bounded. Nothing derived from a request or a customer is allowed here.
+	stage.labels {
+		values = {
+			level   = "",
+			channel = "",
+		}
+	}
+
+	// --- 4. Correlation IDs: structured metadata, not labels. ------------------
+	stage.structured_metadata {
+		values = {
+			request_id          = "",
+			order_id            = "",
+			service_id          = "",
+			customer_id         = "",
+			provisioning_job_id = "",
+			correlation_id      = "",
+			exception_class     = "",
+		}
+	}
+
+	// --- 5. The application's timestamp, not the shipper's. --------------------
+	//
+	// Without this, every line is stamped with the moment Alloy read it. A
+	// backlogged shipper, or one restarted after an outage, then replays an hour
+	// of history all bunched at the current second — and the ordering that makes
+	// a log readable during an incident is exactly what is lost.
+	stage.timestamp {
+		source           = "timestamp"
+		format           = "RFC3339"
+		fallback_formats = ["RFC3339Nano", "UnixMs"]
+	}
+
+	// --- 6. Secret redaction: a backstop, not the control. ---------------------
+	//
+	// The real guarantee is the Monolog processor (RedactSecretsProcessor), which
+	// cannot be bypassed by anything logging through the application. This exists
+	// for the lines that never went through it: a vendor package writing straight
+	// to a file, or an operator pasting output into a log during an incident.
+	// Belt and braces, and cheap.
+	stage.replace {
+		expression = "(?i)(Bearer|Basic|Token)\\s+([A-Za-z0-9._\\-/+=]{8,})"
+		replace    = "$1 [redacted]"
+	}
+
+	stage.replace {
+		expression = "\\b(sk|rk)_(live|test)_[A-Za-z0-9]{8,}"
+		replace    = "[redacted]"
+	}
+
+	stage.replace {
+		expression = "\\bPVE(?:API)?[A-Za-z]*:[^\\s\"']+"
+		replace    = "[redacted]"
+	}
+
+	// --- 7. Drop debug noise in production. ------------------------------------
+	//
+	// Debug lines are kept in staging, where they are read, and dropped in
+	// production, where they are volume. The drop is on the parsed level, so it
+	// survives a change in log format.
+	stage.drop {
+		source              = "level"
+		value               = "DEBUG"
+		drop_counter_reason = "debug_in_production"
+	}
+
+	// A metrics view of the log stream itself, scraped by Prometheus from Alloy.
+	// Counting errors from the logs is a cheap second opinion on the
+	// application's own error metrics, and it keeps working when the application
+	// is too broken to report on itself.
+	stage.metrics {
+		metric.counter {
+			name              = "lynomia_log_lines_total"
+			description       = "Log lines shipped to Loki, by level."
+			match_all         = true
+			action            = "inc"
+			max_idle_duration = "24h"
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Journal — systemd units on the same host.
+//
+// The application log explains what the application did. The journal explains
+// what happened to it: an OOM kill, a failed unit, a restarted php-fpm. During
+// an incident the two are read side by side, so they belong in the same place.
+// ---------------------------------------------------------------------------
+loki.source.journal "host" {
+	forward_to    = [loki.write.default.receiver]
+	max_age       = "12h"
+	relabel_rules = discovery.relabel.journal.rules
+	labels        = {
+		job     = "systemd-journal",
+		service = "host",
+	}
+}
+
+discovery.relabel "journal" {
+	targets = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "unit"
+	}
+
+	rule {
+		source_labels = ["__journal__hostname"]
+		target_label  = "host"
+	}
+
+	rule {
+		source_labels = ["__journal_priority_keyword"]
+		target_label  = "level"
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Push to Loki.
+// ---------------------------------------------------------------------------
+loki.write "default" {
+	endpoint {
+		url = sys.env("LOKI_PUSH_URL")
+
+		// A short queue that survives a Loki restart or a network blip without
+		// losing the lines written during it. Beyond this Alloy applies
+		// backpressure to the file tailer, which is the correct failure: the log
+		// file is itself a durable buffer, and re-reading it later loses nothing.
+		batch_wait = "1s"
+		batch_size = "1MiB"
+
+		retry_on_http_429 = true
+
+		max_backoff_period  = "5m"
+		min_backoff_period  = "500ms"
+		max_backoff_retries = 10
+	}
+
+	external_labels = {
+		// Stamped on every stream so a second region's logs, shipped to the same
+		// Loki, remain distinguishable. Without it, two identically named hosts in
+		// two datacenters silently merge into one stream.
+		region = sys.env("LYNOMIA_REGION"),
+	}
+}

@@ -1,0 +1,20 @@
+# Probed from outside the application, over the real path a customer takes:
+# DNS, load balancer, TLS termination, application. A synthetic check that
+# skips any of those is a check of something no customer uses.
+- targets:
+    - https://portal.lynomia.com/up
+  labels:
+    service: customer-portal
+    tier: customer-facing
+
+- targets:
+    - https://api.lynomia.com/up
+  labels:
+    service: public-api
+    tier: customer-facing
+
+- targets:
+    - https://admin.lynomia.com/up
+  labels:
+    service: admin-portal
+    tier: internal

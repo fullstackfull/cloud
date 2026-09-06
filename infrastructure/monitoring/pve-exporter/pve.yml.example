@@ -1,0 +1,25 @@
+# prometheus-pve-exporter credentials — copy to pve.yml and fill in.
+#
+# Use an API TOKEN, never a root password. A token can be scoped to PVEAuditor
+# on / and revoked from the PVE UI without changing any password, and it never
+# grants the ability to start, stop or delete a guest — which is the whole point
+# of a read-only monitoring credential.
+#
+#   pveum user add monitoring@pve
+#   pveum aclmod / -user monitoring@pve -role PVEAuditor
+#   pveum user token add monitoring@pve prometheus --privsep 0
+#
+# The token secret is printed exactly once. If it is lost, delete the token and
+# make a new one; there is no way to read it back.
+
+default:
+  user: monitoring@pve
+  token_name: prometheus
+  token_value: REPLACE_ME
+  # Certificate verification stays on. The exporter talks to the hypervisors
+  # that run every customer's machine; accepting any certificate there means
+  # accepting a man in the middle on the credential that lists them all.
+  #
+  # If the cluster uses the Proxmox self-signed CA, distribute that CA to this
+  # container and point Python's trust store at it rather than turning this off.
+  verify_ssl: true

@@ -1,0 +1,19 @@
+---
+# The stack's configuration lives in infrastructure/monitoring and is deployed
+# from git. Editing a Prometheus rule on the box means the next run silently
+# reverts an operator's fix — during the incident they made it for.
+monitoring_compose_file: docker-compose.monitoring.yml
+monitoring_service_name: lynomia-monitoring
+
+monitoring_docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-compose-plugin
+
+# Grafana is the only component with a reason to be reachable by a human, and
+# never without authentication.
+monitoring_grafana_port: 3000
+
+monitoring_inbound_rules:
+  - {port: 3000, proto: tcp, comment: 'monitoring: Grafana, authenticated'}

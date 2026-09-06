@@ -1,0 +1,26 @@
+---
+# Control-plane invariants.
+
+# Exactly one host in this group runs the Laravel scheduler. Not zero, not two.
+#
+# Zero means every recurring job stops: reservation reaping, reconciliation,
+# invoice generation, backup verification checks. All of it fails silently,
+# because a scheduler that never runs produces no errors.
+#
+# Two means every recurring job runs twice a minute. For reconciliation that is
+# wasted API calls; for the billing run it is a second invoice against a real
+# customer. roles/control_plane asserts the count is exactly one across the
+# group before it writes a crontab.
+lynomia_scheduler_host: false
+
+# Workers are supervised by systemd, not by a shell loop and not by supervisord.
+# Horizon must be restarted on deploy — a worker still executing the previous
+# release's code against the new schema is the subtlest deploy bug there is
+# (docs/deployment.md) — and `systemctl restart` is the only restart the
+# platform can be sure actually happened.
+control_plane_horizon_service: lynomia-horizon
+
+# The release is deployed by the CI/CD pipeline, not by this role. Ansible
+# builds the machine the release runs on; conflating the two means a
+# configuration change can only ship with a code change.
+control_plane_manage_release: false

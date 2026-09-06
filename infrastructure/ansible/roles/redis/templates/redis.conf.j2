@@ -1,0 +1,79 @@
+# {{ ansible_managed }}
+#
+# THIS FILE CONTAINS A PASSWORD. It is written 0640, owned by redis, and the
+# task that renders it runs with no_log so the value never reaches the play's
+# output or a --diff.
+
+{% for address in redis_bind_addresses %}
+bind {{ address }}
+{% endfor %}
+port {{ redis_port }}
+
+# protected-mode is a second net under the bind list: even if a future edit
+# widens the binding, an instance with no password refuses remote commands.
+protected-mode yes
+requirepass {{ redis_password }}
+
+# Renaming the most dangerous administrative commands. CONFIG SET dir plus
+# CONFIG SET dbfilename is how an authenticated client writes an arbitrary file
+# as the redis user; FLUSHALL on the queue instance deletes every pending job in
+# one keystroke, which is the same outcome as an eviction but faster.
+rename-command FLUSHALL ""
+rename-command FLUSHDB ""
+rename-command CONFIG ""
+
+maxmemory {{ redis_maxmemory }}
+
+# --------------------------------------------------------------------------
+# maxmemory-policy: {{ redis_effective_maxmemory_policy }}
+#
+{% if redis_hosts_queues %}
+# This instance carries the queues, so the policy is noeviction. When it fills,
+# writes fail with an error the platform can see and act on. The alternative —
+# any allkeys-* policy — deletes queued jobs silently: no error, no failed job,
+# no alert, and a customer who paid for a server that will never be built.
+{% else %}
+# Cache-only instance. Eviction here costs a cache miss, which is a slow request
+# and nothing more.
+{% endif %}
+# --------------------------------------------------------------------------
+maxmemory-policy {{ redis_effective_maxmemory_policy }}
+
+# ----------------------------------------------------------------- persistence
+appendonly {{ redis_appendonly | ternary('yes', 'no') }}
+appendfsync {{ redis_appendfsync }}
+appendfilename "appendonly.aof"
+dir /var/lib/redis
+
+{% if redis_hosts_queues %}
+# RDB snapshots are kept alongside the AOF as a cheap second copy, but they are
+# not what makes the queue durable — the AOF is. A snapshot every five minutes
+# would lose up to five minutes of enqueued provisioning on an unclean restart.
+{% endif %}
+save 900 1
+save 300 10
+save 60 10000
+
+# A failed background save must stop writes. The default is to keep accepting
+# them, which means the instance carries on happily while its only path to disk
+# is broken — and the operator finds out at the restart.
+stop-writes-on-bgsave-error yes
+
+# ---------------------------------------------------------------------- limits
+# A worker that blocks on BRPOP holds an idle connection by design; the timeout
+# must not reap it.
+timeout 0
+tcp-keepalive 300
+
+# Slow commands on the queue instance stall every worker behind them.
+slowlog-log-slower-than 10000
+slowlog-max-len 128
+
+# Keyspace notifications are off. They are useful and they also broadcast key
+# names — which on the session store are session identifiers.
+notify-keyspace-events ""
+
+daemonize no
+supervised systemd
+loglevel notice
+logfile ""

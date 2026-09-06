@@ -1,0 +1,11 @@
+# The control plane's metrics endpoint.
+#
+# One entry per application host behind the load balancer, not the load
+# balancer's own name: scraping through the balancer hides the instance that is
+# actually leaking workers, and makes queue depth flap between backends.
+- targets:
+    - cp-app-01.kw.lynomia.internal:443
+    - cp-app-02.kw.lynomia.internal:443
+  labels:
+    service: control-plane
+    role: application

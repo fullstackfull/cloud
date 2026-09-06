@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# control-plane.yml — PHP-FPM, Nginx, Redis client, Horizon, the scheduler.
+# =============================================================================
+#
+# Builds the machine the control plane runs on. It does NOT deploy a release:
+# that is the CI/CD pipeline's job, and conflating the two means a configuration
+# change can only ship with a code change.
+#
+#   ansible-playbook -i inventories/staging playbooks/control-plane.yml --check --diff
+#   ansible-playbook -i inventories/staging playbooks/control-plane.yml --diff
+#
+# Two refusals fire before anything is written, and both are group-wide rather
+# than per-host, so they are caught on the first host of the play:
+#
+#   1. The control plane must not share a machine with a hypervisor, a hosting
+#      node, the PXE server or the firewall. It has to be able to operate and
+#      recover those, which it cannot do from inside them.
+#   2. Exactly one host in the group runs the scheduler. Two run every recurring
+#      job twice — for the billing run, that is a second set of invoices.
+
+- name: Build the control-plane hosts
+  hosts: control_plane
+  gather_facts: true
+  become: true
+
+  # Rolling, one at a time, so a change that breaks the API takes out one host
+  # of several rather than all of them at once.
+  serial: 1
+  max_fail_percentage: 0
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: Load the Vault-encrypted secrets for this environment
+      ansible.builtin.include_vars:
+        file: "{{ vault_file }}"
+      loop: "{{ query('first_found', [lynomia_vault_file], errors='ignore') }}"
+      loop_control:
+        loop_var: vault_file
+      no_log: true
+
+    # Every role that needs an inbound port contributes it here, so the ruleset
+    # the hardening role builds has one owner per open port.
+    - name: Collect the inbound ports this host's roles require
+      ansible.builtin.set_fact:
+        hardening_allowed_inbound: >-
+          {{ (hardening_allowed_inbound | default([]))
+             + (nginx_inbound_rules | default([]))
+             + (control_plane_inbound_rules | default([])) }}
+
+  roles:
+    - role: common
+    - role: hardening
+    - role: php_fpm
+    - role: nginx
+    - role: control_plane

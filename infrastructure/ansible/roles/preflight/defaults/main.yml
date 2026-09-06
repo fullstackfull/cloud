@@ -1,0 +1,27 @@
+---
+# When true (the default) a structural violation stops the run. When false the
+# role surveys the whole fleet and reports every finding at the end.
+#
+# Both modes matter. Before a change you want the refusal. When you have
+# inherited a fleet and are trying to find out how bad it is, you want the
+# survey — and a preflight that aborts on the first bad host cannot give you one.
+preflight_fail_on_violation: true
+
+# Free space below which a host is reported. On a hypervisor a full disk stops
+# snapshots and stops running machines; on a hosting node every site on it
+# breaks at once. Ten percent is late, not early — it is the point at which the
+# report becomes an emergency rather than a note.
+preflight_min_free_disk_percent: 10
+
+# Clock skew against the Ansible controller, in seconds. Beyond this, log
+# correlation across hosts stops being reliable and TLS handshakes start failing
+# intermittently.
+preflight_max_clock_skew_seconds: 60
+
+preflight_supported_os:
+  - {distribution: Debian, major: '12'}
+  - {distribution: Debian, major: '13'}
+  - {distribution: Ubuntu, major: '22'}
+  - {distribution: Ubuntu, major: '24'}
+  - {distribution: AlmaLinux, major: '9'}
+  - {distribution: Rocky, major: '9'}

@@ -1,0 +1,32 @@
+---
+# EVERY DEFAULT HERE IS A REFUSAL.
+
+# `lynomia_role` is deliberately NOT defaulted here. It is a fact about the
+# machine, declared in the inventory, and a role that supplies a default for it
+# is a role that can be tricked into believing a host is something it never
+# said it was. The assertion below treats "undeclared" as "not a firewall".
+
+# An operator has a console or out-of-band path to this firewall OPEN RIGHT NOW.
+# This is not paperwork. Applying a ruleset to the edge is the one change that
+# can remove the path used to undo it, and the difference between a five-minute
+# mistake and a four-hour outage is whether somebody already had a console up
+# when it happened.
+opnsense_console_access_confirmed: false
+
+# OPNsense API endpoint and credentials. Supplied from the Vault file; nothing
+# here is committed. The API is used from the CONTROLLER rather than by running
+# Ansible on the firewall: OPNsense is FreeBSD with a curated package set, and
+# installing a Python interpreter on it to satisfy a config-management tool puts
+# the appliance outside the vendor's supported configuration — on the one box
+# where "unsupported" means the datacentre's edge.
+opnsense_api_url: ~
+opnsense_api_key: ~
+opnsense_api_secret: ~
+
+# Where the pre-change configuration export is written on the controller.
+opnsense_backup_dir: "{{ playbook_dir }}/../.ansible/opnsense-backups"
+
+# Declared rulesets. Empty by default: this role applies what the inventory
+# declares and nothing implicit.
+opnsense_aliases: []
+opnsense_rules: []

@@ -1,0 +1,130 @@
+---
+# The control plane authenticates to Proxmox with an API token whose role grants
+# only what provisioning needs. Never a root password: a compromised control
+# plane must not be a compromised cluster, and a token is revocable in one
+# command while a root password is a coordinated change across every node.
+
+- name: Read the roles that already exist
+  ansible.builtin.command:
+    cmd: pveum role list --output-format json
+  register: proxmox_existing_roles
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Create the provisioning role
+  ansible.builtin.command:
+    cmd: >-
+      pveum role add {{ proxmox_api_role }}
+      -privs "{{ proxmox_api_role_privileges | join(' ') }}"
+  become: true
+  when: proxmox_api_role not in (proxmox_existing_roles.stdout | from_json | map(attribute='roleid') | list)
+  changed_when: true
+
+# Privileges are re-applied on every run rather than only at creation. A role
+# edited by hand in the web UI — to debug something, six months ago — drifts
+# from what is declared here, and the drift is invisible until a provisioning
+# call fails with a permission error nobody can explain.
+- name: Keep the provisioning role's privileges exactly as declared
+  ansible.builtin.command:
+    cmd: >-
+      pveum role modify {{ proxmox_api_role }}
+      -privs "{{ proxmox_api_role_privileges | join(' ') }}"
+  become: true
+  when: proxmox_api_role in (proxmox_existing_roles.stdout | from_json | map(attribute='roleid') | list)
+  changed_when: false
+
+- name: Read the users that already exist
+  ansible.builtin.command:
+    cmd: pveum user list --output-format json
+  register: proxmox_existing_users
+  changed_when: false
+  check_mode: false
+  become: true
+
+- name: Create the control plane's API user
+  ansible.builtin.command:
+    cmd: "pveum user add {{ proxmox_api_user }} --comment 'Lynomia control plane — provisioning'"
+  become: true
+  when: proxmox_api_user not in (proxmox_existing_users.stdout | from_json | map(attribute='userid') | list)
+  changed_when: true
+
+- name: Grant the provisioning role at the root of the resource tree
+  ansible.builtin.command:
+    cmd: "pveum acl modify / -user {{ proxmox_api_user }} -role {{ proxmox_api_role }}"
+  become: true
+  changed_when: false
+
+- name: Read the tokens this user already holds
+  ansible.builtin.command:
+    cmd: "pveum user token list {{ proxmox_api_user }} --output-format json"
+  register: proxmox_existing_tokens
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  become: true
+
+# --------------------------------------------------------------------------
+# Token creation is conditional on the token NOT already existing, and that
+# condition is load-bearing.
+#
+# Proxmox shows a token's secret exactly once, at creation, and there is no way
+# to read it back. Recreating a token that already exists issues a new secret
+# and INVALIDATES THE OLD ONE — which is the running control plane's credential.
+# Every provisioning call, every reconciliation run and every power operation
+# against this cluster starts failing, and the failure looks like the cluster is
+# down rather than like a config run rotated a key.
+# --------------------------------------------------------------------------
+- name: Create the API token, once, and never re-create it
+  ansible.builtin.command:
+    cmd: >-
+      pveum user token add {{ proxmox_api_user }} {{ proxmox_api_token_name }}
+      --privsep 0 --output-format json
+  register: proxmox_new_token
+  become: true
+  when:
+    - proxmox_existing_tokens.rc == 0
+    - proxmox_api_token_name not in (proxmox_existing_tokens.stdout | from_json | map(attribute='tokenid') | list)
+    - not ansible_check_mode
+  changed_when: true
+  # The command's output IS the secret. Without no_log it goes to the play's
+  # output, to any CI job capturing it, and into the operator's scrollback.
+  no_log: true
+
+- name: Write the new token secret where only root can read it
+  ansible.builtin.copy:
+    content: "{{ (proxmox_new_token.stdout | from_json).value }}\n"
+    dest: "{{ proxmox_api_token_secret_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  when:
+    - proxmox_new_token is defined
+    - proxmox_new_token.changed
+  no_log: true
+
+- name: Tell the operator to move the secret into the platform's secret store
+  ansible.builtin.debug:
+    msg: >-
+      A new API token was created for {{ proxmox_api_user }}!{{ proxmox_api_token_name }}
+      and its secret written to {{ proxmox_api_token_secret_path }} (0600, root only).
+      Move it into the platform's secret store and delete the file. It is not
+      printed here and cannot be read back from Proxmox — a lost token secret
+      means creating a new token, which invalidates the one the control plane is
+      currently using.
+  when:
+    - proxmox_new_token is defined
+    - proxmox_new_token.changed
+
+- name: Report an existing token that was left alone
+  ansible.builtin.debug:
+    msg: >-
+      {{ proxmox_api_user }}!{{ proxmox_api_token_name }} already exists and was NOT
+      re-created. Re-creating it would issue a new secret and invalidate the one
+      the running control plane holds, which stops every provisioning call
+      against this cluster. Rotation is a deliberate two-step: create a second
+      token, move the control plane onto it, then remove the first.
+  when:
+    - proxmox_existing_tokens.rc == 0
+    - proxmox_api_token_name in (proxmox_existing_tokens.stdout | from_json | map(attribute='tokenid') | list)

@@ -1,0 +1,15 @@
+---
+# Monitoring host invariants.
+
+# Prometheus and Alertmanager are NOT publicly reachable at all. Prometheus
+# exposes every metric the platform has — capacity, customer counts, which node
+# is nearly full — and Alertmanager can silence alerts, which is the first thing
+# an intruder would do. Grafana is reachable but never without authentication.
+monitoring_bind_address: 127.0.0.1
+monitoring_grafana_anonymous_access: false
+
+# The stack's configuration is the tree at infrastructure/monitoring, which is
+# version-controlled and deployed from git. Editing Prometheus rules on the box
+# means the next deploy silently reverts an operator's fix during an incident.
+monitoring_source_dir: monitoring
+monitoring_target_dir: /opt/lynomia/monitoring

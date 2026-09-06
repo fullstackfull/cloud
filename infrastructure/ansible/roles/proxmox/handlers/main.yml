@@ -1,0 +1,11 @@
+---
+- name: Restart node exporter
+  ansible.builtin.systemd_service:
+    name: prometheus-node-exporter
+    state: restarted
+  become: true
+
+# There is deliberately NO handler that reloads networking. A network reload on
+# a hypervisor is an explicit, scheduled action guarded by
+# `proxmox_apply_network`, never something a changed template triggers as a side
+# effect of an unrelated edit.

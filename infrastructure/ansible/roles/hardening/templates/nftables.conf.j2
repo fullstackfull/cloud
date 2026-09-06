@@ -1,0 +1,89 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+#
+# Default-deny inbound. Every open port below was asked for by a role that named
+# itself, so "why is 6379 open on this host?" has an answer that is not "it was
+# already like that".
+
+# ONLY THIS TABLE IS REPLACED — NOT THE WHOLE RULESET.
+#
+# `flush ruleset` would delete every table in the kernel, and fail2ban keeps its
+# active bans in a table of its own. Flushing the lot on every configuration
+# reload silently releases every ban this host is currently holding AND removes
+# the table fail2ban believes it is writing into, so its next unban fails and
+# the jail stops working — while `fail2ban-client status` still lists the bans.
+# Deleting and re-adding only `inet lynomia` leaves fail2ban's table untouched,
+# which is what jail.local claims and what has to actually be true.
+table inet lynomia {}
+delete table inet lynomia
+
+table inet lynomia {
+    chain input {
+        type filter hook input priority filter; policy {{ hardening_default_inbound_policy }};
+
+        # Established traffic first. Without this rule the policy drops the
+        # replies to the host's own outbound connections, and the symptom is
+        # "apt hangs" rather than "the firewall is wrong".
+        ct state established,related accept
+        ct state invalid drop
+
+        iif lo accept
+
+{% if hardening_allow_icmp %}
+        # Path-MTU discovery depends on these. Dropping ICMP does not hide the
+        # host from anything that matters and does break large transfers —
+        # which, on a backup path, means the backup that stalls at 4GB.
+        ip protocol icmp accept
+        ip6 nexthdr ipv6-icmp accept
+{% endif %}
+
+        # --- management access -------------------------------------------
+        # SSH is reachable only from the declared management networks. This is
+        # the rule the whole ruleset is built around: it goes in first, and the
+        # role refuses to run at all if the network list is empty.
+{% for cidr in hardening_management_cidrs %}
+{% if ':' in cidr %}
+        ip6 saddr {{ cidr }} tcp dport {{ hardening_ssh_port }} accept comment "management SSH"
+{% else %}
+        ip saddr {{ cidr }} tcp dport {{ hardening_ssh_port }} accept comment "management SSH"
+{% endif %}
+{% endfor %}
+
+        # --- role-requested exceptions -----------------------------------
+        # A rule matches on EITHER an input interface or a set of source
+        # networks. The interface form exists because some services cannot be
+        # constrained by source address at all: a DHCP DISCOVER arrives from
+        # 0.0.0.0, so `ip saddr <provisioning network>` drops the very packet
+        # the PXE server exists to answer, and the symptom is machines that
+        # network-boot and hang with no lease. Binding those rules to the named
+        # provisioning interface keeps them off every other network without
+        # having to allow an address that has not been assigned yet.
+{% for rule in hardening_allowed_inbound %}
+{% if rule.iface is defined %}
+        iifname "{{ rule.iface }}" {{ rule.proto | default('tcp') }} dport {{ rule.port }} accept comment "{{ rule.comment }}"
+{% else %}
+{% for cidr in rule.sources | default(hardening_management_cidrs) %}
+{% if ':' in cidr %}
+        ip6 saddr {{ cidr }} {{ rule.proto | default('tcp') }} dport {{ rule.port }} accept comment "{{ rule.comment }}"
+{% else %}
+        ip saddr {{ cidr }} {{ rule.proto | default('tcp') }} dport {{ rule.port }} accept comment "{{ rule.comment }}"
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+
+        # Everything else is dropped by the chain policy, silently. A reject
+        # would be friendlier to debug and also confirms to a scanner that
+        # something is listening here.
+    }
+
+    chain forward {
+        # Platform hosts do not route. A host that forwards is a host that can
+        # be used to reach the management network from a customer network.
+        type filter hook forward priority filter; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority filter; policy {{ hardening_default_outbound_policy }};
+    }
+}

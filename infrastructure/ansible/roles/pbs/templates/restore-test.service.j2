@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Lynomia restore test — proves the restore path, not just the backup job
+After=proxmox-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lynomia-pbs-restore-test
+
+# The script's own timeout is per restore; this one bounds the whole run. Both
+# are limits, not retries: a restore test that did not finish is reported as a
+# failed restore test.
+TimeoutStartSec={{ (pbs_restore_test_timeout_seconds | int) * 2 }}
+
+# A failing restore test must be visible. systemd marks the unit failed, the
+# node exporter's systemd collector exports that, and the alert in
+# docs/monitoring.md fires on it — "backup verification failed" is listed there
+# as worse than a failed backup, because an unverified backup looks like a backup.
+[Install]
+WantedBy=multi-user.target

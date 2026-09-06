@@ -1,0 +1,2 @@
+# The real credentials file is never committed. Create it from pve.yml.example.
+pve.yml

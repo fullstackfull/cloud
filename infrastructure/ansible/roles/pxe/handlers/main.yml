@@ -1,0 +1,10 @@
+---
+# Restart only. There is no reload path that reliably re-reads a changed
+# interface binding, and a dnsmasq that thinks it is still bound to the old
+# interface is precisely the failure this role exists to prevent.
+- name: Restart dnsmasq
+  ansible.builtin.systemd_service:
+    name: "{{ pxe_dhcp_service }}"
+    state: restarted
+  become: true
+  when: pxe_allow_serve_dhcp | bool

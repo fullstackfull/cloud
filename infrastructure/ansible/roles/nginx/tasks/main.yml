@@ -1,0 +1,84 @@
+---
+- name: Install nginx
+  ansible.builtin.package:
+    name: nginx
+    state: present
+  become: true
+
+- name: Configure the control-plane site
+  ansible.builtin.template:
+    src: control-plane.conf.j2
+    dest: /etc/nginx/sites-available/lynomia-control-plane.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: Reload nginx
+
+# THE SITE IS NOT ENABLED BEFORE ITS CERTIFICATE EXISTS.
+#
+# `nginx -t` fails outright on a server block whose `ssl_certificate` file is
+# missing, so enabling this site on a freshly built host — where TLS material is
+# issued by a separate process and is not in this repository — makes the whole
+# play fail on a machine that is otherwise correctly configured. The
+# configuration is still written and still reviewable in --diff; only the
+# symlink waits.
+#
+# Note what this task does NOT do: it never removes an existing symlink. A
+# certificate that disappears during a renewal is a reason for `nginx -t` to
+# fail loudly, not a reason for configuration management to take the API
+# offline by itself.
+- name: Look for the TLS certificate this site references
+  ansible.builtin.stat:
+    path: "{{ nginx_tls_certificate }}"
+  register: nginx_tls_present
+  check_mode: false
+
+- name: Enable the control-plane site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/lynomia-control-plane.conf
+    dest: /etc/nginx/sites-enabled/lynomia-control-plane.conf
+    state: link
+  become: true
+  when: nginx_tls_present.stat.exists
+  notify: Reload nginx
+
+- name: Report a site left disabled because its certificate is not on the host
+  ansible.builtin.debug:
+    msg: >-
+      {{ nginx_tls_certificate }} is not present on {{ inventory_hostname }}, so
+      the control-plane site was written but NOT enabled — nginx would refuse to
+      start with it. Issue the certificate (it is not in this repository) and
+      re-run; the next run enables the site.
+  when: not nginx_tls_present.stat.exists
+
+# The packaged default site answers on port 80 for any name that does not match
+# another server block. Left enabled it serves the distribution's welcome page
+# to anyone scanning the address range, which is a free advertisement of the
+# nginx version.
+- name: Disable the distribution's default site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  become: true
+  notify: Reload nginx
+
+# `nginx -t` reads the whole configuration, including the files just written. A
+# reload with a broken config leaves the old workers running and reports
+# success, so the breakage surfaces at the next restart — typically a reboot,
+# typically at 03:00.
+- name: Verify the whole nginx configuration parses
+  ansible.builtin.command:
+    cmd: nginx -t
+  become: true
+  changed_when: false
+  # In --check the templates above were not written, so this would validate the
+  # previous configuration and report a pass that means nothing.
+  when: not ansible_check_mode
+
+- name: Enable and start nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    enabled: true
+    state: started
+  become: true

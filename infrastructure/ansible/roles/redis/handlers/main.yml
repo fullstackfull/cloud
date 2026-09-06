@@ -1,0 +1,11 @@
+---
+# A Redis restart drops every connection and, on the queue instance, every
+# in-flight blocking pop. Workers reconnect and the jobs are still in the list —
+# but only because appendonly is on. On an instance without persistence this
+# handler would be a data-loss event, which is one more reason the role refuses
+# to configure the queue instance without it.
+- name: Restart redis
+  ansible.builtin.systemd_service:
+    name: "{{ redis_service }}"
+    state: restarted
+  become: true

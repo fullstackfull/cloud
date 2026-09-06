@@ -1,0 +1,23 @@
+---
+nginx_server_name: "{{ inventory_hostname }}"
+nginx_root: "{{ lynomia_base_dir }}/current/public"
+nginx_fpm_socket: "{{ php_fpm_listen | default('/run/php/lynomia.sock') }}"
+
+# TLS material is issued and renewed outside this role and referenced by path.
+# A certificate committed to a repository is a certificate that has to be
+# reissued the day the repository is cloned by someone who leaves.
+nginx_tls_certificate: /etc/ssl/lynomia/fullchain.pem
+nginx_tls_certificate_key: /etc/ssl/lynomia/privkey.pem
+
+nginx_client_max_body_size: 16m
+
+# Ports opened for this role. Every entry names who asked for it, so the
+# firewall ruleset can be read back to a set of owners rather than a mystery.
+# Both address families. The server blocks listen on `[::]:80` and `[::]:443`,
+# so a ruleset that only allows `0.0.0.0/0` produces a control plane that is
+# reachable over IPv4 and silently unreachable over IPv6 — which presents as a
+# customer whose browser picked AAAA reporting that the portal is down while it
+# works for everyone the operator asks.
+nginx_inbound_rules:
+  - {port: 80, proto: tcp, sources: ['0.0.0.0/0', '::/0'], comment: 'nginx: HTTP redirect to TLS'}
+  - {port: 443, proto: tcp, sources: ['0.0.0.0/0', '::/0'], comment: 'nginx: control-plane API and portals'}

@@ -1,0 +1,257 @@
+---
+# Proxmox VE post-install configuration.
+#
+# Proxmox is bare-metal software and this role does not install it. It
+# configures a node that has already been installed, and everything it does is
+# idempotent — running it twice must leave a node with running customer machines
+# exactly as it found it.
+
+# --------------------------------------------------------------------------
+# GUARD: this must actually be a Proxmox node.
+#
+# The role writes /etc/network/interfaces with `vmbr` bridges, adds the Proxmox
+# repositories and calls `pveum`. On a machine that is not Proxmox, the first of
+# those replaces working networking with bridges over interfaces that may not
+# exist — and the machine does not come back. The check is cheap and the failure
+# it prevents needs a console to undo.
+# --------------------------------------------------------------------------
+- name: Look for the Proxmox cluster filesystem
+  ansible.builtin.stat:
+    path: /etc/pve
+  register: proxmox_pve_dir
+  check_mode: false
+
+- name: Refuse to run Proxmox post-install on a machine that is not Proxmox
+  ansible.builtin.assert:
+    that:
+      - proxmox_pve_dir.stat.exists
+      - proxmox_pve_dir.stat.isdir
+    fail_msg: >-
+      /etc/pve is not present on {{ inventory_hostname }}, so this is not a
+      Proxmox VE node. This role rewrites /etc/network/interfaces with vmbr
+      bridges; on a machine without Proxmox that replaces working networking
+      with bridges over interfaces that may not exist, and the machine does not
+      come back without a console.
+    quiet: true
+
+- name: Refuse a node that has not declared its management interface
+  ansible.builtin.assert:
+    that:
+      - proxmox_management_interface is not none
+      - proxmox_management_interface | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }} does not declare `proxmox_management_interface`.
+      It is named rather than discovered because auto-detection returns the
+      interface carrying the default route, which on a correctly built
+      hypervisor is the customer bridge and not the management link.
+    quiet: true
+
+# --------------------------------------------------------------------------
+# Repositories
+# --------------------------------------------------------------------------
+# The enterprise repository needs a subscription. Configured without one, every
+# `apt update` ends in a 401 — and an operator who has learned to ignore apt's
+# output is an operator who also misses the security updates.
+- name: Disable the enterprise repository when there is no subscription
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/pve-enterprise.list
+    state: absent
+  become: true
+  when: not (proxmox_use_enterprise_repo | bool)
+
+- name: Configure the no-subscription repository
+  ansible.builtin.deb822_repository:
+    name: pve-no-subscription
+    types: [deb]
+    uris: http://download.proxmox.com/debian/pve
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: [pve-no-subscription]
+    signed_by: /usr/share/keyrings/proxmox-archive-keyring.gpg
+    state: present
+  become: true
+  when:
+    - proxmox_no_subscription_repo | bool
+    - not (proxmox_use_enterprise_repo | bool)
+
+- name: Refresh the package index
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  changed_when: false
+
+# `upgrade: safe` and never `dist`. A dist-upgrade on a hypervisor can pull a
+# new kernel and a new ZFS module, and the node needs a reboot it did not
+# schedule — with customer machines on it. Kernel and hypervisor upgrades are a
+# maintenance window with migrations planned, not a side effect of a config run.
+#
+# And even `safe` is gated. Upgrading pve-cluster, pveproxy, qemu-server or
+# corosync restarts them, and pve-cluster restarting makes /etc/pve — where
+# every guest's configuration lives — briefly unavailable on a node running
+# customer machines. That belongs in a maintenance window declared for a named
+# host, not in every run of a playbook somebody executes to change a DNS server.
+- name: Apply pending package updates
+  ansible.builtin.apt:
+    upgrade: safe
+  become: true
+  when: proxmox_apply_updates | bool
+
+- name: Report that updates were not applied
+  ansible.builtin.debug:
+    msg: >-
+      Package updates were NOT applied to {{ inventory_hostname }}:
+      `proxmox_apply_updates` is not set for this host. Set it in host_vars for
+      a maintenance window with the guests migrated or the restart accepted, and
+      remove it afterwards. An unpatched hypervisor is its own incident — this
+      guard is about WHEN the restart happens, not whether patching happens.
+  when: not (proxmox_apply_updates | bool)
+
+# --------------------------------------------------------------------------
+# Hostname, /etc/hosts and DNS
+# --------------------------------------------------------------------------
+# CHANGING A CLUSTERED NODE'S HOSTNAME BREAKS THE CLUSTER. Corosync and the
+# Proxmox cluster filesystem key on the node name; renaming a member is a
+# documented manual procedure with the node removed from the cluster first. The
+# role therefore reads whether this node is in a cluster and refuses to touch
+# the hostname if it is.
+- name: Determine whether this node is already in a cluster
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: proxmox_corosync_conf
+  check_mode: false
+
+- name: Set the hostname on a node that is not yet clustered
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname_short }}"
+  become: true
+  when: not proxmox_corosync_conf.stat.exists
+
+- name: Report a hostname that cannot be changed while the node is clustered
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is a cluster member, so its hostname is left
+      alone. Renaming a clustered node breaks corosync and the cluster
+      filesystem for every member; the node must be removed from the cluster
+      first. This is a documented manual procedure, not something a config run
+      should do.
+  when:
+    - proxmox_corosync_conf.stat.exists
+    - ansible_facts.hostname != inventory_hostname_short
+
+# Proxmox resolves its own node name through /etc/hosts, not DNS. A node whose
+# name does not resolve to its management address fails to start pveproxy and
+# reports errors that look like a certificate problem.
+- name: Map this node's name to its management address in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: "^{{ ansible_host | regex_escape }}\\s"
+    line: "{{ ansible_host }} {{ inventory_hostname }} {{ inventory_hostname_short }}"
+    state: present
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+
+- name: Configure DNS resolvers
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: proxmox_dns_servers | length > 0
+
+# --------------------------------------------------------------------------
+# Time
+# --------------------------------------------------------------------------
+# A hypervisor with a skewed clock breaks TLS to the API, makes migration
+# decisions from stale metrics, and makes two nodes' logs impossible to
+# interleave. The common role installs and configures chrony; it is included
+# here so that a node built with only this playbook still gets a disciplined
+# clock.
+- name: Apply the baseline configuration, including NTP
+  ansible.builtin.include_role:
+    name: common
+
+# --------------------------------------------------------------------------
+# Networking and VLAN awareness
+# --------------------------------------------------------------------------
+- name: Write the network configuration
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+    # `ifup --no-act` type-checks the file without touching a single interface.
+    # It catches the missing bridge port and the typo'd address, which are the
+    # two mistakes that leave a node unreachable.
+    validate: "ifup --no-act --all --interfaces=%s"
+  become: true
+  register: proxmox_network_written
+
+- name: Report a pending network change that has not been applied
+  ansible.builtin.debug:
+    msg: >-
+      /etc/network/interfaces changed on {{ inventory_hostname }} and was NOT
+      applied, because `proxmox_apply_network` is false. Review the diff, then
+      schedule the apply with a console path already open — `ifreload -a`
+      re-evaluates every interface, and a mistake on the management link drops
+      the connection you would fix it over.
+  when:
+    - proxmox_network_written.changed
+    - not (proxmox_apply_network | bool)
+
+- name: Apply the network configuration
+  ansible.builtin.command:
+    cmd: ifreload -a
+  become: true
+  when:
+    - proxmox_network_written.changed
+    - proxmox_apply_network | bool
+    - not ansible_check_mode
+  changed_when: true
+
+# --------------------------------------------------------------------------
+# SSH hardening
+# --------------------------------------------------------------------------
+- name: Harden SSH, fail2ban and the host firewall
+  ansible.builtin.include_role:
+    name: hardening
+
+# --------------------------------------------------------------------------
+# The control plane's API token
+# --------------------------------------------------------------------------
+- name: Configure the provisioning role and API token
+  ansible.builtin.include_tasks: api_token.yml
+  when: proxmox_create_api_token | bool
+
+# --------------------------------------------------------------------------
+# Monitoring agent
+# --------------------------------------------------------------------------
+# A hypervisor that is not scraped is a hypervisor whose disk fills silently,
+# and a full disk on a hypervisor stops snapshots and stops running machines.
+- name: Install the node exporter
+  ansible.builtin.package:
+    name: "{{ proxmox_node_exporter_packages }}"
+    state: present
+  become: true
+  when: proxmox_install_node_exporter | bool
+
+- name: Enable and start the node exporter
+  ansible.builtin.systemd_service:
+    name: prometheus-node-exporter
+    enabled: true
+    state: started
+  become: true
+  when: proxmox_install_node_exporter | bool
+
+# --------------------------------------------------------------------------
+# Cluster join — separate role, separate guard, never implied by this one
+# --------------------------------------------------------------------------
+- name: Join or form a cluster, only where explicitly declared for this host
+  ansible.builtin.include_role:
+    name: proxmox_cluster
+  when: proxmox_cluster_join_enabled | default(false) | bool
