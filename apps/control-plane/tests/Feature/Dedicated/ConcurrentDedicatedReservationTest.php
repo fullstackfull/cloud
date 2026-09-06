@@ -177,6 +177,76 @@ final class ConcurrentDedicatedReservationTest extends TestCase
         $this->assertNotSame($a->id, $b->id);
     }
 
+    #[Test]
+    public function a_contended_machine_does_not_hide_the_free_ones_beside_it(): void
+    {
+        /*
+         * The failure this guards against is quiet and expensive.
+         *
+         * Under READ COMMITTED, a blocked `SELECT ... ORDER BY ... LIMIT 1 FOR
+         * UPDATE` does not simply wait and then move on. When the holder
+         * commits, PostgreSQL re-evaluates the blocked statement's qualifiers
+         * against the NEW row version — which no longer matches `allocatable()`
+         * — and the statement returns nothing at all. Not "the next free
+         * machine": nothing.
+         *
+         * So a rack with nine idle servers reported "no hardware available"
+         * because a tenth was contended, and the order went to manual review
+         * while the stock sat there. Reserving with SKIP LOCKED first is what
+         * makes the second worker step over the locked row instead of queueing
+         * behind it and then being told the shelf is empty.
+         */
+        $spare = DedicatedServer::factory()
+            ->inDatacenter($this->datacenter)
+            ->profile(self::PROFILE)
+            ->create();
+
+        DB::connection($this->defaultConnection)->beginTransaction();
+
+        $reservedByA = $this->reserveOnDefaultConnection();
+        $this->assertSame($this->server->id, $reservedByA->id, 'A should take the oldest machine.');
+
+        // B must find the spare rather than blocking on A and then being told
+        // there is nothing left.
+        $reservedByB = $this->asWorkerB(fn (): DedicatedServer => $this->reserve());
+
+        $this->assertSame($spare->id, $reservedByB->id);
+        $this->assertSame(DedicatedServerStatus::Reserved, $reservedByB->status);
+
+        DB::connection($this->defaultConnection)->rollBack();
+    }
+
+    #[Test]
+    public function the_last_machine_is_still_waited_for_rather_than_skipped(): void
+    {
+        /*
+         * SKIP LOCKED alone would be wrong here. With one machine and two
+         * buyers, stepping over the locked row means reporting "none available"
+         * while the first worker might still roll back — turning a transient
+         * lock into a lost sale and a manual review.
+         *
+         * The second pass is a plain blocking lock, taken only when the first
+         * found nothing, so the second worker waits for the committed truth.
+         */
+        DB::connection($this->defaultConnection)->beginTransaction();
+
+        $this->reserveOnDefaultConnection();
+
+        try {
+            $this->asWorkerB(fn (): DedicatedServer => $this->reserve());
+
+            $this->fail('B should have waited for A rather than reporting no stock.');
+        } catch (QueryException $e) {
+            // The lock timeout firing proves B queued rather than skipping —
+            // exactly the behaviour the single-machine case needs.
+            $this->assertStringContainsString('lock timeout', strtolower($e->getMessage()));
+        } catch (NoMatchingHardwareException) {
+            $this->fail('B skipped the contended machine instead of waiting for it.');
+        } finally {
+            DB::connection($this->defaultConnection)->rollBack();
+        }
+    }
+
     private function reserve(): DedicatedServer
     {
         return app(ReserveDedicatedServer::class)->execute(

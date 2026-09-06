@@ -97,18 +97,28 @@ final readonly class ReserveDedicatedServer
             }
 
             /*
-             * Select and lock in one statement.
+             * Two passes, because neither locking mode is right on its own.
              *
-             * A plain lock rather than SKIP LOCKED, deliberately. Skipping
-             * would let the second worker take a DIFFERENT machine while the
-             * first is still deciding — which is fine when there is plenty of
-             * stock and wrong when there is one machine left, because the
-             * second worker would report "none available" while the first was
-             * still able to roll back. Waiting means the second worker sees
-             * the committed truth: either the machine is gone, or it is free
-             * again because the first transaction failed.
+             * SKIP LOCKED first. With stock available, a second worker takes a
+             * different free machine straight away instead of queueing behind
+             * the first — which is the common case and the one worth being fast.
+             *
+             * A plain blocking lock second, and only when the first pass found
+             * nothing. That happens when every candidate is locked, which in
+             * practice means one machine and two buyers: here waiting is
+             * correct, because the second worker must see the committed truth
+             * rather than guess. Either the machine is gone, or it is free
+             * again because the first transaction rolled back.
+             *
+             * Using only the blocking form — as this did originally — is subtly
+             * wrong under READ COMMITTED. When the first worker commits with
+             * status='reserved', PostgreSQL re-evaluates the blocked query's
+             * qualifiers against the new row version; the row no longer
+             * matches, and the statement returns NOTHING rather than moving on
+             * to the next free machine. A rack with nine idle servers reports
+             * "no hardware available" because one of them was contended.
              */
-            $server = DedicatedServer::query()
+            $candidates = DedicatedServer::query()
                 ->allocatable()
                 ->where('hardware_profile', $hardwareProfile)
                 ->where('datacenter_id', $datacenterId)
@@ -116,9 +126,10 @@ final readonly class ReserveDedicatedServer
                 // handed out, released and handed out again while its
                 // neighbours never leave the rack.
                 ->orderBy('created_at')
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->first();
+                ->orderBy('id');
+
+            $server = (clone $candidates)->lock('for update skip locked')->first()
+                ?? (clone $candidates)->lockForUpdate()->first();
 
             if ($server === null) {
                 throw NoMatchingHardwareException::forProfile(
