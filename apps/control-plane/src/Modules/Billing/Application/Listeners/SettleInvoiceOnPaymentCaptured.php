@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Billing\Application\Listeners;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
+use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleableCaptureException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
@@ -65,15 +66,21 @@ final class SettleInvoiceOnPaymentCaptured implements ShouldQueue
         $transaction = Transaction::query()->find($event->transactionId);
 
         if ($invoice === null || $transaction === null) {
-            // Do not throw: retrying cannot make a deleted row reappear, and
-            // failing the job forever would bury a real signal in the failed
-            // queue.
-            Log::warning('Captured payment refers to a row that no longer exists.', [
+            /*
+             * Money was captured and the invoice it names cannot be settled.
+             * Swallowing this — logging and returning — is what turns a
+             * transient invisibility into permanent loss: the provider has
+             * already been answered 200 and the webhook row is processed, so
+             * nothing else will ever come back to it. Throwing puts the job
+             * through its backoff and, if the rows really are gone, into the
+             * failed queue where a human sees a charge with no service.
+             */
+            Log::warning('Captured payment refers to a row that cannot be read.', [
                 'transaction_id' => $event->transactionId,
                 'invoice_id' => $event->invoiceId,
             ]);
 
-            return;
+            throw UnsettleableCaptureException::forCapture($event->transactionId, $event->invoiceId);
         }
 
         $this->settle->execute($invoice, $transaction);

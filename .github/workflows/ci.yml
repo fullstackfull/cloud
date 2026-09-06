@@ -202,8 +202,18 @@ jobs:
           fi
 
           # Credential shapes that must never appear in tracked source.
+          #
+          # Two files are excluded and no more. SecretRedactor.php has to carry
+          # the patterns it matches, and tests/Support/SecretFixtures.php is the
+          # single declared home for the synthetic credentials the redaction
+          # tests need — a redaction test whose fixture does not look like a
+          # credential proves nothing. Excluding the test tree instead would
+          # mean a real key pasted into a test was no longer caught, which is
+          # the one thing this step exists to prevent.
           if git grep -nIE '(sk_live_[A-Za-z0-9]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' \
-              -- ':!*.example' ':!docs/*' ':!**/SecretRedactor.php' ':!**/SecretRedactorTest.php'; then
+              -- ':!*.example' \
+                 ':!**/SecretRedactor.php' \
+                 ':!apps/control-plane/tests/Support/SecretFixtures.php'; then
             echo "::error::A live credential appears to be committed."
             exit 1
           fi

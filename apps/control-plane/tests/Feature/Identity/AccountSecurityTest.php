@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature\Identity;
 
 use Database\Seeders\RolePermissionSeeder;
-use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -13,6 +12,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
 use PHPUnit\Framework\Attributes\Test;
 use PragmaRX\Google2FA\Google2FA;
 use Tests\TestCase;
@@ -379,6 +379,6 @@ final class AccountSecurityTest extends TestCase
 
         $this->postJson(route('api.v1.password.forgot'), ['email' => 'known@example.com'])->assertStatus(202);
 
-        Notification::assertSentTo($user, ResetPassword::class);
+        Notification::assertSentTo($user, QueuedResetPassword::class);
     }
 }

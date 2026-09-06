@@ -45,6 +45,8 @@ final readonly class InstallProfileRenderer
             throw InstallProfileNotRenderableException::inactiveProfile($profile->slug);
         }
 
+        $this->assertSubstitutable($profile, $variables);
+
         /** @var array<string, scalar|null> $defaults */
         $defaults = $profile->defaults ?? [];
 
@@ -74,6 +76,34 @@ final readonly class InstallProfileRenderer
              */
             'variables' => $values,
         ];
+    }
+
+    /**
+     * A caller's value fills in a placeholder; it does not get to add
+     * directives around it.
+     *
+     * The substitution below is deliberately literal, and an answer file is
+     * line-oriented: kickstart, preseed and autoinstall all end a directive at
+     * a newline. So a caller value carrying CR or LF writes new instructions
+     * into the file — `%post --interpreter=/bin/bash` is root on a physical
+     * host, during an install, before the customer has ever logged in. There
+     * is no one escaping that is correct for all three installers, so such a
+     * value is refused and no file is emitted.
+     *
+     * The profile's own defaults are not checked: they are authored by an
+     * operator alongside the template itself and are legitimately multi-line.
+     *
+     * @param  array<string, scalar|null>  $variables
+     *
+     * @throws InstallProfileNotRenderableException
+     */
+    private function assertSubstitutable(OsInstallProfile $profile, array $variables): void
+    {
+        foreach ($variables as $key => $value) {
+            if (is_string($value) && preg_match('/[\r\n]/', $value) === 1) {
+                throw InstallProfileNotRenderableException::unsafeVariable($profile->slug, (string) $key);
+            }
+        }
     }
 
     /**

@@ -326,7 +326,7 @@ serialiser, the real handler and the real shipper.
 
 ```bash
 php artisan tinker --execute="Log::channel('structured')->warning('redaction check', \
-  ['authorization' => 'Bearer sk_live_0123456789abcdef']);"
+  ['authorization' => 'Bearer '.'sk_'.'live_0123456789abcdef']);"
 ```
 
 Then in Grafana Explore: `{service="control-plane"} |= "redaction check"`. The

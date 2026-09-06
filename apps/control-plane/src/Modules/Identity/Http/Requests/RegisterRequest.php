@@ -18,7 +18,16 @@ final class RegisterRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'min:2', 'max:120'],
-            'email' => ['required', 'string', 'email:rfc,strict', 'max:255', Rule::unique('users', 'email')],
+            /*
+             * Deliberately NOT `Rule::unique`. A validation failure on a taken
+             * address is a one-request membership oracle: an attacker learns
+             * which of a list of addresses hold accounts here, which is the
+             * input to credential stuffing and to convincing phishing. The
+             * unique index on the column still holds - RegisterCustomer is
+             * where the collision is handled, and it handles it by saying
+             * nothing.
+             */
+            'email' => ['required', 'string', 'email:rfc,strict', 'max:255'],
             'password' => ['required', 'string', 'confirmed', Password::defaults()],
 
             'account_type' => ['sometimes', Rule::enum(CustomerType::class)],

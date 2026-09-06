@@ -12,6 +12,7 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\ReverseDnsRecord;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\SecretFixtures;
 use Tests\TestCase;
 
 final class ReverseDnsRecordTest extends TestCase
@@ -27,13 +28,13 @@ final class ReverseDnsRecordTest extends TestCase
         // that request carried the zone token. last_error is read by everyone
         // with support access.
         $record->recordFailure(
-            'PATCH /zones/rdns failed: 401 {"error":"invalid"} (Authorization: Bearer sk_live_9f8a7b6c5d4e3f2a1b)',
+            sprintf('PATCH /zones/rdns failed: 401 {"error":"invalid"} (Authorization: Bearer %s)', SecretFixtures::STRIPE_SECRET_KEY),
         );
 
         $stored = (string) $record->fresh()?->last_error;
 
         $this->assertSame(ReverseDnsStatus::Failed, $record->fresh()?->status);
-        $this->assertStringNotContainsString('sk_live_9f8a7b6c5d4e3f2a1b', $stored);
+        $this->assertStringNotContainsString(SecretFixtures::STRIPE_SECRET_KEY, $stored);
         $this->assertStringContainsString(SecretRedactor::PLACEHOLDER, $stored);
         // The part that explains the failure survives; only the credential
         // goes.

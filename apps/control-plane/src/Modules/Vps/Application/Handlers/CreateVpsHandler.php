@@ -12,6 +12,7 @@ use Lynomia\Modules\Compute\Domain\Enums\OsFamily;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Exceptions\NoCapacityAvailableException;
+use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
 use Lynomia\Modules\Compute\Domain\Services\NodeScheduler;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
@@ -75,6 +76,32 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         /** @var array<string, mixed> $payload */
         $payload = $job->payload;
 
+        /*
+         * The customer the job names has to be a customer that exists.
+         *
+         * IpAllocator::assertScopeMayServe() — the one check that stops a
+         * management address being written onto a machine that runs customer
+         * code — is skipped entirely when it is handed a null customer. Passing
+         * null because the row could not be loaded therefore does not fail the
+         * build, it disarms the guard; and Customer is soft-deleted, so a
+         * cancelled customer's job takes that route silently. If the job names
+         * a customer, that customer is either loaded or the job is refused.
+         */
+        $customer = null;
+
+        if ($job->customer_id !== null) {
+            $customer = Customer::query()->find($job->customer_id);
+
+            if ($customer === null) {
+                return ProvisioningResult::failed(
+                    FailureClass::Permanent,
+                    'provisioning.unknown_customer',
+                    sprintf('No customer exists with the id "%s".', (string) $job->customer_id),
+                    metadata: ['customer_id' => (string) $job->customer_id],
+                );
+            }
+        }
+
         $resources = new VmResources(
             vcpu: (int) ($payload['vcpu'] ?? 1),
             memoryMib: (int) ($payload['memory_mib'] ?? 1024),
@@ -110,20 +137,47 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         // key a retried job would commit a second machine's worth of capacity
         // that release can never give back — there is only one machine to
         // destroy.
-        $this->reserveCapacity->execute(
-            node: $node,
-            resources: $resources,
-            customerId: $job->customer_id,
-            storageId: $decision->storageId ?? null,
-            reservationKey: $job->idempotency_key,
-            serviceId: $job->service_id,
-        );
+        try {
+            $this->reserveCapacity->execute(
+                node: $node,
+                resources: $resources,
+                customerId: $job->customer_id,
+                // Forwarded, never omitted. The scheduler's exclusion ran
+                // before any lock and against machines that had already been
+                // written — and this handler writes its virtual_machines row
+                // only after the hypervisor has answered, so the window is the
+                // whole length of the provider call. Re-counting under the
+                // node's row lock is the only thing that stops three
+                // concurrent orders from one customer landing on one node. A
+                // null here is the scheduler's deliberate waiver and has to
+                // travel as such.
+                antiAffinityLimit: $decision->antiAffinityLimit,
+                storageId: $decision->storageId ?? null,
+                reservationKey: $job->idempotency_key,
+                serviceId: $job->service_id,
+            );
+        } catch (NodeCapacityExceededException $e) {
+            /*
+             * The loser of a race the lock exists to expose: another order for
+             * this customer took the last slot the anti-affinity limit allowed,
+             * or filled the node, between scoring and this commitment. Capacity
+             * rather than transient, and for the same reason placement uses it
+             * — the next attempt scores the fleet again and lands somewhere
+             * else. Nothing has been built.
+             */
+            return ProvisioningResult::failed(
+                FailureClass::Capacity,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: $this->redactor->redact($e->context()),
+            );
+        }
 
         try {
             $reservations = $this->ipAllocator->reserve(
                 scope: IpPool::query()->findOrFail((string) $payload['ip_pool_id']),
                 provisioningJobId: (string) $job->getKey(),
-                customer: $job->customer_id !== null ? Customer::query()->find($job->customer_id) : null,
+                customer: $customer,
                 count: (int) ($payload['ipv4_count'] ?? 1),
             );
         } catch (IpPoolExhaustedException $e) {
@@ -140,6 +194,44 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         $primary = $reservations[0];
         $address = $primary->ipAddress()->firstOrFail();
 
+        /*
+         * Which layer-2 segment the machine is plugged into, taken from the
+         * network the address actually belongs to.
+         *
+         * IPAM models this explicitly — a network carries the bridge, the VLAN
+         * id and whether customers may be attached to it — and none of it
+         * reaches the hypervisor unless it is passed here. Falling back to the
+         * DTO's default bridge would put every customer machine, whatever
+         * subnet it was allocated from, untagged on one bridge: on this
+         * platform's own inventory that bridge is the one carried by the
+         * node's management interface, so an untagged NIC lands on the native
+         * VLAN beside the hypervisor and BMC management interfaces — the
+         * lateral movement IpPoolScope::isCustomerAllocatable() exists to
+         * close, bypassed one layer lower — and every tenant shares one
+         * broadcast domain regardless of the VLAN their subnet names.
+         *
+         * A subnet with no network, an inactive or management network, or a
+         * network with no bridge recorded is refused rather than guessed at:
+         * the platform cannot say where the machine would be plugged in, and a
+         * guess is exactly what is dangerous here.
+         */
+        $network = $address->subnet->network()->first();
+
+        if ($network === null || ! $network->acceptsCustomerAttachments() || ($network->bridge ?? '') === '') {
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'vps.network_not_attachable',
+                sprintf(
+                    'The subnet holding %s names no customer-attachable network with a bridge, so there is nowhere to attach this machine.',
+                    $address->address,
+                ),
+                metadata: [
+                    'subnet_id' => (string) $address->subnet_id,
+                    'network_id' => $network?->getKey(),
+                ],
+            );
+        }
+
         try {
             $provider = $this->computeProviders->for($node->cluster()->firstOrFail());
 
@@ -153,6 +245,8 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                 storageName: $decision->storageName,
                 templateReference: isset($payload['template_reference']) ? (string) $payload['template_reference'] : null,
                 osFamily: OsFamily::tryFrom((string) ($payload['os_family'] ?? '')) ?? OsFamily::Debian,
+                networkBridge: $network->bridge,
+                vlanTag: $network->vlan_id,
                 cloudInit: new CloudInitConfig(
                     sshKeys: array_values(array_filter((array) ($payload['ssh_keys'] ?? []), 'is_string')),
                     ipConfig: sprintf('ip=%s/%d,gw=%s', $address->address, $address->subnet->prefix_length, $address->subnet->gateway),

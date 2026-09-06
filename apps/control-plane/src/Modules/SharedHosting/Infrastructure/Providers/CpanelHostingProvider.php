@@ -356,12 +356,54 @@ final class CpanelHostingProvider implements HostingProvider
         }
 
         return new SsoSession(
-            url: $url,
+            url: $this->assertSsoUrlBelongsToNode($node, $url, $username),
             username: $username,
             service: self::SSO_SERVICE,
             expiresAt: isset($data['expires']) && is_numeric($data['expires'])
                 ? CarbonImmutable::createFromTimestampUTC((int) $data['expires'])
                 : null,
+        );
+    }
+
+    /**
+     * The panel does not get to choose where the customer's browser goes.
+     *
+     * The URL in an SSO answer is response data from a node, and the node is
+     * exactly the machine a reseller operates, a customer shares, or an
+     * attacker has taken. Returned verbatim it is a link the portal invites
+     * the customer to click — a login page on a host of the node's choosing,
+     * looking exactly like the panel they expected.
+     *
+     * The port is deliberately NOT compared: the API is served on 2087 while
+     * the session URL legitimately lands on the panel's own port. The host is,
+     * against both the endpoint the platform dialled and the node's recorded
+     * hostname, because an endpoint may be an address while the panel answers
+     * with its name.
+     *
+     * @throws HostingProviderException
+     */
+    private function assertSsoUrlBelongsToNode(HostingNode $node, string $url, string $username): string
+    {
+        $parts = parse_url($url);
+
+        $permitted = array_filter([
+            is_array($endpoint = parse_url($this->connection($node)->baseUrl())) ? ($endpoint['host'] ?? null) : null,
+            $node->hostname,
+        ]);
+
+        if (is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && in_array($parts['host'] ?? null, $permitted, true)
+        ) {
+            return $url;
+        }
+
+        throw HostingProviderException::unexpectedResponse(
+            self::NAME,
+            'create_sso_session',
+            'the node returned a session URL pointing somewhere other than itself, and it will not be '
+            .'handed to a customer',
+            ['node' => $node->hostname, 'username' => $username],
         );
     }
 
@@ -386,7 +428,7 @@ final class CpanelHostingProvider implements HostingProvider
     private function send(HostingNode $node, string $function, array $parameters, string $operation): Response
     {
         try {
-            return $this->request($node)->post($function, [
+            $response = $this->request($node)->post($function, [
                 // Pinned on every call. Without it WHM answers in whichever
                 // format the node's default is, and the older format has no
                 // metadata envelope at all — so the success check silently
@@ -394,6 +436,10 @@ final class CpanelHostingProvider implements HostingProvider
                 'api.version' => 1,
                 ...$parameters,
             ]);
+
+            $this->assertNotRedirect($node, $response, $operation, ['function' => $function]);
+
+            return $response;
         } catch (ConnectionException $e) {
             /*
              * Caught by type and re-thrown as our own. A connection exception
@@ -443,6 +489,35 @@ final class CpanelHostingProvider implements HostingProvider
         }
     }
 
+    /**
+     * A 3xx is not an answer, it is a destination chosen by the node.
+     *
+     * Redirects are disabled on the client, so one arrives here as an ordinary
+     * response. It is refused rather than unwrapped: `failed()` is false for a
+     * 3xx, so an unrefused redirect would reach the envelope check as a body
+     * with no metadata. Flagged indeterminate because a node that answered a
+     * createacct with a redirect may still have created the account.
+     *
+     * @param  array<string, scalar|null>  $context
+     *
+     * @throws HostingProviderException
+     */
+    private function assertNotRedirect(HostingNode $node, Response $response, string $operation, array $context = []): void
+    {
+        if ($response->status() < 300 || $response->status() > 399) {
+            return;
+        }
+
+        throw HostingProviderException::unexpectedResponse(
+            self::NAME,
+            $operation,
+            'the node answered with a redirect, which is not followed because the request carries the API '
+            .'token and, on a 307 or 308, the account password in its body',
+            [...$context, 'node' => $node->hostname, 'status' => $response->status()],
+            indeterminate: true,
+        );
+    }
+
     private function request(HostingNode $node): PendingRequest
     {
         $connection = $this->connection($node);
@@ -452,7 +527,12 @@ final class CpanelHostingProvider implements HostingProvider
             // Explicit rather than left to the client default, so that a future
             // change to that default cannot silently disable certificate
             // verification for every node at once.
-            ->withOptions(['verify' => $connection->verifyTls])
+            //
+            // Redirects are refused too. A Location header is chosen by the
+            // node, and on a 307 or 308 the client re-posts the body to it —
+            // and the body of a createacct or a passwd change is the
+            // customer's plaintext panel password.
+            ->withOptions(['verify' => $connection->verifyTls, 'allow_redirects' => false])
             ->timeout($connection->timeoutSeconds)
             ->acceptJson()
             // WHM takes form-encoded parameters on every endpoint.

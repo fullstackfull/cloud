@@ -26,11 +26,14 @@
       - pxe_provisioning_interface is not none
       - pxe_provisioning_interface | length > 0
       - pxe_provisioning_cidr is not none
+      - pxe_provisioning_address is not none
     fail_msg: >-
-      {{ inventory_hostname }} declares no `pxe_provisioning_interface` or no
-      `pxe_provisioning_cidr`. Neither is discovered, because the answer
-      auto-detection gives — the interface with the default route — is the one
-      interface DHCP must never be served on.
+      {{ inventory_hostname }} declares no `pxe_provisioning_interface`, no
+      `pxe_provisioning_cidr` or no `pxe_provisioning_address`. None of them is
+      discovered, because the answer auto-detection gives — the interface with
+      the default route and the management address on it — is the one interface
+      DHCP must never be served on and the one address the boot chain must never
+      name.
     quiet: true
 
 - name: Refuse to serve DHCP on the interface carrying the default route
@@ -68,7 +71,7 @@
 # collection, and a bootstrap that depends on Galaxy being reachable is a
 # bootstrap that fails on the day the network is what you are trying to fix.
 # Nothing in this repository requires a collection outside ansible-core.
-- name: Test whether the DHCP range falls inside the provisioning network
+- name: Test whether this server's address and the DHCP range fall inside the provisioning network
   ansible.builtin.command:
     argv:
       - python3
@@ -76,9 +79,11 @@
       - |
         import ipaddress, sys
         net = ipaddress.ip_network(sys.argv[1], strict=False)
-        ok = all(ipaddress.ip_address(a) in net for a in sys.argv[2:])
+        given = [a for a in sys.argv[2:] if a not in ('', 'None')]
+        ok = bool(given) and all(ipaddress.ip_address(a) in net for a in given)
         print('inside' if ok else 'outside')
       - "{{ pxe_provisioning_cidr }}"
+      - "{{ pxe_provisioning_address }}"
       - "{{ pxe_dhcp_range_start }}"
       - "{{ pxe_dhcp_range_end }}"
   delegate_to: localhost
@@ -86,19 +91,21 @@
   register: pxe_range_check
   changed_when: false
   check_mode: false
-  when: pxe_dhcp_range_start is not none
 
-- name: Refuse a DHCP range that is not inside the provisioning network
+- name: Refuse an address or a DHCP range that is not inside the provisioning network
   ansible.builtin.assert:
     that:
       - pxe_range_check.stdout == 'inside'
     fail_msg: >-
-      The DHCP range {{ pxe_dhcp_range_start }}-{{ pxe_dhcp_range_end }} is not
+      One of `pxe_provisioning_address` ({{ pxe_provisioning_address }}) or the
+      DHCP range {{ pxe_dhcp_range_start }}-{{ pxe_dhcp_range_end }} is not
       inside {{ pxe_provisioning_cidr }}. A range that spills into another
-      network hands out addresses that belong to it — which is the same outage
-      as a rogue DHCP server, arriving one lease at a time.
+      network hands out addresses that belong to it — the same outage as a rogue
+      DHCP server, arriving one lease at a time. An address outside it is worse
+      in the other direction: the boot URL every machine is told to fetch would
+      name a host off the provisioning VLAN, so either nothing boots or the
+      answer files leave the VLAN that exists to contain them.
     quiet: true
-  when: pxe_dhcp_range_start is not none
 
 - name: Install dnsmasq and the iPXE boot files
   ansible.builtin.package:

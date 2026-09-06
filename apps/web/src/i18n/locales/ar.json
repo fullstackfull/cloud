@@ -162,7 +162,8 @@
       "unverified_email": "البريد غير مُفعَّل",
       "token_issued": "استُخدم مفتاح برمجي",
       "logged_out": "تم الخروج",
-      "password_reset": "إعادة تعيين كلمة المرور"
+      "password_reset": "إعادة تعيين كلمة المرور",
+      "failed_password_confirmation": "محاولة تخمين كلمة المرور داخل الجلسة"
     }
   }
 }

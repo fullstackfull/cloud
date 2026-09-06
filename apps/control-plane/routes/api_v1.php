@@ -49,7 +49,15 @@ Route::get('email/verify/{id}/{hash}', [EmailVerificationController::class, 'ver
     ->middleware(['signed', 'throttle:6,1'])
     ->name('verification.verify');
 
-Route::middleware('auth:sanctum')->group(function (): void {
+/*
+ * `throttle:api` is applied here rather than to the framework `api` group so
+ * that Laravel's middleware priority runs authentication first: the limiter in
+ * RateLimitServiceProvider keys on the acting user and honours a personal
+ * access token's own ceiling, both of which need a resolved user. Without it
+ * every authenticated endpoint — including the ones that verify the account
+ * password — accepts requests as fast as the network allows.
+ */
+Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
     Route::post('logout', [LoginController::class, 'destroy'])->name('logout');
 
     Route::post('email/verify/resend', [EmailVerificationController::class, 'resend'])

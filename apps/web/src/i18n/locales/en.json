@@ -162,7 +162,8 @@
       "unverified_email": "Email not verified",
       "token_issued": "API token used",
       "logged_out": "Signed out",
-      "password_reset": "Password reset"
+      "password_reset": "Password reset",
+      "failed_password_confirmation": "Password guess in session"
     }
   }
 }

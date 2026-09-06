@@ -20,14 +20,19 @@ final class ApiTokenServiceProvider extends ServiceProvider
         /*
          * A token that has been revoked or has expired must not authenticate,
          * even though its row still exists for the audit trail.
+         *
+         * The CIDR allow-list is enforced in the same place, because it is the
+         * one point every token-authenticated request passes through: leaving
+         * it to the endpoints would make an advertised control depend on each
+         * of them remembering it.
          */
         Sanctum::authenticateAccessTokensUsing(
             static function (PersonalAccessToken $token, bool $isValid): bool {
-                if (! $isValid) {
+                if (! $isValid || ! $token->isUsable()) {
                     return false;
                 }
 
-                return $token->isUsable();
+                return $token->allowsRequestFrom(request()->ip());
             }
         );
     }

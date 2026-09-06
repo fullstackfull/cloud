@@ -63,7 +63,24 @@ final readonly class AttemptLogin
         if ($user->isLocked()) {
             $this->recordActivity->execute(LoginOutcome::Locked, $request, $user, $email);
 
-            throw AccountLockedException::until($user->locked_until);
+            /*
+             * Only an account that exists can be locked, so answering 423 to
+             * anyone who asks turns the lockout into a membership oracle: five
+             * requests - exactly the throttle budget - classify any address
+             * with certainty. Everything above this line goes to real trouble
+             * to make an unknown address indistinguishable from a wrong
+             * password, and this would give it all back.
+             *
+             * The detail is worth keeping for the person who owns the account,
+             * though: "locked until 14:05" is a far better answer than "wrong
+             * password" when the password was right. So the password decides.
+             * Someone who can present it already knows the account exists.
+             */
+            if (Hash::check($password, $user->password)) {
+                throw AccountLockedException::until($user->locked_until);
+            }
+
+            throw InvalidCredentialsException::make();
         }
 
         if (! Hash::check($password, $user->password)) {

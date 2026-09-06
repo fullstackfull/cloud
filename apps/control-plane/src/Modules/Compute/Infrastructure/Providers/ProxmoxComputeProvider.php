@@ -565,7 +565,7 @@ final class ProxmoxComputeProvider implements ComputeProvider
         try {
             $request = $this->request();
 
-            return match ($method) {
+            $response = match ($method) {
                 'GET' => $request->get($path, $parameters),
                 'POST' => $request->post($path, $parameters),
                 'PUT' => $request->put($path, $parameters),
@@ -579,6 +579,10 @@ final class ProxmoxComputeProvider implements ComputeProvider
                     'provider_message' => sprintf('unsupported HTTP method "%s"', $method),
                 ]),
             };
+
+            $this->assertNotRedirect($response, $operation, ['path' => $path]);
+
+            return $response;
         } catch (ConnectionException $e) {
             /*
              * Caught by type and re-thrown as our own. A connection exception
@@ -614,6 +618,35 @@ final class ProxmoxComputeProvider implements ComputeProvider
         }
     }
 
+    /**
+     * A 3xx is not an answer, it is a destination chosen by the cluster.
+     *
+     * Redirects are disabled on the client, so one arrives here as an ordinary
+     * response. It is refused rather than unwrapped: `failed()` is false for a
+     * 3xx, so an unrefused redirect would be read as an envelope with no data.
+     * Flagged indeterminate because a node that answered a create with a
+     * redirect may still have accepted it.
+     *
+     * @param  array<string, scalar|null>  $context
+     *
+     * @throws ComputeProviderException
+     */
+    private function assertNotRedirect(Response $response, string $operation, array $context = []): void
+    {
+        if ($response->status() < 300 || $response->status() > 399) {
+            return;
+        }
+
+        throw ComputeProviderException::unexpectedResponse(
+            self::NAME,
+            $operation,
+            'the cluster answered with a redirect, which is not followed because every request this '
+            .'adapter makes carries the API token',
+            [...$context, 'status' => $response->status()],
+            indeterminate: true,
+        );
+    }
+
     private function request(): PendingRequest
     {
         return Http::baseUrl($this->connection->baseUrl())
@@ -621,7 +654,13 @@ final class ProxmoxComputeProvider implements ComputeProvider
             // Explicit rather than left to the client default, so that a
             // future change to that default cannot silently disable
             // certificate verification for every cluster at once.
-            ->withOptions(['verify' => $this->connection->verifyTls])
+            //
+            // Redirects are refused as well: a Location header is chosen by
+            // the cluster, and following one would let a compromised node
+            // point any request this adapter makes — the worker sits on the
+            // management network — at a host of its choosing, re-posting the
+            // body on a 307 or 308.
+            ->withOptions(['verify' => $this->connection->verifyTls, 'allow_redirects' => false])
             ->timeout($this->connection->timeoutSeconds)
             ->acceptJson()
             // Proxmox takes form-encoded parameters, not JSON, on every

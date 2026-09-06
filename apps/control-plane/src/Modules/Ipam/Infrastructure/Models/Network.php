@@ -25,6 +25,7 @@ use Lynomia\Modules\Ipam\Domain\Enums\NetworkPurpose;
  * @property string $slug
  * @property NetworkPurpose $purpose
  * @property ?int $vlan_id
+ * @property ?string $bridge
  * @property bool $is_customer_facing
  * @property bool $is_active
  */

@@ -9,6 +9,7 @@ use Lynomia\Modules\SharedHosting\Domain\DTOs\HostingCapacityReservation;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\PlacementRejectionReason;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingNodeUnlicensedException;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingUsernameConflictException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\NodeAtCapacityException;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
@@ -47,6 +48,7 @@ final readonly class ReserveHostingNodeCapacity
      *
      * @throws NodeAtCapacityException
      * @throws HostingNodeUnlicensedException
+     * @throws HostingUsernameConflictException
      */
     public function execute(
         HostingNode $node,
@@ -71,6 +73,7 @@ final readonly class ReserveHostingNodeCapacity
      *
      * @throws NodeAtCapacityException
      * @throws HostingNodeUnlicensedException
+     * @throws HostingUsernameConflictException
      */
     public function reserve(
         HostingNode $node,
@@ -95,6 +98,30 @@ final readonly class ReserveHostingNodeCapacity
                 ->where('hosting_node_id', $locked->getKey())
                 ->where('username', $username)
                 ->first();
+
+            /*
+             * The row is only this job's own earlier attempt when it belongs
+             * to the same customer. A row carrying the same name for somebody
+             * else is a collision, not a retry — and every branch below treats
+             * what it finds as "the account this job already holds": it re-arms
+             * the row to pending and the handler then marks it active, leaving
+             * a live account whose customer_id, service_id and primary_domain
+             * still name the other tenant. One panel account, two customers'
+             * records, and whichever of them acts on it first — a portal
+             * listing, an SSO session, a suspend, a terminate — crosses the
+             * boundary.
+             *
+             * Refused outright rather than renamed: the name is unique per
+             * node at the panel as well as in this table, so there is nothing
+             * this node can serve under it.
+             */
+            if ($existing !== null && (string) $existing->customer_id !== $customerId) {
+                throw HostingUsernameConflictException::forUsername(
+                    (string) $locked->getKey(),
+                    $locked->hostname,
+                    $username,
+                );
+            }
 
             if ($existing !== null && $existing->status->occupiesNodeCapacity()) {
                 // This job already holds its slot. Returning the row rather

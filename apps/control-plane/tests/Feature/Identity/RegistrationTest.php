@@ -8,10 +8,12 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\RegistrationAttemptedOnExistingAccount;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -48,10 +50,13 @@ final class RegistrationTest extends TestCase
 
         $response = $this->postJson(route('api.v1.register'), $this->validPayload());
 
-        $response->assertCreated()
-            ->assertJsonPath('data.user.email', 'amal@example.com')
-            ->assertJsonPath('data.customer.type', CustomerType::Individual->value)
-            ->assertJsonPath('meta.email_verification_required', true);
+        // 202 and nothing identifying: the response is the same whether or not
+        // the address was already taken, so it cannot say what was created.
+        // What was created is asserted against the database instead.
+        $response->assertAccepted()
+            ->assertJsonPath('meta.email_verification_required', true)
+            ->assertJsonMissingPath('data.user')
+            ->assertJsonMissingPath('data.customer');
 
         $user = User::query()->where('email', 'amal@example.com')->sole();
         $customer = Customer::query()->sole();
@@ -68,7 +73,7 @@ final class RegistrationTest extends TestCase
     #[Test]
     public function registration_does_not_sign_the_user_in(): void
     {
-        $this->postJson(route('api.v1.register'), $this->validPayload())->assertCreated();
+        $this->postJson(route('api.v1.register'), $this->validPayload())->assertAccepted();
 
         // Verification comes first: an address typo must not leave an
         // unreachable account holding an active session.
@@ -80,7 +85,7 @@ final class RegistrationTest extends TestCase
     {
         $response = $this->postJson(route('api.v1.register'), $this->validPayload());
 
-        $response->assertCreated();
+        $response->assertAccepted();
         $this->assertStringNotContainsString('correct-horse-9', $response->getContent() ?: '');
 
         $stored = $this->getConnection()->table('users')->where('email', 'amal@example.com')->value('password');
@@ -94,7 +99,7 @@ final class RegistrationTest extends TestCase
         $this->postJson(route('api.v1.register'), $this->validPayload([
             'account_type' => CustomerType::Organization->value,
             'company_name' => 'Premier Care W.L.L.',
-        ]))->assertCreated();
+        ]))->assertAccepted();
 
         $customer = Customer::query()->sole();
 
@@ -115,23 +120,50 @@ final class RegistrationTest extends TestCase
     }
 
     #[Test]
-    public function a_duplicate_address_is_rejected(): void
+    public function a_duplicate_address_creates_nothing_and_says_nothing(): void
     {
-        User::factory()->create(['email' => 'amal@example.com']);
+        Notification::fake();
+
+        $existing = User::factory()->create(['email' => 'amal@example.com', 'name' => 'The real Amal']);
 
         $this->postJson(route('api.v1.register'), $this->validPayload())
-            ->assertStatus(422)
-            ->assertJsonPath('error.code', 'validation.failed');
+            ->assertAccepted()
+            ->assertJsonPath('meta.email_verification_required', true);
+
+        // Nothing was created, and nothing about the existing account leaked:
+        // not its name, not its id, not the fact that it exists.
+        $this->assertSame(1, User::query()->where('email', 'amal@example.com')->count());
+        $this->assertSame('The real Amal', $existing->fresh()->name);
+        $this->assertSame(0, Customer::query()->count());
+
+        // The one party entitled to know is told.
+        Notification::assertSentTo($existing, RegistrationAttemptedOnExistingAccount::class);
+    }
+
+    #[Test]
+    public function a_taken_address_is_answered_exactly_as_a_free_one_is(): void
+    {
+        User::factory()->create(['email' => 'taken@example.com']);
+
+        $taken = $this->postJson(route('api.v1.register'), $this->validPayload(['email' => 'taken@example.com']));
+        $free = $this->postJson(route('api.v1.register'), $this->validPayload(['email' => 'free@example.com']));
+
+        // Byte for byte. Any difference at all - status, body, a field present
+        // in one and absent in the other - is the oracle back again.
+        $this->assertSame($free->status(), $taken->status());
+        $this->assertSame($free->getContent(), $taken->getContent());
     }
 
     #[Test]
     public function addresses_are_normalised_so_case_cannot_create_a_duplicate(): void
     {
-        $this->postJson(route('api.v1.register'), $this->validPayload())->assertCreated();
+        $this->postJson(route('api.v1.register'), $this->validPayload())->assertAccepted();
 
         $this->postJson(route('api.v1.register'), $this->validPayload([
             'email' => 'AMAL@Example.COM',
-        ]))->assertStatus(422);
+        ]))->assertAccepted();
+
+        $this->assertSame(1, User::query()->count());
     }
 
     #[Test]

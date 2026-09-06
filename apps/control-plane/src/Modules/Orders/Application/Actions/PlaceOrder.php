@@ -12,6 +12,8 @@ use Lynomia\Modules\Billing\Domain\ValueObjects\PricedOrder;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Domain\ValueObjects\TaxRate;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
+use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCustomerLimitReachedException;
+use Lynomia\Modules\Catalog\Domain\Exceptions\CouponFullyRedeemedException;
 use Lynomia\Modules\Catalog\Domain\Services\CouponValidator;
 use Lynomia\Modules\Catalog\Domain\Services\TaxResolver;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
@@ -47,9 +49,11 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  *     leave no transition record of how it got there — which is precisely the
  *     information an operator needs when the order later stalls.
  *
- * Coupons are validated here but redeemed only when the order is paid. A basket
- * that is abandoned must not consume a single-use code, and a coupon reserved at
- * checkout would be held hostage by every customer who closed the tab.
+ * Coupons are validated here but redeemed only when the order is paid: a basket
+ * that is abandoned must not consume a single-use code. The counter alone
+ * therefore does not bound the discount — it moves at payment, while the money
+ * is given away here — so an unpaid order holds a use of the coupon in the same
+ * way it already holds plan stock, and releases it when the order is cancelled.
  */
 final readonly class PlaceOrder
 {
@@ -279,6 +283,10 @@ final readonly class PlaceOrder
             $order = DB::transaction(function () use (
                 $customer, $request, $plans, $pricingLines, $priced, $coupon, $placedBy
             ): Order {
+                if ($coupon !== null) {
+                    $this->assertCouponHasUnspentCapacity($customer, $coupon);
+                }
+
                 $order = Order::create([
                     'customer_id' => $customer->getKey(),
                     'placed_by_user_id' => $placedBy?->getKey(),
@@ -348,6 +356,97 @@ final readonly class PlaceOrder
             actor: $placedBy,
             reason: $priced->isFree() ? 'order total is zero' : 'checkout submitted',
         );
+    }
+
+    /**
+     * Refuses a coupon whose remaining uses are already spoken for.
+     *
+     * Redemption happens when the order is paid, and FulfilOrderOnInvoicePaid
+     * deliberately does not withhold a paying customer's service when that
+     * redemption is refused. So the counter bounds the audit trail and nothing
+     * else: a one-use code placed on ten orders before any of them is paid
+     * discounts ten invoices, fulfils ten orders, and still reports a single
+     * redemption. The limit has to be enforced where the discount is granted.
+     *
+     * An order that has been placed and not yet redeemed holds a use, and stops
+     * holding it when it is cancelled — the same treatment plan stock already
+     * gets a few lines above. The coupon row is locked for the remainder of the
+     * enclosing transaction so two simultaneous checkouts cannot both read the
+     * same remaining capacity.
+     *
+     * @throws CouponFullyRedeemedException
+     * @throws CouponCustomerLimitReachedException
+     */
+    private function assertCouponHasUnspentCapacity(Customer $customer, Coupon $coupon): void
+    {
+        // Read under the lock rather than from the caller's copy, which was
+        // loaded before any of this transaction's competitors committed.
+        $locked = DB::table('coupons')->where('id', $coupon->getKey())->lockForUpdate()->first();
+
+        if ($locked === null) {
+            return;
+        }
+
+        $redeemed = (int) $locked->redemption_count;
+        $globalLimit = $locked->max_redemptions === null ? null : (int) $locked->max_redemptions;
+
+        if ($globalLimit !== null) {
+            $claimed = $redeemed + $this->outstandingCouponHolds($coupon);
+
+            if ($claimed >= $globalLimit) {
+                throw CouponFullyRedeemedException::forCoupon(
+                    (string) $coupon->getKey(),
+                    $coupon->code,
+                    $claimed,
+                    $globalLimit,
+                );
+            }
+        }
+
+        $limit = (int) $locked->max_redemptions_per_customer;
+
+        if ($limit <= 0) {
+            return;
+        }
+
+        $used = $this->coupons->redemptionsBy($coupon, $customer)
+            + $this->outstandingCouponHolds($coupon, $customer);
+
+        if ($used >= $limit) {
+            throw CouponCustomerLimitReachedException::forCustomer(
+                (string) $coupon->getKey(),
+                $coupon->code,
+                (string) $customer->getKey(),
+                $used,
+                $limit,
+            );
+        }
+    }
+
+    /**
+     * Orders that carry this coupon and have not yet redeemed it.
+     *
+     * Counted from orders that are still alive, and excluding any that already
+     * has a redemption row — those are counted by redemption_count instead, and
+     * counting them in both places would refuse the very order that is being
+     * redeemed.
+     */
+    private function outstandingCouponHolds(Coupon $coupon, ?Customer $customer = null): int
+    {
+        return (int) DB::table('orders')
+            ->where('orders.coupon_id', $coupon->getKey())
+            ->whereNotIn('orders.status', [
+                OrderStatus::Cancelled->value,
+                OrderStatus::Refunded->value,
+                OrderStatus::Terminated->value,
+            ])
+            ->whereNotExists(
+                fn ($query) => $query->selectRaw('1')
+                    ->from('coupon_redemptions')
+                    ->whereColumn('coupon_redemptions.order_id', 'orders.id')
+            )
+            ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()))
+            ->count();
     }
 
     /**

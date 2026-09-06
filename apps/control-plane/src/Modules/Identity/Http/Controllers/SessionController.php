@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Identity\Http\Controllers;
 
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class SessionController
@@ -57,6 +60,7 @@ final class SessionController
         }
 
         DB::table('sessions')->where('id', $target->id)->delete();
+        $this->evictRememberedDevices($request, $user);
 
         return response()->json(status: 204);
     }
@@ -70,6 +74,8 @@ final class SessionController
             ->where('user_id', $user->id)
             ->when($currentId !== null, fn ($query) => $query->where('id', '!=', $currentId))
             ->delete();
+
+        $this->evictRememberedDevices($request, $user);
 
         return response()->json(status: 204);
     }
@@ -93,6 +99,33 @@ final class SessionController
                 'occurred_at' => $row->created_at?->toIso8601String(),
             ])->all(),
         ]);
+    }
+
+    /**
+     * Deleting session rows is not enough to get a device out.
+     *
+     * A remember-me cookie is a standalone credential — `id|remember_token|
+     * password-hash` — that SessionGuard re-authenticates from and mints a
+     * brand-new session for on the very next request. It is not a session row,
+     * so it cannot be listed or addressed individually, and revocation that
+     * leaves `remember_token` alone leaves a stolen cookie fully working.
+     * Rotating the token is what actually evicts those devices.
+     *
+     * The device the customer is revoking *from* keeps its persistent login:
+     * if it presented a recaller, it is re-issued one under the new token,
+     * exactly as the framework's own logoutOtherDevices does.
+     */
+    private function evictRememberedDevices(Request $request, User $user): void
+    {
+        $guard = Auth::guard('web');
+        $keepThisDevice = $guard instanceof SessionGuard
+            && $request->cookies->has($guard->getRecallerName());
+
+        $user->forceFill(['remember_token' => Str::random(60)])->save();
+
+        if ($keepThisDevice) {
+            $guard->login($user, remember: true);
+        }
     }
 
     private function currentUser(Request $request): User

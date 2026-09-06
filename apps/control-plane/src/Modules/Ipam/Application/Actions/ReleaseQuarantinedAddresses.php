@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Ipam\Application\Actions;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
+use Lynomia\Modules\Ipam\Domain\Enums\ReleaseReason;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 
 /**
@@ -42,6 +44,25 @@ final readonly class ReleaseQuarantinedAddresses
                  */
                 ->whereNotNull('quarantined_until')
                 ->where('quarantined_until', '<=', now())
+                /*
+                 * A timeout quarantine is not a waiting period and does not
+                 * end on a clock. The address was withdrawn because nobody
+                 * knows whether a machine was built with it configured, and
+                 * the window elapsing answers nothing: handing it on puts the
+                 * next customer on an address the first machine may still be
+                 * answering on. It is cleared by an operator who has looked —
+                 * by adopting the resource, or by releasing the address as
+                 * OperatorAction once the machine is known not to exist.
+                 *
+                 * Written as "reason is null OR not one of these" rather than
+                 * a plain <>: in SQL a NULL reason compares to NULL, not to
+                 * true, and a quarantine with no reason would silently stop
+                 * being swept.
+                 */
+                ->where(function (Builder $query): void {
+                    $query->whereNull('quarantine_reason')
+                        ->orWhereNotIn('quarantine_reason', ReleaseReason::requiringOperatorClearance());
+                })
                 ->orderBy('quarantined_until')
                 ->limit($limit)
                 ->lock('for update skip locked')

@@ -7,15 +7,16 @@ namespace Lynomia\Modules\Identity\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
-use Illuminate\Validation\ValidationException;
+use Lynomia\Modules\Identity\Http\Controllers\Concerns\ConfirmsCurrentPassword;
 use Lynomia\Modules\Identity\Http\Resources\UserResource;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class ProfileController
 {
+    use ConfirmsCurrentPassword;
+
     public function show(Request $request): JsonResponse
     {
         $user = $this->currentUser($request);
@@ -52,11 +53,7 @@ final class ProfileController
             'password' => ['required', 'string', 'confirmed', Password::defaults()],
         ]);
 
-        if (! Hash::check($validated['current_password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'current_password' => 'That password is incorrect.',
-            ]);
-        }
+        $this->confirmCurrentPassword($request, $user, $validated['current_password']);
 
         $user->forceFill([
             'password' => $validated['password'],

@@ -300,12 +300,12 @@ final class CpanelHostingProviderTest extends TestCase
     {
         Http::fake(['*' => Http::response([
             'metadata' => ['result' => 1],
-            'data' => ['url' => 'https://node.test:2083/cpsess1234/', 'expires' => 1893456000],
+            'data' => ['url' => 'https://node-a.lynomia.test:2083/cpsess1234/', 'expires' => 1893456000],
         ], 200)]);
 
         $session = $this->provider()->createSsoSession($this->node(), 'acme');
 
-        $this->assertSame('https://node.test:2083/cpsess1234/', $session->url);
+        $this->assertSame('https://node-a.lynomia.test:2083/cpsess1234/', $session->url);
         $this->assertStringNotContainsString('password', $session->describe());
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'create_user_session')
@@ -330,7 +330,7 @@ final class CpanelHostingProviderTest extends TestCase
     {
         Http::fake(['*' => Http::response([
             'metadata' => ['result' => 1],
-            'data' => ['acct' => [['user' => 'acme']], 'one' => '0.10', 'url' => 'https://node.test:2083/x/'],
+            'data' => ['acct' => [['user' => 'acme']], 'one' => '0.10', 'url' => 'https://node-a.lynomia.test:2083/x/'],
         ], 200)]);
 
         $provider = $this->provider();

@@ -323,6 +323,10 @@ final class DirectAdminHostingProvider implements HostingProvider
 
         $url = $this->stringOrNull($response['url'] ?? null);
 
+        if ($url !== null) {
+            $url = $this->assertSsoUrlBelongsToNode($node, $url, $username);
+        }
+
         if ($url === null) {
             $key = $this->stringOrNull($response['key'] ?? null);
 
@@ -348,6 +352,48 @@ final class DirectAdminHostingProvider implements HostingProvider
             username: $username,
             service: 'directadmin',
             expiresAt: $expiresAt,
+        );
+    }
+
+    /**
+     * The panel does not get to choose where the customer's browser goes.
+     *
+     * The URL in an SSO answer is response data from a node, and the node is
+     * exactly the machine a reseller operates, a customer shares, or an
+     * attacker has taken. Returned verbatim it is a link the portal invites
+     * the customer to click — a login page on a host of the node's choosing,
+     * looking exactly like the panel they expected.
+     *
+     * The port is deliberately NOT compared — a node may serve its panel on a
+     * port other than the one its API answers on. The host is, against both
+     * the endpoint the platform dialled and the node's recorded hostname,
+     * because an endpoint may be an address while the panel answers with its
+     * name.
+     *
+     * @throws HostingProviderException
+     */
+    private function assertSsoUrlBelongsToNode(HostingNode $node, string $url, string $username): string
+    {
+        $parts = parse_url($url);
+
+        $permitted = array_filter([
+            is_array($endpoint = parse_url($this->connection($node)->baseUrl())) ? ($endpoint['host'] ?? null) : null,
+            $node->hostname,
+        ]);
+
+        if (is_array($parts)
+            && ($parts['scheme'] ?? null) === 'https'
+            && in_array($parts['host'] ?? null, $permitted, true)
+        ) {
+            return $url;
+        }
+
+        throw HostingProviderException::unexpectedResponse(
+            self::NAME,
+            'create_sso_session',
+            'the node returned a session URL pointing somewhere other than itself, and it will not be '
+            .'handed to a customer',
+            ['node' => $node->hostname, 'username' => $username],
         );
     }
 
@@ -379,9 +425,13 @@ final class DirectAdminHostingProvider implements HostingProvider
             // Reads go as GET because DirectAdmin's read commands take their
             // parameters in the query string; writes go as POST so the account
             // name and package never appear in the node's access log.
-            return in_array($command, self::MUTATING_COMMANDS, true)
+            $response = in_array($command, self::MUTATING_COMMANDS, true)
                 ? $request->post('/'.$command, $parameters)
                 : $request->get('/'.$command, $parameters);
+
+            $this->assertNotRedirect($node, $response, $operation, ['command' => $command]);
+
+            return $response;
         } catch (ConnectionException $e) {
             /*
              * Indeterminate, deliberately. This is a timeout or a dropped
@@ -423,6 +473,36 @@ final class DirectAdminHostingProvider implements HostingProvider
         }
     }
 
+    /**
+     * A 3xx is not an answer, it is a destination chosen by the node.
+     *
+     * Redirects are disabled on the client, so one arrives here as an ordinary
+     * response. It is refused rather than parsed: DirectAdmin reports failure
+     * in the body of a 200, so an unrefused redirect would parse as an empty
+     * body with no `error=1` and be read as success. Flagged indeterminate
+     * because a node that answered a create with a redirect may still have
+     * created the account.
+     *
+     * @param  array<string, scalar|null>  $context
+     *
+     * @throws HostingProviderException
+     */
+    private function assertNotRedirect(HostingNode $node, Response $response, string $operation, array $context = []): void
+    {
+        if ($response->status() < 300 || $response->status() > 399) {
+            return;
+        }
+
+        throw HostingProviderException::unexpectedResponse(
+            self::NAME,
+            $operation,
+            'the node answered with a redirect, which is not followed because the request carries the login '
+            .'key and, on a 307 or 308, the account password in its body',
+            [...$context, 'node' => $node->hostname, 'status' => $response->status()],
+            indeterminate: true,
+        );
+    }
+
     private function request(HostingNode $node): PendingRequest
     {
         $connection = $this->connection($node);
@@ -435,7 +515,12 @@ final class DirectAdminHostingProvider implements HostingProvider
             // Explicit rather than left to the client default, so a future
             // change to that default cannot silently disable certificate
             // verification for every node at once.
-            ->withOptions(['verify' => $connection->verifyTls])
+            //
+            // Redirects are refused too. A Location header is chosen by the
+            // node, and on a 307 or 308 the client re-posts the body to it —
+            // and the body of CMD_API_USER_PASSWD or CMD_API_ACCOUNT_USER is
+            // the customer's plaintext panel password.
+            ->withOptions(['verify' => $connection->verifyTls, 'allow_redirects' => false])
             ->timeout($connection->timeoutSeconds)
             ->asForm();
     }

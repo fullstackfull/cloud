@@ -47,6 +47,7 @@ class Refund extends Model
             'status' => RefundStatus::class,
             'amount_minor' => 'integer',
             'processed_at' => 'immutable_datetime',
+            'recorded_on_invoice_at' => 'immutable_datetime',
         ];
     }
 

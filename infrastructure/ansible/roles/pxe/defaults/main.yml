@@ -9,6 +9,19 @@ pxe_dhcp_range_start: ~
 pxe_dhcp_range_end: ~
 pxe_dhcp_lease_time: 10m
 
+# THIS SERVER'S OWN ADDRESS ON THE PROVISIONING VLAN, and the only address the
+# boot chain may name. It is declared per host and is NOT `ansible_host`:
+# `ansible_host` is the management address, on a different network, so a boot
+# URL built from it hands a machine on the provisioning VLAN a host it cannot
+# route to — and the rules below open port 80 on
+# `pxe_provisioning_interface` only, so even a routed management address would
+# have the request dropped. The installer profiles and unattended answer files
+# under `pxe_http_root` carry root password hashes and provisioning keys; the
+# whole point of this VLAN is that they are reachable from it and from nowhere
+# else. The role refuses unless this address is inside
+# `pxe_provisioning_cidr`.
+pxe_provisioning_address: ~
+
 # Where installers fetch their images and answer files from. Served over HTTP
 # on the provisioning VLAN only.
 pxe_http_root: /srv/provisioning
