@@ -4,18 +4,24 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Infrastructure\Repositories;
 
-use Illuminate\Support\Facades\DB;
-use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\CouponTerms;
 
 /**
- * Reads coupon terms for a renewal.
+ * Reads the terms of the coupon attached to a subscription.
  *
- * Deliberately a read-only projection over the coupons table rather than an
- * Eloquent model: coupon lifecycle — validity windows, redemption limits,
- * counters — belongs to the catalogue and checkout side of the platform, and a
- * renewal has no business being able to write any of it. What it needs is a
- * value it can price with.
+ * Deliberately a read: coupon state — validity windows, redemption limits and
+ * the redemption counter — belongs to the catalogue, and is only ever moved by
+ * RedeemCoupon under a row lock. A renewal is not a redemption; it re-applies a
+ * discount the customer has already redeemed once, so it narrows the coupon to
+ * the handful of fields it prices with and touches nothing.
+ *
+ * A deactivated coupon stops discounting renewals as well as new checkouts.
+ * That is the point of the switch: a coupon that was mispriced or abused is
+ * usually already attached to live subscriptions, and honouring it there
+ * indefinitely would leave an operator no way to stop it. Cycles are not
+ * consumed while it is off, so re-activating one restores what the customer
+ * had left.
  */
 final class CouponTermsRepository
 {
@@ -25,27 +31,25 @@ final class CouponTermsRepository
             return null;
         }
 
-        $row = DB::table('coupons')
-            ->select(['id', 'code', 'applies_to_renewals', 'percentage', 'amount_minor', 'currency', 'duration_cycles'])
-            ->where('id', $couponId)
+        /** @var Coupon|null $coupon */
+        $coupon = Coupon::query()
+            ->whereKey($couponId)
             ->where('is_active', true)
             ->first();
 
-        if ($row === null) {
+        if ($coupon === null) {
             return null;
         }
 
         return new CouponTerms(
-            id: (string) $row->id,
-            code: (string) $row->code,
-            appliesToRenewals: (bool) $row->applies_to_renewals,
-            // numeric(9,6) arrives as an exact decimal string; keeping it a
-            // string is what stops a rate ever becoming a float.
-            percentage: $row->percentage === null ? null : (string) $row->percentage,
-            fixedAmount: $row->amount_minor === null || $row->currency === null
-                ? null
-                : Money::ofMinor((int) $row->amount_minor, (string) $row->currency),
-            durationCycles: $row->duration_cycles === null ? null : (int) $row->duration_cycles,
+            id: (string) $coupon->getKey(),
+            code: $coupon->code,
+            appliesToRenewals: (bool) $coupon->applies_to_renewals,
+            // Exact decimal string throughout — the rate is never a float, and
+            // a fixed-amount coupon has no rate at all.
+            percentage: $coupon->isPercentage() ? $coupon->percentageRate() : null,
+            fixedAmount: $coupon->fixedAmount(),
+            durationCycles: $coupon->duration_cycles,
         );
     }
 }

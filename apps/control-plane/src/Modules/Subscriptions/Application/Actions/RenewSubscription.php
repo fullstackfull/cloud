@@ -94,9 +94,16 @@ final readonly class RenewSubscription
             $periodEnd = $locked->billing_period->advance($periodStart);
 
             $coupon = $this->coupons->find($locked->coupon_id);
-            $stillDiscounting = $coupon !== null && $coupon->appliesTo($locked->coupon_cycles_remaining);
-            $percentage = $stillDiscounting ? $coupon?->percentage : null;
-            $fixed = $stillDiscounting ? $coupon?->fixedAmountIn($locked->currency) : null;
+            $percentage = null;
+            $fixed = null;
+            $code = null;
+
+            if ($coupon !== null && $coupon->appliesTo($locked->coupon_cycles_remaining)) {
+                $percentage = $coupon->percentage;
+                $fixed = $coupon->fixedAmountIn($locked->currency);
+                $code = $coupon->code;
+            }
+
             $discountApplied = $percentage !== null || $fixed !== null;
 
             $cyclesRemaining = $locked->coupon_cycles_remaining;
@@ -123,7 +130,7 @@ final readonly class RenewSubscription
                 lines: [$this->renewalLine($locked)],
                 fixedDiscount: $fixed,
                 percentageDiscount: $percentage,
-                couponCode: $discountApplied ? $coupon?->code : null,
+                couponCode: $discountApplied ? $code : null,
                 couponCyclesRemaining: $cyclesRemaining,
             );
         });

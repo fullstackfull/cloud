@@ -7,7 +7,6 @@ namespace Tests\Feature\Subscriptions;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Lynomia\Modules\Billing\Application\Actions\IssueInvoice;
 use Lynomia\Modules\Billing\Application\DTOs\InvoiceLineDraft;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
@@ -15,6 +14,7 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
 use Lynomia\Modules\Billing\Domain\ValueObjects\TaxRate;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Subscriptions\Application\Actions\CancelSubscription;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewSubscription;
@@ -181,11 +181,11 @@ final class RenewSubscriptionTest extends TestCase
     #[Test]
     public function coupon_cycles_decrement_and_stop_applying_once_exhausted(): void
     {
-        $couponId = $this->coupon(['percentage' => '0.100000', 'duration_cycles' => 2]);
+        $coupon = $this->coupon(['duration_cycles' => 2]);
 
         $subscription = Subscription::factory()
             ->startingOn(CarbonImmutable::parse('2026-01-01 00:00:00'))
-            ->withCoupon($couponId, 2)
+            ->withCoupon($coupon->id, 2)
             ->create();
 
         $this->travelTo(CarbonImmutable::parse('2026-02-01 00:00:00'));
@@ -217,11 +217,11 @@ final class RenewSubscriptionTest extends TestCase
     #[Test]
     public function a_coupon_that_does_not_apply_to_renewals_never_discounts_one(): void
     {
-        $couponId = $this->coupon(['applies_to_renewals' => false, 'duration_cycles' => null]);
+        $coupon = $this->coupon(['applies_to_renewals' => false, 'duration_cycles' => null]);
 
         $subscription = Subscription::factory()
             ->startingOn(CarbonImmutable::parse('2026-01-01 00:00:00'))
-            ->withCoupon($couponId, null)
+            ->withCoupon($coupon->id, null)
             ->create();
 
         $this->travelTo(CarbonImmutable::parse('2026-02-01 00:00:00'));
@@ -233,17 +233,43 @@ final class RenewSubscriptionTest extends TestCase
     }
 
     #[Test]
+    public function a_renewal_coupon_in_another_currency_is_dropped_without_burning_a_cycle(): void
+    {
+        $coupon = Coupon::factory()->fixed(500, 'USD')->create([
+            'applies_to_renewals' => true,
+            'duration_cycles' => 2,
+        ]);
+
+        $subscription = Subscription::factory()
+            ->startingOn(CarbonImmutable::parse('2026-01-01 00:00:00'))
+            ->priced(9000, 'KWD')
+            ->withCoupon($coupon->id, 2)
+            ->create();
+
+        $this->travelTo(CarbonImmutable::parse('2026-02-01 00:00:00'));
+
+        $plan = $this->renew->execute($subscription);
+
+        $this->assertNotNull($plan);
+        // Currencies are never converted, so a USD coupon simply does not
+        // apply to a KWD renewal — and must not spend one of the cycles the
+        // customer is still owed.
+        $this->assertFalse($plan->hasDiscount());
+        $this->assertSame(2, $subscription->refresh()->coupon_cycles_remaining);
+    }
+
+    #[Test]
     public function a_renewal_plan_prices_and_issues_through_the_billing_module(): void
     {
         DB::statement("SELECT setval('invoice_number_seq', 1, false)");
 
         $customer = Customer::factory()->create(['currency' => 'KWD']);
-        $couponId = $this->coupon(['percentage' => '0.100000', 'duration_cycles' => 1]);
+        $coupon = $this->coupon(['duration_cycles' => 1]);
 
         $subscription = Subscription::factory()
             ->startingOn(CarbonImmutable::parse('2026-01-01 00:00:00'), BillingPeriod::Monthly)
             ->priced(9000)
-            ->withCoupon($couponId, 1)
+            ->withCoupon($coupon->id, 1)
             ->create(['customer_id' => $customer->id]);
 
         $this->travelTo(CarbonImmutable::parse('2026-02-01 00:00:00'));
@@ -286,24 +312,11 @@ final class RenewSubscriptionTest extends TestCase
     /**
      * @param  array<string, mixed>  $overrides
      */
-    private function coupon(array $overrides = []): string
+    private function coupon(array $overrides = []): Coupon
     {
-        $id = (string) Str::ulid();
-
-        DB::table('coupons')->insert(array_merge([
-            'id' => $id,
-            'code' => 'CPN'.Str::upper(Str::random(7)),
-            'discount_type' => 'percentage',
-            'percentage' => '0.100000',
+        return Coupon::factory()->create(array_merge([
             'applies_to_renewals' => true,
             'duration_cycles' => 3,
-            'is_active' => true,
-            'max_redemptions_per_customer' => 1,
-            'redemption_count' => 0,
-            'created_at' => now(),
-            'updated_at' => now(),
         ], $overrides));
-
-        return $id;
     }
 }

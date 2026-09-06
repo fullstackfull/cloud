@@ -6,10 +6,9 @@ namespace Tests\Feature\Subscriptions;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
@@ -119,14 +118,14 @@ final class StartSubscriptionTest extends TestCase
         $customer = Customer::factory()->create();
 
         $recurring = $this->coupon(['applies_to_renewals' => true, 'duration_cycles' => 3]);
-        $order = $this->paidOrder($customer, $recurring);
+        $order = $this->paidOrder($customer, $recurring->id);
         $subscription = $this->start->execute($order, $this->planLine($order));
 
-        $this->assertSame($recurring, trim((string) $subscription->coupon_id));
+        $this->assertSame($recurring->id, trim((string) $subscription->coupon_id));
         $this->assertSame(3, $subscription->coupon_cycles_remaining);
 
         $oneOff = $this->coupon(['applies_to_renewals' => false, 'duration_cycles' => null]);
-        $otherOrder = $this->paidOrder($customer, $oneOff);
+        $otherOrder = $this->paidOrder($customer, $oneOff->id);
         $otherSubscription = $this->start->execute($otherOrder, $this->planLine($otherOrder));
 
         $this->assertNull($otherSubscription->coupon_id);
@@ -181,24 +180,11 @@ final class StartSubscriptionTest extends TestCase
     /**
      * @param  array<string, mixed>  $overrides
      */
-    private function coupon(array $overrides = []): string
+    private function coupon(array $overrides = []): Coupon
     {
-        $id = (string) Str::ulid();
-
-        DB::table('coupons')->insert(array_merge([
-            'id' => $id,
-            'code' => 'CPN'.Str::upper(Str::random(7)),
-            'discount_type' => 'percentage',
-            'percentage' => '0.100000',
+        return Coupon::factory()->create(array_merge([
             'applies_to_renewals' => true,
             'duration_cycles' => 3,
-            'is_active' => true,
-            'max_redemptions_per_customer' => 1,
-            'redemption_count' => 0,
-            'created_at' => now(),
-            'updated_at' => now(),
         ], $overrides));
-
-        return $id;
     }
 }
