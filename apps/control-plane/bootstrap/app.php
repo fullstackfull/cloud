@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Lynomia\Http\Middleware\AssignRequestId;
+use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Http\Middleware\SecurityHeaders;
 use Lynomia\Http\Responses\ApiError;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
@@ -75,6 +76,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => PermissionMiddleware::class,
             'role' => RoleMiddleware::class,
+
+            // Resolves the one customer account a request acts for. Every
+            // customer-scoped route carries it, and every customer-scoped
+            // query reads the answer from it rather than from the request.
+            'customer' => ResolveActingCustomer::class,
         ]);
 
         // Never trust proxy headers blindly. The production Ansible role sets
