@@ -1,0 +1,67 @@
+# Dependencies
+/node_modules
+**/node_modules
+**/vendor
+
+# Build output
+**/dist
+**/build
+**/.vite
+**/public/build
+**/public/hot
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+!**/*.pub
+id_rsa*
+id_ed25519*
+**/vault-password*
+**/*.vault
+**/secrets.yml
+!**/secrets.example.yml
+
+# Laravel
+apps/control-plane/storage/*.key
+apps/control-plane/storage/framework/cache/*
+apps/control-plane/storage/framework/sessions/*
+apps/control-plane/storage/framework/views/*
+apps/control-plane/storage/logs/*
+apps/control-plane/bootstrap/cache/*
+!**/.gitignore
+
+# Tooling caches
+.phpunit.result.cache
+.phpunit.cache
+.php-cs-fixer.cache
+**/.pest
+coverage/
+**/coverage/
+.eslintcache
+*.tsbuildinfo
+
+# Terraform / OpenTofu
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+
+# Ansible
+**/*.retry
+infrastructure/ansible/inventories/*/host_vars/*/vault.yml
+infrastructure/ansible/.ansible/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,56 @@
+# Local development dependencies ONLY.
+#
+# This file deliberately does NOT contain Proxmox, cPanel, DirectAdmin, PBS or
+# any hypervisor. Those are physical/bare-metal roles and are never emulated in
+# Docker. Provider behaviour in development is exercised through the explicitly
+# named Fake* providers, which refuse to load when APP_ENV=production.
+
+name: lynomia-dev
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: lynomia-postgres
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-lynomia}
+      POSTGRES_USER: ${DB_USERNAME:-lynomia}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-lynomia_dev_only}
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-lynomia} -d ${DB_DATABASE:-lynomia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    container_name: lynomia-redis
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: lynomia-mailpit
+    ports:
+      - "${MAIL_PORT:-1025}:1025"   # SMTP
+      - "${MAILPIT_UI_PORT:-8025}:8025"   # Web UI
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  postgres-data:
+  redis-data:
