@@ -38,6 +38,13 @@ final readonly class PlacementDecision
         public array $rejections,
         public string $storageName,
         public ?int $antiAffinityLimit = null,
+        /*
+         * The pool's id, not just its name. Committing shared storage has to
+         * lock the pool row, and a provider-side name is not a key: two
+         * clusters can both call a pool "ceph-pool", and the name is what the
+         * hypervisor uses rather than what the platform accounts against.
+         */
+        public ?string $storageId = null,
     ) {}
 
     public function node(): ComputeNode

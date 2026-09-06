@@ -189,14 +189,16 @@ final readonly class NodeScheduler
 
         $chosen = $candidates[0];
         $storageName = '';
+        $storageId = null;
 
         foreach ($eligible as $candidate) {
             if ($candidate['node']->is($chosen->node)) {
                 $storageName = $candidate['storage']->provider_name;
+                $storageId = (string) $candidate['storage']->getKey();
             }
         }
 
-        return new PlacementDecision($chosen, $candidates, $rejections, $storageName, $enforcedLimit);
+        return new PlacementDecision($chosen, $candidates, $rejections, $storageName, $enforcedLimit, $storageId);
     }
 
     /**
