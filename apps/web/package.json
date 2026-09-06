@@ -10,9 +10,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest",
-    "test:e2e": "playwright test",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "generate:types": "openapi-typescript ../../docs/openapi.json -o ../../packages/shared-types/src/api.d.ts"
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {
     "@lynomia/api-client": "*",

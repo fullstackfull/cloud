@@ -1,5 +1,19 @@
 # API
 
+> **Implementation status.** Read this first, because the rest of this document
+> describes the whole surface and only part of it is built.
+>
+> | Surface | Status |
+> |---|---|
+> | `/api/v1` identity — register, login, two-factor challenge, logout, email verification, password reset, profile, password change, sessions, login activity, two-factor enrolment and recovery codes | implemented and covered by tests |
+> | `/webhooks/{provider}` — signature verification, replay rejection, idempotent ingestion | implemented and covered by tests |
+> | `/api/v1` business — catalogue, orders, checkout, invoices, payments, wallet, subscriptions, services, VPS lifecycle, dedicated servers, hosting accounts, IPAM | **not exposed.** The operations exist as application actions with unit and feature coverage; no controller, route or API resource publishes them yet. |
+> | `/api/admin` — the entire administrative surface | **not built.** The prefix, the guard and the permission model are designed and the permissions are seeded; no route is registered under it. |
+>
+> `php artisan route:list` is the authority on what is reachable. Everything below
+> describes the conventions those routes follow, and the conventions the remaining
+> routes will follow when they are written.
+
 ## Two surfaces, one implementation
 
 ```text
@@ -13,9 +27,9 @@ deliberate: there is exactly one implementation of every operation, and anything
 can do in the UI they can also automate. A separate internal API drifts from the public one
 within a release or two, and the public one is always the poorer for it.
 
-Administrative capability lives behind its own prefix so that an over-scoped customer token
-cannot reach it by accident. Route-level permission checks are the enforcement; the prefix
-is defence in depth.
+Administrative capability is to live behind its own prefix so that an over-scoped customer
+token cannot reach it by accident. Route-level permission checks are the enforcement; the
+prefix is defence in depth. No route is registered under `/api/admin` yet.
 
 ## Authentication
 
@@ -134,13 +148,17 @@ as an IEEE double, and JSON numbers are doubles in most clients.
 
 ## OpenAPI
 
-The specification is generated from the routes and their form requests, so it cannot drift
-from the implementation:
+There is no generated specification yet, and no generated client. The portal talks to the
+API through a hand-written client in `apps/web/src/lib/api.ts`.
 
-```bash
-make openapi        # regenerates docs/openapi.json and the typed TypeScript client
-```
+This is worth stating plainly because the alternative is attractive enough to assume: a
+specification generated from the routes and their form requests, feeding a typed client, so
+that a breaking change to an endpoint fails the frontend's typecheck in CI rather than at
+runtime in front of a customer. That is the intent. It is not the state. Generating it now,
+against an API that is still only the identity surface, would produce a contract that has to
+be thrown away as soon as the business endpoints land — so it is deferred until those
+endpoints exist, and until then nothing in this repository claims a specification it does
+not produce.
 
-The portal's API client is generated from that specification, which means a breaking
-change to an endpoint fails the frontend's typecheck in CI rather than at runtime in front
-of a customer.
+`packages/shared-types` and `packages/api-client` are empty workspace placeholders reserved
+for that generated output. They export nothing today.

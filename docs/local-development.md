@@ -53,11 +53,10 @@ reach production by accident.
 make test            # backend + frontend tests
 make test-backend    # php artisan test
 make test-frontend   # vitest
-make lint            # Pint, PHPStan, ESLint, tsc
+make lint            # Pint, ESLint, tsc (plus PHPStan when its toolchain is installed)
 make fmt             # auto-format everything
 make fresh           # drop, migrate from empty, seed
 make dev-reset       # destroy and recreate the Docker data volumes
-make openapi         # regenerate the OpenAPI spec and the typed API client
 ```
 
 ## Working on infrastructure code

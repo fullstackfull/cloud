@@ -48,23 +48,27 @@ fresh: ## Drop everything, migrate from empty DB and seed
 test: test-backend test-frontend ## Run the full test suite
 
 .PHONY: test-backend
-test-backend: ## Run PHP tests (Pest)
+test-backend: ## Run PHP tests (PHPUnit, against real PostgreSQL)
 	cd $(CP) && php artisan test
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests
 	cd $(WEB) && npm run test -- --run
 
-.PHONY: test-e2e
-test-e2e: ## Run browser end-to-end tests
-	cd $(WEB) && npm run test:e2e
-
 .PHONY: lint
 lint: lint-backend lint-frontend ## Lint everything
 
 .PHONY: lint-backend
-lint-backend: ## Laravel Pint + PHPStan/Larastan
-	cd $(CP) && ./vendor/bin/pint --test && ./vendor/bin/phpstan analyse --memory-limit=1G
+lint-backend: ## Laravel Pint, plus PHPStan when its toolchain is installed
+	cd $(CP) && ./vendor/bin/pint --test
+	@# PHPStan lives in its own composer root so that a static-analysis upgrade can
+	@# never move an application dependency. It is not part of `make bootstrap`
+	@# because it is only needed by CI and by whoever is about to change types.
+	@if [ -x "$(CP)/tools/phpstan/vendor/bin/phpstan" ]; then \
+		cd $(CP) && tools/phpstan/vendor/bin/phpstan analyse --no-progress --memory-limit=1G; \
+	else \
+		echo "phpstan: not installed - run 'composer install --working-dir=$(CP)/tools/phpstan' to enable it"; \
+	fi
 
 .PHONY: fmt
 fmt: ## Auto-format all code
@@ -78,11 +82,6 @@ lint-frontend: ## ESLint + TypeScript typecheck
 .PHONY: build
 build: ## Production build of the frontend
 	cd $(WEB) && npm run build
-
-.PHONY: openapi
-openapi: ## Regenerate the OpenAPI spec and typed API client
-	cd $(CP) && php artisan lynomia:openapi:generate
-	cd $(WEB) && npm run generate:types
 
 .PHONY: deploy-staging
 deploy-staging: ## Deploy to staging via Ansible
