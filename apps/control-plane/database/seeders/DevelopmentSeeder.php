@@ -14,10 +14,13 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use RuntimeException;
 
 /**
- * Sample data for local development only.
+ * Sample data for local development only: accounts, then the catalogue they can
+ * buy from, then the inventory that fulfils it.
  *
  * Refuses to run in production: a seeded super-admin account with a known
  * password is exactly the kind of thing that must never reach a live system.
+ * The two seeders it calls refuse independently, so neither can be reached by
+ * being invoked directly with `db:seed --class`.
  */
 final class DevelopmentSeeder extends Seeder
 {
@@ -78,5 +81,10 @@ final class DevelopmentSeeder extends Seeder
         );
 
         $this->command?->info('Development accounts seeded (password: "password").');
+
+        $this->call([
+            CatalogueSeeder::class,
+            InfrastructureSeeder::class,
+        ]);
     }
 }
