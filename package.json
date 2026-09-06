@@ -1,0 +1,23 @@
+{
+  "name": "lynomia-cloud",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}
