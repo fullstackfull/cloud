@@ -1,11 +1,19 @@
 <?php
 
+declare(strict_types=1);
+
 use App\Providers\AppServiceProvider;
+use Lynomia\Providers\ApiTokenServiceProvider;
 use Lynomia\Providers\AuthorizationServiceProvider;
 use Lynomia\Providers\DomainServiceProvider;
+use Lynomia\Providers\NotificationRoutingServiceProvider;
+use Lynomia\Providers\RateLimitServiceProvider;
 
 return [
     AppServiceProvider::class,
     DomainServiceProvider::class,
     AuthorizationServiceProvider::class,
+    RateLimitServiceProvider::class,
+    NotificationRoutingServiceProvider::class,
+    ApiTokenServiceProvider::class,
 ];

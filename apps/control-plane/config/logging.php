@@ -1,5 +1,8 @@
 <?php
 
+declare(strict_types=1);
+
+use Lynomia\Modules\Shared\Infrastructure\Logging\StructuredLogger;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -51,6 +54,19 @@ return [
     */
 
     'channels' => [
+
+        /*
+         * Structured JSON, one object per line, with secrets scrubbed by a
+         * Monolog processor rather than at each call site — so a developer
+         * cannot leak a credential by logging a raw exception or request body.
+         * Grafana Alloy tails this file and ships it to Loki.
+         */
+        'structured' => [
+            'driver' => 'custom',
+            'via' => StructuredLogger::class,
+            'path' => storage_path('logs/lynomia.json'),
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
 
         'stack' => [
             'driver' => 'stack',

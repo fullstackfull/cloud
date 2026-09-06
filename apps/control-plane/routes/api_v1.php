@@ -1,0 +1,83 @@
+<?php
+
+declare(strict_types=1);
+
+use Illuminate\Support\Facades\Route;
+use Lynomia\Modules\Identity\Http\Controllers\EmailVerificationController;
+use Lynomia\Modules\Identity\Http\Controllers\LoginController;
+use Lynomia\Modules\Identity\Http\Controllers\PasswordResetController;
+use Lynomia\Modules\Identity\Http\Controllers\ProfileController;
+use Lynomia\Modules\Identity\Http\Controllers\RegistrationController;
+use Lynomia\Modules\Identity\Http\Controllers\SessionController;
+use Lynomia\Modules\Identity\Http\Controllers\TwoFactorController;
+
+/*
+|--------------------------------------------------------------------------
+| Customer API — /api/v1
+|--------------------------------------------------------------------------
+|
+| Serves both the customer portal (Sanctum SPA cookie session) and the public
+| customer API (scoped personal access tokens). One implementation of every
+| operation, so anything a customer can do in the UI they can also automate.
+|
+*/
+
+Route::middleware('guest')->group(function (): void {
+    Route::post('register', RegistrationController::class)
+        ->middleware('throttle:register')
+        ->name('register');
+
+    Route::post('login', [LoginController::class, 'store'])
+        ->middleware('throttle:login')
+        ->name('login');
+
+    Route::post('password/forgot', [PasswordResetController::class, 'sendLink'])
+        ->middleware('throttle:password-reset')
+        ->name('password.forgot');
+
+    Route::post('password/reset', [PasswordResetController::class, 'reset'])
+        ->middleware('throttle:password-reset')
+        ->name('password.reset');
+});
+
+/*
+ * Email verification is confirmed through a signed URL, so it is reachable
+ * without an authenticated session: a customer may well click the link in a
+ * different browser from the one they registered in.
+ */
+Route::get('email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
+    ->middleware(['signed', 'throttle:6,1'])
+    ->name('verification.verify');
+
+Route::middleware('auth:sanctum')->group(function (): void {
+    Route::post('logout', [LoginController::class, 'destroy'])->name('logout');
+
+    Route::post('email/verify/resend', [EmailVerificationController::class, 'resend'])
+        ->middleware('throttle:6,1')
+        ->name('verification.resend');
+
+    Route::get('me', [ProfileController::class, 'show'])->name('me');
+    Route::patch('me', [ProfileController::class, 'update'])->name('me.update');
+    Route::put('me/password', [ProfileController::class, 'updatePassword'])->name('me.password');
+
+    // Active sessions and their revocation.
+    Route::get('me/sessions', [SessionController::class, 'index'])->name('me.sessions');
+    Route::delete('me/sessions/{session}', [SessionController::class, 'destroy'])->name('me.sessions.destroy');
+    Route::delete('me/sessions', [SessionController::class, 'destroyOthers'])->name('me.sessions.destroy_others');
+
+    Route::get('me/login-activity', [SessionController::class, 'loginActivity'])->name('me.login_activity');
+
+    // Two-factor authentication.
+    Route::post('me/two-factor', [TwoFactorController::class, 'enable'])->name('me.2fa.enable');
+    Route::post('me/two-factor/confirm', [TwoFactorController::class, 'confirm'])->name('me.2fa.confirm');
+    Route::delete('me/two-factor', [TwoFactorController::class, 'disable'])->name('me.2fa.disable');
+    Route::post('me/two-factor/recovery-codes', [TwoFactorController::class, 'regenerateRecoveryCodes'])
+        ->name('me.2fa.recovery_codes');
+});
+
+// Challenge endpoint for a login that has passed the password stage and is
+// awaiting a second factor. It is not behind auth:sanctum because no session
+// exists yet.
+Route::post('login/two-factor', [LoginController::class, 'twoFactorChallenge'])
+    ->middleware('throttle:two-factor')
+    ->name('login.two_factor');
