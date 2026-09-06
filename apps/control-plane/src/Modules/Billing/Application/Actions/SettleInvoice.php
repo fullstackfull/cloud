@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceOverpaymentRefusedException;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
@@ -185,11 +187,37 @@ final readonly class SettleInvoice
             // PostgreSQL recomputed amount_due_minor as part of that write.
             $locked->refresh();
 
+            $becamePaid = false;
+
             if ($locked->amountDue()->isZero() && $locked->status !== InvoiceStatus::Paid) {
                 $locked = $this->transitionInvoice->execute($locked, InvoiceStatus::Paid);
+                $becamePaid = true;
             }
 
             $surplus = $this->creditSurplus($locked, $capture, $surplusMinor);
+
+            /*
+             * Announced only on the transition to paid, and only once — a
+             * second capture against an already-paid invoice credits the wallet
+             * but must not re-announce a fulfilment that has already happened.
+             *
+             * Dispatched after the commit so that a listener which starts a
+             * subscription or queues provisioning cannot observe, or act on, an
+             * invoice whose settlement is about to roll back.
+             */
+            if ($becamePaid) {
+                $paidInvoice = $locked;
+
+                DB::afterCommit(static function () use ($paidInvoice): void {
+                    event(new InvoicePaid(
+                        invoiceId: (string) $paidInvoice->getKey(),
+                        customerId: (string) $paidInvoice->customer_id,
+                        orderId: $paidInvoice->order_id,
+                        subscriptionId: $paidInvoice->subscription_id,
+                        paidAt: CarbonImmutable::instance($paidInvoice->paid_at ?? now()),
+                    ));
+                });
+            }
 
             return new InvoiceSettlement(
                 invoice: $locked,

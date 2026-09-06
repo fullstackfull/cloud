@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
@@ -66,6 +67,19 @@ class Order extends Model
     public function placedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'placed_by_user_id');
+    }
+
+    /**
+     * The coupon applied at checkout, if any.
+     *
+     * Nulled rather than cascaded when a coupon is deleted: the order is a
+     * historical record and the discount is already on the invoice.
+     *
+     * @return BelongsTo<Coupon, $this>
+     */
+    public function coupon(): BelongsTo
+    {
+        return $this->belongsTo(Coupon::class);
     }
 
     /**

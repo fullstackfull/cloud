@@ -84,6 +84,16 @@ final class RecordPaymentCaptureTest extends TestCase
     #[Test]
     public function recording_a_capture_does_not_settle_the_invoice(): void
     {
+        /*
+         * The listener is silenced on purpose. Settlement does happen in the
+         * running platform — a billing listener reacts to PaymentCaptured — but
+         * that is a decision the billing module makes, not something this action
+         * does. Faking the event is what isolates the boundary: without it this
+         * test would pass or fail depending on which listeners happen to be
+         * registered, which is not a property of the code under test.
+         */
+        Event::fake([PaymentCaptured::class]);
+
         $invoiceId = $this->anOpenInvoice();
 
         $this->record->execute('fake', $this->captureEvent(), invoiceId: $invoiceId);
@@ -94,6 +104,9 @@ final class RecordPaymentCaptureTest extends TestCase
         $invoice = DB::table('invoices')->where('id', $invoiceId)->first();
         $this->assertSame('open', $invoice?->status);
         $this->assertSame(0, (int) $invoice?->amount_paid_minor);
+
+        // And it does announce the capture, so billing can act on it.
+        Event::assertDispatched(PaymentCaptured::class);
     }
 
     #[Test]

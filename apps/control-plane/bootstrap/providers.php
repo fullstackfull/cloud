@@ -7,6 +7,7 @@ use Lynomia\Modules\Payments\Infrastructure\PaymentsServiceProvider;
 use Lynomia\Providers\ApiTokenServiceProvider;
 use Lynomia\Providers\AuthorizationServiceProvider;
 use Lynomia\Providers\DomainServiceProvider;
+use Lynomia\Providers\EventServiceProvider;
 use Lynomia\Providers\NotificationRoutingServiceProvider;
 use Lynomia\Providers\ProviderRegistryServiceProvider;
 use Lynomia\Providers\RateLimitServiceProvider;
@@ -20,4 +21,5 @@ return [
     ApiTokenServiceProvider::class,
     ProviderRegistryServiceProvider::class,
     PaymentsServiceProvider::class,
+    EventServiceProvider::class,
 ];
