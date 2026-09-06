@@ -256,7 +256,10 @@ final readonly class IpAllocator
             }
 
             /** @var IpAddress $address */
-            $address = IpAddress::query()->lockForUpdate()->findOrFail($locked->ip_address_id);
+            $address = IpAddress::query()
+                ->with('subnet.ipPool')
+                ->lockForUpdate()
+                ->findOrFail($locked->ip_address_id);
 
             $locked->forceFill([
                 'released_at' => now(),
@@ -267,11 +270,27 @@ final readonly class IpAllocator
             // assigned, something committed it and this reservation row is
             // stale bookkeeping; returning it would hand out a live address.
             if ($address->status === IpAddressStatus::Reserved) {
-                $address->forceFill([
-                    'status' => IpAddressStatus::Available,
-                    'quarantined_until' => null,
-                    'quarantine_reason' => null,
-                ])->save();
+                if ($reason->requiresQuarantine()) {
+                    /*
+                     * A timed-out job is not a failed job. The platform stopped
+                     * waiting; the provider may not have. The machine could be
+                     * running right now with this address configured, so the
+                     * address sits out until an operator has checked rather
+                     * than going to the next customer and putting two machines
+                     * on one address.
+                     */
+                    $address->forceFill([
+                        'status' => IpAddressStatus::Quarantined,
+                        'quarantined_until' => $address->subnet->ipPool->quarantineExpiryFor($reason),
+                        'quarantine_reason' => $reason,
+                    ])->save();
+                } else {
+                    $address->forceFill([
+                        'status' => IpAddressStatus::Available,
+                        'quarantined_until' => null,
+                        'quarantine_reason' => null,
+                    ])->save();
+                }
             }
 
             return $locked;

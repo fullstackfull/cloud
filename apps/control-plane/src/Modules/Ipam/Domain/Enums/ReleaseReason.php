@@ -20,6 +20,18 @@ enum ReleaseReason: string
     /** The provisioning job that held the reservation failed terminally. */
     case JobFailed = 'job_failed';
 
+    /**
+     * The provisioning job TIMED OUT rather than failed.
+     *
+     * These are not the same thing and must not be treated the same. A failure
+     * means nothing was built and the address was never configured anywhere. A
+     * timeout means the platform stopped waiting — the machine may exist right
+     * now, answering on this address. Returning it to the pool would put two
+     * machines on one address, and the resulting fault looks like a network
+     * problem rather than a control-plane one.
+     */
+    case ProvisioningTimedOut = 'provisioning_timed_out';
+
     /** The reservation was committed into an assignment — a happy ending. */
     case Committed = 'committed';
 
@@ -56,5 +68,22 @@ enum ReleaseReason: string
     public function isFulfilment(): bool
     {
         return $this === self::Committed;
+    }
+
+    /**
+     * Whether an address released for this reason must sit in quarantine
+     * rather than returning to the pool immediately.
+     *
+     * A reservation that was never committed normally carries no history and
+     * can be reused at once. A timeout is the exception: the platform does not
+     * know whether the address was configured, and "probably not" is not good
+     * enough when being wrong means two machines on one address.
+     */
+    public function requiresQuarantine(): bool
+    {
+        return match ($this) {
+            self::ProvisioningTimedOut, self::Abuse => true,
+            default => false,
+        };
     }
 }
