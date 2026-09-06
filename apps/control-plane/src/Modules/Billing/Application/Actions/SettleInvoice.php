@@ -12,6 +12,7 @@ use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceOverpaymentRefusedException;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
@@ -74,10 +75,17 @@ final readonly class SettleInvoice
     public function execute(Invoice $invoice, Transaction $payment): InvoiceSettlement
     {
         return DB::transaction(function () use ($invoice, $payment): InvoiceSettlement {
-            /** @var Invoice $locked */
-            $locked = Invoice::query()->lockForUpdate()->findOrFail($invoice->getKey());
+            /*
+             * Lock ordering convention: the payment-side row first, then the
+             * invoice. The payments flow records a capture and then asks for it
+             * to be settled, so it already holds the transaction when it gets
+             * here; taking the two rows in the other order would let the two
+             * paths deadlock against each other under load.
+             */
             /** @var Transaction $capture */
             $capture = Transaction::query()->lockForUpdate()->findOrFail($payment->getKey());
+            /** @var Invoice $locked */
+            $locked = Invoice::query()->lockForUpdate()->findOrFail($invoice->getKey());
 
             $this->assertPayable($locked);
             $this->assertSettleable($locked, $capture);
@@ -164,7 +172,7 @@ final readonly class SettleInvoice
 
         $surplus = Money::ofMinor($surplusMinor, $currency);
 
-        /** @var \Lynomia\Modules\Identity\Infrastructure\Models\Customer $customer */
+        /** @var Customer $customer */
         $customer = $invoice->customer()->firstOrFail();
 
         $entry = $this->wallet->credit(

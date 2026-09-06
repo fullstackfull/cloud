@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Payments\Domain\Exceptions;
 
-use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
  * A refund would return more than was ever captured.

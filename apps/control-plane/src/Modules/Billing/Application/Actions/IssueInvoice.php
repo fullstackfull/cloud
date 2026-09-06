@@ -12,6 +12,7 @@ use Lynomia\Modules\Billing\Application\DTOs\InvoiceLineDraft;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricedOrder;
+use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Services\InvoiceNumberAllocator;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -155,7 +156,7 @@ final readonly class IssueInvoice
     /**
      * Issues the invoice for an order that has just been priced.
      *
-     * @param  list<\Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine>  $pricingLines
+     * @param  list<PricingLine>  $pricingLines
      */
     public function fromPricedOrder(
         Customer $customer,

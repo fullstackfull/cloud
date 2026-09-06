@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Payments;
 
+use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentRequest;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Enums\RemotePaymentStatus;
-use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentRequest;
 use Lynomia\Modules\Payments\Domain\Exceptions\UnsupportedCurrencyException;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;

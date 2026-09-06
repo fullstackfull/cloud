@@ -48,17 +48,25 @@ final readonly class RecordInvoiceRefund
         }
 
         return DB::transaction(function () use ($invoice, $amount, $refund): Invoice {
+            /*
+             * The refund row is taken before the invoice, the same ordering
+             * SettleInvoice uses for a capture: the payments flow reaches both
+             * actions holding the payment-side row, and one path locking them
+             * in the opposite order is how two correct actions deadlock.
+             */
+            $firstRecording = $refund === null || $this->attach($refund, $invoice);
+
             /** @var Invoice $locked */
             $locked = Invoice::query()->lockForUpdate()->findOrFail($invoice->getKey());
 
-            if ($amount->currency() !== $locked->currency) {
-                throw CurrencyMismatchException::between($locked->currency, $amount->currency());
-            }
-
-            if ($refund !== null && ! $this->attach($refund, $locked)) {
+            if (! $firstRecording) {
                 // Already recorded against this invoice; the reduction stands
                 // as it is rather than being applied a second time.
                 return $locked;
+            }
+
+            if ($amount->currency() !== $locked->currency) {
+                throw CurrencyMismatchException::between($locked->currency, $amount->currency());
             }
 
             $refundable = $locked->refundableAmount();
@@ -115,10 +123,6 @@ final readonly class RecordInvoiceRefund
 
         $locked->invoice_id = (string) $invoice->getKey();
         $locked->save();
-
-        // Keep the caller's copy in step; it is the same row.
-        $refund->invoice_id = $locked->invoice_id;
-        $refund->syncOriginalAttribute('invoice_id');
 
         return true;
     }

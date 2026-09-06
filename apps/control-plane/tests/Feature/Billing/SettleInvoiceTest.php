@@ -70,6 +70,29 @@ final class SettleInvoiceTest extends TestCase
     }
 
     #[Test]
+    public function a_two_decimal_currency_settles_in_exact_minor_units(): void
+    {
+        // The three-decimal case is covered above; this is the same arithmetic
+        // in a currency whose minor unit is a hundredth, to pin that nothing
+        // in settlement assumes the platform's default fils.
+        $customer = Customer::factory()->create(['currency' => 'USD']);
+        $invoice = $this->openInvoice(Money::of('42.57', 'USD'), $customer);
+
+        $first = $this->settle->execute($invoice, $this->capture($invoice, Money::of('20.00', 'USD')));
+
+        $this->assertSame('22.57', $first->invoice->amountDue()->toDecimalString());
+        $this->assertSame(InvoiceStatus::Open, $first->invoice->status);
+
+        $second = $this->settle->execute($first->invoice, $this->capture($invoice, Money::of('22.57', 'USD')));
+
+        $this->assertSame(InvoiceStatus::Paid, $second->invoice->status);
+        $this->assertSame('0.00', $second->invoice->amountDue()->toDecimalString());
+        $this->assertSame(4_257, $second->invoice->amount_paid_minor);
+        $this->assertSame('USD', $second->invoice->amountPaid()->currency());
+        $this->assertAmountDueAgrees($second->invoice);
+    }
+
+    #[Test]
     public function settling_the_same_transaction_twice_applies_it_once(): void
     {
         $invoice = $this->openInvoice(Money::of('30.000', 'KWD'));
