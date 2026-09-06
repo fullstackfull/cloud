@@ -148,14 +148,39 @@ class Coupon extends Model
     }
 
     /**
+     * The kinds this campaign is restricted to, as the enum recognises them.
+     *
+     * Anything the enum does not recognise is dropped, so this is only safe to
+     * ask when a *missing* restriction is the harmless answer. The check that
+     * decides whether a basket qualifies must use applicableProductKindValues()
+     * instead — see the note there.
+     *
      * @return list<ProductKind>
      */
     public function applicableProductKinds(): array
     {
         return array_values(array_filter(array_map(
-            static fn (mixed $kind): ?ProductKind => is_string($kind) ? ProductKind::tryFrom($kind) : null,
-            $this->applicable_product_kinds ?? [],
+            static fn (string $kind): ?ProductKind => ProductKind::tryFrom($kind),
+            $this->applicableProductKindValues(),
         )));
+    }
+
+    /**
+     * The kinds this campaign is restricted to, exactly as they were stored.
+     *
+     * Deliberately not filtered through ProductKind::tryFrom(). A kind that was
+     * renamed, retired from the enum or simply mistyped when the campaign was
+     * created would be dropped by that filter, the restriction list would come
+     * back empty, and an empty list means "anything" — so a single stale string
+     * would silently turn a campaign aimed at one product line into a discount
+     * on the whole catalogue. Keeping the raw value makes it match nothing
+     * instead, which refuses the coupon rather than over-spending it.
+     *
+     * @return list<string>
+     */
+    public function applicableProductKindValues(): array
+    {
+        return self::restrictionValues($this->applicable_product_kinds);
     }
 
     /**
@@ -163,10 +188,39 @@ class Coupon extends Model
      */
     public function applicablePlanIds(): array
     {
-        return array_values(array_filter(
-            $this->applicable_plan_ids ?? [],
-            static fn (mixed $id): bool => is_string($id) && $id !== '',
-        ));
+        return self::restrictionValues($this->applicable_plan_ids);
+    }
+
+    /**
+     * Reduces a stored restriction list to comparable strings.
+     *
+     * Every entry that carries any value at all is kept, for the reason set out
+     * on applicableProductKindValues(): silently dropping an entry widens the
+     * campaign, and widening a campaign by accident costs money.
+     *
+     * @return list<string>
+     */
+    private static function restrictionValues(mixed $values): array
+    {
+        if (! is_array($values)) {
+            return [];
+        }
+
+        $restrictions = [];
+
+        foreach ($values as $value) {
+            $string = match (true) {
+                is_string($value) => $value,
+                is_int($value) => (string) $value,
+                default => '',
+            };
+
+            if ($string !== '') {
+                $restrictions[] = $string;
+            }
+        }
+
+        return array_values(array_unique($restrictions));
     }
 
     public function hasGlobalCapacity(): bool

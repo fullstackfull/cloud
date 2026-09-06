@@ -19,13 +19,15 @@ use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Applies a captured payment to an invoice.
  *
  * **How idempotency is achieved.** `amount_paid_minor` is not incremented, it
  * is re-derived: it is the sum of the captured charges attached to the invoice,
- * capped at the invoice total. A redelivered webhook therefore settles once
+ * less anything an earlier overpayment sent to the wallet, capped at what the
+ * document can still absorb. A redelivered webhook therefore settles once
  * because the same transaction row is summed once, not because a flag was
  * checked — and two partial payments accumulate for exactly the same reason.
  * The invariant this rests on is that every payment applied to an invoice is a
@@ -41,6 +43,11 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * double-click. Where an operator wants the refusal instead,
  * `billing.credit_overpayment_to_wallet` turns it off and this action throws
  * before writing anything.
+ *
+ * **What the invoice can absorb.** The ceiling is the total plus whatever has
+ * been refunded, not the total alone: a refund puts money back in the
+ * customer's hands and makes it owed again, so a customer re-paying an invoice
+ * they were refunded is settling it, not overpaying it.
  *
  * The whole thing runs in one transaction with the invoice row locked, because
  * two payments landing at once would otherwise both read the same paid figure
@@ -87,35 +94,79 @@ final readonly class SettleInvoice
             /** @var Invoice $locked */
             $locked = Invoice::query()->lockForUpdate()->findOrFail($invoice->getKey());
 
-            $this->assertPayable($locked);
             $this->assertSettleable($locked, $capture);
 
             $currency = $locked->currency;
-            $totalMinor = $locked->total_minor;
             $paidBeforeMinor = $locked->amount_paid_minor;
 
             /*
-             * Everything already attached to this invoice, deliberately
-             * excluding the capture in hand: the two sums are what tell this
-             * payment's own contribution apart from the running total, so a
-             * replay computes the same surplus it computed the first time
-             * instead of crediting it again on top.
+             * Every captured charge already attached to this invoice, minus
+             * the one in hand: adding it back below gives the same ledger
+             * whether the payments side attached it before calling or leaves
+             * the attaching to this action, which is what makes a redelivered
+             * webhook and a pre-attached capture take the same path.
              */
-            $priorMinor = (int) Transaction::query()
+            $otherChargesMinor = (int) Transaction::query()
                 ->where('invoice_id', $locked->getKey())
                 ->whereKeyNot($capture->getKey())
                 ->where('kind', TransactionKind::Charge->value)
                 ->where('status', TransactionStatus::Succeeded->value)
                 ->sum('amount_minor');
 
-            $ledgerMinor = $priorMinor + $capture->amount_minor;
+            $ledgerMinor = $otherChargesMinor + $capture->amount_minor;
 
-            if ($ledgerMinor > $totalMinor && ! $this->creditsOverpaymentToWallet()) {
+            /*
+             * Captured money an earlier settlement moved to the wallet instead
+             * of applying. It has to be subtracted from the ledger rather than
+             * assumed away: a later refund raises what this invoice can absorb,
+             * and without this the surplus that was already handed to the
+             * customer as stored value would be counted a second time as
+             * payment — the platform crediting a wallet and collecting the
+             * same fils.
+             */
+            $divertedMinor = (int) WalletTransaction::query()
+                ->where('invoice_id', $locked->getKey())
+                ->where('kind', WalletTransactionKind::Topup->value)
+                ->sum('amount_minor');
+
+            $availableMinor = $ledgerMinor - $divertedMinor;
+
+            /*
+             * What the document can still absorb. Refunded money is owed again
+             * — amount_due is total - paid + refunded — so the ceiling is the
+             * total plus whatever went back. Measured against the total alone,
+             * a customer re-paying an invoice they were refunded would look
+             * like an overpayment: their money would go to the wallet and the
+             * invoice would stay in dunning with nothing wrong with it.
+             */
+            $capacityMinor = $locked->total_minor + $locked->amount_refunded_minor;
+
+            $appliedMinor = min($availableMinor, $capacityMinor);
+            $surplusMinor = $availableMinor - $appliedMinor;
+
+            /*
+             * A capture that is already attached and changes nothing is a
+             * redelivery, and a redelivery is a no-op whatever state the
+             * document has since reached. Asking whether the invoice can take
+             * a payment first would turn the routine second copy of a webhook
+             * into an exception on every invoice refunded inside the
+             * provider's retry window — a handler that fails forever over a
+             * payment it has already recorded.
+             */
+            $isRedelivery = $capture->invoice_id === (string) $locked->getKey()
+                && $appliedMinor === $paidBeforeMinor
+                && $surplusMinor === 0;
+
+            if (! $isRedelivery) {
+                $this->assertPayable($locked);
+            }
+
+            if ($surplusMinor > 0 && ! $this->creditsOverpaymentToWallet()) {
                 // Thrown before the attach and before any write, so a refused
                 // overpayment leaves the invoice and the transaction untouched.
                 throw InvoiceOverpaymentRefusedException::forInvoice(
                     (string) $locked->getKey(),
-                    Money::ofMinor($totalMinor - $paidBeforeMinor, $currency),
+                    Money::ofMinor($capacityMinor - $paidBeforeMinor, $currency),
                     $capture->amount(),
                 );
             }
@@ -123,12 +174,11 @@ final readonly class SettleInvoice
             if ($capture->invoice_id === null) {
                 // Attaching is what makes the recomputation above find this
                 // payment next time, so it is the closest thing settlement has
-                // to a "applied" marker.
+                // to an "applied" marker.
                 $capture->invoice_id = (string) $locked->getKey();
                 $capture->save();
             }
 
-            $appliedMinor = min($ledgerMinor, $totalMinor);
             $locked->amount_paid_minor = $appliedMinor;
             $locked->save();
 
@@ -139,7 +189,7 @@ final readonly class SettleInvoice
                 $locked = $this->transitionInvoice->execute($locked, InvoiceStatus::Paid);
             }
 
-            $surplus = $this->creditSurplus($locked, $capture, $priorMinor, $ledgerMinor, $totalMinor);
+            $surplus = $this->creditSurplus($locked, $capture, $surplusMinor);
 
             return new InvoiceSettlement(
                 invoice: $locked,
@@ -150,21 +200,15 @@ final readonly class SettleInvoice
     }
 
     /**
-     * Credits this payment's share of the overpayment to the customer's wallet.
+     * Credits what this call could not apply to the customer's wallet.
      *
-     * The share is the difference between the surplus before this payment and
-     * the surplus after it, so a third payment on an already-overpaid invoice
-     * credits only what it added rather than the whole overhang a second time.
+     * The figure handed in is already net of every earlier diversion, so a
+     * second payment on an already-overpaid invoice credits only what it
+     * added, and a redelivery of the first one credits nothing at all.
      */
-    private function creditSurplus(
-        Invoice $invoice,
-        Transaction $capture,
-        int $priorMinor,
-        int $ledgerMinor,
-        int $totalMinor,
-    ): Money {
+    private function creditSurplus(Invoice $invoice, Transaction $capture, int $surplusMinor): Money
+    {
         $currency = $invoice->currency;
-        $surplusMinor = max(0, $ledgerMinor - $totalMinor) - max(0, $priorMinor - $totalMinor);
 
         if ($surplusMinor <= 0) {
             return Money::zero($currency);

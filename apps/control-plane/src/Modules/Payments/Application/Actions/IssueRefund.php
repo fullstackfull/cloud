@@ -67,7 +67,20 @@ final readonly class IssueRefund
         $provider = $this->registry->get($transaction->provider);
 
         try {
-            $result = $provider->refund((string) $transaction->provider_reference, $amount, $reason);
+            /*
+             * The refund row's id is the idempotency key: unique to this
+             * refund, and stable if this same row's provider call is retried.
+             * A key derived from the amount and reason instead would make two
+             * deliberate refunds of the same amount collide at the provider,
+             * which answers the second with a replay of the first — one payout,
+             * two rows, and a customer who is owed the difference.
+             */
+            $result = $provider->refund(
+                (string) $transaction->provider_reference,
+                $amount,
+                $reason,
+                (string) $refund->id,
+            );
         } catch (Throwable $e) {
             /*
              * Release the reservation. Leaving it pending would permanently

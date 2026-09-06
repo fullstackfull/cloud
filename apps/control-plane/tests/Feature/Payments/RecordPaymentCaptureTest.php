@@ -16,6 +16,7 @@ use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentRequest;
 use Lynomia\Modules\Payments\Domain\DTOs\ProviderEvent;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
+use Lynomia\Modules\Payments\Domain\Exceptions\PaymentAttributionMismatchException;
 use Lynomia\Modules\Payments\Domain\Exceptions\UnattributablePaymentException;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
@@ -127,6 +128,7 @@ final class RecordPaymentCaptureTest extends TestCase
         $unconfirmed = $provider->createPaymentIntent(new PaymentIntentRequest(
             amount: Money::ofMinor(9000, 'KWD'),
             idempotencyKey: 'idem_unconfirmed',
+            metadata: ['customer_id' => $this->customer->id],
         ));
 
         $transaction = app(ConfirmPaymentFromReturn::class)
@@ -143,6 +145,7 @@ final class RecordPaymentCaptureTest extends TestCase
         $confirmed = $provider->createPaymentIntent(new PaymentIntentRequest(
             amount: Money::ofMinor(9000, 'KWD'),
             idempotencyKey: 'idem_confirmed',
+            metadata: ['customer_id' => $this->customer->id],
             confirm: true,
         ));
 
@@ -162,6 +165,7 @@ final class RecordPaymentCaptureTest extends TestCase
         $declined = $provider->createPaymentIntent(new PaymentIntentRequest(
             amount: FakePaymentProvider::declineAmount(Money::ofMinor(9000, 'KWD'), 'expired_card'),
             idempotencyKey: 'idem_declined',
+            metadata: ['customer_id' => $this->customer->id],
             confirm: true,
         ));
 
@@ -172,6 +176,62 @@ final class RecordPaymentCaptureTest extends TestCase
         $this->assertSame(TransactionStatus::Failed, $transaction->status);
         $this->assertSame('expired_card', $transaction->failure_code);
         $this->assertSame(0, Transaction::query()->where('status', TransactionStatus::Succeeded->value)->count());
+    }
+
+    #[Test]
+    public function a_return_cannot_settle_someone_elses_payment_against_the_signed_in_account(): void
+    {
+        $provider = new FakePaymentProvider;
+        $payer = Customer::factory()->create();
+
+        // A real, genuinely succeeded payment belonging to another customer.
+        // Its reference is not a secret: it travels through browser history,
+        // a shared success URL and every support ticket about the order.
+        $confirmed = $provider->createPaymentIntent(new PaymentIntentRequest(
+            amount: Money::ofMinor(9000, 'KWD'),
+            idempotencyKey: 'idem_someone_else',
+            metadata: ['customer_id' => $payer->id],
+            confirm: true,
+        ));
+
+        try {
+            // The attacker is signed in as themselves and hands back the
+            // reference. The provider will happily confirm the payment
+            // succeeded — the question that matters is whose it is.
+            app(ConfirmPaymentFromReturn::class)
+                ->execute('fake', $confirmed->reference, $this->customer->id);
+            $this->fail('A payment was attributed to a customer who did not make it.');
+        } catch (PaymentAttributionMismatchException $e) {
+            $this->assertSame('payment.attribution_mismatch', $e->errorCode());
+            $this->assertSame(403, $e->httpStatus());
+            $this->assertSame($this->customer->id, $e->context()['claimed_customer_id']);
+        }
+
+        $this->assertSame(0, Transaction::query()->count());
+    }
+
+    #[Test]
+    public function a_return_for_a_payment_the_provider_cannot_attribute_is_refused(): void
+    {
+        $provider = new FakePaymentProvider;
+
+        // No attribution metadata at creation: a payment made outside the
+        // platform, or a metadata bug. Either way the payer is unknown, and
+        // the session's claim is not evidence of ownership.
+        $confirmed = $provider->createPaymentIntent(new PaymentIntentRequest(
+            amount: Money::ofMinor(9000, 'KWD'),
+            idempotencyKey: 'idem_orphan_return',
+            confirm: true,
+        ));
+
+        $this->expectException(UnattributablePaymentException::class);
+
+        try {
+            app(ConfirmPaymentFromReturn::class)
+                ->execute('fake', $confirmed->reference, $this->customer->id);
+        } finally {
+            $this->assertSame(0, Transaction::query()->count());
+        }
     }
 
     private function captureEvent(): ProviderEvent

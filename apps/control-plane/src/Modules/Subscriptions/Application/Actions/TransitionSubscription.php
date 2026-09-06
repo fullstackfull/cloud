@@ -38,19 +38,22 @@ final readonly class TransitionSubscription
     ): Subscription {
         $now = $at !== null ? CarbonImmutable::instance($at) : CarbonImmutable::now();
 
-        // A retried job or a redelivered webhook lands here; converging is the
-        // point, and it must not restamp a timestamp that already recorded
-        // when the change really happened.
-        if ($subscription->status === $to) {
-            return $subscription;
-        }
-
-        $this->stateMachine->assertCanTransition($subscription->status, $to);
-
+        /*
+         * Every decision below is taken on the locked row and never on the
+         * caller's copy. A model handed to this action may have been read
+         * minutes ago — a dunning sweep's cursor, a webhook payload resolved
+         * before the queue picked it up — and deciding on it both ways round
+         * is wrong: a stale copy that already reads past_due would make a real
+         * active → past_due move silently do nothing, and a stale copy that
+         * reads cancelled would refuse a transition the row actually allows.
+         */
         return DB::transaction(function () use ($subscription, $to, $now): Subscription {
             /** @var Subscription $locked */
             $locked = Subscription::query()->lockForUpdate()->findOrFail($subscription->getKey());
 
+            // A retried job or a redelivered webhook lands here; converging is
+            // the point, and it must not restamp a timestamp that already
+            // recorded when the change really happened.
             if ($locked->status === $to) {
                 return $locked;
             }

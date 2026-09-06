@@ -132,6 +132,11 @@ final class RenewSubscriptionTest extends TestCase
     #[Test]
     public function a_subscription_scheduled_to_cancel_is_not_renewed(): void
     {
+        // Frozen inside the period being cancelled: the claim below is that
+        // the service keeps running until the date the customer paid for, and
+        // that only means anything while that date is still ahead.
+        $this->travelTo(CarbonImmutable::parse('2026-01-15 00:00:00'));
+
         $subscription = Subscription::factory()
             ->startingOn(CarbonImmutable::parse('2026-01-01 00:00:00'))
             ->create();

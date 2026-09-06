@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Wallet\Infrastructure\Models;
 
 use Database\Factories\WalletFactory;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -44,6 +45,20 @@ class Wallet extends Model
         return [
             'balance_minor' => 'integer',
         ];
+    }
+
+    /**
+     * ISO-4217 codes are upper case, and Money normalises to upper case, so a
+     * wallet stored in another case would fail every currency check against
+     * its own currency. Normalising on the way in keeps that row from existing.
+     *
+     * @return Attribute<string, string>
+     */
+    protected function currency(): Attribute
+    {
+        return Attribute::make(
+            set: static fn (string $value): string => strtoupper($value),
+        );
     }
 
     /**

@@ -57,9 +57,22 @@ final readonly class RecordPaymentFailure
         $invoiceId ??= $event->invoiceReference();
 
         try {
-            $transaction = $this->record($provider, $event, $reference, $customerId, $invoiceId);
+            [$transaction, $recorded] = $this->record($provider, $event, $reference, $customerId, $invoiceId);
         } catch (UniqueConstraintViolationException) {
-            $transaction = $this->record($provider, $event, $reference, $customerId, $invoiceId);
+            [$transaction, $recorded] = $this->record($provider, $event, $reference, $customerId, $invoiceId);
+        }
+
+        /*
+         * Only a failure we actually recorded is announced. Providers deliver
+         * a late payment_intent.payment_failed after a capture has settled —
+         * for an earlier attempt on the same intent, or simply out of order —
+         * and the ledger already refuses to downgrade the row. Dispatching the
+         * event anyway would hand dunning a "payment failed" for a payment
+         * that succeeded: retry emails, a suspension timer and a dunning
+         * counter, all against a paid invoice.
+         */
+        if (! $recorded) {
+            return $transaction;
         }
 
         event(new PaymentFailed(
@@ -77,14 +90,17 @@ final readonly class RecordPaymentFailure
         return $transaction;
     }
 
+    /**
+     * @return array{0: Transaction, 1: bool} the transaction, and whether this call recorded a failure on it
+     */
     private function record(
         string $provider,
         ProviderEvent $event,
         string $reference,
         string $customerId,
         ?string $invoiceId,
-    ): Transaction {
-        return DB::transaction(function () use ($provider, $event, $reference, $customerId, $invoiceId): Transaction {
+    ): array {
+        return DB::transaction(function () use ($provider, $event, $reference, $customerId, $invoiceId): array {
             /** @var Transaction|null $existing */
             $existing = Transaction::query()
                 ->where('provider', $provider)
@@ -98,7 +114,7 @@ final readonly class RecordPaymentFailure
              * successful charge to failed would un-pay a paid invoice.
              */
             if ($existing?->status === TransactionStatus::Succeeded) {
-                return $existing;
+                return [$existing, false];
             }
 
             $attributes = [
@@ -125,10 +141,10 @@ final readonly class RecordPaymentFailure
             if ($existing !== null) {
                 $existing->fill($attributes)->save();
 
-                return $existing;
+                return [$existing, true];
             }
 
-            return Transaction::create($attributes);
+            return [Transaction::create($attributes), true];
         });
     }
 }

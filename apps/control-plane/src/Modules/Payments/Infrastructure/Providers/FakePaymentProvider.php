@@ -54,6 +54,16 @@ final class FakePaymentProvider implements PaymentProvider
 
     private const string REFUND_PREFIX = 'fake_re_';
 
+    /** Seconds a signature stays acceptable, mirroring Stripe's own default. */
+    private const int DEFAULT_WEBHOOK_TOLERANCE = 300;
+
+    /**
+     * Marks the segment of a reference that carries the customer the intent
+     * was created for. "cust" cannot occur in the hex digest that precedes it,
+     * so the segment is unambiguous even though references vary in length.
+     */
+    private const string CUSTOMER_SEGMENT_PREFIX = 'cust';
+
     /**
      * Amount suffixes that select a declined outcome, keyed by the last two
      * minor units of the requested amount.
@@ -86,7 +96,13 @@ final class FakePaymentProvider implements PaymentProvider
         $this->supportedCurrencies = array_map(strtoupper(...), $currencies);
 
         $this->webhookSecret = (string) config('payments.fake.webhook_secret', 'fake_webhook_secret');
-        $this->webhookTolerance = (int) config('payments.fake.webhook_tolerance', 300);
+
+        // Clamped rather than trusted: a tolerance of zero disables the replay
+        // window entirely, so a config value of 0 — which is what an unset or
+        // non-numeric environment variable casts to — must not be able to turn
+        // the check off silently.
+        $tolerance = (int) config('payments.fake.webhook_tolerance', self::DEFAULT_WEBHOOK_TOLERANCE);
+        $this->webhookTolerance = $tolerance > 0 ? $tolerance : self::DEFAULT_WEBHOOK_TOLERANCE;
     }
 
     public function name(): string
@@ -108,7 +124,12 @@ final class FakePaymentProvider implements PaymentProvider
             ? RemotePaymentStatus::Failed
             : ($request->confirm ? RemotePaymentStatus::Succeeded : RemotePaymentStatus::RequiresAction);
 
-        $reference = $this->buildReference($request->amount, $status, $request->idempotencyKey);
+        $reference = $this->buildReference(
+            $request->amount,
+            $status,
+            $request->idempotencyKey,
+            $request->metadata['customer_id'] ?? null,
+        );
 
         return new PaymentIntentResult(
             reference: $reference,
@@ -128,7 +149,7 @@ final class FakePaymentProvider implements PaymentProvider
 
     public function retrievePayment(string $reference): RemotePaymentState
     {
-        [$status, $amount] = $this->decodeReference($reference);
+        [$status, $amount, $customerId] = $this->decodeReference($reference);
 
         $failureCode = $status === RemotePaymentStatus::Failed
             ? (self::declineCodeFor($amount) ?? 'card_declined')
@@ -143,18 +164,30 @@ final class FakePaymentProvider implements PaymentProvider
                 : null,
             failureCode: $failureCode,
             failureMessage: $failureCode !== null ? 'The fake provider declined this amount by design.' : null,
-            metadata: ['fake' => true],
+            // Shaped like Stripe's: the provider's own view of the payment,
+            // with the attribution metadata we attached at creation nested
+            // under "metadata". A caller confirming a browser return has to be
+            // able to ask the provider who the payer is, rather than being
+            // told by the request it is validating.
+            metadata: [
+                'fake' => true,
+                'metadata' => $customerId === null ? [] : ['customer_id' => $customerId],
+            ],
         );
     }
 
-    public function refund(string $chargeReference, Money $amount, string $reason): RemoteRefundResult
+    public function refund(string $chargeReference, Money $amount, string $reason, string $idempotencyKey): RemoteRefundResult
     {
         $this->assertSupportedCurrency($amount->currency());
 
         $failure = self::declineCodeFor($amount);
 
         return new RemoteRefundResult(
-            reference: self::REFUND_PREFIX.substr(hash('sha256', $chargeReference.'|'.$amount->minorUnits()), 0, 24),
+            // Derived from the idempotency key rather than from the amount, so
+            // that two deliberate refunds of the same amount are two refunds
+            // here as well. A reference keyed on the parameters would hide the
+            // very collision a real provider would silently make.
+            reference: self::REFUND_PREFIX.substr(hash('sha256', $chargeReference.'|'.$idempotencyKey), 0, 24),
             status: $failure !== null ? RefundStatus::Failed : RefundStatus::Succeeded,
             amount: $amount,
             failureReason: $failure,
@@ -189,7 +222,7 @@ final class FakePaymentProvider implements PaymentProvider
          * is inside the signed material: an attacker who could edit the
          * timestamp freely would be able to replay a captured request forever.
          */
-        if ($this->webhookTolerance > 0 && abs(time() - $timestamp) > $this->webhookTolerance) {
+        if (abs(time() - $timestamp) > $this->webhookTolerance) {
             return WebhookVerification::failed('the signature timestamp is outside the tolerance window');
         }
 
@@ -333,20 +366,25 @@ final class FakePaymentProvider implements PaymentProvider
      * facts into it keeps the fake correct across process boundaries without
      * a store that production would not have.
      */
-    private function buildReference(Money $amount, RemotePaymentStatus $status, string $idempotencyKey): string
-    {
+    private function buildReference(
+        Money $amount,
+        RemotePaymentStatus $status,
+        string $idempotencyKey,
+        ?string $customerId,
+    ): string {
         return sprintf(
-            '%s%s_%s_%d_%s',
+            '%s%s_%s_%d_%s%s',
             self::REFERENCE_PREFIX,
             $status->value,
             $amount->currency(),
             $amount->minorUnits(),
             substr(hash('sha256', $idempotencyKey), 0, 8),
+            $customerId === null ? '' : '_'.self::CUSTOMER_SEGMENT_PREFIX.$customerId,
         );
     }
 
     /**
-     * @return array{0: RemotePaymentStatus, 1: Money}
+     * @return array{0: RemotePaymentStatus, 1: Money, 2: string|null}
      */
     private function decodeReference(string $reference): array
     {
@@ -355,6 +393,15 @@ final class FakePaymentProvider implements PaymentProvider
             : null;
 
         $parts = $body === null ? [] : explode('_', $body);
+
+        $customerId = null;
+
+        // Optional, because a reference may predate the customer segment or be
+        // built by hand in a fixture; absent is "the provider knows of no
+        // payer", which the caller must then refuse rather than fill in.
+        if (count($parts) > 4 && str_starts_with((string) end($parts), self::CUSTOMER_SEGMENT_PREFIX)) {
+            $customerId = substr((string) array_pop($parts), strlen(self::CUSTOMER_SEGMENT_PREFIX)) ?: null;
+        }
 
         if (count($parts) < 4) {
             throw PaymentProviderException::requestFailed(
@@ -377,7 +424,7 @@ final class FakePaymentProvider implements PaymentProvider
             );
         }
 
-        return [$status, Money::ofMinor((int) $minor, (string) $currency)];
+        return [$status, Money::ofMinor((int) $minor, (string) $currency), $customerId];
     }
 
     private static function kindFor(string $type): ProviderEventKind

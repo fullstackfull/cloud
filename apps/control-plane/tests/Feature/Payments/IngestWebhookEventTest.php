@@ -14,6 +14,7 @@ use Lynomia\Modules\Payments\Domain\DTOs\SignedWebhookPayload;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Domain\Enums\WebhookEventStatus;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
+use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Exceptions\MalformedWebhookPayloadException;
 use Lynomia\Modules\Payments\Domain\Exceptions\WebhookSignatureException;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
@@ -256,6 +257,41 @@ final class IngestWebhookEventTest extends TestCase
         $this->assertSame(TransactionStatus::Failed, $transaction->status);
         $this->assertSame('insufficient_funds', $transaction->failure_code);
         $this->assertSame(0, Transaction::query()->where('status', TransactionStatus::Succeeded->value)->count());
+    }
+
+    #[Test]
+    public function a_failure_arriving_after_the_capture_neither_downgrades_it_nor_starts_dunning(): void
+    {
+        $this->ingest->execute('fake', ...$this->deliver($this->signedCapture()));
+
+        /*
+         * Providers deliver these out of order, and send a
+         * payment_intent.payment_failed for an earlier attempt on an intent
+         * that has since succeeded. The ledger must not un-pay the capture,
+         * and — the part a row-level guard alone does not give you — nothing
+         * downstream may be told the payment failed: PaymentFailed is what
+         * drives dunning emails, retry scheduling and suspension timers.
+         */
+        Event::fake([PaymentFailed::class]);
+
+        $late = $this->provider->emitWebhook(
+            ProviderEventKind::PaymentFailed,
+            self::REFERENCE,
+            Money::ofMinor(9000, 'KWD'),
+            metadata: ['customer_id' => $this->customer->id],
+            eventId: 'evt_late_failure_1',
+            failureCode: 'card_declined',
+        );
+
+        $result = $this->ingest->execute('fake', ...$this->deliver($late));
+
+        Event::assertNotDispatched(PaymentFailed::class);
+        $this->assertSame(1, Transaction::query()->count());
+
+        $transaction = Transaction::query()->sole();
+        $this->assertSame(TransactionStatus::Succeeded, $transaction->status);
+        $this->assertNull($transaction->failure_code);
+        $this->assertSame($transaction->id, $result->transaction?->id);
     }
 
     #[Test]

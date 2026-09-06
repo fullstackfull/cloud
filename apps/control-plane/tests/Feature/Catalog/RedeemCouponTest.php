@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Catalog;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Catalog\Application\Actions\RedeemCoupon;
@@ -145,6 +146,108 @@ final class RedeemCouponTest extends TestCase
 
         $this->expectException(CouponCustomerLimitReachedException::class);
         $this->redeem->execute($coupon, $this->context());
+    }
+
+    #[Test]
+    public function a_coupon_that_expired_after_the_preview_is_refused_at_redemption(): void
+    {
+        /*
+         * The context carries the instant the customer was quoted. Redeeming
+         * against that instant instead of against now means a campaign that
+         * ended between the quote and the payment still pays out — and the gap
+         * between the two is a card form, a 3-D Secure round trip or a retried
+         * webhook, not milliseconds.
+         */
+        $coupon = Coupon::factory()->create([
+            'valid_from' => CarbonImmutable::now()->subMonth(),
+            'valid_until' => CarbonImmutable::now()->subHour(),
+        ]);
+
+        $previewed = new CouponContext(
+            customer: $this->customer,
+            orderAmount: Money::ofMinor(9_000, 'KWD'),
+            at: CarbonImmutable::now()->subDay(),
+        );
+
+        try {
+            $this->redeem->execute($coupon, $previewed);
+            $this->fail('An expired coupon was redeemed against a stale preview instant.');
+        } catch (CouponExpiredException $e) {
+            $this->assertSame('coupon.expired', $e->errorCode());
+        }
+
+        $this->assertSame(0, DB::table('coupon_redemptions')->count());
+        $this->assertSame(0, (int) DB::table('coupons')->where('id', $coupon->id)->value('redemption_count'));
+    }
+
+    #[Test]
+    public function a_coupon_that_has_since_become_valid_is_redeemable_against_an_older_preview(): void
+    {
+        // The mirror of the case above: judging at redemption time must open
+        // the window as well as close it, not just refuse everything stale.
+        $coupon = Coupon::factory()->create(['valid_from' => CarbonImmutable::now()->subMinute()]);
+
+        $previewed = new CouponContext(
+            customer: $this->customer,
+            orderAmount: Money::ofMinor(9_000, 'KWD'),
+            at: CarbonImmutable::now()->subDay(),
+        );
+
+        $this->redeem->execute($coupon, $previewed);
+
+        $this->assertSame(1, (int) DB::table('coupons')->where('id', $coupon->id)->value('redemption_count'));
+    }
+
+    #[Test]
+    public function redeeming_the_same_order_twice_gives_the_coupon_away_once(): void
+    {
+        /*
+         * Payment webhooks are redelivered and queued jobs are retried, so the
+         * second call is the normal case rather than the exceptional one. It
+         * must be a no-op returning the first redemption: a second audit row
+         * would double-count the campaign's spend, and a second increment would
+         * consume a use the customer never received.
+         */
+        $coupon = Coupon::factory()->limitedTo(10)->perCustomer(0)->create();
+        $order = Order::factory()->create(['customer_id' => $this->customer->id]);
+
+        $first = $this->redeem->execute($coupon, $this->context(), (string) $order->id);
+        $second = $this->redeem->execute($coupon, $this->context(), (string) $order->id);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame(1, DB::table('coupon_redemptions')->where('order_id', $order->id)->count());
+        $this->assertSame(1, (int) DB::table('coupons')->where('id', $coupon->id)->value('redemption_count'));
+    }
+
+    #[Test]
+    public function a_redelivery_after_the_campaign_is_exhausted_still_returns_the_original(): void
+    {
+        // The retry arrives after the last use has gone to somebody else. It
+        // must not be refused: this order was served, and answering
+        // coupon.fully_redeemed would send the webhook back round for ever.
+        $coupon = Coupon::factory()->limitedTo(1)->perCustomer(0)->create();
+        $order = Order::factory()->create(['customer_id' => $this->customer->id]);
+
+        $first = $this->redeem->execute($coupon, $this->context(), (string) $order->id);
+
+        $this->assertSame($first->id, $this->redeem->execute($coupon, $this->context(), (string) $order->id)->id);
+        $this->assertSame(1, DB::table('coupon_redemptions')->count());
+    }
+
+    #[Test]
+    public function two_different_orders_each_consume_their_own_use(): void
+    {
+        // The idempotency guard keys on the order, so it must not collapse two
+        // genuinely separate purchases into one redemption.
+        $coupon = Coupon::factory()->limitedTo(10)->perCustomer(0)->create();
+        $first = Order::factory()->create(['customer_id' => $this->customer->id]);
+        $second = Order::factory()->create(['customer_id' => $this->customer->id]);
+
+        $this->redeem->execute($coupon, $this->context(), (string) $first->id);
+        $this->redeem->execute($coupon, $this->context(), (string) $second->id);
+
+        $this->assertSame(2, DB::table('coupon_redemptions')->count());
+        $this->assertSame(2, (int) DB::table('coupons')->where('id', $coupon->id)->value('redemption_count'));
     }
 
     #[Test]

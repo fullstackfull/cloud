@@ -98,6 +98,24 @@ final class StripeWebhookVerificationTest extends TestCase
     }
 
     #[Test]
+    public function a_tolerance_of_zero_does_not_disable_the_replay_window(): void
+    {
+        // Zero is what the SDK reads as "skip the timestamp check", and zero is
+        // what an unset or non-numeric STRIPE_WEBHOOK_TOLERANCE_SECONDS casts
+        // to. Read literally, a single missing environment variable would make
+        // every captured webhook replayable forever, silently.
+        config(['services.stripe.webhook_tolerance' => 0]);
+        $payload = $this->payload();
+
+        $verification = $this->provider->verifyWebhookSignature(
+            $payload,
+            $this->headersFor($payload, time() - 3600),
+        );
+
+        $this->assertFalse($verification->verified);
+    }
+
+    #[Test]
     public function verification_fails_closed_when_no_signing_secret_is_configured(): void
     {
         config(['services.stripe.webhook_secret' => null]);

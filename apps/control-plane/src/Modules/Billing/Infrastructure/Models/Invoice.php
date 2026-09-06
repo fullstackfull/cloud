@@ -165,8 +165,18 @@ class Invoice extends Model
         return $this->amountPaid()->minus($this->amountRefunded());
     }
 
+    /**
+     * Whether the document is settled — the same question the generated
+     * amount_due column answers, asked of a model that may not have been
+     * refreshed since its parts moved.
+     *
+     * Refunded money is netted off rather than ignored: an invoice that took
+     * its total and gave it back is owed that money again, and a caller that
+     * was told otherwise would stop dunning an invoice that is unpaid.
+     */
     public function isFullyPaid(): bool
     {
-        return $this->amountPaid()->isGreaterThanOrEqualTo($this->total());
+        return $this->amountPaid()->minus($this->amountRefunded())
+            ->isGreaterThanOrEqualTo($this->total());
     }
 }

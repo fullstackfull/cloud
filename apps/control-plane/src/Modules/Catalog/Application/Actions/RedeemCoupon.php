@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Catalog\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
 use Lynomia\Modules\Catalog\Domain\Exceptions\UnknownCouponException;
 use Lynomia\Modules\Catalog\Domain\Services\CouponValidator;
@@ -31,6 +32,10 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  *
  * The counter and the coupon_redemptions row move together or not at all,
  * which is what keeps redemption_count reconcilable against its audit trail.
+ *
+ * The same lock is what makes a repeat delivery cheap to recognise: a call
+ * naming an order that has already redeemed this coupon returns the redemption
+ * it was given the first time instead of writing a second one.
  */
 final readonly class RedeemCoupon
 {
@@ -39,7 +44,8 @@ final readonly class RedeemCoupon
     ) {}
 
     /**
-     * @param  string|null  $orderId  the order the discount was granted on
+     * @param  string|null  $orderId  the order the discount was granted on; supplying it
+     *                                is what makes a repeated call idempotent
      */
     public function execute(Coupon $coupon, CouponContext $context, ?string $orderId = null): CouponRedemption
     {
@@ -55,10 +61,24 @@ final readonly class RedeemCoupon
             /** @var Coupon $locked */
             $locked = $coupon->newQuery()->lockForUpdate()->findOrFail($coupon->getKey());
 
-            // Re-validated in full, not just re-counted: a coupon can also
-            // have been deactivated or have expired between the preview the
-            // customer saw and this moment.
-            $this->validator->validate($locked, $context);
+            $already = $this->existingRedemption($locked, $orderId);
+
+            if ($already !== null) {
+                $this->refresh($coupon, $locked);
+
+                return $already;
+            }
+
+            /*
+             * Re-validated in full, not just re-counted — and re-validated
+             * against *now*, not against the instant the preview was taken.
+             * The context carries the moment the customer was quoted, which
+             * may be minutes or days old by the time the order is paid; a
+             * campaign that has ended in between is over, and re-running the
+             * window check against the stale instant would hand out a discount
+             * the campaign is no longer funding.
+             */
+            $this->validator->validate($locked, $context->judgedAt(CarbonImmutable::now()));
 
             $discount = $this->validator->discountFor($locked, $context->orderAmount);
 
@@ -67,10 +87,7 @@ final readonly class RedeemCoupon
             $locked->redemption_count = $locked->redemption_count + 1;
             $locked->save();
 
-            // The caller's instance would otherwise keep answering with the
-            // pre-redemption count and re-offer a coupon that is now spent.
-            $coupon->redemption_count = $locked->redemption_count;
-            $coupon->syncOriginalAttribute('redemption_count');
+            $this->refresh($coupon, $locked);
 
             return $redemption;
         });
@@ -84,6 +101,46 @@ final readonly class RedeemCoupon
     public function byCode(string $code, CouponContext $context, ?string $orderId = null): CouponRedemption
     {
         return $this->execute($this->validator->resolveCode($code), $context, $orderId);
+    }
+
+    /**
+     * The redemption this order has already been given, if it has been here before.
+     *
+     * Redemption is driven by events that are redelivered as a matter of
+     * course: a payment webhook arrives twice, a queued job is retried after a
+     * timeout that the first attempt survived. Without this, the second
+     * delivery writes a second audit row and moves redemption_count again, and
+     * the campaign quietly pays for one order twice.
+     *
+     * The read is safe as a plain select precisely because it happens after the
+     * coupon row has been locked: every redemption of this coupon is
+     * serialised behind that lock, so nothing can insert a competing row
+     * between this check and the write that follows it. An order id is the only
+     * handle a caller has for "this same redemption again" — a redemption with
+     * no order attached cannot be recognised on a second delivery and is
+     * documented on execute() as not being idempotent.
+     */
+    private function existingRedemption(Coupon $coupon, ?string $orderId): ?CouponRedemption
+    {
+        if ($orderId === null || $orderId === '') {
+            return null;
+        }
+
+        /** @var CouponRedemption|null $redemption */
+        $redemption = $coupon->redemptions()->where('order_id', $orderId)->first();
+
+        return $redemption;
+    }
+
+    /**
+     * Carries the committed counter back onto the caller's own instance, which
+     * would otherwise keep answering with the pre-redemption count and re-offer
+     * a coupon that is now spent.
+     */
+    private function refresh(Coupon $caller, Coupon $locked): void
+    {
+        $caller->redemption_count = $locked->redemption_count;
+        $caller->syncOriginalAttribute('redemption_count');
     }
 
     private function write(Coupon $coupon, CouponContext $context, Money $discount, ?string $orderId): CouponRedemption

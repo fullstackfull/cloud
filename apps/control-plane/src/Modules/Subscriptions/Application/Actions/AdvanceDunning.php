@@ -121,6 +121,22 @@ final readonly class AdvanceDunning
             /** @var Subscription $locked */
             $locked = Subscription::query()->lockForUpdate()->findOrFail($subscription->getKey());
 
+            /*
+             * A subscription can reach past_due without a failed payment
+             * behind it — an operator moving it by hand, or a payment webhook
+             * that transitioned the status without recording the failure. It
+             * then carries no grace deadline, and a sweep that only ever asks
+             * whether the deadline has passed would leave it serving, unpaid,
+             * for ever. Starting the clock here is what guarantees the
+             * sequence always makes progress.
+             */
+            if ($locked->status === SubscriptionStatus::PastDue && $locked->grace_period_ends_at === null) {
+                $locked->grace_period_ends_at = $now->addDays($this->graceDays());
+                $locked->save();
+
+                return $locked;
+            }
+
             if ($this->graceHasExpired($locked, $now)) {
                 return $this->transition->execute($locked, SubscriptionStatus::Suspended, $now);
             }

@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Exceptions\LedgerEntryIsImmutableException;
 
 /**
  * One append-only line of a wallet ledger.
@@ -51,6 +52,25 @@ class WalletTransaction extends Model
      * caller-supplied metadata, so a caller cannot forge or clobber it.
      */
     public const string IDEMPOTENCY_METADATA_KEY = 'idempotency_key';
+
+    /**
+     * The append-only rule is enforced, not just documented.
+     *
+     * A balance the platform will defend in front of a customer is only worth
+     * as much as the entries behind it, and an entry that a later code path
+     * can quietly edit or remove is no evidence at all. Corrections are posted
+     * as compensating `adjustment` entries that name their author.
+     */
+    protected static function booted(): void
+    {
+        static::updating(static function (self $entry): void {
+            throw LedgerEntryIsImmutableException::forEntry((string) $entry->getKey(), 'updated');
+        });
+
+        static::deleting(static function (self $entry): void {
+            throw LedgerEntryIsImmutableException::forEntry((string) $entry->getKey(), 'deleted');
+        });
+    }
 
     /**
      * @return array<string, string>

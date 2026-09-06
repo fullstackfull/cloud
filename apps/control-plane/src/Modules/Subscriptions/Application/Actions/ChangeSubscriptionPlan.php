@@ -52,6 +52,7 @@ final readonly class ChangeSubscriptionPlan
         Subscription $subscription,
         Plan $newPlan,
         PlanPrice $newPrice,
+        ?int $units = null,
         ?DateTimeImmutable $changeAt = null,
     ): ProrationPlan {
         if ($newPrice->plan_id !== $newPlan->getKey()) {
@@ -62,9 +63,13 @@ final readonly class ChangeSubscriptionPlan
             ));
         }
 
+        if ($units !== null && $units < 1) {
+            throw new InvalidArgumentException('A subscription cannot be moved onto fewer than one unit of a plan.');
+        }
+
         $now = $changeAt !== null ? CarbonImmutable::instance($changeAt) : CarbonImmutable::now();
 
-        return DB::transaction(function () use ($subscription, $newPlan, $newPrice, $now): ProrationPlan {
+        return DB::transaction(function () use ($subscription, $newPlan, $newPrice, $units, $now): ProrationPlan {
             /** @var Subscription $locked */
             $locked = Subscription::query()
                 ->with('plan')
@@ -76,17 +81,29 @@ final readonly class ChangeSubscriptionPlan
             $periodStart = $locked->current_period_start;
             $periodEnd = $locked->current_period_end;
 
+            /*
+             * A subscription bills for a whole order line, so its recurring
+             * amount is the plan's unit price times however many units were
+             * bought. The row does not carry that count, so it has to be
+             * re-established before the new plan is priced — moving a
+             * three-server subscription onto the unit price of the new plan
+             * would quietly bill a third of what the customer is using, every
+             * period, for the life of the subscription.
+             */
+            $count = $units ?? $this->unitsOn($locked);
+            $newRecurring = $newPrice->recurring()->multipliedBy($count);
+
             $credit = $this->pricing
                 ->prorate($locked->recurringAmount(), $periodStart, $periodEnd, $now)
                 ->negated();
 
-            $charge = $this->pricing->prorate($newPrice->recurring(), $periodStart, $periodEnd, $now);
+            $charge = $this->pricing->prorate($newRecurring, $periodStart, $periodEnd, $now);
 
             $outgoingPlan = $locked->plan?->nameFor(app()->getLocale()) ?? 'previous plan';
             $incomingPlan = $newPlan->nameFor(app()->getLocale());
 
             $locked->plan_id = $newPlan->getKey();
-            $locked->recurring_amount_minor = $newPrice->recurring_amount_minor;
+            $locked->recurring_amount_minor = $newRecurring->minorUnits();
             $locked->save();
 
             return new ProrationPlan(
@@ -127,6 +144,44 @@ final readonly class ChangeSubscriptionPlan
             unitPrice: $amount,
             setupFee: Money::zero($amount->currency()),
             discountable: false,
+        );
+    }
+
+    /**
+     * How many units of its current plan a subscription is paying for.
+     *
+     * plan_prices is unique on (plan, currency, period), so the outgoing unit
+     * price is unambiguous and the count is a division. It is only accepted
+     * when it divides exactly: a subscription on a grandfathered price no
+     * longer in the catalogue would otherwise silently resolve to one unit and
+     * under-bill the customer forever, so the caller is made to state the count
+     * instead.
+     *
+     * @throws SubscriptionNotChangeableException
+     */
+    private function unitsOn(Subscription $subscription): int
+    {
+        // Nothing in a zero-priced row distinguishes one free unit from ten,
+        // so a move off a free plan bills for one unless the caller says
+        // otherwise.
+        if ($subscription->recurring_amount_minor === 0) {
+            return 1;
+        }
+
+        $unit = PlanPrice::query()
+            ->where('plan_id', $subscription->plan_id)
+            ->where('currency', $subscription->currency)
+            ->where('billing_period', $subscription->billing_period->value)
+            ->value('recurring_amount_minor');
+
+        $unit = is_numeric($unit) ? (int) $unit : 0;
+
+        if ($unit > 0 && $subscription->recurring_amount_minor % $unit === 0) {
+            return intdiv($subscription->recurring_amount_minor, $unit);
+        }
+
+        throw SubscriptionNotChangeableException::becauseUnitCountIsUnknown(
+            (string) $subscription->getKey(),
         );
     }
 

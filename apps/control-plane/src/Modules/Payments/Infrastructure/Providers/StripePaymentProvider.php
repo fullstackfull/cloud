@@ -58,6 +58,9 @@ final class StripePaymentProvider implements PaymentProvider
 
     public const string SIGNATURE_HEADER = 'stripe-signature';
 
+    /** Stripe's own default replay window, in seconds. */
+    private const int DEFAULT_WEBHOOK_TOLERANCE = 300;
+
     /**
      * The only values Stripe accepts for a refund's `reason`. Anything else we
      * want to record travels in metadata instead of being rejected by the API.
@@ -157,7 +160,7 @@ final class StripePaymentProvider implements PaymentProvider
         );
     }
 
-    public function refund(string $chargeReference, Money $amount, string $reason): RemoteRefundResult
+    public function refund(string $chargeReference, Money $amount, string $reason, string $idempotencyKey): RemoteRefundResult
     {
         $this->assertSupportedCurrency($amount->currency());
 
@@ -175,14 +178,16 @@ final class StripePaymentProvider implements PaymentProvider
 
         try {
             $refund = $this->client->refunds->create($params, [
-                // Two operators clicking refund on the same screen produce the
-                // same key and therefore one refund.
-                'idempotency_key' => hash('sha256', implode('|', [
-                    $chargeReference,
-                    (string) $amount->minorUnits(),
-                    $amount->currency(),
-                    $reason,
-                ])),
+                /*
+                 * The caller's key, which identifies one refund row rather
+                 * than one set of parameters. Hashing the parameters instead
+                 * would be actively dangerous: two deliberate partial refunds
+                 * of the same amount, for the same reason, against the same
+                 * charge would produce one key, and Stripe would answer the
+                 * second with a replay of the first — one payout made, two
+                 * recorded, and the customer short the difference.
+                 */
+                'idempotency_key' => self::NAME.'_refund_'.$idempotencyKey,
             ]);
         } catch (ApiErrorException $e) {
             throw $this->translate($e, 'refund', ['provider_reference' => $chargeReference]);
@@ -216,12 +221,7 @@ final class StripePaymentProvider implements PaymentProvider
         }
 
         try {
-            Webhook::constructEvent(
-                $rawPayload,
-                $header,
-                $secret,
-                (int) config('services.stripe.webhook_tolerance', 300),
-            );
+            Webhook::constructEvent($rawPayload, $header, $secret, self::webhookTolerance());
         } catch (SignatureVerificationException|UnexpectedValueException $e) {
             // Stripe's message names the failure — bad signature, stale
             // timestamp, unparseable body — without echoing the secret.
@@ -267,6 +267,22 @@ final class StripePaymentProvider implements PaymentProvider
                 ? CarbonImmutable::createFromTimestampUTC((int) $payload['created'])
                 : null,
         );
+    }
+
+    /**
+     * The replay window, clamped to a positive value.
+     *
+     * The SDK treats a tolerance of zero as "skip the timestamp check
+     * entirely", and zero is exactly what an unset or non-numeric environment
+     * variable casts to. That failure is silent and total — every captured
+     * request stays replayable forever — so a non-positive configured value is
+     * read as a misconfiguration and the default is used instead.
+     */
+    private static function webhookTolerance(): int
+    {
+        $configured = (int) config('services.stripe.webhook_tolerance', self::DEFAULT_WEBHOOK_TOLERANCE);
+
+        return $configured > 0 ? $configured : self::DEFAULT_WEBHOOK_TOLERANCE;
     }
 
     private function assertSupportedCurrency(string $currency): void

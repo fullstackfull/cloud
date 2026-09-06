@@ -6,7 +6,6 @@ namespace Lynomia\Modules\Catalog\Domain\Services;
 
 use Brick\Math\RoundingMode;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
-use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCurrencyMismatchException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCustomerLimitReachedException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponExpiredException;
@@ -47,8 +46,16 @@ final class CouponValidator
             return null;
         }
 
+        /*
+         * `coupons_code_unique` is a unique index on the column verbatim, not
+         * on upper(code), so nothing at the database level stops "save10" and
+         * "SAVE10" both existing. Ordering by the primary key makes a pasted
+         * code resolve to the same one of them every time: two customers with
+         * the same code must never be quoted two different discounts because
+         * the planner happened to return the rows in a different order.
+         */
         /** @var Coupon|null $coupon */
-        $coupon = Coupon::query()->forCode($code)->first();
+        $coupon = Coupon::query()->forCode($code)->orderBy('id')->first();
 
         return $coupon;
     }
@@ -287,16 +294,18 @@ final class CouponValidator
             }
         }
 
-        $applicableKinds = $coupon->applicableProductKinds();
+        // Compared as raw strings on both sides. The coupon's list is not
+        // filtered through ProductKind first (a value the enum has forgotten
+        // would drop out and take the whole restriction with it), and neither
+        // is the basket's (a kind we cannot parse must fail to match, not be
+        // waved through).
+        $applicableKinds = $coupon->applicableProductKindValues();
 
         if ($applicableKinds === []) {
             return;
         }
 
-        $offendingKinds = array_values(array_filter(
-            $context->productKinds,
-            static fn (ProductKind $kind): bool => ! in_array($kind, $applicableKinds, true),
-        ));
+        $offendingKinds = array_values(array_diff($context->productKinds, $applicableKinds));
 
         if ($context->productKinds === [] || $offendingKinds !== []) {
             throw CouponNotApplicableException::forProductKinds(

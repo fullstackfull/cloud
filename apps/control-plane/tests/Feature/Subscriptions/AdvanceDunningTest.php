@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
 use Lynomia\Modules\Subscriptions\Application\Actions\AdvanceDunning;
+use Lynomia\Modules\Subscriptions\Application\Actions\TransitionSubscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -159,6 +160,73 @@ final class AdvanceDunningTest extends TestCase
         $this->expectException(IllegalStateTransitionException::class);
 
         $this->dunning->recordFailedPayment($subscription);
+    }
+
+    #[Test]
+    public function a_past_due_subscription_with_no_grace_clock_is_given_one_rather_than_stalling(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-02-01 09:00:00'));
+
+        // Reached past_due without a recorded failure — an operator, or a
+        // webhook that moved the status without recording the failure.
+        $subscription = Subscription::factory()->status(SubscriptionStatus::PastDue)->create();
+        $this->assertNull($subscription->grace_period_ends_at);
+
+        $subscription = $this->dunning->execute($subscription);
+
+        // Without a clock the sweep would ask "has the deadline passed?",
+        // answer no for ever, and serve an unpaying customer indefinitely.
+        $this->assertSame(SubscriptionStatus::PastDue, $subscription->status);
+        $this->assertSame('2026-02-08 09:00:00', $subscription->grace_period_ends_at->toDateTimeString());
+
+        $this->travelTo(CarbonImmutable::parse('2026-02-08 09:00:00'));
+
+        $this->assertSame(
+            SubscriptionStatus::Suspended,
+            $this->dunning->execute($subscription)->status,
+        );
+    }
+
+    #[Test]
+    public function a_stale_caller_copy_does_not_suppress_a_real_transition(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-02-01 09:00:00'));
+
+        $subscription = Subscription::factory()->create();
+
+        // The copy a queued job is holding: read while the subscription was
+        // still past due, and only handed to the action after a payment had
+        // already returned the row to active.
+        $stale = Subscription::query()->findOrFail($subscription->id);
+        $stale->status = SubscriptionStatus::PastDue;
+
+        $moved = app(TransitionSubscription::class)->execute($stale, SubscriptionStatus::PastDue);
+
+        // Answering "already past due" from the caller's copy would leave an
+        // active subscription outside dunning entirely, still being served and
+        // with no grace clock ever started.
+        $this->assertSame(SubscriptionStatus::PastDue, $moved->status);
+        $this->assertSame(
+            SubscriptionStatus::PastDue,
+            Subscription::query()->findOrFail($subscription->id)->status,
+        );
+    }
+
+    #[Test]
+    public function a_stale_caller_copy_does_not_refuse_a_transition_the_row_allows(): void
+    {
+        $this->travelTo(CarbonImmutable::parse('2026-02-01 09:00:00'));
+
+        $subscription = Subscription::factory()->create();
+
+        // The mirror image: a copy read while the subscription looked
+        // terminal, against a row that is in fact perfectly live.
+        $stale = Subscription::query()->findOrFail($subscription->id);
+        $stale->status = SubscriptionStatus::Cancelled;
+
+        $moved = app(TransitionSubscription::class)->execute($stale, SubscriptionStatus::PastDue);
+
+        $this->assertSame(SubscriptionStatus::PastDue, $moved->status);
     }
 
     #[Test]

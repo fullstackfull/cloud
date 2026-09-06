@@ -117,9 +117,19 @@ class Subscription extends Model
      * Whether the underlying service should still be answering requests.
      *
      * Past due deliberately still runs — see SubscriptionStatus.
+     *
+     * A scheduled cancellation is honoured here as well as in the status,
+     * because the status only moves when the cancellation sweep next runs. The
+     * customer paid up to cancel_at and not a second beyond it, so a sweep that
+     * is late — or has not been scheduled at all — must not leave the service
+     * running for free.
      */
-    public function serviceIsRunning(): bool
+    public function serviceIsRunning(?DateTimeInterface $at = null): bool
     {
+        if ($this->cancel_at !== null && $this->cancel_at->lessThanOrEqualTo($at ?? now())) {
+            return false;
+        }
+
         return $this->status->serviceShouldRun();
     }
 
@@ -161,5 +171,27 @@ class Subscription extends Model
             ->where(fn (Builder $inner): Builder => $inner
                 ->whereNull('cancel_at')
                 ->orWhereColumn('cancel_at', '>', 'current_period_end'));
+    }
+
+    /**
+     * Subscriptions whose scheduled cancellation has come due.
+     *
+     * Scheduling a cancellation only records a date; something has to act on
+     * it. Without this sweep the status stays active for ever, and a customer
+     * who cancelled keeps a running service nobody is billing for.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeDueForCancellation(Builder $query, ?DateTimeInterface $at = null): Builder
+    {
+        return $query
+            ->whereIn('status', [
+                SubscriptionStatus::Active->value,
+                SubscriptionStatus::PastDue->value,
+                SubscriptionStatus::Suspended->value,
+            ])
+            ->whereNotNull('cancel_at')
+            ->where('cancel_at', '<=', $at ?? now());
     }
 }

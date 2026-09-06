@@ -93,6 +93,69 @@ final class ChangeSubscriptionPlanTest extends TestCase
     }
 
     #[Test]
+    public function a_multi_unit_subscription_keeps_its_unit_count_across_a_plan_change(): void
+    {
+        [$small, $smallPrice] = $this->plan('CX-2', 9000);
+        [$large, $largePrice] = $this->plan('CX-4', 18000);
+
+        // Two servers of the small plan: the subscription bills 2 x 9.000.
+        $subscription = $this->subscriptionOn($small, 18000, '2026-02-01 00:00:00');
+
+        $this->travelTo(CarbonImmutable::parse('2026-02-15 00:00:00'));
+
+        $proration = $this->change->execute($subscription, $large, $largePrice);
+
+        // Half of February, at two units of each plan.
+        $this->assertSame('-9.000', $proration->credit->toDecimalString());
+        $this->assertSame('18.000', $proration->charge->toDecimalString());
+
+        $subscription->refresh();
+        // Not 18.000: moving two servers onto the unit price of the new plan
+        // would bill half of what the customer is running, every month.
+        $this->assertSame(36000, $subscription->recurring_amount_minor);
+
+        // And the round trip still cancels exactly.
+        $down = $this->change->execute($subscription, $small, $smallPrice);
+        $this->assertTrue($proration->net()->plus($down->net())->isZero());
+        $this->assertSame(18000, $subscription->refresh()->recurring_amount_minor);
+    }
+
+    #[Test]
+    public function an_explicit_unit_count_overrides_what_the_recurring_amount_implies(): void
+    {
+        [$small] = $this->plan('CX-2', 9000);
+        [$large, $largePrice] = $this->plan('CX-4', 18000);
+
+        $subscription = $this->subscriptionOn($small, 9000, '2026-02-01 00:00:00');
+
+        $this->travelTo(CarbonImmutable::parse('2026-02-15 00:00:00'));
+
+        $proration = $this->change->execute($subscription, $large, $largePrice, units: 3);
+
+        // Half of February at three units of the 18.000 plan.
+        $this->assertSame('27.000', $proration->charge->toDecimalString());
+        $this->assertSame('-4.500', $proration->credit->toDecimalString());
+        $this->assertSame(54000, $subscription->refresh()->recurring_amount_minor);
+    }
+
+    #[Test]
+    public function a_grandfathered_price_that_no_longer_divides_refuses_to_guess_the_unit_count(): void
+    {
+        [$small] = $this->plan('CX-2', 9000);
+        [$large, $largePrice] = $this->plan('CX-4', 18000);
+
+        // The customer is on a price the catalogue has since moved off; the
+        // number of units they hold can no longer be derived from the money.
+        $subscription = $this->subscriptionOn($small, 7777, '2026-02-01 00:00:00');
+
+        $this->travelTo(CarbonImmutable::parse('2026-02-15 00:00:00'));
+
+        $this->expectException(SubscriptionNotChangeableException::class);
+
+        $this->change->execute($subscription, $large, $largePrice);
+    }
+
+    #[Test]
     public function a_change_at_the_very_end_of_a_period_credits_and_charges_nothing(): void
     {
         [$small] = $this->plan('CX-2', 9000);

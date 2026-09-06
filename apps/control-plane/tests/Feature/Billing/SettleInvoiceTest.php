@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use LogicException;
+use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\TransitionInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
@@ -300,6 +301,122 @@ final class SettleInvoiceTest extends TestCase
         $this->expectException(LogicException::class);
 
         $invoice->amount_due_minor = 0;
+    }
+
+    #[Test]
+    public function a_payment_replacing_a_refunded_one_settles_the_invoice_rather_than_the_wallet(): void
+    {
+        $customer = Customer::factory()->create();
+        $invoice = $this->openInvoice(Money::of('30.000', 'KWD'), $customer);
+
+        $deposit = $this->capture($invoice, Money::of('10.000', 'KWD'));
+        $partly = $this->settle->execute($invoice, $deposit)->invoice;
+
+        // The deposit goes back to the customer: the invoice is unpaid again
+        // and owes the whole thirty.
+        $returned = app(RecordInvoiceRefund::class)->execute($partly, Money::of('10.000', 'KWD'));
+
+        $this->assertSame(InvoiceStatus::Open, $returned->status);
+        $this->assertTrue($returned->amountDue()->equals(Money::of('30.000', 'KWD')));
+
+        $settled = $this->settle->execute($returned, $this->capture($invoice, Money::of('30.000', 'KWD')));
+
+        /*
+         * Refunded money is owed again, so the invoice can absorb it again. A
+         * settlement that measured this payment against the total alone would
+         * see the returned deposit as an overpayment, divert thirty fils short
+         * of the whole payment into the wallet and leave a fully paid invoice
+         * sitting in dunning.
+         */
+        $this->assertTrue($settled->creditedToWallet->isZero());
+        $this->assertTrue($settled->applied->equals(Money::of('30.000', 'KWD')));
+        $this->assertSame(InvoiceStatus::Paid, $settled->invoice->status);
+        $this->assertTrue($settled->invoice->amountDue()->isZero());
+        $this->assertSame(0, DB::table('wallet_transactions')->count());
+        $this->assertAmountDueAgrees($settled->invoice);
+    }
+
+    #[Test]
+    public function a_redelivered_capture_for_an_invoice_that_has_since_been_refunded_is_a_no_op(): void
+    {
+        $customer = Customer::factory()->create();
+        $invoice = $this->openInvoice(Money::of('10.000', 'KWD'), $customer);
+        $capture = $this->capture($invoice, Money::of('10.000', 'KWD'));
+
+        $paid = $this->settle->execute($invoice, $capture)->invoice;
+        $refunded = app(RecordInvoiceRefund::class)->execute($paid, Money::of('10.000', 'KWD'));
+
+        $this->assertSame(InvoiceStatus::Refunded, $refunded->status);
+
+        /*
+         * Providers redeliver a capture for days, and a refund can easily be
+         * issued inside that window. The payment this webhook carries is
+         * already recorded on the invoice, so the redelivery has to change
+         * nothing — not fail the handler and be retried forever.
+         */
+        $replay = $this->settle->execute($refunded, $capture);
+
+        $this->assertTrue($replay->movedNothing());
+        $this->assertSame(InvoiceStatus::Refunded, $replay->invoice->status);
+        $this->assertSame(10_000, $replay->invoice->amount_paid_minor);
+        $this->assertSame(0, DB::table('wallet_transactions')->count());
+        $this->assertAmountDueAgrees($replay->invoice);
+    }
+
+    #[Test]
+    public function a_surplus_already_credited_to_the_wallet_is_never_collected_a_second_time(): void
+    {
+        $customer = Customer::factory()->create();
+        $invoice = $this->openInvoice(Money::of('10.000', 'KWD'), $customer);
+
+        // Overpaid by two: ten settles the invoice, two becomes stored value.
+        $overpaid = $this->settle->execute($invoice, $this->capture($invoice, Money::of('12.000', 'KWD')))->invoice;
+
+        // Part of the bill is then returned, so the invoice owes four again.
+        $partly = app(RecordInvoiceRefund::class)->execute($overpaid, Money::of('4.000', 'KWD'));
+        $this->assertTrue($partly->amountDue()->equals(Money::of('4.000', 'KWD')));
+
+        $settled = $this->settle->execute($partly, $this->capture($invoice, Money::of('4.000', 'KWD')));
+
+        /*
+         * The refund raises what the invoice can absorb, which is what lets
+         * the four settle it. The two fils sitting in the wallet must not ride
+         * along into that ceiling: counted again they would be credited a
+         * second time, giving the customer stored value they never paid for.
+         */
+        $this->assertTrue($settled->invoice->amountDue()->isZero());
+        $this->assertTrue($settled->creditedToWallet->isZero());
+        $this->assertSame(14_000, $settled->invoice->amount_paid_minor);
+        $this->assertAmountDueAgrees($settled->invoice);
+
+        // 16 captured, 4 returned, 2 in the wallet: the invoice kept its ten.
+        $wallet = app(WalletLedger::class)->walletFor($customer, 'KWD');
+        $this->assertTrue($wallet->balance()->equals(Money::of('2.000', 'KWD')));
+        $this->assertSame(1, DB::table('wallet_transactions')->count());
+        $this->assertTrue(
+            $settled->invoice->amountPaid()->minus($settled->invoice->amountRefunded())
+                ->equals($settled->invoice->total()),
+        );
+    }
+
+    #[Test]
+    public function a_capture_the_payments_side_attached_before_calling_is_still_applied(): void
+    {
+        $invoice = $this->openInvoice(Money::of('10.000', 'KWD'));
+
+        // The documented alternative wiring: Payments owns the link and sets
+        // invoice_id itself, then asks for the settlement.
+        $capture = $this->capture($invoice, Money::of('10.000', 'KWD'));
+        $capture->invoice_id = $invoice->id;
+        $capture->save();
+
+        $settlement = $this->settle->execute($invoice, $capture);
+
+        $this->assertTrue($settlement->applied->equals(Money::of('10.000', 'KWD')));
+        $this->assertSame(InvoiceStatus::Paid, $settlement->invoice->status);
+        $this->assertTrue($settlement->invoice->amountDue()->isZero());
+        $this->assertTrue($this->settle->execute($settlement->invoice, $capture)->movedNothing());
+        $this->assertAmountDueAgrees($settlement->invoice);
     }
 
     private function openInvoice(Money $total, ?Customer $customer = null): Invoice

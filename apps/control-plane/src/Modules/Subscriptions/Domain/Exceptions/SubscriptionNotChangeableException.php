@@ -31,6 +31,25 @@ final class SubscriptionNotChangeableException extends DomainException
         ]);
     }
 
+    /**
+     * The subscription's recurring amount is not a whole multiple of its
+     * current plan's unit price, so the number of units it is paying for
+     * cannot be established — usually a grandfathered price that has since
+     * been changed in the catalogue.
+     */
+    public static function becauseUnitCountIsUnknown(string $subscriptionId): self
+    {
+        $exception = new self(sprintf(
+            'Subscription %s does not bill a whole multiple of its plan price, so the number of units to move onto the new plan must be supplied explicitly.',
+            $subscriptionId,
+        ));
+
+        return $exception->withContext([
+            'subscription_id' => $subscriptionId,
+            'reason' => 'unit_count_unknown',
+        ]);
+    }
+
     public function errorCode(): string
     {
         return 'subscription.not_changeable';

@@ -54,6 +54,10 @@ final readonly class RecordInvoiceRefund
              * actions holding the payment-side row, and one path locking them
              * in the opposite order is how two correct actions deadlock.
              */
+            if ($refund !== null) {
+                $this->assertRecordsTheWholeRefund($refund, $amount);
+            }
+
             $firstRecording = $refund === null || $this->attach($refund, $invoice);
 
             /** @var Invoice $locked */
@@ -101,6 +105,26 @@ final readonly class RecordInvoiceRefund
     }
 
     /**
+     * A refund row may only be recorded for what it actually returned.
+     *
+     * Attaching the row is what stops the reduction being applied twice, so a
+     * call that books the wrong figure spends that single chance: the
+     * shortfall could never be recorded afterwards, and the invoice would
+     * permanently understate what went back to the customer.
+     */
+    private function assertRecordsTheWholeRefund(Refund $refund, Money $amount): void
+    {
+        if ($refund->currency !== $amount->currency() || $refund->amount_minor !== $amount->minorUnits()) {
+            throw UnsettleablePaymentException::refundAmountMismatch(
+                (string) $refund->getKey(),
+                $refund->amount_minor,
+                $amount->minorUnits(),
+                $amount->currency(),
+            );
+        }
+    }
+
+    /**
      * Links the refund to the invoice, reporting whether this call is the one
      * that did it.
      */
@@ -117,6 +141,24 @@ final readonly class RecordInvoiceRefund
             throw UnsettleablePaymentException::refundAttachedElsewhere(
                 (string) $locked->getKey(),
                 (string) $locked->invoice_id,
+                (string) $invoice->getKey(),
+            );
+        }
+
+        /*
+         * The mirror of "one capture cannot pay two invoices". A refund
+         * returns part of one capture, and that capture settles at most one
+         * invoice; deducting it from a different document would leave both of
+         * them describing money that never moved between them and the
+         * customer. A capture attached to nothing is left alone — that is the
+         * manually reconciled case, and it has no other document to belong to.
+         */
+        $settledInvoiceId = $locked->transaction()->value('invoice_id');
+
+        if ($settledInvoiceId !== null && (string) $settledInvoiceId !== (string) $invoice->getKey()) {
+            throw UnsettleablePaymentException::refundsAPaymentForAnotherInvoice(
+                (string) $locked->getKey(),
+                (string) $settledInvoiceId,
                 (string) $invoice->getKey(),
             );
         }

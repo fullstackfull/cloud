@@ -12,7 +12,9 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\InsufficientWalletBalanceException;
+use Lynomia\Modules\Wallet\Domain\Exceptions\LedgerEntryIsImmutableException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\UnattributedAdjustmentException;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
@@ -464,5 +466,239 @@ final class WalletLedgerTest extends TestCase
         // The key the replay check reads is written after redaction, so it
         // survives even though it looks credential-shaped.
         $this->assertSame('psp-charge-redaction', $stored['idempotency_key']);
+    }
+
+    #[Test]
+    public function caller_metadata_cannot_smuggle_in_an_idempotency_key(): void
+    {
+        $wallet = Wallet::factory()->create();
+
+        /*
+         * The replay check reads one reserved name out of a caller-controlled
+         * document. If a caller could plant that name, a one-fil promotional
+         * entry carrying the key of a top-up that has not happened yet would
+         * make the real top-up look like a replay of itself: the customer's
+         * 50 KWD would never reach their balance and the PSP callback would be
+         * answered with an entry that has nothing to do with the payment.
+         */
+        $planted = $this->ledger->credit(
+            $wallet,
+            Money::ofMinor(1, 'KWD'),
+            WalletTransactionKind::Promotional,
+            'One fil promotion',
+            metadata: ['idempotency_key' => 'psp-charge-01J9AA', 'campaign' => 'launch'],
+        );
+
+        $stored = $planted->refresh()->metadata;
+        $this->assertSame('launch', $stored['campaign']);
+        $this->assertArrayNotHasKey('idempotency_key', $stored);
+        $this->assertNull($planted->idempotencyKey());
+
+        $topup = $this->ledger->credit(
+            $wallet,
+            Money::ofMinor(50_000, 'KWD'),
+            WalletTransactionKind::Topup,
+            'Top-up by card ending 4242',
+            idempotencyKey: 'psp-charge-01J9AA',
+        );
+
+        $this->assertNotSame($planted->id, $topup->id);
+        $this->assertSame(50_000, $topup->amount_minor);
+        $this->assertSame(50_001, (int) DB::table('wallets')->where('id', $wallet->id)->value('balance_minor'));
+        $this->assertSame(2, DB::table('wallet_transactions')->where('wallet_id', $wallet->id)->count());
+    }
+
+    #[Test]
+    public function an_idempotency_key_that_names_a_different_posting_is_refused(): void
+    {
+        $wallet = Wallet::factory()->create();
+
+        $this->ledger->credit(
+            $wallet,
+            Money::ofMinor(10_000, 'KWD'),
+            WalletTransactionKind::Topup,
+            'Top-up',
+            idempotencyKey: 'shared-key',
+        );
+
+        /*
+         * Answering this debit with the earlier credit would report an invoice
+         * as settled while nothing left the wallet. A key collision has to be
+         * loud.
+         */
+        try {
+            $this->ledger->debit(
+                $wallet,
+                Money::ofMinor(500, 'KWD'),
+                WalletTransactionKind::Payment,
+                'Applied to invoice LYN-000003',
+                idempotencyKey: 'shared-key',
+            );
+            $this->fail('Expected a colliding idempotency key to be refused.');
+        } catch (IdempotencyKeyConflictException $e) {
+            $this->assertSame('wallet.idempotency_key_conflict', $e->errorCode());
+            $this->assertSame(409, $e->httpStatus());
+        }
+
+        $this->assertSame(1, DB::table('wallet_transactions')->where('wallet_id', $wallet->id)->count());
+        $this->assertSame(10_000, (int) DB::table('wallets')->where('id', $wallet->id)->value('balance_minor'));
+
+        // The genuine retry of the original posting still replays cleanly.
+        $replay = $this->ledger->credit(
+            $wallet,
+            Money::ofMinor(10_000, 'KWD'),
+            WalletTransactionKind::Topup,
+            'Top-up',
+            idempotencyKey: 'shared-key',
+        );
+
+        $this->assertSame(1, DB::table('wallet_transactions')->where('wallet_id', $wallet->id)->count());
+        $this->assertSame(10_000, $replay->amount_minor);
+    }
+
+    #[Test]
+    public function a_credit_can_repair_a_wallet_whose_balance_went_negative(): void
+    {
+        $wallet = Wallet::factory()->create();
+        $admin = User::factory()->create();
+
+        // However it got there — a lost write, a bug since fixed — a wallet in
+        // the red has to be repairable, and the repair is a credit. Refusing
+        // it because the resulting balance is still below zero would leave the
+        // only remedy unusable.
+        DB::table('wallets')->where('id', $wallet->id)->update(['balance_minor' => -1_500]);
+
+        $entry = $this->ledger->credit(
+            $wallet->refresh(),
+            Money::ofMinor(1_000, 'KWD'),
+            WalletTransactionKind::Adjustment,
+            'Partial correction of the 3 June lost write',
+            actor: $admin,
+        );
+
+        $this->assertSame(-500, $entry->balance_after_minor);
+        $this->assertSame(-500, (int) DB::table('wallets')->where('id', $wallet->id)->value('balance_minor'));
+
+        // A debit against that wallet is still refused: only debits may breach
+        // the floor, and this one would take it further under.
+        $this->expectException(InsufficientWalletBalanceException::class);
+        $this->ledger->debit($wallet, Money::ofMinor(1, 'KWD'), WalletTransactionKind::Payment, 'Invoice');
+    }
+
+    #[Test]
+    public function a_posted_entry_can_neither_be_edited_nor_removed(): void
+    {
+        $wallet = Wallet::factory()->create();
+        $entry = $this->ledger->credit($wallet, Money::ofMinor(1_000, 'KWD'), WalletTransactionKind::Topup, 'Top-up');
+
+        $entry->amount_minor = 99_999;
+
+        try {
+            $entry->save();
+            $this->fail('Expected a posted ledger entry to be immutable.');
+        } catch (LedgerEntryIsImmutableException $e) {
+            $this->assertSame('wallet.ledger_entry_immutable', $e->errorCode());
+        }
+
+        try {
+            $entry->delete();
+            $this->fail('Expected a posted ledger entry to be undeletable.');
+        } catch (LedgerEntryIsImmutableException) {
+            // Expected.
+        }
+
+        $this->assertSame(1_000, (int) DB::table('wallet_transactions')->where('id', $entry->id)->value('amount_minor'));
+        $this->assertSame(1, DB::table('wallet_transactions')->where('wallet_id', $wallet->id)->count());
+    }
+
+    #[Test]
+    public function a_wallet_currency_is_stored_normalised(): void
+    {
+        $customer = Customer::factory()->create();
+
+        $wallet = new Wallet(['customer_id' => $customer->id, 'currency' => 'usd', 'balance_minor' => 0]);
+        $wallet->save();
+
+        $this->assertSame('USD', DB::table('wallets')->where('id', $wallet->id)->value('currency'));
+
+        // The wallet's own currency must never read as a mismatch against
+        // itself, which is what made a differently-cased row unusable.
+        $entry = $this->ledger->credit($wallet, Money::ofMinor(250, 'USD'), WalletTransactionKind::Topup, 'Top-up');
+
+        $this->assertSame(250, $entry->balance_after_minor);
+    }
+
+    #[Test]
+    public function reconcile_is_not_fooled_by_an_entry_that_lands_while_it_reads(): void
+    {
+        /*
+         * reconcile() reads two things — the ledger and the cached balance —
+         * and a top-up committing between them is counted by one and missed by
+         * the other. The wallet is consistent throughout; only a torn read
+         * makes it look corrupt. A reconciler that cries wolf on a live wallet
+         * is worse than none, because the real alarm gets ignored with it.
+         */
+        foreach (['recon_a', 'recon_b'] as $name) {
+            config()->set("database.connections.{$name}", config('database.connections.pgsql'));
+        }
+
+        // RefreshDatabase never commits the default connection, so fixtures the
+        // second connection has to see are committed here and cleaned up below.
+        $customer = Customer::factory()->make();
+        $customer->setConnection('recon_a')->save();
+
+        try {
+            $wallet = new Wallet(['customer_id' => $customer->id, 'currency' => 'KWD', 'balance_minor' => 0]);
+            $wallet->setConnection('recon_a')->save();
+
+            $this->ledger->credit($wallet, Money::ofMinor(1_000, 'KWD'), WalletTransactionKind::Topup, 'Top-up 1');
+            $this->ledger->credit($wallet, Money::ofMinor(1_000, 'KWD'), WalletTransactionKind::Topup, 'Top-up 2');
+
+            // Without a lock timeout the contender would wait on a lock only
+            // the caller further up this same PHP stack can release.
+            DB::connection('recon_b')->statement("SET lock_timeout = '1s'");
+
+            $contender = Wallet::on('recon_b')->findOrFail($wallet->id);
+            $fired = false;
+            $outcome = null;
+
+            // Fires while reconcile() is streaming the ledger and before it has
+            // read the cached balance.
+            WalletTransaction::retrieved(function () use (&$fired, &$outcome, $contender): void {
+                if ($fired) {
+                    return;
+                }
+
+                $fired = true;
+
+                try {
+                    $this->ledger->credit(
+                        $contender,
+                        Money::ofMinor(500, 'KWD'),
+                        WalletTransactionKind::Topup,
+                        'Top-up landing mid-reconciliation',
+                    );
+                    $outcome = 'committed';
+                } catch (QueryException) {
+                    $outcome = 'blocked';
+                }
+            });
+
+            $report = $this->ledger->reconcile($wallet);
+
+            $this->assertTrue($fired, 'The interleaved top-up never ran, so this proves nothing.');
+            $this->assertSame('blocked', $outcome);
+            $this->assertTrue(
+                $report->isBalanced(),
+                'A consistent wallet must not be reported as drifting because a top-up committed mid-scan.'
+            );
+            $this->assertSame(2_000, $report->cached->minorUnits());
+            $this->assertSame(2_000, $report->derived->minorUnits());
+        } finally {
+            WalletTransaction::flushEventListeners();
+            DB::connection('recon_b')->statement('SET lock_timeout = 0');
+            // wallets and wallet_transactions cascade from the customer.
+            Customer::on('recon_a')->whereKey($customer->id)->forceDelete();
+        }
     }
 }

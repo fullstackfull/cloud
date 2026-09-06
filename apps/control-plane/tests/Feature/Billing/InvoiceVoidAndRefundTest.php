@@ -15,6 +15,7 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceRefundExceedsPaymentException;
 use Lynomia\Modules\Billing\Domain\Exceptions\PaidInvoiceCannotBeVoidedException;
+use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
@@ -139,6 +140,10 @@ final class InvoiceVoidAndRefundTest extends TestCase
         $this->assertSame(InvoiceStatus::Refunded, $fully->status);
         $this->assertTrue($fully->amountRefunded()->equals(Money::of('30.000', 'KWD')));
         $this->assertTrue($fully->refundableAmount()->isZero());
+        // The money went back, so the document is not settled any more —
+        // amount_due says thirty and the model must not disagree with it.
+        $this->assertTrue($fully->amountDue()->equals(Money::of('30.000', 'KWD')));
+        $this->assertFalse($fully->isFullyPaid());
         $this->assertAmountDueAgrees($fully);
     }
 
@@ -227,6 +232,67 @@ final class InvoiceVoidAndRefundTest extends TestCase
         $this->assertSame(InvoiceStatus::Open, $returned->status);
         $this->assertTrue($returned->amountDue()->equals(Money::of('30.000', 'KWD')));
         $this->assertAmountDueAgrees($returned);
+    }
+
+    #[Test]
+    public function a_refund_of_a_capture_that_settled_another_invoice_is_refused(): void
+    {
+        $customer = Customer::factory()->create();
+        $mine = $this->openInvoice(Money::of('30.000', 'KWD'), $customer);
+        $theirs = $this->openInvoice(Money::of('30.000', 'KWD'), $customer);
+
+        $theirCapture = $this->capture($theirs, Money::of('30.000', 'KWD'));
+        $this->settle->execute($theirs, $theirCapture);
+        $this->settle->execute($mine, $this->capture($mine, Money::of('30.000', 'KWD')));
+
+        /*
+         * The mirror of "one capture cannot pay two invoices": money returned
+         * against one document must not be deducted from another, or both
+         * invoices end up describing a payment the customer never made to
+         * them.
+         */
+        try {
+            $refund = $this->refundRow($theirCapture, Money::of('10.000', 'KWD'));
+            $this->refund->execute($mine, $refund->amount(), $refund);
+            $this->fail('Expected the refund to be refused.');
+        } catch (UnsettleablePaymentException $e) {
+            $this->assertSame('invoice.payment_not_settleable', $e->errorCode());
+            $this->assertSame($theirs->id, $e->context()['attached_invoice_id']);
+        }
+
+        $this->assertSame(0, $mine->refresh()->amount_refunded_minor);
+        $this->assertSame(0, $theirs->refresh()->amount_refunded_minor);
+    }
+
+    #[Test]
+    public function a_refund_row_is_recorded_for_its_own_amount_or_not_at_all(): void
+    {
+        $invoice = $this->openInvoice(Money::of('30.000', 'KWD'));
+        $capture = $this->capture($invoice, Money::of('30.000', 'KWD'));
+        $paid = $this->settle->execute($invoice, $capture)->invoice;
+
+        $refund = $this->refundRow($capture, Money::of('10.000', 'KWD'));
+
+        /*
+         * Attaching the refund is what stops it being recorded twice, so a
+         * call that records the wrong figure spends that one chance: the
+         * shortfall could never be booked afterwards. The disagreement is
+         * refused instead.
+         */
+        try {
+            $this->refund->execute($paid, Money::of('4.000', 'KWD'), $refund);
+            $this->fail('Expected the mismatched refund amount to be refused.');
+        } catch (UnsettleablePaymentException $e) {
+            $this->assertSame(10_000, $e->context()['refund_amount_minor']);
+            $this->assertSame(4_000, $e->context()['requested_minor']);
+        }
+
+        $this->assertSame(0, $paid->refresh()->amount_refunded_minor);
+        $this->assertNull($refund->refresh()->invoice_id);
+
+        // The same refund, recorded for what it actually returned, is fine.
+        $recorded = $this->refund->execute($paid, $refund->amount(), $refund);
+        $this->assertTrue($recorded->amountRefunded()->equals(Money::of('10.000', 'KWD')));
     }
 
     private function openInvoice(Money $total, ?Customer $customer = null): Invoice

@@ -75,6 +75,39 @@ final class UnsettleablePaymentException extends DomainException
         ]);
     }
 
+    public static function refundsAPaymentForAnotherInvoice(string $refundId, string $attachedInvoiceId, string $invoiceId): self
+    {
+        $exception = new self(sprintf(
+            'Refund %s returns money captured for invoice %s and cannot reduce %s.',
+            $refundId,
+            $attachedInvoiceId,
+            $invoiceId,
+        ));
+
+        return $exception->withContext([
+            'refund_id' => $refundId,
+            'attached_invoice_id' => $attachedInvoiceId,
+            'invoice_id' => $invoiceId,
+        ]);
+    }
+
+    public static function refundAmountMismatch(string $refundId, int $refundAmountMinor, int $requestedMinor, string $currency): self
+    {
+        $exception = new self(sprintf(
+            'Refund %s returned %d minor units and cannot be recorded as %d.',
+            $refundId,
+            $refundAmountMinor,
+            $requestedMinor,
+        ));
+
+        return $exception->withContext([
+            'refund_id' => $refundId,
+            'refund_amount_minor' => $refundAmountMinor,
+            'requested_minor' => $requestedMinor,
+            'currency' => $currency,
+        ]);
+    }
+
     public function errorCode(): string
     {
         return 'invoice.payment_not_settleable';

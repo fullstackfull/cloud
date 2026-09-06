@@ -59,10 +59,17 @@ interface PaymentProvider
 
     /**
      * @param  string  $chargeReference  The captured payment to refund against.
+     * @param  string  $idempotencyKey  Identifies this refund attempt to the provider. It must be unique per
+     *                                  refund and stable across retries of that one refund — the local
+     *                                  refund row's id is exactly that. Deriving it from the request
+     *                                  parameters instead would make two deliberate refunds of the same
+     *                                  amount, for the same reason, on the same charge collide: the
+     *                                  provider would replay the first refund's response and the second
+     *                                  payout would silently never happen while our ledger recorded both.
      *
      * @throws PaymentProviderException
      */
-    public function refund(string $chargeReference, Money $amount, string $reason): RemoteRefundResult;
+    public function refund(string $chargeReference, Money $amount, string $reason, string $idempotencyKey): RemoteRefundResult;
 
     /**
      * Decide whether a raw request body genuinely came from this provider.

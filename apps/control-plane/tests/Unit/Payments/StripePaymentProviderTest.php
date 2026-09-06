@@ -33,6 +33,8 @@ final class StripePaymentProviderTest extends TestCase
 {
     private const string API_KEY = 'sk_test_0000000000000000000000';
 
+    private ?ClientInterface $httpClient = null;
+
     protected function tearDown(): void
     {
         // The HTTP client is global static state in the SDK; leaving a stub
@@ -172,11 +174,38 @@ final class StripePaymentProviderTest extends TestCase
             'status' => 'succeeded',
         ]);
 
-        $result = $provider->refund('ch_test_1', Money::ofMinor(2500, 'KWD'), 'requested_by_customer');
+        $result = $provider->refund('ch_test_1', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'refund_row_1');
 
         $this->assertSame('re_test_1', $result->reference);
         $this->assertSame(RefundStatus::Succeeded, $result->status);
         $this->assertTrue($result->amount->equals(Money::ofMinor(2500, 'KWD')));
+    }
+
+    #[Test]
+    public function a_refund_is_sent_with_an_idempotency_key_that_identifies_the_refund_not_its_parameters(): void
+    {
+        $body = ['id' => 're_test_1', 'object' => 'refund', 'amount' => 2500, 'currency' => 'kwd', 'status' => 'succeeded'];
+        $provider = $this->providerReturning(200, $body);
+
+        $provider->refund('ch_test_1', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'refund_row_1');
+        $first = $this->idempotencyKeySent();
+
+        $provider->refund('ch_test_1', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'refund_row_2');
+        $second = $this->idempotencyKeySent();
+
+        $this->assertNotNull($first);
+        /*
+         * Stripe replays the original response for a repeated key, so two
+         * deliberate refunds sharing one key means the second payout never
+         * happens while our ledger records both. The key therefore has to be
+         * derived from the refund we are making, not from what it looks like.
+         */
+        $this->assertNotSame($first, $second);
+
+        // …and the same refund retried must reuse its key, which is what makes
+        // a retry after a timeout safe rather than a second payout.
+        $provider->refund('ch_test_1', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'refund_row_1');
+        $this->assertSame($first, $this->idempotencyKeySent());
     }
 
     #[Test]
@@ -194,12 +223,29 @@ final class StripePaymentProviderTest extends TestCase
     }
 
     /**
+     * The Idempotency-Key header of the most recent request the SDK made.
+     */
+    private function idempotencyKeySent(): ?string
+    {
+        foreach ($this->httpClient?->headers ?? [] as $header) {
+            if (is_string($header) && str_starts_with(strtolower($header), 'idempotency-key:')) {
+                return trim(substr($header, strlen('idempotency-key:')));
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @param  array<string, mixed>  $body
      */
     private function providerReturning(int $status, array $body): StripePaymentProvider
     {
-        ApiRequestor::setHttpClient(new class($status, $body) implements ClientInterface
+        $this->httpClient = new class($status, $body) implements ClientInterface
         {
+            /** @var list<string> */
+            public array $headers = [];
+
             /**
              * @param  array<string, mixed>  $body
              */
@@ -207,9 +253,15 @@ final class StripePaymentProviderTest extends TestCase
 
             public function request($method, $absUrl, $headers, $params, $hasFile, $apiMode = 'v1', $maxNetworkRetries = null)
             {
+                // Recorded so a test can assert on what actually went over the
+                // wire rather than on what the adapter meant to send.
+                $this->headers = array_values(array_map(strval(...), (array) $headers));
+
                 return [json_encode($this->body, JSON_THROW_ON_ERROR), $this->status, []];
             }
-        });
+        };
+
+        ApiRequestor::setHttpClient($this->httpClient);
 
         return new StripePaymentProvider(
             new StripeClient(['api_key' => self::API_KEY]),

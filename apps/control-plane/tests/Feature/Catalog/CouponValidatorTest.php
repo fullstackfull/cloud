@@ -6,6 +6,7 @@ namespace Tests\Feature\Catalog;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCurrencyMismatchException;
@@ -181,6 +182,102 @@ final class CouponValidatorTest extends TestCase
         $this->assertSame('product_kind', $exception->context()['restriction']);
 
         $this->validator->validateCode($coupon->code, $this->context(productKinds: [ProductKind::Vps]));
+    }
+
+    #[Test]
+    public function a_basket_whose_kinds_arrive_as_strings_is_judged_the_same_way(): void
+    {
+        // This is the shape the checkout actually hands over: it reads the kind
+        // off the catalogue and flattens it before building the context. A
+        // validator that insisted on enum cases here blew up with a TypeError
+        // — a 500 on every checkout using a kind-restricted campaign, instead
+        // of either a discount or a refusal.
+        $coupon = Coupon::factory()->forProductKinds([ProductKind::Vps])->create();
+
+        $this->validator->validate($coupon, $this->context(productKinds: [ProductKind::Vps->value]));
+
+        $exception = $this->assertRefusal(
+            $coupon,
+            CouponNotApplicableException::class,
+            'coupon.not_applicable',
+            fn (): Coupon => $this->validator->validateCode(
+                $coupon->code,
+                $this->context(productKinds: [ProductKind::Dedicated->value]),
+            ),
+        );
+        $this->assertSame(ProductKind::Dedicated->value, $exception->context()['offending_product_kinds']);
+    }
+
+    #[Test]
+    public function a_kind_the_enum_does_not_recognise_never_matches_a_restricted_campaign(): void
+    {
+        $coupon = Coupon::factory()->forProductKinds([ProductKind::Vps])->create();
+
+        $this->assertRefusal(
+            $coupon,
+            CouponNotApplicableException::class,
+            'coupon.not_applicable',
+            fn (): Coupon => $this->validator->validateCode(
+                $coupon->code,
+                $this->context(productKinds: ['quantum_widget']),
+            ),
+        );
+    }
+
+    #[Test]
+    public function a_restriction_the_enum_has_forgotten_still_restricts(): void
+    {
+        // A kind renamed or retired after the campaign was created. Filtering
+        // the stored list through ProductKind::tryFrom() would empty it, and an
+        // empty list means "anything" — so one stale string would turn a
+        // campaign aimed at one product line into a discount on the catalogue.
+        $coupon = Coupon::factory()->create(['applicable_product_kinds' => ['quantum_widget']]);
+
+        $this->assertFalse($this->validator->passes($coupon, $this->context(productKinds: [ProductKind::Vps])));
+        $this->assertTrue($this->validator->passes($coupon, $this->context(productKinds: ['quantum_widget'])));
+    }
+
+    #[Test]
+    public function a_plan_restriction_stored_in_an_unexpected_shape_still_restricts(): void
+    {
+        $covered = Plan::factory()->create();
+
+        // Written by an import that stored ids as numbers rather than strings.
+        $coupon = Coupon::factory()->create(['applicable_plan_ids' => [12345]]);
+
+        $this->assertFalse($this->validator->passes($coupon, $this->context(planIds: [(string) $covered->id])));
+        $this->assertTrue($this->validator->passes($coupon, $this->context(planIds: ['12345'])));
+    }
+
+    #[Test]
+    public function a_pasted_code_resolves_to_the_same_coupon_every_time(): void
+    {
+        // The unique index is on the column verbatim, so two codes differing
+        // only in case can coexist and both match upper(code). Resolution must
+        // not depend on the order the planner happens to return them in.
+        $late = Coupon::factory()->create(['code' => 'SAVE10']);
+
+        // Inserted second but keyed first, so an unordered scan hands back the
+        // other row and only an explicit ordering picks this one.
+        $early = '01AAAAAAAAAAAAAAAAAAAAAAAA';
+        DB::table('coupons')->insert([
+            'id' => $early,
+            'code' => 'save10',
+            'discount_type' => 'percentage',
+            'percentage' => '0.100000',
+            'applies_to_renewals' => false,
+            'max_redemptions_per_customer' => 1,
+            'redemption_count' => 0,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->assertTrue($early < $late->id);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $this->assertSame($early, $this->validator->resolveCode(' Save10 ')->id);
+        }
     }
 
     #[Test]

@@ -112,6 +112,25 @@ final class IssueRefundTest extends TestCase
     }
 
     #[Test]
+    public function two_partial_refunds_of_the_same_amount_are_two_distinct_refunds_at_the_provider(): void
+    {
+        $transaction = $this->capture(Money::ofMinor(9000, 'KWD'));
+
+        // Two returned items of equal value, refunded for the same reason on
+        // the same day. Nothing in the request tells them apart, so the
+        // provider is told them apart by the refund row's own id. If the key
+        // were derived from the parameters, the provider would answer the
+        // second call by replaying the first — our ledger would show 6.000 KWD
+        // returned while the customer received 3.000.
+        $first = $this->issue->execute($transaction, Money::ofMinor(3000, 'KWD'), 'requested_by_customer');
+        $second = $this->issue->execute($transaction, Money::ofMinor(3000, 'KWD'), 'requested_by_customer');
+
+        $this->assertNotSame($first->id, $second->id);
+        $this->assertNotSame($first->provider_reference, $second->provider_reference);
+        $this->assertTrue($transaction->refresh()->refundedAmount()->equals(Money::ofMinor(6000, 'KWD')));
+    }
+
+    #[Test]
     public function the_final_partial_refund_may_use_the_whole_remaining_balance(): void
     {
         Event::fake([RefundIssued::class]);
@@ -244,7 +263,7 @@ final class IssueRefundTest extends TestCase
                 throw new \LogicException('not used');
             }
 
-            public function refund(string $chargeReference, Money $amount, string $reason): RemoteRefundResult
+            public function refund(string $chargeReference, Money $amount, string $reason, string $idempotencyKey): RemoteRefundResult
             {
                 throw PaymentProviderException::requestFailed('fake', 'refund', ['error_code' => 'api_unavailable']);
             }

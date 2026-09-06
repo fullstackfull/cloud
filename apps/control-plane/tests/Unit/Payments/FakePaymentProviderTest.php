@@ -131,6 +131,20 @@ final class FakePaymentProviderTest extends TestCase
     }
 
     #[Test]
+    public function a_configured_tolerance_of_zero_does_not_disable_the_replay_window(): void
+    {
+        // A tolerance read straight from an unset environment variable is 0,
+        // and 0 read literally means "accept any timestamp". The fake mirrors
+        // the real providers here so the fail-open is caught in either.
+        config(['payments.fake.webhook_tolerance' => 0]);
+        $provider = new FakePaymentProvider;
+
+        $signed = $provider->signPayload('{"id":"evt_1","type":"payment.succeeded"}', time() - 3600);
+
+        $this->assertFalse($provider->verifyWebhookSignature($signed->rawPayload, $signed->headers)->verified);
+    }
+
+    #[Test]
     public function a_payload_with_no_signature_header_does_not_verify(): void
     {
         $verification = $this->provider->verifyWebhookSignature('{"id":"evt_1"}', []);
@@ -181,10 +195,33 @@ final class FakePaymentProviderTest extends TestCase
     #[Test]
     public function a_refund_is_acknowledged(): void
     {
-        $result = $this->provider->refund('fake_ch_abc', Money::ofMinor(2500, 'KWD'), 'requested_by_customer');
+        $result = $this->provider->refund('fake_ch_abc', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'ref_1');
 
         $this->assertSame(RefundStatus::Succeeded, $result->status);
         $this->assertStringStartsWith('fake_re_', $result->reference);
+    }
+
+    #[Test]
+    public function two_refunds_of_the_same_amount_are_two_refunds(): void
+    {
+        // A charge legitimately refunded twice for the same amount and reason
+        // — two returned line items, say. Nothing about the parameters
+        // distinguishes them, so only the idempotency key can, and a provider
+        // that keys on the parameters instead would answer the second call
+        // with a replay of the first: one payout made, two recorded.
+        $first = $this->provider->refund('fake_ch_abc', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'ref_1');
+        $second = $this->provider->refund('fake_ch_abc', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'ref_2');
+
+        $this->assertNotSame($first->reference, $second->reference);
+    }
+
+    #[Test]
+    public function retrying_one_refund_is_the_same_refund(): void
+    {
+        $first = $this->provider->refund('fake_ch_abc', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'ref_1');
+        $retry = $this->provider->refund('fake_ch_abc', Money::ofMinor(2500, 'KWD'), 'requested_by_customer', 'ref_1');
+
+        $this->assertSame($first->reference, $retry->reference);
     }
 
     private function request(Money $amount, bool $confirm = false): PaymentIntentRequest

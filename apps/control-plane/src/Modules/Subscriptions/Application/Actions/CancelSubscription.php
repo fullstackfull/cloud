@@ -55,6 +55,38 @@ final readonly class CancelSubscription
     }
 
     /**
+     * The sweep that makes a scheduled cancellation actually happen.
+     *
+     * Recording cancel_at stops the subscription being renewed, but on its own
+     * it leaves the status active for ever: the service keeps running and
+     * nothing is billing for it. This moves the subscription to cancelled once
+     * the date it was promised has arrived, stamping the ending at cancel_at
+     * rather than at whatever hour the sweep happened to run.
+     */
+    public function applyScheduled(Subscription $subscription, ?DateTimeImmutable $at = null): Subscription
+    {
+        $now = $at !== null ? CarbonImmutable::instance($at) : CarbonImmutable::now();
+
+        return DB::transaction(function () use ($subscription, $now): Subscription {
+            /** @var Subscription $locked */
+            $locked = Subscription::query()->lockForUpdate()->findOrFail($subscription->getKey());
+
+            // Re-read under the lock: a customer who revoked the cancellation
+            // between the sweep's selection and this row lock must not have
+            // their service switched off anyway.
+            if ($locked->cancel_at === null || $locked->cancel_at->greaterThan($now)) {
+                return $locked;
+            }
+
+            if ($locked->status->isTerminal()) {
+                return $locked;
+            }
+
+            return $this->transition->execute($locked, SubscriptionStatus::Cancelled, $locked->cancel_at);
+        });
+    }
+
+    /**
      * Undoes a scheduled cancellation, for a customer who changes their mind
      * before the period ends.
      */

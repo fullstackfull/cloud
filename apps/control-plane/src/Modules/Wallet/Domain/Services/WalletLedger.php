@@ -10,6 +10,7 @@ use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\InsufficientWalletBalanceException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\UnattributedAdjustmentException;
 use Lynomia\Modules\Wallet\Domain\ValueObjects\WalletReconciliation;
@@ -156,34 +157,54 @@ final class WalletLedger
      */
     public function reconcile(Wallet $wallet): WalletReconciliation
     {
-        $running = 0;
-        $divergent = [];
-
         /*
-         * created_at has one-second resolution, so it cannot order entries
-         * written in the same second on its own. ULIDs are lexicographically
-         * ordered by generation time, which breaks those ties in insertion
-         * order.
+         * The scan of the ledger and the read of the cached balance have to be
+         * one consistent observation of the wallet. Taken separately, a top-up
+         * that commits between them is counted by the cache and missed by the
+         * scan, and reconcile() reports drift on a wallet that is perfectly
+         * consistent — a false ledger-corruption alarm, which is worse than no
+         * alarm because it teaches an operator to ignore the real one.
+         *
+         * The wallet row is therefore taken with the same lock the writers
+         * take, so no entry can appear underneath the scan. It holds a write
+         * lock for the length of one wallet's ledger read, which is an indexed
+         * scan of that wallet's entries; a sweep does one wallet at a time.
          */
-        $entries = $wallet->transactions()
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->cursor();
+        return $wallet->getConnection()->transaction(function () use ($wallet): WalletReconciliation {
+            /** @var Wallet $locked */
+            $locked = $wallet->newQuery()->lockForUpdate()->findOrFail($wallet->getKey());
 
-        foreach ($entries as $entry) {
-            $running += $entry->amount_minor;
+            $running = 0;
+            $divergent = [];
 
-            if ($entry->balance_after_minor !== $running) {
-                $divergent[] = $entry->id;
+            /*
+             * created_at has one-second resolution, so it cannot order entries
+             * written in the same second on its own. ULIDs are lexicographically
+             * ordered by generation time, which breaks those ties in insertion
+             * order.
+             */
+            $entries = $locked->transactions()
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->cursor();
+
+            foreach ($entries as $entry) {
+                $running += $entry->amount_minor;
+
+                if ($entry->balance_after_minor !== $running) {
+                    $divergent[] = $entry->id;
+                }
             }
-        }
 
-        return new WalletReconciliation(
-            walletId: (string) $wallet->getKey(),
-            cached: Money::ofMinor($this->cachedBalanceMinor($wallet), $wallet->currency),
-            derived: Money::ofMinor($running, $wallet->currency),
-            divergentEntryIds: $divergent,
-        );
+            return new WalletReconciliation(
+                walletId: (string) $locked->getKey(),
+                // Read from the locked row rather than re-queried, so the cache
+                // and the ledger below it are the same observation.
+                cached: $locked->balance(),
+                derived: Money::ofMinor($running, $locked->currency),
+                divergentEntryIds: $divergent,
+            );
+        });
     }
 
     /**
@@ -237,14 +258,24 @@ final class WalletLedger
                     // A retried top-up must not credit twice. The original
                     // entry is returned unchanged, so the caller sees the same
                     // answer it would have seen had the first call not been
-                    // lost on the way back.
+                    // lost on the way back — but only once the original is
+                    // confirmed to be this call and not a different one that
+                    // happens to share the key.
+                    $this->assertReplayMatches($locked, $replay, $idempotencyKey, $kind, $signedAmount);
+
                     return $this->withWallet($replay, $locked);
                 }
             }
 
             $balanceAfter = $locked->balance()->plus($signedAmount);
 
-            if ($balanceAfter->isNegative()) {
+            /*
+             * Only a debit can breach the floor. A credit onto a balance that
+             * is already negative — the compensating adjustment that repairs
+             * exactly that situation — moves it towards zero, so refusing it
+             * would leave a broken wallet with no way back.
+             */
+            if ($signedAmount->isNegative() && $balanceAfter->isNegative()) {
                 // Thrown inside the transaction and before any insert, so the
                 // refusal leaves neither an entry nor a moved balance.
                 throw InsufficientWalletBalanceException::forDebit(
@@ -290,6 +321,33 @@ final class WalletLedger
     }
 
     /**
+     * A replay may only be answered with an entry that is the same posting.
+     *
+     * Matching on the key alone is not enough: the same key attached to a
+     * different kind or amount means two different calls collided on one key,
+     * and handing back the first one reports work as done that was never done.
+     */
+    private function assertReplayMatches(
+        Wallet $wallet,
+        WalletTransaction $replay,
+        string $idempotencyKey,
+        WalletTransactionKind $kind,
+        Money $signedAmount,
+    ): void {
+        if ($replay->kind === $kind && $replay->amount_minor === $signedAmount->minorUnits()) {
+            return;
+        }
+
+        throw IdempotencyKeyConflictException::forEntry(
+            (string) $wallet->getKey(),
+            $idempotencyKey,
+            (string) $replay->getKey(),
+            $kind,
+            $signedAmount->minorUnits(),
+        );
+    }
+
+    /**
      * @param  array<string, mixed>  $metadata
      * @return array<string, mixed>
      */
@@ -299,6 +357,16 @@ final class WalletLedger
         // so it reaches storage through the redactor: a stored payment token
         // is a leak whether it was logged or persisted.
         $redacted = $this->redactor->redact($metadata);
+
+        /*
+         * The metadata document is caller-controlled and the replay check reads
+         * one reserved name out of it, so that name is stripped unconditionally
+         * before the real key is written. Without this a caller could attach
+         * `idempotency_key` to any entry and pre-empt a later genuine top-up
+         * carrying that key: the top-up would be answered with the planted
+         * entry and the customer's money would never reach their balance.
+         */
+        unset($redacted[WalletTransaction::IDEMPOTENCY_METADATA_KEY]);
 
         if ($idempotencyKey !== null) {
             // Written after redaction, and last, so caller-supplied metadata
@@ -323,7 +391,11 @@ final class WalletLedger
 
     private function assertSameCurrency(Wallet $wallet, Money $amount): void
     {
-        if ($wallet->currency !== $amount->currency()) {
+        // Money normalises its currency code to upper case, so the wallet's
+        // side is normalised too: a row written in another case is still that
+        // wallet's own currency, and reporting a mismatch against itself would
+        // make the wallet permanently unusable rather than merely untidy.
+        if (strtoupper($wallet->currency) !== $amount->currency()) {
             throw CurrencyMismatchException::between($wallet->currency, $amount->currency());
         }
     }

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Catalog\Domain\Exceptions;
 
-use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
 /**
@@ -35,7 +34,7 @@ final class CouponNotApplicableException extends DomainException
     }
 
     /**
-     * @param  list<ProductKind>  $offendingKinds
+     * @param  list<string>  $offendingKinds  product kind values, as the basket carried them
      */
     public static function forProductKinds(string $couponId, string $code, array $offendingKinds): self
     {
@@ -48,10 +47,7 @@ final class CouponNotApplicableException extends DomainException
             'coupon_id' => $couponId,
             'code' => $code,
             'restriction' => 'product_kind',
-            'offending_product_kinds' => implode(',', array_map(
-                static fn (ProductKind $kind): string => $kind->value,
-                $offendingKinds,
-            )),
+            'offending_product_kinds' => implode(',', $offendingKinds),
         ]);
     }
 
