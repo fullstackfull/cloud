@@ -7,6 +7,7 @@ use Lynomia\Providers\ApiTokenServiceProvider;
 use Lynomia\Providers\AuthorizationServiceProvider;
 use Lynomia\Providers\DomainServiceProvider;
 use Lynomia\Providers\NotificationRoutingServiceProvider;
+use Lynomia\Providers\ProviderRegistryServiceProvider;
 use Lynomia\Providers\RateLimitServiceProvider;
 
 return [
@@ -16,4 +17,5 @@ return [
     RateLimitServiceProvider::class,
     NotificationRoutingServiceProvider::class,
     ApiTokenServiceProvider::class,
+    ProviderRegistryServiceProvider::class,
 ];
