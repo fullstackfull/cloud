@@ -1,6 +1,6 @@
 <?php
 
-use App\Models\User;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 return [
 

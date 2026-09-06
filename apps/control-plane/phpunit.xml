@@ -3,6 +3,12 @@
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
          bootstrap="vendor/autoload.php"
          colors="true"
+         failOnWarning="true"
+         failOnRisky="true"
+         failOnNotice="true"
+         beStrictAboutOutputDuringTests="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
+         displayDetailsOnTestsThatTriggerErrors="true"
 >
     <testsuites>
         <testsuite name="Unit">
@@ -11,9 +17,13 @@
         <testsuite name="Feature">
             <directory>tests/Feature</directory>
         </testsuite>
+        <testsuite name="Architecture">
+            <directory>tests/Architecture</directory>
+        </testsuite>
     </testsuites>
     <source>
         <include>
+            <directory>src</directory>
             <directory>app</directory>
         </include>
     </source>
@@ -23,14 +33,35 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
+
+        <!--
+            Tests run against PostgreSQL, not SQLite.
+
+            The schema uses jsonb columns, timezone-aware timestamps, partial
+            and expression indexes, and SELECT ... FOR UPDATE SKIP LOCKED for
+            IP and capacity allocation. None of that behaves identically on
+            SQLite, and a green suite on an engine the platform never deploys
+            to would be worse than no suite at all.
+        -->
+        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_PORT" value="5432"/>
+        <env name="DB_DATABASE" value="lynomia_test"/>
+        <env name="DB_USERNAME" value="lynomia"/>
         <env name="DB_URL" value=""/>
+
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
-        <env name="PULSE_ENABLED" value="false"/>
-        <env name="TELESCOPE_ENABLED" value="false"/>
-        <env name="NIGHTWATCH_ENABLED" value="false"/>
+
+        <!-- Fake providers are the only providers permitted in the test suite. -->
+        <env name="COMPUTE_PROVIDER" value="fake"/>
+        <env name="DEDICATED_PROVIDER" value="fake"/>
+        <env name="HOSTING_PROVIDER" value="fake"/>
+        <env name="DNS_PROVIDER" value="fake"/>
+        <env name="PAYMENT_PROVIDER" value="fake"/>
+        <env name="BACKUP_PROVIDER" value="fake"/>
+
+        <env name="BILLING_DEFAULT_CURRENCY" value="KWD"/>
     </php>
 </phpunit>

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Shared\Domain\Contracts;
 
 use BackedEnum;
+use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
 
 /**
  * A finite state machine over a backed enum.
@@ -25,7 +26,7 @@ interface StateMachine
     /**
      * The complete transition table.
      *
-     * @return array<string, list<TState>>  keyed by the source state's value
+     * @return array<string, list<TState>> keyed by the source state's value
      */
     public function transitions(): array;
 
@@ -39,7 +40,7 @@ interface StateMachine
      * @param  TState  $from
      * @param  TState  $to
      *
-     * @throws \Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException
+     * @throws IllegalStateTransitionException
      */
     public function assertCanTransition(BackedEnum $from, BackedEnum $to): void;
 }
