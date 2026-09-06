@@ -89,3 +89,54 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
 Route::post('login/two-factor', [LoginController::class, 'twoFactorChallenge'])
     ->middleware('throttle:two-factor')
     ->name('login.two_factor');
+
+/*
+|--------------------------------------------------------------------------
+| Business surface
+|--------------------------------------------------------------------------
+|
+| Every module registers its own routes in its own file, and each of those
+| files is a leaf: modules do not reach into each other's routing, and adding a
+| module is one line here rather than an edit inside a shared closure.
+|
+| All of them sit inside the same group, so the four things that must be true of
+| every customer-facing business endpoint are true by construction rather than
+| by each file remembering:
+|
+|   auth:sanctum   authenticated
+|   verified       the address on the account has been proved
+|   throttle:api   bounded, keyed on the acting principal
+|   customer       resolved to exactly one customer account
+|
+| `verified` is here and not on the identity routes above on purpose: signing in
+| and managing your own credentials must work before the address is verified —
+| otherwise a customer who mistyped their address cannot even reach the resend
+| button — but nothing that spends money or provisions hardware should.
+|
+*/
+Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->group(function (): void {
+    foreach ([
+        'catalog',
+        'orders',
+        'billing',
+        'payments',
+        'wallet',
+        'services',
+        'vps',
+        'dedicated',
+        'hosting',
+        'ipam',
+        'api-tokens',
+    ] as $module) {
+        $file = __DIR__.'/v1/'.$module.'.php';
+
+        // A missing file is a wiring mistake, not something to skip quietly: a
+        // module silently absent from the API is the kind of thing that is
+        // noticed by a customer rather than by CI.
+        if (! is_file($file)) {
+            throw new RuntimeException(sprintf('Route module "%s" is listed but %s does not exist.', $module, $file));
+        }
+
+        require $file;
+    }
+});

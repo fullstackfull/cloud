@@ -17,6 +17,15 @@
 **/.env
 **/.env.*
 !**/.env.example
+
+# Every *.example is a template with no secrets in it, and some of them are
+# required: the CI backend job copies .env.testing.example before it can run a
+# single test. The narrower `!**/.env.example` above matched only that one name,
+# so .env.testing.example was silently ignored and the job could never have
+# succeeded on a fresh checkout - the file existed on every developer machine
+# and in nobody's clone.
+!.env.*.example
+!**/.env.*.example
 *.pem
 *.key
 !**/*.pub
@@ -68,4 +77,12 @@ Thumbs.db
 
 # Laravel bootstrap cache is regenerated on every boot
 apps/control-plane/bootstrap/cache/*.php
+
+# Runtime artefacts that land in whatever directory a service was started from.
+# dump.rdb was already listed here and was tracked anyway: an ignore rule added
+# after a file is committed does nothing, which is exactly how a binary blob
+# nobody reviews stays in a repository. It has been untracked.
 dump.rdb
+*.rdb
+appendonly.aof
+appendonlydir/

@@ -50,6 +50,25 @@
         <env name="DB_USERNAME" value="lynomia"/>
         <env name="DB_URL" value=""/>
 
+        <!--
+            Pinned here rather than left to a dotenv file.
+
+            The suite used to get these from an untracked .env.testing, which
+            meant the result depended on a file that was on every developer's
+            machine and in nobody's clone: a fresh checkout failed 23 tests, and
+            the failure was a 500 from "Session store not set on request" rather
+            than anything that named the cause. A test suite whose outcome
+            depends on a file git does not have is not a test suite.
+
+            Tests\TestCase presents `Origin: config('app.url')` so that the test
+            client looks like the SPA rather than a third-party site; that only
+            works if the host it names is one Sanctum considers stateful.
+        -->
+        <env name="APP_URL" value="http://localhost"/>
+        <env name="FRONTEND_URL" value="http://localhost:5173"/>
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1"/>
+        <env name="SESSION_DOMAIN" value="localhost"/>
+
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
