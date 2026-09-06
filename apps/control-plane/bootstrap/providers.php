@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
+use Lynomia\Modules\Payments\Infrastructure\PaymentsServiceProvider;
 use Lynomia\Providers\ApiTokenServiceProvider;
 use Lynomia\Providers\AuthorizationServiceProvider;
 use Lynomia\Providers\DomainServiceProvider;
@@ -18,4 +19,5 @@ return [
     NotificationRoutingServiceProvider::class,
     ApiTokenServiceProvider::class,
     ProviderRegistryServiceProvider::class,
+    PaymentsServiceProvider::class,
 ];
