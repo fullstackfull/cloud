@@ -1,30 +1,76 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
+import { DashboardPage } from '@/features/account/DashboardPage'
+import { ProfilePage } from '@/features/account/ProfilePage'
+import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
-import { useCurrentUser } from '@/features/auth/useAuth'
+import { RegisterPage } from '@/features/auth/RegisterPage'
+import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage'
+import { SecurityPage } from '@/features/security/SecurityPage'
 import { applyLocale, isSupportedLocale } from '@/i18n'
 import { ApiError } from '@/lib/api'
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: (failureCount, error) => {
-        // Client errors will not become correct by being repeated.
-        if (error instanceof ApiError && error.status < 500) return false
-        return failureCount < 2
+import { AppLayout } from './AppLayout'
+import { NotFoundPage } from './NotFoundPage'
+import { PublicLayout } from './PublicLayout'
+import { RequireAuth, RequireGuest } from './guards'
+
+function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        refetchOnWindowFocus: false,
+        retry: (failureCount, error) => {
+          // Client errors will not become correct by being repeated.
+          if (error instanceof ApiError && error.status < 500) return false
+          return failureCount < 2
+        },
       },
     },
-  },
-})
+  })
+}
 
 export function App() {
+  /*
+   * One cache per mounted application rather than one per module.
+   *
+   * A module-level client is shared by every instance in the process, which in
+   * the browser is invisible — there is only ever one — but means a signed-out
+   * result cached by one instance is served to the next. The lazy initialiser
+   * keeps it stable across re-renders while giving each mount its own cache.
+   */
+  const [queryClient] = useState(createQueryClient)
+
   return (
     <QueryClientProvider client={queryClient}>
       <LocaleBoundary>
-        <Shell />
+        <BrowserRouter>
+          <Routes>
+            <Route element={<RequireGuest />}>
+              <Route element={<PublicLayout />}>
+                <Route path="/sign-in" element={<LoginPage />} />
+                <Route path="/register" element={<RegisterPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+              </Route>
+            </Route>
+
+            <Route element={<RequireAuth />}>
+              <Route element={<AppLayout />}>
+                <Route index element={<DashboardPage />} />
+                <Route path="/profile" element={<ProfilePage />} />
+                <Route path="/security" element={<SecurityPage />} />
+              </Route>
+            </Route>
+
+            {/* Legacy path kept so an old bookmark still lands somewhere sensible. */}
+            <Route path="/login" element={<Navigate to="/sign-in" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </BrowserRouter>
       </LocaleBoundary>
     </QueryClientProvider>
   )
@@ -36,32 +82,8 @@ function LocaleBoundary({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const language = i18n.language.split('-')[0] ?? 'en'
-    applyLocale(isSupportedLocale(language) ? language : ('en'))
+    applyLocale(isSupportedLocale(language) ? language : 'en')
   }, [i18n.language])
 
   return <>{children}</>
-}
-
-function Shell() {
-  const { t } = useTranslation()
-  const { data: user, isPending } = useCurrentUser()
-
-  if (isPending) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center text-[var(--text-secondary)]">
-        {t('common.loading')}
-      </div>
-    )
-  }
-
-  if (user === null || user === undefined) {
-    return <LoginPage />
-  }
-
-  return (
-    <main className="min-h-dvh bg-[var(--surface)] p-8">
-      <h1 className="text-2xl font-semibold text-[var(--text-primary)]">{t('nav.dashboard')}</h1>
-      <p className="mt-2 text-sm text-[var(--text-secondary)]">{user.email}</p>
-    </main>
-  )
 }
