@@ -8,12 +8,14 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Catalog\Application\Actions\RedeemCoupon;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCustomerLimitReachedException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponFullyRedeemedException;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -199,6 +201,149 @@ final class CouponRedemptionConcurrencyTest extends TestCase
         }
 
         $this->assertRedeemedExactlyOnce($coupon->id, $customer->id);
+    }
+
+    #[Test]
+    public function two_processes_racing_for_the_last_use_of_a_coupon_produce_exactly_one_redemption(): void
+    {
+        if (! function_exists('pcntl_fork') || ! function_exists('posix_kill')) {
+            $this->markTestSkipped('Genuine parallelism needs pcntl and posix.');
+        }
+
+        $coupon = Coupon::factory()->limitedTo(1)->perCustomer(1)->create();
+        $customers = [Customer::factory()->create(), Customer::factory()->create()];
+
+        $outcomeDir = sys_get_temp_dir().'/coupon-race-'.Str::lower(Str::random(12));
+        mkdir($outcomeDir);
+
+        /*
+         * Two real processes, each with its own connection, both entering the
+         * redemption at the same wall-clock instant. Unlike the interleavings
+         * staged above, neither process knows the other exists: the only thing
+         * ordering them is the lock PostgreSQL grants on the coupon row.
+         */
+        $startAt = microtime(true) + 0.5;
+        $pids = [];
+
+        foreach ($customers as $index => $customer) {
+            $pid = pcntl_fork();
+
+            if ($pid === -1) {
+                $this->fail('Could not fork a second checkout.');
+            }
+
+            if ($pid === 0) {
+                $this->checkoutInChildProcess($index, $customer, (string) $coupon->id, $startAt, $outcomeDir);
+            }
+
+            $pids[] = $pid;
+        }
+
+        $this->awaitChildren($pids);
+
+        $outcomes = array_map(
+            static fn (int $index): string => @file_get_contents($outcomeDir.'/'.$index) ?: 'no outcome recorded',
+            array_keys($customers),
+        );
+        sort($outcomes);
+
+        array_map(unlink(...), glob($outcomeDir.'/*') ?: []);
+        rmdir($outcomeDir);
+
+        // One process was served, the other was told the campaign is spent.
+        $this->assertSame(['coupon.fully_redeemed', 'redeemed'], $outcomes);
+
+        $rows = DB::table('coupon_redemptions')->where('coupon_id', $coupon->id)->get();
+        $this->assertCount(1, $rows, 'The last use of the coupon was handed out twice.');
+        $this->assertSame(1, (int) DB::table('coupons')->where('id', $coupon->id)->value('redemption_count'));
+    }
+
+    /**
+     * Runs one checkout in a forked process and never returns.
+     */
+    private function checkoutInChildProcess(
+        int $index,
+        Customer $customer,
+        string $couponId,
+        float $startAt,
+        string $outcomeDir,
+    ): never {
+        $outcome = 'no outcome recorded';
+
+        try {
+            $name = 'pgsql_race_'.$index;
+            config([
+                'database.connections.'.$name => config('database.connections.'.config('database.default')),
+            ]);
+
+            /*
+             * A connection opened after the fork. The child must never touch
+             * the socket it inherited from the parent: both processes would be
+             * speaking on the same wire.
+             */
+            $connection = DB::connection($name);
+            // Long enough that a legitimate wait on the other process finishes,
+            // short enough that a genuine deadlock fails the test rather than
+            // hanging the suite.
+            $connection->statement("SET lock_timeout = '10s'");
+
+            /** @var Coupon $coupon */
+            $coupon = Coupon::on($name)->findOrFail($couponId);
+
+            $this->waitUntil($startAt);
+
+            $this->redeem->execute($coupon, $this->context($customer));
+
+            $outcome = 'redeemed';
+        } catch (DomainException $e) {
+            $outcome = $e->errorCode();
+        } catch (\Throwable $e) {
+            $outcome = 'error: '.$e->getMessage();
+        }
+
+        file_put_contents($outcomeDir.'/'.$index, $outcome);
+
+        /*
+         * Exit without running destructors. A normal shutdown would close the
+         * connection inherited from the parent, and closing it politely sends
+         * a terminate for a backend session the parent is still using — which
+         * would kill the test runner's own connection rather than this copy of
+         * the file descriptor.
+         */
+        posix_kill(posix_getpid(), SIGKILL);
+        exit(1);
+    }
+
+    private function waitUntil(float $startAt): void
+    {
+        $remaining = $startAt - microtime(true);
+
+        if ($remaining > 0) {
+            usleep((int) ($remaining * 1_000_000));
+        }
+    }
+
+    /**
+     * @param  list<int>  $pids
+     */
+    private function awaitChildren(array $pids): void
+    {
+        $deadline = microtime(true) + 30;
+
+        foreach ($pids as $pid) {
+            $status = 0;
+
+            while (pcntl_waitpid($pid, $status, WNOHANG) === 0) {
+                if (microtime(true) > $deadline) {
+                    posix_kill($pid, SIGKILL);
+                    pcntl_waitpid($pid, $status);
+
+                    $this->fail('A forked checkout never finished.');
+                }
+
+                usleep(20_000);
+            }
+        }
     }
 
     private function assertRedeemedExactlyOnce(string $couponId, string $customerId): void

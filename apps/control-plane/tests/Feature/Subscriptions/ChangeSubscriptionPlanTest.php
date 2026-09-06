@@ -34,7 +34,7 @@ final class ChangeSubscriptionPlanTest extends TestCase
     #[Test]
     public function an_upgrade_credits_the_unused_remainder_and_charges_the_same_remainder_of_the_new_plan(): void
     {
-        [$small, $smallPrice] = $this->plan('CX-2', 9000);
+        [$small] = $this->plan('CX-2', 9000);
         [$large, $largePrice] = $this->plan('CX-4', 18000);
 
         $subscription = $this->subscriptionOn($small, 9000, '2026-02-01 00:00:00');
@@ -65,7 +65,6 @@ final class ChangeSubscriptionPlanTest extends TestCase
         // A plan change is not a renewal: the anniversary does not move.
         $this->assertSame('2026-03-01 00:00:00', $subscription->current_period_end->toDateTimeString());
         $this->assertSame('2026-03-01 00:00:00', $subscription->next_invoice_at->toDateTimeString());
-        $this->assertSame($smallPrice->recurring_amount_minor, 9000);
     }
 
     #[Test]
@@ -147,8 +146,11 @@ final class ChangeSubscriptionPlanTest extends TestCase
         [$small] = $this->plan('CX-2', 9000);
         [$large, $largePrice] = $this->plan('CX-4', 18000);
 
-        $subscription = $this->subscriptionOn($small, 9000, '2026-02-01 00:00:00');
-        $subscription->forceFill(['status' => 'suspended', 'suspended_at' => now()])->save();
+        $subscription = Subscription::factory()
+            ->startingOn(CarbonImmutable::parse('2026-02-01 00:00:00'))
+            ->priced(9000)
+            ->suspended()
+            ->create(['plan_id' => $small->id]);
 
         $this->expectException(SubscriptionNotChangeableException::class);
 
