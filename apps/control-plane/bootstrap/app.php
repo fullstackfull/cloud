@@ -50,17 +50,25 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
-            AssignRequestId::class,
             EnsureFrontendRequestsAreStateful::class,
         ]);
 
-        $middleware->api(append: [
+        /*
+         * Both of these are global rather than group middleware.
+         *
+         * Laravel's middleware priority runs authentication before a group's
+         * appended middleware, so an appended header middleware would miss
+         * every 401 — the responses an attacker probes most. And a request that
+         * matches no route never enters a group at all, so a correlation id
+         * assigned there would be absent from exactly the 404 a confused
+         * customer is most likely to quote to support.
+         */
+        $middleware->prepend([
+            AssignRequestId::class,
             SecurityHeaders::class,
         ]);
 
         $middleware->group('webhook', [
-            AssignRequestId::class,
-            SecurityHeaders::class,
             'throttle:webhooks',
         ]);
 

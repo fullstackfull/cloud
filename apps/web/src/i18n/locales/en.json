@@ -1,0 +1,70 @@
+{
+  "common": {
+    "appName": "Lynomia Cloud",
+    "loading": "Loading…",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "retry": "Try again",
+    "search": "Search",
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "register": "Create account",
+    "email": "Email address",
+    "password": "Password",
+    "language": "Language",
+    "theme": "Theme"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "services": "Services",
+    "vps": "Cloud VPS",
+    "dedicated": "Dedicated Servers",
+    "hosting": "Shared Hosting",
+    "dns": "Domains & DNS",
+    "ips": "IP Addresses",
+    "backups": "Backups",
+    "monitoring": "Monitoring",
+    "usage": "Usage",
+    "invoices": "Invoices",
+    "wallet": "Wallet & Credits",
+    "paymentMethods": "Payment Methods",
+    "support": "Support",
+    "notifications": "Notifications",
+    "apiKeys": "API Keys",
+    "profile": "Profile",
+    "security": "Security"
+  },
+  "auth": {
+    "signInTitle": "Sign in to Lynomia Cloud",
+    "signInSubtitle": "Manage your servers, hosting and billing in one place.",
+    "forgotPassword": "Forgot your password?",
+    "noAccount": "Don't have an account?",
+    "twoFactorTitle": "Two-factor authentication",
+    "twoFactorPrompt": "Enter the 6-digit code from your authenticator app, or one of your recovery codes.",
+    "code": "Authentication code"
+  },
+  "errors": {
+    "auth.invalid_credentials": "These credentials do not match our records.",
+    "auth.account_locked": "This account is temporarily locked after repeated failed sign-in attempts.",
+    "auth.two_factor_required": "A two-factor code is required to complete sign-in.",
+    "auth.unauthenticated": "Please sign in to continue.",
+    "auth.forbidden": "You are not permitted to perform this action.",
+    "auth.csrf_token_mismatch": "Your session expired. Refresh the page and try again.",
+    "validation.failed": "Please correct the highlighted fields.",
+    "resource.not_found": "The requested resource does not exist.",
+    "server.error": "Something went wrong on our side.",
+    "network": "We could not reach the server. Check your connection and try again.",
+    "rateLimited": "Too many attempts. Please wait a moment and try again.",
+    "referenceId": "Reference: {{requestId}}"
+  },
+  "status": {
+    "running": "Running",
+    "stopped": "Stopped",
+    "provisioning": "Provisioning",
+    "failed": "Failed",
+    "suspended": "Suspended",
+    "active": "Active",
+    "pending": "Pending"
+  }
+}

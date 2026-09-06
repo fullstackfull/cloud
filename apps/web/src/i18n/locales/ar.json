@@ -1,0 +1,70 @@
+{
+  "common": {
+    "appName": "لينوميا كلاود",
+    "loading": "جارٍ التحميل…",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "confirm": "تأكيد",
+    "retry": "إعادة المحاولة",
+    "search": "بحث",
+    "signIn": "تسجيل الدخول",
+    "signOut": "تسجيل الخروج",
+    "register": "إنشاء حساب",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "language": "اللغة",
+    "theme": "المظهر"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "services": "الخدمات",
+    "vps": "الخوادم السحابية",
+    "dedicated": "الخوادم المخصصة",
+    "hosting": "الاستضافة المشتركة",
+    "dns": "النطاقات و DNS",
+    "ips": "عناوين IP",
+    "backups": "النسخ الاحتياطي",
+    "monitoring": "المراقبة",
+    "usage": "الاستهلاك",
+    "invoices": "الفواتير",
+    "wallet": "المحفظة والرصيد",
+    "paymentMethods": "طرق الدفع",
+    "support": "الدعم الفني",
+    "notifications": "الإشعارات",
+    "apiKeys": "مفاتيح API",
+    "profile": "الملف الشخصي",
+    "security": "الأمان"
+  },
+  "auth": {
+    "signInTitle": "تسجيل الدخول إلى لينوميا كلاود",
+    "signInSubtitle": "أدر خوادمك واستضافتك وفواتيرك من مكان واحد.",
+    "forgotPassword": "نسيت كلمة المرور؟",
+    "noAccount": "ليس لديك حساب؟",
+    "twoFactorTitle": "المصادقة الثنائية",
+    "twoFactorPrompt": "أدخل الرمز المكوّن من ٦ أرقام من تطبيق المصادقة، أو أحد رموز الاسترداد.",
+    "code": "رمز المصادقة"
+  },
+  "errors": {
+    "auth.invalid_credentials": "بيانات الدخول غير مطابقة لسجلاتنا.",
+    "auth.account_locked": "تم قفل الحساب مؤقتًا بعد محاولات دخول فاشلة متكررة.",
+    "auth.two_factor_required": "يلزم رمز المصادقة الثنائية لإكمال تسجيل الدخول.",
+    "auth.unauthenticated": "يرجى تسجيل الدخول للمتابعة.",
+    "auth.forbidden": "لا تملك صلاحية تنفيذ هذا الإجراء.",
+    "auth.csrf_token_mismatch": "انتهت صلاحية الجلسة. حدّث الصفحة وحاول مجددًا.",
+    "validation.failed": "يرجى تصحيح الحقول المحددة.",
+    "resource.not_found": "المورد المطلوب غير موجود.",
+    "server.error": "حدث خطأ لدينا.",
+    "network": "تعذّر الوصول إلى الخادم. تحقق من اتصالك وحاول مجددًا.",
+    "rateLimited": "محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.",
+    "referenceId": "الرقم المرجعي: {{requestId}}"
+  },
+  "status": {
+    "running": "قيد التشغيل",
+    "stopped": "متوقف",
+    "provisioning": "قيد التجهيز",
+    "failed": "فشل",
+    "suspended": "معلّق",
+    "active": "نشط",
+    "pending": "قيد الانتظار"
+  }
+}
