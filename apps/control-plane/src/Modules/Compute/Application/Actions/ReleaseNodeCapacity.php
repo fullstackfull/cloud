@@ -7,6 +7,8 @@ namespace Lynomia\Modules\Compute\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 
 /**
  * Gives a node's capacity back when a machine goes away.
@@ -26,9 +28,34 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
  */
 final readonly class ReleaseNodeCapacity
 {
-    public function execute(ComputeNode $node, VmResources $resources): ComputeNode
-    {
-        return DB::transaction(function () use ($node, $resources): ComputeNode {
+    public function execute(
+        ComputeNode $node,
+        VmResources $resources,
+        ?string $storageId = null,
+        ?string $reservationKey = null,
+    ): ComputeNode {
+        return DB::transaction(function () use ($node, $resources, $storageId, $reservationKey): ComputeNode {
+            /*
+             * A release for a key that is already released returns without
+             * touching a counter. Clamping alone would stop the numbers going
+             * negative, but it would still lose one machine's worth of
+             * accounting on every duplicate release — and duplicates are
+             * normal here: a destroy retried after a timeout and a
+             * reconciliation removing the same machine both arrive.
+             */
+            $reservation = null;
+
+            if ($reservationKey !== null) {
+                $reservation = NodeCapacityReservation::query()
+                    ->where('reservation_key', $reservationKey)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($reservation === null || ! $reservation->isLive()) {
+                    return $node->fresh() ?? $node;
+                }
+            }
+
             /** @var ComputeNode $locked */
             $locked = ComputeNode::query()
                 ->lockForUpdate()
@@ -39,6 +66,19 @@ final readonly class ReleaseNodeCapacity
             $locked->allocated_storage_gib = max(0, $locked->allocated_storage_gib - $resources->diskGib);
             $locked->vm_count = max(0, $locked->vm_count - 1);
             $locked->save();
+
+            // The pool's committed figure is what placement actually trusts for
+            // shared storage, so it has to be given back on the same clamped
+            // terms as the node's counters.
+            if ($storageId !== null) {
+                /** @var ComputeStorage|null $storage */
+                $storage = ComputeStorage::query()->lockForUpdate()->find($storageId);
+
+                if ($storage !== null) {
+                    $storage->committed_gib = max(0, (int) $storage->committed_gib - $resources->diskGib);
+                    $storage->save();
+                }
+            }
 
             return $locked;
         });

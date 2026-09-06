@@ -50,6 +50,7 @@ class ComputeStorage extends Model
         return [
             'storage_class' => StorageClass::class,
             'shared' => 'boolean',
+            'committed_gib' => 'integer',
             'total_gib' => 'integer',
             'available_gib' => 'integer',
             'is_active' => 'boolean',
@@ -91,6 +92,30 @@ class ComputeStorage extends Model
             return false;
         }
 
-        return $this->available_gib === null || $this->available_gib >= $diskGib;
+        return $this->freeGib() === null || $this->freeGib() >= $diskGib;
+    }
+
+    /**
+     * Space the platform may still promise out of this pool.
+     *
+     * Free space is what the provider reports MINUS what the platform has
+     * already committed but not yet written. The distinction matters most for
+     * shared storage: a Ceph pool is visible from every node in the cluster, so
+     * counting its capacity per node made the scheduler believe in as many
+     * copies of the pool as there were nodes able to reach it, and the fleet
+     * oversold it by exactly that factor.
+     *
+     * Null means the provider has not reported a figure yet. That is treated as
+     * usable rather than unusable: refusing to place anything on a pool whose
+     * numbers have not arrived would empty the fleet the first time a sync
+     * failed.
+     */
+    public function freeGib(): ?int
+    {
+        if ($this->available_gib === null) {
+            return null;
+        }
+
+        return max(0, (int) $this->available_gib - (int) $this->committed_gib);
     }
 }

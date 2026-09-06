@@ -12,6 +12,8 @@ use Lynomia\Modules\Compute\Domain\Services\CustomerNodeCensus;
 use Lynomia\Modules\Compute\Domain\Services\NodeCapacityPolicy;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 
 /**
  * Commits a node's capacity to one machine.
@@ -53,8 +55,37 @@ final readonly class ReserveNodeCapacity
         CpuArchitecture $architecture = CpuArchitecture::X86_64,
         ?string $customerId = null,
         ?int $antiAffinityLimit = null,
+        ?string $storageId = null,
+        ?string $reservationKey = null,
+        ?string $serviceId = null,
     ): ComputeNode {
-        return DB::transaction(function () use ($node, $resources, $architecture, $customerId, $antiAffinityLimit): ComputeNode {
+        return DB::transaction(function () use (
+            $node, $resources, $architecture, $customerId, $antiAffinityLimit, $storageId, $reservationKey, $serviceId
+        ): ComputeNode {
+            /*
+             * A retried provisioning job must not commit capacity twice.
+             *
+             * Without this the commitment is a bare counter increment, and the
+             * second one never comes back: release is driven by destroying a
+             * machine, and there is only ever one machine to destroy. The node
+             * loses capacity permanently and silently, in proportion to how
+             * often provisioning is retried — which is highest exactly when the
+             * fleet is already under strain.
+             */
+            if ($reservationKey !== null) {
+                $existing = NodeCapacityReservation::query()
+                    ->where('reservation_key', $reservationKey)
+                    ->whereNull('released_at')
+                    ->first();
+
+                if ($existing !== null) {
+                    /** @var ComputeNode $alreadyCommitted */
+                    $alreadyCommitted = ComputeNode::query()->findOrFail($existing->node_id);
+
+                    return $alreadyCommitted;
+                }
+            }
+
             /*
              * Re-read under a row lock. The caller's copy was fetched during
              * scoring and is stale by definition: everything this action
@@ -112,13 +143,79 @@ final readonly class ReserveNodeCapacity
                 }
             }
 
+            /*
+             * Storage is committed against the POOL, not the node.
+             *
+             * Shared storage is visible from every node in the cluster, so
+             * counting it per node made the scheduler believe in as many copies
+             * of the pool as there were nodes able to reach it, and the fleet
+             * oversold it by exactly that factor. The symptom arrives as
+             * customer machines failing to start on a full datastore, which
+             * reads as a storage fault rather than a control-plane one.
+             *
+             * The node's own allocated_storage_gib is still maintained, because
+             * it is what a per-node capacity report shows; it is no longer what
+             * placement is allowed to trust for a shared pool.
+             */
+            if ($storageId !== null) {
+                $this->commitStorage($storageId, $resources->diskGib);
+            }
+
             $locked->allocated_cpu_cores += $resources->vcpu;
             $locked->allocated_memory_mib += $resources->memoryMib;
             $locked->allocated_storage_gib += $resources->diskGib;
             $locked->vm_count += 1;
             $locked->save();
 
+            if ($reservationKey !== null) {
+                /*
+                 * Written inside the same transaction as the counters, so the
+                 * attribution and the commitment can never disagree. The unique
+                 * index on reservation_key is the real guard: two workers that
+                 * both passed the check above serialise here, and the loser's
+                 * transaction rolls back with its counter increment.
+                 */
+                NodeCapacityReservation::create([
+                    'node_id' => $locked->getKey(),
+                    'storage_id' => $storageId,
+                    'reservation_key' => $reservationKey,
+                    'service_id' => $serviceId,
+                    'customer_id' => $customerId,
+                    'vcpu' => $resources->vcpu,
+                    'memory_mib' => $resources->memoryMib,
+                    'disk_gib' => $resources->diskGib,
+                ]);
+            }
+
             return $locked;
         });
+    }
+
+    /**
+     * Commits space out of a storage pool under its own row lock.
+     *
+     * Locked separately from the node because a shared pool is contended by
+     * every node that can see it: two placements onto two different nodes are
+     * not concurrent on the node row at all, and would both commit against a
+     * pool that only had room for one.
+     */
+    private function commitStorage(string $storageId, int $diskGib): void
+    {
+        /** @var ComputeStorage $storage */
+        $storage = ComputeStorage::query()->lockForUpdate()->findOrFail($storageId);
+
+        $free = $storage->freeGib();
+
+        if ($free !== null && $free < $diskGib) {
+            throw NodeCapacityExceededException::forNode(
+                $storage->node_id ?? $storageId,
+                $storage->provider_name,
+                PlacementRejectionReason::InsufficientStorage,
+                sprintf('pool has %d GiB uncommitted, needs %d GiB', $free, $diskGib),
+            );
+        }
+
+        $storage->committed_gib = (int) $storage->committed_gib + $diskGib;
+        $storage->save();
     }
 }
