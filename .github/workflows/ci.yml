@@ -217,16 +217,45 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Fail if a fake provider is referenced as a production default
+      - name: Fail if a fake provider is configured outside the development template
         run: |
           set -euo pipefail
-          # Fake providers must never be the default anywhere outside the
-          # development and testing templates.
-          if grep -RnE "_PROVIDER=fake" deployments/production 2>/dev/null; then
-            echo "::error::A fake provider is configured for production."
+
+          # The control that actually protects production is a boot-time refusal
+          # in ProviderRegistryServiceProvider, covered by
+          # tests/Feature/Security/ProductionGuardTest.php. Assert it is still
+          # there: a guard whose test has been deleted is not a guard.
+          if [ ! -f apps/control-plane/src/Providers/ProviderRegistryServiceProvider.php ] \
+            || [ ! -f apps/control-plane/tests/Feature/Security/ProductionGuardTest.php ]; then
+            echo "::error::The production provider guard or its test is missing."
             exit 1
           fi
-          echo "No fake provider configured for production."
+
+          # Defence in depth over anything the repository itself ships that could
+          # set a provider. `.env.example` is the development template and
+          # documents `fake` on purpose, so it is the one exclusion.
+          # Regular files only: a tracked symlink to a directory would make
+          # grep emit a warning that reads like an error and hides real ones.
+          templates=$(git ls-files -- '*.env*' 'infrastructure/**' 'deployments/**' \
+            | grep -vx 'apps/control-plane/.env.example' \
+            | grep -vx '.env.example' \
+            | while read -r file; do [ -f "$file" ] && printf '%s\n' "$file"; done || true)
+
+          # A guard that has nothing to scan passes silently and reads, in
+          # review, exactly like a guard that found nothing wrong. This step
+          # used to scan `deployments/production`, a directory that is not in
+          # the repository at all, and had therefore never checked anything.
+          if [ -z "$templates" ]; then
+            echo "::error::This guard has no files to scan; its paths are wrong."
+            exit 1
+          fi
+
+          if printf '%s\n' $templates | xargs -r grep -nE '_PROVIDER[=:][[:space:]]*["'"'"']?fake'; then
+            echo "::error::A fake provider is configured outside the development template."
+            exit 1
+          fi
+
+          echo "No fake provider configured outside the development template."
 
       - name: Fail on unresolved placeholders in application source
         run: |
