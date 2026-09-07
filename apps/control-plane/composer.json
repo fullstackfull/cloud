@@ -9,7 +9,7 @@
     ],
     "license": "MIT",
     "require": {
-        "php": "^8.3",
+        "php": "^8.4",
         "bacon/bacon-qr-code": "^3.1",
         "brick/money": "^0.14.2",
         "laravel/framework": "^13.17",

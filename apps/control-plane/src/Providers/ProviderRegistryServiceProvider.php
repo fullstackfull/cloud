@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Providers;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
@@ -34,6 +35,32 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
     public function boot(): void
     {
         if (! $this->app->isProduction()) {
+            return;
+        }
+
+        if ($this->productionIsAnUnconfiguredDefault()) {
+            /*
+             * Nothing has been configured at all: no environment file, and no
+             * APP_ENV in the environment either. Laravel's default for the
+             * absent value is "production", so this is not a production system
+             * — it is a machine that has not been configured yet, which is what
+             * every build and tooling step looks like. Composer's package
+             * discovery, `artisan test` on a fresh clone and the static
+             * analyser booting the application all arrive here, and all three
+             * were being refused with a message about production deployments.
+             *
+             * A twelve-factor container that carries its configuration in the
+             * environment rather than in a file still sets APP_ENV=production
+             * explicitly, so it is guarded exactly as before. The distinction is
+             * between "production was chosen" and "production was what was left
+             * when nothing was said".
+             */
+            Log::warning(
+                'The provider guard did not run: no environment file and no APP_ENV, so '
+                .'"production" is a default rather than a configured deployment.',
+                ['environment_file' => $this->app->environmentFilePath()],
+            );
+
             return;
         }
 
@@ -68,6 +95,44 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
                 $this->environmentHint(),
             ));
         }
+    }
+
+    /**
+     * Whether this process is running as "production" only because nothing said
+     * otherwise.
+     *
+     * Both halves matter. A missing environment file alone is not enough — a
+     * container may legitimately carry everything in real environment variables
+     * — so APP_ENV must also be absent from the environment before the guard
+     * stands down.
+     */
+    private function productionIsAnUnconfiguredDefault(): bool
+    {
+        return ! $this->environmentWasNamed() && ! is_file($this->app->environmentFilePath());
+    }
+
+    /**
+     * Whether APP_ENV is present in the process environment.
+     *
+     * Read from the superglobals and getenv() rather than through `env()`,
+     * which this codebase forbids outside config/ for a reason that matters
+     * exactly here: with a cached configuration Laravel never loads the dotenv
+     * file, so `env()` answers null in a perfectly well configured production
+     * deployment — and a guard that stood down on that answer would stand down
+     * in production, which is the one place it exists for. The question being
+     * asked is not "what is the configured environment" (that is
+     * `$this->app->isProduction()`, already answered above) but "did anything
+     * out there say so at all".
+     */
+    private function environmentWasNamed(): bool
+    {
+        foreach ([$_SERVER['APP_ENV'] ?? null, $_ENV['APP_ENV'] ?? null, getenv('APP_ENV')] as $value) {
+            if (is_string($value) && $value !== '') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

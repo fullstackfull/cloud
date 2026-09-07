@@ -18,6 +18,47 @@ final class ProductionGuardTest extends TestCase
         return new ProviderRegistryServiceProvider($this->app);
     }
 
+    /**
+     * Removes APP_ENV from every place Laravel reads it, and returns the
+     * closure that puts it back.
+     *
+     * PHPUnit sets APP_ENV in $_ENV and $_SERVER as well as the process
+     * environment, so clearing only one of the three leaves the value visible
+     * and the branch under test unreachable — which is how the first version of
+     * this test passed for the wrong reason.
+     *
+     * @return callable(): void
+     */
+    private function withoutAppEnv(): callable
+    {
+        $process = getenv('APP_ENV');
+        $env = $_ENV['APP_ENV'] ?? null;
+        $server = $_SERVER['APP_ENV'] ?? null;
+
+        putenv('APP_ENV');
+        unset($_ENV['APP_ENV'], $_SERVER['APP_ENV']);
+
+        return static function () use ($process, $env, $server): void {
+            if (is_string($process)) {
+                putenv('APP_ENV='.$process);
+            } else {
+                putenv('APP_ENV');
+            }
+
+            if ($env !== null) {
+                $_ENV['APP_ENV'] = $env;
+            } else {
+                unset($_ENV['APP_ENV']);
+            }
+
+            if ($server !== null) {
+                $_SERVER['APP_ENV'] = $server;
+            } else {
+                unset($_SERVER['APP_ENV']);
+            }
+        };
+    }
+
     #[Test]
     public function a_production_deployment_with_a_fake_provider_refuses_to_boot(): void
     {
@@ -57,6 +98,56 @@ final class ProductionGuardTest extends TestCase
             $this->assertStringContainsString('payment', $e->getMessage());
             $this->assertStringContainsString('compute', $e->getMessage());
             $this->assertStringNotContainsString('dns', $e->getMessage());
+        }
+    }
+
+    #[Test]
+    public function the_guard_stands_down_when_nothing_at_all_has_been_configured(): void
+    {
+        /*
+         * No environment file and no APP_ENV: this is a build step, not a
+         * deployment. Composer's package discovery, `artisan test` on a fresh
+         * clone and the static analyser booting the application all arrive here,
+         * and all three were being refused with a message about production.
+         */
+        config()->set('billing.providers', ['payment' => 'fake']);
+        $this->app->useEnvironmentPath('/nonexistent-for-this-test');
+
+        $restore = $this->withoutAppEnv();
+
+        try {
+            $this->app->detectEnvironment(static fn (): string => 'production');
+
+            // No exception: boot() is what decides, and it stands down here.
+            $this->guard()->boot();
+
+            $this->addToAssertionCount(1);
+        } finally {
+            $restore();
+        }
+    }
+
+    #[Test]
+    public function the_guard_still_refuses_a_container_that_chose_production(): void
+    {
+        // The twelve-factor case: configuration in real environment variables
+        // rather than a file. "production" was chosen, so the guard applies.
+        config()->set('billing.providers', ['payment' => 'fake']);
+        $this->app->useEnvironmentPath('/nonexistent-for-this-test');
+
+        $restore = $this->withoutAppEnv();
+        putenv('APP_ENV=production');
+        $_ENV['APP_ENV'] = 'production';
+        $_SERVER['APP_ENV'] = 'production';
+
+        try {
+            $this->app->detectEnvironment(static fn (): string => 'production');
+
+            $this->expectException(RuntimeException::class);
+
+            $this->guard()->boot();
+        } finally {
+            $restore();
         }
     }
 

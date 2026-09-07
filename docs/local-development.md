@@ -4,7 +4,7 @@
 
 | Tool | Version | Notes |
 |---|---|---|
-| PHP | 8.3+ | with `pdo_pgsql`, `redis`, `intl`, `mbstring`, `openssl` |
+| PHP | 8.4+ | with `pdo_pgsql`, `redis`, `intl`, `mbstring`, `openssl` |
 | PHP (recommended) | — | `bcmath` **or** `gmp`; without either, money arithmetic falls back to a slower pure-PHP calculator |
 | Composer | 2.x | |
 | Node | 20+ | |

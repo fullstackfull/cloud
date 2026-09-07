@@ -49,7 +49,13 @@ test: test-backend test-frontend ## Run the full test suite
 
 .PHONY: test-backend
 test-backend: ## Run PHP tests (PHPUnit, against real PostgreSQL)
-	cd $(CP) && php artisan test
+	@# APP_ENV is set here because `artisan test` boots the application before
+	@# handing over to PHPUnit. On a fresh clone there is a .env.testing and no
+	@# .env, and Laravel does not read .env.testing unless APP_ENV says testing —
+	@# so the boot defaults to production, the provider guard correctly refuses a
+	@# production deployment configured with fakes, and the suite dies in a fifth
+	@# of a second having run nothing. Reproduced from a clean-room clone.
+	cd $(CP) && APP_ENV=testing php artisan test
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests

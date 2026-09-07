@@ -207,12 +207,37 @@ final class LayeringTest extends TestCase
         $violations = [];
 
         foreach ($this->phpFiles(self::SRC) as $file) {
-            if (preg_match_all('/\benv\s*\(/', $file['source'], $matches) > 0) {
+            // Comments are stripped first. A rule that reads prose punishes the
+            // one thing this codebase wants most — a class explaining why it
+            // does what it does — and it did: a docblock stating why a guard
+            // must not use the helper was itself reported as using it.
+            $code = self::withoutComments($file['source']);
+
+            if (preg_match_all('/\benv\s*\(/', $code, $matches) > 0) {
                 $violations[] = $file['relative'].' ('.count($matches[0]).')';
             }
         }
 
         $this->assertSame([], $violations, "env() outside config/:\n  ".implode("\n  ", $violations));
+    }
+
+    /**
+     * The file's source with every comment removed, so a rule matching on code
+     * cannot be tripped by a sentence about that code.
+     */
+    private static function withoutComments(string $source): string
+    {
+        $code = '';
+
+        foreach (token_get_all($source) as $token) {
+            if (is_array($token) && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            $code .= is_array($token) ? $token[1] : $token;
+        }
+
+        return $code;
     }
 
     #[Test]

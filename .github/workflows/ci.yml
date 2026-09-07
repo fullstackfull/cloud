@@ -27,7 +27,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.3', '8.4']
+        # 8.4 only. The lock file pins Symfony 8, which requires PHP >= 8.4.1,
+        # so the 8.3 entry in this matrix could never install a single package —
+        # it failed instantly on every run this workflow has ever had, and
+        # composer.json claimed ^8.3 while its own lock file said otherwise.
+        php: ['8.4']
         postgres: ['18']
         include:
           # The platform targets PostgreSQL 18, but many operators are still on

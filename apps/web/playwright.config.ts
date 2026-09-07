@@ -97,11 +97,20 @@ export default defineConfig({
     {
       command: `php artisan serve --host=127.0.0.1 --port=${API_PORT}`,
       cwd: '../control-plane',
-      url: `${API_ORIGIN}/sanctum/csrf-cookie`,
-      // /sanctum/csrf-cookie answers 204 to anybody, which is what a readiness
-      // probe needs: it proves the application booted and is routing without
-      // needing a session. /api/v1/me was tried first and answers 401 — a
-      // perfectly good signal that Playwright treats as "not ready".
+      url: `${API_ORIGIN}/up`,
+      /*
+       * The framework health route, which touches neither the session nor the
+       * database.
+       *
+       * Two probes were tried before it. /api/v1/me answers 401 always, which
+       * Playwright reads as "not ready". /sanctum/csrf-cookie answers 204 — but
+       * it starts a session, and sessions now live in PostgreSQL, so on a fresh
+       * CI database it answered 500 with "relation sessions does not exist"
+       * until the suite timed out. Playwright starts webServers *before*
+       * globalSetup, so at probe time the migration this suite runs has not
+       * happened yet: a readiness probe must not depend on the schema the
+       * suite is about to create.
+       */
       ignoreHTTPSErrors: true,
       reuseExistingServer: !process.env.CI,
       // Generous, because the first boot on a cold CI runner compiles the whole
