@@ -6,13 +6,12 @@ namespace Lynomia\Modules\Provisioning\Infrastructure\Models;
 
 use Carbon\CarbonImmutable;
 use Database\Factories\ProvisioningAttemptFactory;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderPayloads;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * One recorded call to a provider.
@@ -39,7 +38,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderP
 class ProvisioningAttempt extends Model
 {
     /** @use HasFactory<ProvisioningAttemptFactory> */
-    use HasFactory, HasUlids, RedactsProviderPayloads;
+    use HasFactory, HasUlids;
 
     public const UPDATED_AT = null;
 
@@ -51,19 +50,12 @@ class ProvisioningAttempt extends Model
     protected function casts(): array
     {
         return [
+            'response_metadata' => RedactedJsonCast::class,
             'status' => ProvisioningJobStatus::class,
             'attempt_number' => 'integer',
             'duration_ms' => 'integer',
             'created_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function responseMetadata(): Attribute
-    {
-        return self::redactedJsonAttribute();
     }
 
     /**

@@ -156,6 +156,43 @@ final class MoneyTest extends TestCase
     }
 
     #[Test]
+    public function it_formats_for_a_locale_at_all(): void
+    {
+        // This method called a brick/money method that does not exist, and no
+        // test called this method, so the two absences cancelled out and the
+        // failure waited for the first rendered invoice.
+        $formatted = Money::of('9.000', 'KWD')->format('en');
+
+        // Asserted in pieces rather than as one literal: ICU separates the
+        // code from the amount with a non-breaking space, and a test that
+        // pastes one in reads as though the two strings were identical when
+        // it fails.
+        $this->assertStringContainsString('KWD', $formatted);
+        $this->assertStringContainsString('9.000', $formatted);
+    }
+
+    #[Test]
+    public function it_formats_arabic_with_western_numerals(): void
+    {
+        $formatted = Money::of('9.000', 'KWD')->format('ar');
+
+        // The portal asks Intl for Latin digits explicitly; a document the
+        // server renders must not disagree with the screen the customer is
+        // looking at. Arabic-Indic digits here would also break copy-paste
+        // into a bank reference field.
+        $this->assertStringContainsString('9.000', $formatted);
+        $this->assertDoesNotMatchRegularExpression('/[\x{0660}-\x{0669}\x{06F0}-\x{06F9}]/u', $formatted);
+    }
+
+    #[Test]
+    public function it_leaves_a_locale_that_names_its_own_numbering_system_alone(): void
+    {
+        $formatted = Money::of('9.000', 'KWD')->format('ar-u-nu-arab');
+
+        $this->assertMatchesRegularExpression('/[\x{0660}-\x{0669}]/u', $formatted);
+    }
+
+    #[Test]
     public function it_serialises_to_json_without_a_float(): void
     {
         $json = json_encode(Money::of('12.500', 'KWD'), JSON_THROW_ON_ERROR);

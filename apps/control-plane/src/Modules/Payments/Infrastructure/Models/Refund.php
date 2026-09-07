@@ -11,8 +11,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
-use Lynomia\Modules\Payments\Infrastructure\Models\Concerns\RedactsJsonSecrets;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * Money returned to a customer against one captured transaction.
@@ -34,7 +34,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 class Refund extends Model
 {
     /** @use HasFactory<RefundFactory> */
-    use HasFactory, HasUlids, RedactsJsonSecrets;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -44,6 +44,7 @@ class Refund extends Model
     protected function casts(): array
     {
         return [
+            'provider_metadata' => RedactedJsonCast::class,
             'status' => RefundStatus::class,
             'amount_minor' => 'integer',
             'processed_at' => 'immutable_datetime',

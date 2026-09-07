@@ -105,12 +105,26 @@ final readonly class IssueHostingPanelSession
              * attempt would be a second live session for the same account,
              * only one of which anybody will ever spend. There is also nothing
              * to release: no capacity was reserved and no row was written.
+             *
+             * Except when the cause was our own configuration. Every adapter
+             * converts HostingNodeNotConfiguredException into this type before
+             * it leaves — on purpose, so that a missing config key is not
+             * flagged indeterminate and does not quarantine a working node —
+             * which means catching the original type here would catch nothing.
+             * Left as an ordinary provider failure it becomes "the panel could
+             * not be reached, please try again shortly": advice that will never
+             * come true, under an error code that sends support to look at a
+             * machine that is fine.
              */
+            if ($e->getPrevious() instanceof HostingNodeNotConfiguredException) {
+                throw HostingPanelSessionFailedException::platformMisconfigured($id, $e);
+            }
+
             throw HostingPanelSessionFailedException::panelUnreachable($id, $e);
-        } catch (HostingNodeNotConfiguredException|UnknownHostingPanelException $e) {
-            // The node row is incomplete or names a panel this build cannot
-            // drive. Its context names the node and the config key its root
-            // API token is read from, which is precisely what must not travel.
+        } catch (UnknownHostingPanelException $e) {
+            // The node row names a panel this build cannot drive. Its context
+            // names the node and the config key its root API token is read
+            // from, which is precisely what must not travel.
             throw HostingPanelSessionFailedException::platformMisconfigured($id, $e);
         }
     }

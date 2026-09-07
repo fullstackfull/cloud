@@ -13,6 +13,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
@@ -248,6 +249,25 @@ final class AdminSurfaceTest extends TestCase
             ->assertStatus(422);
 
         $this->assertSame(0, Refund::query()->count());
+    }
+
+    #[Test]
+    public function the_ip_pool_listing_survives_actually_having_a_pool_in_it(): void
+    {
+        // Every other test on this surface asserted the shape of an empty
+        // page, and an empty page is exactly where an eager load cannot fail:
+        // Eloquent resolves the relation only once there is a row to attach it
+        // to. This route eager-loaded a relation the model did not declare, so
+        // it answered 200 while the table was empty and 500 the moment an
+        // operator had any inventory to look at.
+        $pool = IpPool::factory()->create(['slug' => 'kw-public-v4']);
+
+        $this->actingAs($this->operator())
+            ->getJson('/api/admin/infrastructure/ip-pools')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.slug', 'kw-public-v4')
+            ->assertJsonPath('data.0.datacenter', $pool->datacenter->slug);
     }
 
     #[Test]

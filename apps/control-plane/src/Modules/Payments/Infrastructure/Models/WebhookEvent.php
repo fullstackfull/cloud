@@ -5,12 +5,11 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Payments\Infrastructure\Models;
 
 use Database\Factories\WebhookEventFactory;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Lynomia\Modules\Payments\Domain\Enums\WebhookEventStatus;
-use Lynomia\Modules\Payments\Infrastructure\Models\Concerns\RedactsJsonSecrets;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * The record of one inbound provider event.
@@ -38,7 +37,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Concerns\RedactsJsonSecrets;
 class WebhookEvent extends Model
 {
     /** @use HasFactory<WebhookEventFactory> */
-    use HasFactory, HasUlids, RedactsJsonSecrets;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -48,26 +47,13 @@ class WebhookEvent extends Model
     protected function casts(): array
     {
         return [
+            'payload' => RedactedJsonCast::class,
+            'provider_metadata' => RedactedJsonCast::class,
             'status' => WebhookEventStatus::class,
             'attempts' => 'integer',
             'provider_created_at' => 'immutable_datetime',
             'processed_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * The verified payload, stored with its secrets stripped.
-     *
-     * Stripe payment payloads legitimately contain a client_secret, and a
-     * webhook body is one of the few structures that is both attacker-adjacent
-     * and dumped verbatim into support tickets. Redacting on write means the
-     * copy that survives in the database is safe to paste.
-     *
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function payload(): Attribute
-    {
-        return self::redactedJsonAttribute();
     }
 
     public function isSettled(): bool

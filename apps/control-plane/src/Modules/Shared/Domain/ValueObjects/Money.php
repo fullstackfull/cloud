@@ -202,10 +202,40 @@ final readonly class Money implements JsonSerializable, Stringable
     /**
      * Localised presentation. Formatting is a presentation concern and never
      * feeds back into arithmetic.
+     *
+     * The portal formats client-side from the minor units and the currency
+     * code, so nothing in the HTTP layer calls this. It exists for the places
+     * that cannot — a PDF invoice, a dunning email — and it is covered by a
+     * test because a method with no caller is a method nobody notices is
+     * broken: this one called `formatTo()`, which brick/money does not have,
+     * and would have raised a fatal error the first time an invoice was
+     * rendered.
      */
     public function format(string $locale = 'en'): string
     {
-        return $this->amount->formatTo($locale);
+        return $this->amount->formatToLocale(self::withWesternNumerals($locale));
+    }
+
+    /**
+     * Western digits, whatever the locale would have chosen.
+     *
+     * The portal already asks Intl for `-u-nu-latn` explicitly, for a reason
+     * that applies at least as much to a document: an amount a customer may
+     * have to quote back to their bank has to be copy-pasteable, and Arabic
+     * script digits are not what a bank's reference field expects. A server
+     * rendering the same invoice in Arabic-Indic digits would make the emailed
+     * total and the on-screen total look like different numbers.
+     *
+     * A locale that already names a numbering system is left alone: it was
+     * asked for on purpose.
+     */
+    private static function withWesternNumerals(string $locale): string
+    {
+        if (str_contains($locale, 'nu-') || str_contains($locale, 'numbers=')) {
+            return $locale;
+        }
+
+        return $locale.'-u-nu-latn';
     }
 
     /**

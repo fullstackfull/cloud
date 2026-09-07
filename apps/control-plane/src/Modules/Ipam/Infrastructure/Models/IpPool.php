@@ -10,7 +10,9 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Domain\Enums\IpVersion;
 use Lynomia\Modules\Ipam\Domain\Enums\ReleaseReason;
@@ -27,6 +29,7 @@ use Lynomia\Modules\Ipam\Domain\Enums\ReleaseReason;
  *
  * @property string $id
  * @property string $datacenter_id
+ * @property-read Datacenter $datacenter
  * @property string $slug
  * @property IpVersion $ip_version
  * @property IpPoolScope $scope
@@ -62,6 +65,14 @@ class IpPool extends Model
             'is_active' => 'boolean',
             'quarantine_days' => 'integer',
         ];
+    }
+
+    /**
+     * @return BelongsTo<Datacenter, $this>
+     */
+    public function datacenter(): BelongsTo
+    {
+        return $this->belongsTo(Datacenter::class);
     }
 
     /**

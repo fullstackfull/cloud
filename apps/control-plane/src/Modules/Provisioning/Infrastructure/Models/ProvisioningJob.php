@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Provisioning\Infrastructure\Models;
 use Carbon\CarbonImmutable;
 use Database\Factories\ProvisioningJobFactory;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderPayloads;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * One unit of provisioning work, and everything needed to survive it failing.
@@ -52,7 +51,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderP
 class ProvisioningJob extends Model
 {
     /** @use HasFactory<ProvisioningJobFactory> */
-    use HasFactory, HasUlids, RedactsProviderPayloads;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -62,6 +61,8 @@ class ProvisioningJob extends Model
     protected function casts(): array
     {
         return [
+            'payload' => RedactedJsonCast::class,
+            'result' => RedactedJsonCast::class,
             'kind' => ProvisioningJobKind::class,
             'status' => ProvisioningJobStatus::class,
             'failure_class' => FailureClass::class,
@@ -72,22 +73,6 @@ class ProvisioningJob extends Model
             'finished_at' => 'immutable_datetime',
             'next_attempt_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function payload(): Attribute
-    {
-        return self::redactedJsonAttribute();
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function result(): Attribute
-    {
-        return self::redactedJsonAttribute();
     }
 
     /**

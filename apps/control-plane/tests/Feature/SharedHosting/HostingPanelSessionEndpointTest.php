@@ -10,6 +10,7 @@ use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\SsoSession;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingNodeNotConfiguredException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
 use Lynomia\Modules\SharedHosting\Infrastructure\HostingProviderFactory;
 use Mockery;
@@ -248,6 +249,48 @@ final class HostingPanelSessionEndpointTest extends HostingApiTestCase
      * machine their neighbours are on, in a response the whole rest of this
      * module is built to avoid.
      */
+
+    #[Test]
+    public function a_missing_credential_is_reported_as_our_fault_and_not_as_a_panel_outage(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $account = $this->hostingAccountFor($customer);
+
+        /*
+         * Every adapter converts HostingNodeNotConfiguredException into a
+         * HostingProviderException before it leaves — deliberately, so that a
+         * configuration mistake is not flagged indeterminate and does not
+         * quarantine the node. The action still carried a catch for the
+         * original type, which therefore never ran, and a missing WHM token
+         * reached the customer as "the panel could not be reached, try again
+         * shortly": advice that will never come true, under an error code that
+         * sends support looking at the wrong machine.
+         */
+        $panel = Mockery::mock(HostingProvider::class);
+        $panel->shouldReceive('createSsoSession')
+            ->once()
+            ->andThrow(HostingProviderException::requestFailed('cpanel', 'create_sso_session', [
+                'node' => $this->node()->hostname,
+            ], previous: HostingNodeNotConfiguredException::missingCredentials(
+                $this->node()->id,
+                $this->node()->hostname,
+                'services.hosting.whm_token_for_node_seven',
+            )));
+
+        app(HostingProviderFactory::class)->swap($this->node(), $panel);
+
+        $body = $this->actingAs($user)
+            ->postJson('/api/v1/hosting/'.$account->id.'/sso')
+            ->assertStatus(500)
+            ->assertJsonPath('error.code', 'hosting.panel_not_configured')
+            ->getContent();
+
+        // Still nothing about the node or the config key: the diagnosis
+        // changes, what travels does not.
+        $this->assertIsString($body);
+        $this->assertStringNotContainsString('whm_token_for_node_seven', $body);
+        $this->assertStringNotContainsString($this->node()->hostname, $body);
+    }
 
     #[Test]
     public function a_panel_failure_does_not_name_the_machine_it_happened_on(): void

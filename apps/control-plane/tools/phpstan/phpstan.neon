@@ -17,6 +17,15 @@ parameters:
     # is worth doing; shipping it red is not.
     level: 6
 
+    # This codebase declares casts in the `casts()` method, which is where
+    # Laravel has wanted them since 11. Larastan reads the `$casts` property by
+    # default and only parses the method when told to; left off, it sees no
+    # casts at all and reports every cast attribute as the raw column type —
+    # around eighty findings that say more about the configuration than the
+    # code. This is not a suppression: it tells the analyser where the casts
+    # are, and turning it off does not make any real finding disappear.
+    parseModelCastsMethod: true
+
     excludePaths:
         - ../../vendor/*
         - ../../storage/*
