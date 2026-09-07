@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -27,8 +28,8 @@ export function AdminInfrastructurePage() {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
 
-  const { data: nodes, isPending } = useAdminNodes(page)
-  const { data: hosting } = useAdminHostingNodes(1)
+  const { data: nodes, isPending, error: nodesError } = useAdminNodes(page)
+  const { data: hosting, error: hostingError } = useAdminHostingNodes(1)
 
   const nodeColumns: Array<Column<AdminNode>> = [
     {
@@ -115,6 +116,14 @@ export function AdminInfrastructurePage() {
         title={t('admin.infrastructure.title')}
         description={t('admin.infrastructure.subtitle')}
       />
+
+      {/*
+        Both reads reported, and reported before the tables: a login without
+        infrastructure.view gets a 403 from each of them, and an empty compute
+        table with no explanation tells that operator the fleet is empty. "You
+        may not see this" and "there is nothing here" are opposite facts.
+      */}
+      <LoadFailure error={nodesError ?? hostingError} />
 
       <div className="flex flex-col gap-4">
         <Card title={t('admin.infrastructure.computeNodes')}>

@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -30,8 +31,8 @@ export function AdminProvisioningPage() {
   const locale = useActiveLocale()
   const [page, setPage] = useState(1)
 
-  const { data, isPending } = useAdminProvisioningJobs(page)
-  const { data: review } = useJobsNeedingReview()
+  const { data, isPending, error: jobsError } = useAdminProvisioningJobs(page)
+  const { data: review, error: reviewError } = useJobsNeedingReview()
 
   const columns: Array<Column<AdminProvisioningJob>> = [
     {
@@ -89,6 +90,13 @@ export function AdminProvisioningPage() {
         title={t('admin.provisioning.title')}
         description={t('admin.provisioning.subtitle')}
       />
+
+      {/*
+        The needs-review count is the point of this screen. A failed read that
+        rendered as zero would say the queue is clear when nobody has looked at
+        it.
+      */}
+      <LoadFailure error={jobsError ?? reviewError} />
 
       {needsReview.length > 0 ? (
         <div className="mb-4">

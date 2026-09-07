@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
@@ -17,7 +18,7 @@ export function SubscriptionsPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const [page, setPage] = useState(1)
-  const { data, isPending } = useSubscriptions(page)
+  const { data, isPending, error: readError } = useSubscriptions(page)
   const cancel = useCancelSubscription()
 
   const columns: Array<Column<Subscription>> = [
@@ -66,6 +67,8 @@ export function SubscriptionsPage() {
   return (
     <>
       <PageHeader title={t('nav.subscriptions')} description={t('subscriptions.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       <Card>
         {isPending ? (

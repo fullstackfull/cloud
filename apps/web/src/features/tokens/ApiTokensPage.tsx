@@ -19,7 +19,7 @@ export function ApiTokensPage() {
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
 
-  const { data, isPending } = useApiTokens()
+  const { data, isPending, error: readError } = useApiTokens()
   const create = useCreateApiToken()
   const revoke = useRevokeApiToken()
 
@@ -27,7 +27,7 @@ export function ApiTokensPage() {
   const [password, setPassword] = useState('')
   const [issued, setIssued] = useState<string | null>(null)
 
-  const displayed = describeError(create.error ?? revoke.error)
+  const displayed = describeError(readError ?? create.error ?? revoke.error)
 
   const columns: Array<Column<ApiToken>> = [
     { key: 'name', header: t('tokens.name'), cell: (token) => token.name },

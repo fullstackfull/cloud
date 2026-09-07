@@ -6,6 +6,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -21,7 +22,7 @@ export function IpAddressesPage() {
   const [editing, setEditing] = useState<string | null>(null)
   const [hostname, setHostname] = useState('')
 
-  const { data, isPending } = useIpAssignments(page)
+  const { data, isPending, error: readError } = useIpAssignments(page)
   const setRdns = useSetReverseDns()
 
   const displayed = describeError(setRdns.error)
@@ -75,6 +76,8 @@ export function IpAddressesPage() {
   return (
     <>
       <PageHeader title={t('nav.ips')} description={t('ips.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       {displayed !== null ? (
         <div className="mb-4">

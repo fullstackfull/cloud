@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
@@ -17,7 +18,7 @@ export function OrdersPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const [page, setPage] = useState(1)
-  const { data, isPending } = useOrders(page)
+  const { data, isPending, error: readError } = useOrders(page)
 
   const columns: Array<Column<Order>> = [
     {
@@ -42,6 +43,8 @@ export function OrdersPage() {
   return (
     <>
       <PageHeader title={t('nav.orders')} description={t('orders.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       <Card>
         {isPending ? (

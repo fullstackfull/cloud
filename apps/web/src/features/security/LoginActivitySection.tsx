@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import {
   SUCCESSFUL_LOGIN_OUTCOMES,
   useLoginActivity,
@@ -27,7 +28,7 @@ function toneFor(outcome: string): 'success' | 'danger' | 'neutral' {
 export function LoginActivitySection() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const { data: activity, isPending } = useLoginActivity()
+  const { data: activity, isPending, error: readError } = useLoginActivity()
 
   const columns: Array<Column<LoginActivityEntry>> = [
     {
@@ -70,6 +71,13 @@ export function LoginActivitySection() {
 
   return (
     <Card title={t('security.activityTitle')} description={t('security.activitySubtitle')}>
+      {/*
+        A sign-in history that fails to load must not read as "nobody has
+        signed in": this is the screen a customer checks after being told their
+        account may have been used by somebody else.
+      */}
+      <LoadFailure error={readError} />
+
       {isPending ? (
         <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
       ) : (

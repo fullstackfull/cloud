@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import { Card } from '@/components/Card'
+import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -27,7 +28,7 @@ import { useWallet } from '@/lib/queries'
 export function WalletPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const { data: wallet, isPending } = useWallet()
+  const { data: wallet, isPending, error: readError } = useWallet()
 
   const balances = wallet?.data ?? []
   const accountCurrency = wallet?.meta.account_currency
@@ -35,6 +36,8 @@ export function WalletPage() {
   return (
     <>
       <PageHeader title={t('nav.wallet')} description={t('wallet.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       <div className="max-w-sm">
         <Card title={t('wallet.balance')}>

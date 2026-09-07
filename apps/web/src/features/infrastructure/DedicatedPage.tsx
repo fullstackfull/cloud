@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -21,7 +22,7 @@ export function DedicatedPage() {
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
   const [page, setPage] = useState(1)
-  const { data, isPending } = useDedicatedServers(page)
+  const { data, isPending, error: readError } = useDedicatedServers(page)
   const power = useDedicatedPower()
 
   const displayed = describeError(power.error)
@@ -75,6 +76,8 @@ export function DedicatedPage() {
   return (
     <>
       <PageHeader title={t('nav.dedicated')} description={t('dedicated.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       {displayed !== null ? (
         <div className="mb-4">

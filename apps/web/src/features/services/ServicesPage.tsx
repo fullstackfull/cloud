@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -15,7 +16,7 @@ export function ServicesPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const [page, setPage] = useState(1)
-  const { data, isPending } = useServices(page)
+  const { data, isPending, error: readError } = useServices(page)
 
   const columns: Array<Column<Service>> = [
     {
@@ -44,6 +45,8 @@ export function ServicesPage() {
   return (
     <>
       <PageHeader title={t('nav.services')} description={t('services.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       <Card>
         {isPending ? (

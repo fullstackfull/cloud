@@ -6,6 +6,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -23,7 +24,7 @@ export function AdminCustomersPage() {
   const [suspending, setSuspending] = useState<AdminCustomer | null>(null)
   const [reason, setReason] = useState('')
 
-  const { data, isPending } = useAdminCustomers(page, search)
+  const { data, isPending, error: readError } = useAdminCustomers(page, search)
   const setStatus = useSetCustomerStatus()
   const maySuspend = useHasPermission('customer.suspend')
 
@@ -76,6 +77,8 @@ export function AdminCustomersPage() {
   return (
     <>
       <PageHeader title={t('admin.customers.title')} description={t('admin.customers.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       {displayed !== null ? (
         <div className="mb-4">

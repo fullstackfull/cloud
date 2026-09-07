@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -24,7 +25,7 @@ export function VpsPage() {
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
   const [page, setPage] = useState(1)
-  const { data, isPending } = useVirtualMachines(page)
+  const { data, isPending, error: readError } = useVirtualMachines(page)
   const power = useVpsPower()
 
   const displayed = describeError(power.error)
@@ -90,6 +91,8 @@ export function VpsPage() {
   return (
     <>
       <PageHeader title={t('nav.vps')} description={t('vps.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       {displayed !== null ? (
         <div className="mb-4">

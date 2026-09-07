@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
@@ -21,7 +22,7 @@ export function InvoicesPage() {
   const describeError = useApiErrorMessage()
 
   const [page, setPage] = useState(1)
-  const { data, isPending } = useInvoices(page)
+  const { data, isPending, error: readError } = useInvoices(page)
   const pay = useStartPayment()
 
   const displayed = describeError(pay.error)
@@ -76,6 +77,8 @@ export function InvoicesPage() {
   return (
     <>
       <PageHeader title={t('nav.invoices')} description={t('invoices.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       {displayed !== null ? (
         <div className="mb-4">

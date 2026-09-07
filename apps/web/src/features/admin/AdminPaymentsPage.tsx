@@ -6,6 +6,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
@@ -27,7 +28,7 @@ export function AdminPaymentsPage() {
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
 
-  const { data, isPending } = useAdminTransactions(page)
+  const { data, isPending, error: readError } = useAdminTransactions(page)
   const refund = useIssueRefund()
   const mayRefund = useHasPermission('payment.refund')
 
@@ -87,6 +88,8 @@ export function AdminPaymentsPage() {
   return (
     <>
       <PageHeader title={t('admin.payments.title')} description={t('admin.payments.subtitle')} />
+
+      <LoadFailure error={readError} />
 
       {displayed !== null ? (
         <div className="mb-4">
