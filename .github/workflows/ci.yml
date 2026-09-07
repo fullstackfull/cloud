@@ -159,6 +159,32 @@ jobs:
       - name: Production build
         run: npm run build
 
+  openapi:
+    name: API description
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # A real OpenAPI 3.1 validator, not a structural assertion in PHP. The
+      # difference showed the first time this ran: it caught an empty security
+      # requirement serialised as a map instead of a list, and a ULID example
+      # that did not match the pattern printed directly above it. Neither is
+      # something a hand-rolled check would have looked for.
+      #
+      # Exits non-zero on errors and zero on warnings, which is the behaviour
+      # wanted: one warning stands, on the email-verification endpoint, because
+      # it redirects and genuinely has no 2xx response.
+      - name: Validate docs/openapi.yaml
+        run: npm run openapi:lint
+
   security:
     name: Security checks
     runs-on: ubuntu-latest

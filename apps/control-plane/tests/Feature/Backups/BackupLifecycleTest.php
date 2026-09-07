@@ -309,7 +309,12 @@ final class BackupLifecycleTest extends TestCase
             // it considers default, which on a hypervisor is frequently the
             // same disks the machine runs on.
             $this->assertSame('backups.not_configured', $e->errorCode());
-            $this->assertStringContainsString('backups.datastores.', (string) ($e->context()['configuration_key'] ?? ''));
+
+            // The configuration key is deliberately NOT in the context. The
+            // API renderer publishes a DomainException's context verbatim as
+            // `error.details`, and the key names the platform's own cluster.
+            // It goes to the log; the customer gets a sentence.
+            $this->assertSame([], $e->context());
         }
 
         $this->assertSame(0, Backup::query()->count());

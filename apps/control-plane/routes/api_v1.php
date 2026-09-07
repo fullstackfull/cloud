@@ -123,6 +123,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->gro
         'wallet',
         'services',
         'vps',
+        'backups',
         'dedicated',
         'hosting',
         'ipam',

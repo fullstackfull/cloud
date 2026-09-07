@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Domain\Exceptions;
 
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
 /**
@@ -17,14 +18,31 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  */
 final class BackupNotConfiguredException extends DomainException
 {
+    /**
+     * The cluster has no datastore declared.
+     *
+     * Nothing identifying the platform's own infrastructure goes in the
+     * context. The API renderer publishes a DomainException's context verbatim
+     * as `error.details`, so a configuration key or a cluster id put here
+     * reaches the customer — and "backups.datastores.kw-cluster" tells them
+     * the name of the cluster their neighbours are on and the shape of the
+     * platform's configuration.
+     *
+     * Both go to the log instead, where the audience is somebody holding a
+     * runbook. The customer gets a sentence that says it is our problem and
+     * that somebody knows.
+     */
     public static function missingDatastore(string $clusterId, string $key): self
     {
-        $exception = new self(
+        Log::warning('A backup was requested for a cluster with no datastore configured.', [
+            'cluster_id' => $clusterId,
+            'configuration_key' => $key,
+        ]);
+
+        return new self(
             'Backups are not available for this service yet: no backup datastore is configured '
             .'for the cluster it runs on. This has been recorded.'
         );
-
-        return $exception->withContext(['cluster_id' => $clusterId, 'configuration_key' => $key]);
     }
 
     public static function notBackable(string $serviceId, string $because): self

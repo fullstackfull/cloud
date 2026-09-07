@@ -1,18 +1,26 @@
 # API
 
-> **Implementation status.** Read this first, because the rest of this document
-> describes the whole surface and only part of it is built.
+> **The authority on this API is `docs/openapi.yaml`.**
+>
+> It is generated from the route table of the running application by
+> `php artisan openapi:generate`, and three things fail the build rather than
+> letting it drift: a route with no entry, an entry naming a route that does
+> not exist, and a committed file that is not what the generator produces. A
+> real OpenAPI 3.1 validator runs over it in CI (`npm run openapi:lint`).
+>
+> This document explains the conventions those endpoints follow and why they
+> are what they are. Where the two disagree, the generated one is right.
 >
 > | Surface | Status |
 > |---|---|
-> | `/api/v1` identity — register, login, two-factor challenge, logout, email verification, password reset, profile, password change, sessions, login activity, two-factor enrolment and recovery codes | implemented and covered by tests |
-> | `/webhooks/{provider}` — signature verification, replay rejection, idempotent ingestion | implemented and covered by tests |
-> | `/api/v1` business — catalogue, orders, checkout, invoices, payments, wallet, subscriptions, services, VPS lifecycle, dedicated servers, hosting accounts, IPAM | **not exposed.** The operations exist as application actions with unit and feature coverage; no controller, route or API resource publishes them yet. |
-> | `/api/admin` — the entire administrative surface | **not built.** The prefix, the guard and the permission model are designed and the permissions are seeded; no route is registered under it. |
+> | `/api/v1` identity, account and API tokens | implemented, 22 operations |
+> | `/api/v1` business — catalogue, orders, billing, wallet, services, VPS, backups, dedicated, hosting, IPAM | implemented, 39 operations |
+> | `/api/admin` — the operator surface | implemented, 12 operations, each gated on its own permission |
+> | `/webhooks/{provider}` | implemented — signature verified before the body is parsed, replays acknowledged without being applied twice |
 >
-> `php artisan route:list` is the authority on what is reachable. Everything below
-> describes the conventions those routes follow, and the conventions the remaining
-> routes will follow when they are written.
+> Not present, and absent because it is not implemented rather than because it
+> is undocumented: a support-ticket API, DNS zone management, and restore or
+> delete for backups. See `docs/build-status.md`.
 
 ## Two surfaces, one implementation
 
