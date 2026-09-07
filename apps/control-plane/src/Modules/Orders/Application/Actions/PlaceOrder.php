@@ -462,7 +462,7 @@ final readonly class PlaceOrder
     /**
      * Refuses a coupon whose remaining uses are already spoken for.
      *
-     * Redemption happens when the order is paid, and FulfilOrderOnInvoicePaid
+     * Redemption happens when the order is paid, and FulfilOrderOnSettlement
      * deliberately does not withhold a paying customer's service when that
      * redemption is refused. So the counter bounds the audit trail and nothing
      * else: a one-use code placed on ten orders before any of them is paid

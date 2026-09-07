@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as BaseEventServiceProvider;
-use Lynomia\Modules\Billing\Application\Listeners\IssueInvoiceOnOrderPlaced;
+use Lynomia\Modules\Billing\Application\Listeners\AnnounceSettlementOnInvoicePaid;
+use Lynomia\Modules\Billing\Application\Listeners\EvaluateOrderFinancialRequirement;
 use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
-use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnInvoicePaid;
+use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
+use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
@@ -17,10 +19,18 @@ use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 /**
  * The commerce chain, wired explicitly rather than discovered.
  *
- *     OrderPlaced     → issue the invoice
- *     PaymentCaptured → settle the invoice
- *     InvoicePaid     → mark the order paid, redeem the coupon, start subscriptions
- *     RefundIssued    → record the refund against the invoice it came off
+ *     OrderPlaced             → decide what is owed: issue an invoice, or, when
+ *                               nothing is owed, settle the order outright
+ *     PaymentCaptured         → settle the invoice
+ *     InvoicePaid             → announce that the order owes nothing further
+ *     OrderFinanciallySettled → mark the order paid, redeem the coupon, start
+ *                               the subscription, create the service and ask
+ *                               for it to be built
+ *     RefundIssued            → record the refund against the invoice it came off
+ *
+ * The settlement event in the middle is what lets a zero-total order reach
+ * fulfilment: it owes nothing, so it produces no invoice, and a chain that
+ * hangs off InvoicePaid can never deliver it.
  *
  * Listed here rather than auto-discovered on purpose. This mapping is the
  * platform's fulfilment policy: what happens when money arrives is the single
@@ -38,13 +48,16 @@ final class EventServiceProvider extends BaseEventServiceProvider
      */
     protected $listen = [
         OrderPlaced::class => [
-            IssueInvoiceOnOrderPlaced::class,
+            EvaluateOrderFinancialRequirement::class,
         ],
         PaymentCaptured::class => [
             SettleInvoiceOnPaymentCaptured::class,
         ],
         InvoicePaid::class => [
-            FulfilOrderOnInvoicePaid::class,
+            AnnounceSettlementOnInvoicePaid::class,
+        ],
+        OrderFinanciallySettled::class => [
+            FulfilOrderOnSettlement::class,
         ],
         RefundIssued::class => [
             RecordRefundAgainstTheInvoice::class,

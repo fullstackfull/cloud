@@ -7,20 +7,26 @@ namespace Lynomia\Modules\Orders\Application\Listeners;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Catalog\Application\Actions\RedeemCoupon;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
 use Lynomia\Modules\Orders\Application\Actions\TransitionOrder;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\StartSubscription;
 use Throwable;
 
 /**
- * The point at which a paid invoice becomes a fulfilled order.
+ * The point at which a settled order becomes a delivered one.
  *
- * Three things happen here, in this order and for these reasons:
+ * It listens to OrderFinanciallySettled rather than to InvoicePaid, and the
+ * difference is the whole reason that event exists: an order whose total is
+ * zero owes nothing, produces no invoice, and used to sit in PAID for ever with
+ * nothing delivered. Both routes to "nothing further is owed" arrive here now.
+ *
+ * Four things happen here, in this order and for these reasons:
  *
  *  1. **The order is marked paid.** This is what unlocks provisioning; the
  *     state machine will not let an unpaid order reach it.
@@ -36,12 +42,18 @@ use Throwable;
  *  3. **Subscriptions are started, one per plan line.** This is what puts the
  *     service on a renewal clock.
  *
+ *  4. **The service is created and its provisioning requested.** One service
+ *     per purchased line, one job per service, both idempotent on the order
+ *     item — including at the database, which holds a unique index on
+ *     services.order_item_id so that two workers cannot both decide to build.
+ *
  * Idempotent throughout. The transition converges when the order is already
- * paid, and StartSubscription refuses to create a second subscription for a
- * line that has one — so a redelivered webhook, a retried job, or a settlement
- * that ran twice all produce one fulfilment.
+ * paid, StartSubscription refuses to create a second subscription for a line
+ * that has one, and ProvisionOrderedService returns the existing service rather
+ * than a second machine — so a redelivered webhook, a retried job, or a
+ * settlement that ran twice all produce one fulfilment.
  */
-final class FulfilOrderOnInvoicePaid implements ShouldQueue
+final class FulfilOrderOnSettlement implements ShouldQueue
 {
     public string $queue = 'payments';
 
@@ -59,23 +71,18 @@ final class FulfilOrderOnInvoicePaid implements ShouldQueue
         private readonly TransitionOrder $transition,
         private readonly StartSubscription $startSubscription,
         private readonly RedeemCoupon $redeemCoupon,
+        private readonly ProvisionOrderedService $provisionService,
     ) {}
 
-    public function handle(InvoicePaid $event): void
+    public function handle(OrderFinanciallySettled $event): void
     {
-        if ($event->orderId === null) {
-            // A renewal invoice has a subscription but no order. Its period was
-            // already advanced when the invoice was generated; there is nothing
-            // to fulfil here.
-            return;
-        }
-
         $order = Order::query()->with(['items', 'customer'])->find($event->orderId);
 
         if ($order === null) {
-            Log::warning('Paid invoice refers to an order that no longer exists.', [
+            Log::warning('A settled order no longer exists.', [
                 'invoice_id' => $event->invoiceId,
                 'order_id' => $event->orderId,
+                'basis' => $event->basis->value,
             ]);
 
             return;
@@ -85,7 +92,9 @@ final class FulfilOrderOnInvoicePaid implements ShouldQueue
             $order,
             OrderStatus::Paid,
             actorType: 'system',
-            reason: 'invoice '.$event->invoiceId.' settled',
+            reason: $event->invoiceId !== null
+                ? 'invoice '.$event->invoiceId.' settled'
+                : 'nothing was owed on this order',
         );
 
         $this->redeem($order);
@@ -97,7 +106,18 @@ final class FulfilOrderOnInvoicePaid implements ShouldQueue
                 continue;
             }
 
-            $this->startSubscription->execute($order, $item);
+            $subscription = $this->startSubscription->execute($order, $item);
+
+            /*
+             * And the thing the customer actually bought.
+             *
+             * This is the step that was missing entirely: an order could be
+             * paid, its subscription started and its coupon redeemed, and
+             * nothing anywhere created a service or asked a provider for a
+             * machine. The end-to-end test was called "purchase to active
+             * service" and asserted a subscription.
+             */
+            $this->provisionService->execute($order, $item, $subscription);
         }
     }
 

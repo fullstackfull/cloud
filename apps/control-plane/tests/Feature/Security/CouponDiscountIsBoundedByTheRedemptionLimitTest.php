@@ -37,7 +37,7 @@ use Tests\TestCase;
  * RedeemCoupon was already correct — it locks the coupon row, re-validates and
  * refuses a second redemption. But the discount is not granted by RedeemCoupon.
  * It is granted by PlaceOrder, and redemption is deferred to
- * FulfilOrderOnInvoicePaid, which deliberately swallows a redemption failure so
+ * FulfilOrderOnSettlement, which deliberately swallows a redemption failure so
  * that a paying customer is never denied the service they bought.
  *
  * So the counter bounded the audit trail and nothing else: any number of orders
