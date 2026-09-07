@@ -98,6 +98,7 @@
     "provisioning": "قيد التجهيز",
     "failed": "فشل",
     "suspended": "معلّق",
+    "reactivating": "قيد إعادة التفعيل",
     "active": "نشط",
     "pending": "قيد الانتظار",
     "draft": "مسوّدة",

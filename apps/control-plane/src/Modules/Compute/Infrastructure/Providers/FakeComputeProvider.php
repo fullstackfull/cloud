@@ -15,6 +15,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Services\FakeComputeProviderGuard;
 
@@ -50,6 +51,9 @@ final class FakeComputeProvider implements ComputeProvider
     public const string NAME = 'fake';
 
     /** A hostname carrying this is refused outright, as a cluster with no capacity would. */
+    /** The same lock value the real adapter writes, so tests assert on one string. */
+    public const string SUSPENSION_LOCK = ProxmoxComputeProvider::SUSPENSION_LOCK;
+
     public const string PROVIDER_FAILURE_MARKER = 'provider-fail';
 
     /** A hostname carrying this is accepted, and the task fails later. */
@@ -195,18 +199,12 @@ final class FakeComputeProvider implements ComputeProvider
             throw $this->noSuchMachine($nodeName, $providerId, 'resize_vm');
         }
 
-        $this->machines[$nodeName][$providerId] = new RemoteVmState(
-            providerId: $machine->providerId,
-            nodeName: $machine->nodeName,
-            name: $machine->name,
-            powerState: $machine->powerState,
+        $this->machines[$nodeName][$providerId] = $machine->withShape(
             vcpu: $request->vcpu ?? $machine->vcpu,
             memoryMib: $request->memoryMib ?? $machine->memoryMib,
             // A disk request is a growth, never an absolute size, which is the
             // same rule the real adapter enforces.
             diskGib: $request->diskGib === null ? $machine->diskGib : ($machine->diskGib ?? 0) + $request->diskGib,
-            uptimeSeconds: $machine->uptimeSeconds,
-            raw: $machine->raw,
         );
 
         return new VmOperation(
@@ -246,6 +244,76 @@ final class FakeComputeProvider implements ComputeProvider
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState
     {
         return $this->machine($nodeName, $providerId);
+    }
+
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation
+    {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'suspend_vm');
+        }
+
+        if ($policy === SuspensionPolicy::RecordOnly) {
+            // Nothing at the provider, which is the whole meaning of the value.
+            return new VmOperation(
+                taskId: $this->upid($nodeName, 'qmsuspend', $providerId, false),
+                nodeName: $nodeName,
+                providerId: $providerId,
+                operation: 'suspend_vm',
+                status: RemoteTaskStatus::Succeeded,
+            );
+        }
+
+        $this->machines[$nodeName][$providerId] = $machine
+            ->withPowerState($policy->powersOff() ? PowerState::Stopped : $machine->powerState)
+            ->withSuspension(
+                lock: $policy->locksAtProvider() ? self::SUSPENSION_LOCK : $machine->lock,
+                // Cleared whatever the policy: a suspended machine that came
+                // back on the next node reboot would be suspended only until
+                // the next maintenance window.
+                startsOnBoot: false,
+            );
+
+        return new VmOperation(
+            taskId: $this->upid($nodeName, 'qmsuspend', $providerId, false),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'suspend_vm',
+            status: RemoteTaskStatus::Succeeded,
+            metadata: ['policy' => $policy->value],
+        );
+    }
+
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation
+    {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'lift_suspension');
+        }
+
+        /*
+         * Only the platform's own lock is cleared. A machine locked by a
+         * backup is left alone, because clearing that would have the platform
+         * quietly interfering with an operation it did not start.
+         */
+        $lock = $machine->lock === self::SUSPENSION_LOCK ? null : $machine->lock;
+
+        /*
+         * Deliberately not started. Returning a customer's server to a running
+         * state is the platform's decision, made in the reactivation flow
+         * where it can be verified.
+         */
+        $this->machines[$nodeName][$providerId] = $machine->withSuspension($lock, startsOnBoot: true);
+
+        return new VmOperation(
+            taskId: $this->upid($nodeName, 'qmunsuspend', $providerId, false),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'lift_suspension',
+            status: RemoteTaskStatus::Succeeded,
+        );
     }
 
     public function listVms(string $nodeName): array
@@ -342,17 +410,22 @@ final class FakeComputeProvider implements ComputeProvider
             throw $this->noSuchMachine($nodeName, $providerId, $action.'_vm');
         }
 
-        $this->machines[$nodeName][$providerId] = new RemoteVmState(
-            providerId: $machine->providerId,
-            nodeName: $machine->nodeName,
-            name: $machine->name,
-            powerState: $resulting,
-            vcpu: $machine->vcpu,
-            memoryMib: $machine->memoryMib,
-            diskGib: $machine->diskGib,
-            uptimeSeconds: $resulting->isOn() ? 0 : null,
-            raw: $machine->raw,
-        );
+        /*
+         * A locked machine refuses every power operation, exactly as Proxmox
+         * does. This is the behaviour that makes suspension enforcement rather
+         * than bookkeeping, so the fake has to model it — a fake that let a
+         * suspended machine start would let the test suite prove a property
+         * the real hypervisor does not have.
+         */
+        if ($machine->isLockedAtProvider()) {
+            throw ComputeProviderException::requestFailed(self::NAME, $action.'_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => sprintf('VM is locked (%s)', $machine->lock),
+            ]);
+        }
+
+        $this->machines[$nodeName][$providerId] = $machine->withPowerState($resulting);
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qm'.$action, $providerId, false),

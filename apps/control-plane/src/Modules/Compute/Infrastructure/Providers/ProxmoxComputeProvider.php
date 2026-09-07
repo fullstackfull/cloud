@@ -20,6 +20,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Throwable;
@@ -59,6 +60,16 @@ use Throwable;
 final class ProxmoxComputeProvider implements ComputeProvider
 {
     public const string NAME = 'proxmox';
+
+    /**
+     * The value written to Proxmox's config `lock` when a service is suspended.
+     *
+     * Named rather than generic so that an operator reading `qm config` on a
+     * node can tell a Lynomia suspension apart from a lock left by a backup,
+     * a migration or a snapshot — and so the platform can tell them apart too,
+     * which is what stops reconciliation from clearing somebody else's lock.
+     */
+    public const string SUSPENSION_LOCK = SuspensionPolicy::LOCK_NAME;
 
     /**
      * Marks the task id of an operation Proxmox completed synchronously.
@@ -124,6 +135,132 @@ final class ProxmoxComputeProvider implements ComputeProvider
     public function resetVm(string $nodeName, string $providerId): VmOperation
     {
         return $this->changePowerState($nodeName, $providerId, 'reset');
+    }
+
+    /**
+     * Suspension, in the only terms Proxmox actually has.
+     *
+     * Three steps, and the order is the whole design:
+     *
+     *  1. **Ask the guest to shut down, then stop it.** A customer who is late
+     *     paying has not consented to losing unflushed writes, so the guest is
+     *     asked first; the stop is the fallback for a guest that will not go.
+     *  2. **Clear `onboot`.** Without this, suspension survives until the next
+     *     time the node reboots and the unpaid machine quietly comes back.
+     *  3. **Set the config lock, last.** A locked VM refuses every subsequent
+     *     operation, including the two above — so locking first would leave a
+     *     running machine that nothing could then stop. This is the step the
+     *     customer cannot undo: `qm start` on the node itself is refused while
+     *     the lock is set.
+     *
+     * Idempotent by construction. Every step tolerates already being true: a
+     * stop on a stopped VM, a config write of values that already match, and a
+     * lock that is already ours are all no-ops at Proxmox.
+     */
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation
+    {
+        if ($policy === SuspensionPolicy::RecordOnly) {
+            /*
+             * Nothing at the provider. Returned as a completed operation with
+             * no task, because there is genuinely nothing to poll — inventing
+             * a task id would give the poller something to chase for ever.
+             */
+            return new VmOperation(
+                taskId: $this->synchronousTaskId('suspend_vm', $nodeName, $providerId),
+                nodeName: $nodeName,
+                providerId: $providerId,
+                operation: 'suspend_vm',
+                status: RemoteTaskStatus::Succeeded,
+                metadata: ['policy' => $policy->value],
+            );
+        }
+
+        $taskId = null;
+
+        if ($policy->powersOff()) {
+            $taskId = $this->powerDownForSuspension($nodeName, $providerId);
+        }
+
+        /*
+         * onboot and the lock go through the same config PUT, which is one
+         * round trip and — more importantly — one atomic change at Proxmox.
+         * Two writes would leave a window in which the machine is locked and
+         * still set to start on boot, or unlocked and not.
+         */
+        $config = ['onboot' => 0];
+
+        if ($policy->locksAtProvider()) {
+            $config['lock'] = self::SUSPENSION_LOCK;
+        }
+
+        $this->put(sprintf('/nodes/%s/qemu/%s/config', $nodeName, $providerId), $config, 'suspend_vm');
+
+        /*
+         * The config PUT has already completed by the time Proxmox answers, so
+         * the only thing worth polling is the shutdown — and only when there
+         * was one. A machine that was already off gets a synchronous handle
+         * rather than a task that would never appear in the node's task log.
+         */
+        return new VmOperation(
+            taskId: $taskId ?? $this->synchronousTaskId('suspend_vm', $nodeName, $providerId),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'suspend_vm',
+            status: $taskId === null ? RemoteTaskStatus::Succeeded : RemoteTaskStatus::Running,
+            metadata: ['policy' => $policy->value],
+        );
+    }
+
+    /**
+     * Undoes the suspension, and does not start the machine.
+     *
+     * Returning a customer's server to a running state is the platform's
+     * decision and belongs in the reactivation flow where it can be verified.
+     * Starting it here would start machines that were deliberately powered off
+     * before they were ever suspended.
+     *
+     * The lock is cleared by writing an empty value, which is how Proxmox
+     * removes it. `onboot` is restored to 1: a machine that has been paid for
+     * again should survive a node reboot like any other.
+     */
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation
+    {
+        /*
+         * `delete=lock` rather than `lock=`, because Proxmox treats an empty
+         * string as a value to set and refuses it. The delete parameter is the
+         * documented way to remove a config key.
+         */
+        $this->put(sprintf('/nodes/%s/qemu/%s/config', $nodeName, $providerId), [
+            'delete' => 'lock',
+            'onboot' => 1,
+        ], 'lift_suspension');
+
+        return new VmOperation(
+            taskId: $this->synchronousTaskId('lift_suspension', $nodeName, $providerId),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'lift_suspension',
+            status: RemoteTaskStatus::Succeeded,
+        );
+    }
+
+    /**
+     * Shuts the guest down, falling back to a stop.
+     *
+     * @return string|null the task to poll, when Proxmox gave one
+     */
+    private function powerDownForSuspension(string $nodeName, string $providerId): ?string
+    {
+        $current = $this->getVm($nodeName, $providerId);
+
+        if ($current !== null && ! $current->powerState->isOn()) {
+            // Already off. Asking again would produce a task that fails, and a
+            // failed task on an idempotent path is noise an operator has to
+            // learn to ignore.
+            return null;
+        }
+
+        return $this->changePowerState($nodeName, $providerId, 'shutdown')->taskId;
     }
 
     public function resizeVm(string $nodeName, string $providerId, ResizeVmRequest $request): VmOperation
@@ -521,6 +658,11 @@ final class ProxmoxComputeProvider implements ComputeProvider
             memoryMib: isset($row['maxmem']) ? $this->toMib($row['maxmem']) : null,
             diskGib: isset($row['maxdisk']) ? $this->toGib($row['maxdisk']) : null,
             uptimeSeconds: isset($row['uptime']) && is_numeric($row['uptime']) ? (int) $row['uptime'] : null,
+            // Reported so suspension can be verified rather than assumed. A
+            // lock cleared by hand at the node is exactly the drift the
+            // reconciler exists to find.
+            lock: isset($row['lock']) && is_string($row['lock']) && $row['lock'] !== '' ? $row['lock'] : null,
+            startsOnBoot: isset($row['onboot']) ? (bool) $row['onboot'] : null,
             raw: $this->redactor->redact($row),
         );
     }

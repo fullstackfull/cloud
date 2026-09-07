@@ -48,7 +48,24 @@ final class ServiceStateMachine extends AbstractStateMachine
             ],
 
             ServiceStatus::Suspended->value => [
+                /*
+                 * Straight to active only where the platform has nothing to
+                 * undo at the provider — a record-only suspension policy, or a
+                 * service with no machine behind it. Everything else goes
+                 * through reactivating, because the hypervisor call between
+                 * the two can fail.
+                 */
                 ServiceStatus::Active,
+                ServiceStatus::Reactivating,
+                ServiceStatus::Terminated,
+            ],
+
+            ServiceStatus::Reactivating->value => [
+                // Forward when the provider confirms, and back when it does
+                // not: a reactivation that failed leaves the customer exactly
+                // where they were, which is unusable and honest.
+                ServiceStatus::Active,
+                ServiceStatus::Suspended,
                 ServiceStatus::Terminated,
             ],
 

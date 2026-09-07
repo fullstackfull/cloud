@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Compute\Application\Actions;
 
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
@@ -14,6 +15,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Application\Actions\RecordDrift;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 
 /**
  * Compares what the platform believes about a cluster's machines with what the
@@ -45,6 +47,14 @@ use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
  *  - **State mismatch.** Both agree the machine exists and disagree about
  *    whether it is running. Information, not an emergency: a customer may have
  *    shut a machine down from inside it.
+ *  - **Suspension mismatch.** The service's commercial state and the
+ *    provider's enforcement of it have come apart. Critical in both
+ *    directions: a suspended service whose machine is running is a suspension
+ *    that never took — or one an operator cleared by hand — and an active
+ *    service still carrying the platform's lock is a paying customer locked
+ *    out of their own server. This is the check that stops suspension being
+ *    bookkeeping: without it, the platform's only evidence that a machine is
+ *    suspended is that it once asked.
  *
  * A machine still being built is deliberately not compared: it has no provider
  * id yet, and calling that drift would page an operator every time somebody
@@ -102,6 +112,7 @@ final readonly class DetectVirtualMachineDrift
         $machines = VirtualMachine::query()
             ->where('node_id', $node->getKey())
             ->whereNotNull('provider_id')
+            ->with('service')
             ->get()
             ->all();
 
@@ -126,6 +137,27 @@ final readonly class DetectVirtualMachineDrift
                 $recorded++;
 
                 continue;
+            }
+
+            $mismatch = $this->suspensionMismatch($machine, $byProviderId[$providerId]);
+
+            if ($mismatch !== null) {
+                $this->recordDrift->execute(
+                    provider: $cluster->driver->value,
+                    resourceType: 'virtual_machine',
+                    kind: DriftKind::SuspensionMismatch,
+                    providerReference: $providerId,
+                    serviceId: $machine->service_id,
+                    expected: ['suspension' => $mismatch['expected']],
+                    observed: [
+                        'suspension' => $mismatch['observed'],
+                        'power_state' => $byProviderId[$providerId]->powerState->value,
+                        'locked_by_platform' => $byProviderId[$providerId]->isSuspendedByPlatform(),
+                    ],
+                    severity: DriftSeverity::Critical,
+                );
+
+                $recorded++;
             }
 
             if ($byProviderId[$providerId]->powerState !== $machine->power_state) {
@@ -164,5 +196,50 @@ final readonly class DetectVirtualMachineDrift
         }
 
         return $recorded;
+    }
+
+    /**
+     * Whether the provider is enforcing what the service's status says.
+     *
+     * Returns null when the two agree, or when there is nothing to compare —
+     * a machine with no service row, or a deployment configured for
+     * `record_only`, which asks nothing of the provider and would otherwise
+     * report every suspended machine as drift forever.
+     *
+     * @return array{expected: string, observed: string}|null
+     */
+    private function suspensionMismatch(VirtualMachine $machine, RemoteVmState $state): ?array
+    {
+        $policy = SuspensionPolicy::configured();
+
+        if (! $policy->requiresProviderVerification()) {
+            return null;
+        }
+
+        $service = $machine->service()->first();
+
+        if ($service === null) {
+            // Already reported by other means; not a suspension question.
+            return null;
+        }
+
+        if ($service->status === ServiceStatus::Suspended) {
+            $enforced = ! $state->powerState->isOn()
+                && (! $policy->locksAtProvider() || $state->isSuspendedByPlatform());
+
+            return $enforced ? null : ['expected' => 'enforced', 'observed' => 'not_enforced'];
+        }
+
+        /*
+         * Reactivating is deliberately not compared. It is the window in which
+         * the platform is in the middle of lifting the lock, so a machine
+         * still carrying it is the expected state rather than drift, and
+         * reporting it would page an operator for every reactivation.
+         */
+        if ($service->status->isUsable() && $state->isSuspendedByPlatform()) {
+            return ['expected' => 'released', 'observed' => 'still_locked'];
+        }
+
+        return null;
     }
 }

@@ -38,6 +38,17 @@ enum CustomerServiceState: string
     /** Stopped, and restorable. */
     case Suspended = 'suspended';
 
+    /**
+     * Paid for, coming back, not yet usable.
+     *
+     * Its own word rather than folding into `provisioning` or `active`. The
+     * customer has just paid and is watching: telling them the service is
+     * active when the hypervisor is still refusing them would be the one
+     * message they immediately disprove, and calling it `provisioning` reads
+     * as though the machine is being rebuilt.
+     */
+    case Reactivating = 'reactivating';
+
     /** Gone, and not coming back. */
     case Terminated = 'terminated';
 
@@ -69,6 +80,7 @@ enum CustomerServiceState: string
             ServiceStatus::Provisioning => self::Provisioning,
             ServiceStatus::Active => self::Active,
             ServiceStatus::Suspended => self::Suspended,
+            ServiceStatus::Reactivating => self::Reactivating,
             ServiceStatus::Terminated => self::Terminated,
             ServiceStatus::Failed => self::Failed,
         };
@@ -90,7 +102,13 @@ enum CustomerServiceState: string
     {
         return match ($this) {
             self::Pending, self::Provisioning, self::Failed => true,
-            self::Active, self::Suspended, self::Terminated, self::UnderReview => false,
+            /*
+             * Reactivating is a fact about what the customer owns and owes,
+             * not about a build in progress, so a stuck job does not talk over
+             * it — same reasoning as Active and Suspended.
+             */
+            self::Active, self::Suspended, self::Reactivating,
+            self::Terminated, self::UnderReview => false,
         };
     }
 
@@ -112,6 +130,7 @@ enum CustomerServiceState: string
             self::Provisioning => [ServiceStatus::Provisioning],
             self::Active => [ServiceStatus::Active],
             self::Suspended => [ServiceStatus::Suspended],
+            self::Reactivating => [ServiceStatus::Reactivating],
             self::Terminated => [ServiceStatus::Terminated],
             self::Failed => [ServiceStatus::Failed],
             // A service waiting on a person can be sitting in any of the three

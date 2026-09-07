@@ -6,7 +6,9 @@ namespace Lynomia\Providers;
 
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
@@ -67,6 +69,7 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
         $this->assertNoFakeProviders();
         $this->assertEveryConfiguredDriverExists();
         $this->assertSessionsAreEnumerable();
+        $this->assertSuspensionPolicyIsUnderstood();
     }
 
     /**
@@ -94,6 +97,25 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
                 implode(', ', $fake),
                 $this->environmentHint(),
             ));
+        }
+    }
+
+    /**
+     * The suspension policy names something the platform can actually do.
+     *
+     * Read at boot rather than at the first suspension. The value is only
+     * consulted when a customer stops paying, so a typo would otherwise sit
+     * undiscovered until the night it matters and then surface as an exception
+     * inside a queued listener.
+     *
+     * @throws RuntimeException
+     */
+    public function assertSuspensionPolicyIsUnderstood(): void
+    {
+        try {
+            SuspensionPolicy::configured();
+        } catch (InvalidArgumentException $e) {
+            throw new RuntimeException($e->getMessage().$this->environmentHint(), previous: $e);
         }
     }
 

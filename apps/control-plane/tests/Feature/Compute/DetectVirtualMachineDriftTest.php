@@ -10,6 +10,7 @@ use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
@@ -18,7 +19,9 @@ use Lynomia\Modules\Provisioning\Application\Actions\RecordDrift;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -174,6 +177,129 @@ final class DetectVirtualMachineDriftTest extends TestCase
 
         $this->assertSame(1, ResourceDrift::query()->count());
         $this->assertSame(3, $this->onlyDrift()->occurrences);
+    }
+
+    #[Test]
+    public function a_suspended_service_whose_machine_is_running_is_critical_drift(): void
+    {
+        /*
+         * The failure this check exists for. A suspension that was asked for
+         * and never took, or a lock an operator cleared by hand, leaves a
+         * customer using a server they are not paying for — and every screen
+         * in the platform says "suspended", because the platform's only
+         * evidence was that it once sent the request.
+         */
+        $this->createAtProviderOnly(vmId: 610, hostname: 'vps-unpaid', running: true);
+
+        $machine = VirtualMachine::factory()->onNode($this->node, 610)->create([
+            'power_state' => PowerState::Running,
+        ]);
+
+        $this->suspendService($machine);
+
+        $this->assertSame(1, $this->detect());
+
+        $drift = $this->onlyDrift();
+
+        $this->assertSame(DriftKind::SuspensionMismatch, $drift->kind);
+        $this->assertSame(DriftSeverity::Critical, $drift->severity);
+        $this->assertSame('enforced', $drift->expected['suspension'] ?? null);
+        $this->assertSame('not_enforced', $drift->observed['suspension'] ?? null);
+        $this->assertSame($machine->service_id, $drift->service_id);
+
+        // Unbilled use is money moving, which is what an operator triages
+        // first.
+        $this->assertTrue($drift->kind->isBillingRelevant());
+    }
+
+    #[Test]
+    public function a_suspended_machine_that_is_stopped_but_unlocked_is_still_drift(): void
+    {
+        /*
+         * Stopped is not suspended. Nothing prevents the customer starting it
+         * again, which is precisely why the platform stopped modelling
+         * suspension as a power state.
+         */
+        $this->createAtProviderOnly(vmId: 611, hostname: 'vps-merely-off', running: false);
+
+        $machine = VirtualMachine::factory()->onNode($this->node, 611)->create([
+            'power_state' => PowerState::Stopped,
+        ]);
+
+        $this->suspendService($machine);
+
+        $this->assertSame(1, $this->detect());
+        $this->assertSame(DriftKind::SuspensionMismatch, $this->onlyDrift()->kind);
+    }
+
+    #[Test]
+    public function an_active_service_still_carrying_the_platform_lock_is_drift(): void
+    {
+        // The other direction, and the one the customer notices: they have
+        // paid, and their machine still refuses every operation.
+        $this->createAtProviderOnly(vmId: 612, hostname: 'vps-paid-up', running: false);
+
+        $this->provider()->suspendVm($this->node->provider_name, '612', SuspensionPolicy::PowerOffAndLock);
+
+        $machine = VirtualMachine::factory()->onNode($this->node, 612)->create([
+            'power_state' => PowerState::Stopped,
+        ]);
+
+        Service::query()->whereKey($machine->service_id)
+            ->update(['status' => ServiceStatus::Active->value]);
+
+        $this->assertSame(1, $this->detect());
+
+        $drift = $this->onlyDrift();
+
+        $this->assertSame(DriftKind::SuspensionMismatch, $drift->kind);
+        $this->assertSame('released', $drift->expected['suspension'] ?? null);
+        $this->assertSame('still_locked', $drift->observed['suspension'] ?? null);
+    }
+
+    #[Test]
+    public function a_properly_enforced_suspension_is_not_drift(): void
+    {
+        $this->createAtProviderOnly(vmId: 613, hostname: 'vps-suspended', running: true);
+
+        $this->provider()->suspendVm($this->node->provider_name, '613', SuspensionPolicy::PowerOffAndLock);
+
+        $machine = VirtualMachine::factory()->onNode($this->node, 613)->create([
+            'power_state' => PowerState::Stopped,
+        ]);
+
+        $this->suspendService($machine);
+
+        $this->assertSame(0, $this->detect());
+        $this->assertSame(0, ResourceDrift::query()->count());
+    }
+
+    #[Test]
+    public function a_machine_mid_reactivation_is_not_drift(): void
+    {
+        /*
+         * Reactivating is the window in which the platform is lifting the lock
+         * itself. Reporting it would page an operator for every customer who
+         * paid their invoice.
+         */
+        $this->createAtProviderOnly(vmId: 614, hostname: 'vps-coming-back', running: true);
+
+        $this->provider()->suspendVm($this->node->provider_name, '614', SuspensionPolicy::PowerOffAndLock);
+
+        $machine = VirtualMachine::factory()->onNode($this->node, 614)->create([
+            'power_state' => PowerState::Stopped,
+        ]);
+
+        Service::query()->whereKey($machine->service_id)
+            ->update(['status' => ServiceStatus::Reactivating->value]);
+
+        $this->assertSame(0, $this->detect());
+    }
+
+    private function suspendService(VirtualMachine $machine): void
+    {
+        Service::query()->whereKey($machine->service_id)
+            ->update(['status' => ServiceStatus::Suspended->value]);
     }
 
     private function detect(): int

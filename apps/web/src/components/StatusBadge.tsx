@@ -24,6 +24,7 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   processing: 'info',
 
   suspended: 'warning',
+  reactivating: 'info',
   maintenance: 'warning',
   past_due: 'warning',
   quarantined: 'warning',

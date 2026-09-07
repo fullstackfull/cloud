@@ -161,6 +161,7 @@ return new class extends Migration
             $table->string('provider_reference')->nullable();
 
             // missing_at_provider | orphan_at_provider | state_mismatch | spec_mismatch
+            // | suspension_mismatch
             $table->string('kind', 32);
             $table->string('severity', 16)->default('warning');
 

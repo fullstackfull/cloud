@@ -11,6 +11,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 
 /**
@@ -71,6 +72,22 @@ final class PowerRecordingComputeProvider implements ComputeProvider
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation
     {
         return $this->record('destroyVm', $nodeName, $providerId);
+    }
+
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation
+    {
+        // Recorded like every other call, so a test asserting that a code path
+        // does NOT suspend a machine has something to assert against.
+        $this->calls[] = 'suspendVm';
+
+        return new VmOperation('UPID:suspend', $nodeName, $providerId, 'suspend_vm');
+    }
+
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation
+    {
+        $this->calls[] = 'liftSuspension';
+
+        return new VmOperation('UPID:unsuspend', $nodeName, $providerId, 'lift_suspension');
     }
 
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState

@@ -27,13 +27,24 @@ enum DriftKind: string
     case SpecMismatch = 'spec_mismatch';
 
     /**
+     * The service's commercial state and the provider's enforcement of it have
+     * come apart.
+     *
+     * Either direction is a real incident. A suspended service whose machine
+     * is running is a customer using what they have not paid for, or an abuse
+     * suspension that never took; an active service still carrying the
+     * platform's lock is a paying customer locked out of their own server.
+     */
+    case SuspensionMismatch = 'suspension_mismatch';
+
+    /**
      * Whether this drift may be costing money nobody is billing for, which is
      * what an operator triages first.
      */
     public function isBillingRelevant(): bool
     {
         return match ($this) {
-            self::OrphanAtProvider, self::SpecMismatch => true,
+            self::OrphanAtProvider, self::SpecMismatch, self::SuspensionMismatch => true,
             self::MissingAtProvider, self::StateMismatch => false,
         };
     }

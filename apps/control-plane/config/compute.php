@@ -4,6 +4,27 @@ declare(strict_types=1);
 
 return [
     /*
+     * What suspending a customer's machine does to it at the hypervisor.
+     *
+     * One of the values SuspensionPolicy declares, and nothing else: an
+     * unrecognised string falls back to the strict default rather than
+     * silently disabling enforcement, because the failure mode of a typo here
+     * is a fleet of unpaid machines that nobody notices are still running.
+     *
+     *   power_off_and_lock   shut down, clear onboot, and set Proxmox's config
+     *                        lock so nothing — including somebody typing
+     *                        `qm start` on the node — can bring it back
+     *   power_off            shut down and clear onboot, no lock
+     *   record_only          change nothing at the provider; the platform's
+     *                        own guard is the only thing stopping the customer
+     *
+     * record_only is what the platform did before Phase 30A. It is named so
+     * that a deployment which wants it has to choose it, rather than getting
+     * it from an omission nobody noticed.
+     */
+    'suspension_policy' => env('COMPUTE_SUSPENSION_POLICY', 'power_off_and_lock'),
+
+    /*
      * Placement scoring.
      *
      * Weights rather than hardcoded rules, because different fleets want

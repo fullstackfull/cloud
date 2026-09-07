@@ -33,12 +33,23 @@ final readonly class TransitionService
      */
     public function execute(Service $service, ServiceStatus $to): Service
     {
-        if ($service->status === $to) {
-            return $service;
-        }
-
-        $this->stateMachine->assertCanTransition($service->status, $to);
-
+        /*
+         * Deliberately no converge check and no validation before the lock.
+         *
+         * Both would be decided on the caller's copy, which is exactly the
+         * thing this action refuses to trust everywhere else. A model handed
+         * to a listener is read once and then passed through several
+         * transitions — a reactivation moves a service to `reactivating` and,
+         * if the provider will not confirm, back to `suspended` — and by the
+         * second call the caller's copy still says what it said when it was
+         * loaded. Short-circuiting on it turned that second transition into a
+         * silent no-op, leaving a service that could not be reactivated
+         * sitting in `reactivating` forever.
+         *
+         * The cost is a transaction for a call that changes nothing. That is
+         * the right price for a status that is always read from the row it is
+         * about to change.
+         */
         return DB::transaction(function () use ($service, $to): Service {
             /*
              * Re-read under a row lock and re-check. Two workers can pass the

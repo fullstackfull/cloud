@@ -10,6 +10,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 
 /**
@@ -107,6 +108,37 @@ interface ComputeProvider
      *
      * @throws ComputeProviderException
      */
+    /**
+     * Make a service policy state true at the provider.
+     *
+     * Suspension is not "stop the VM". A stop is indistinguishable at the
+     * hypervisor from the customer stopping their own machine, and nothing
+     * about a stopped VM prevents it being started again — so an adapter that
+     * implemented this as a stop would be implementing bookkeeping. What the
+     * policy asks for is that the machine cannot be brought back by the
+     * customer, or by a node reboot, until the platform lifts it.
+     *
+     * Must be idempotent. A suspension arriving twice — a retried job, a
+     * reconciliation confirming a state that is already true — must not fail
+     * and must not double anything.
+     *
+     * @throws ComputeProviderException
+     */
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation;
+
+    /**
+     * Undo whatever suspendVm did, and nothing else.
+     *
+     * Specifically it does not start the machine. Returning a customer's
+     * server to a running state is the platform's decision and belongs in the
+     * reactivation flow where it can be verified; an adapter that started it
+     * here would start machines that were deliberately powered off before they
+     * were ever suspended.
+     *
+     * @throws ComputeProviderException
+     */
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation;
+
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState;
 
     /**

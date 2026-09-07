@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Security;
 
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Providers\ProviderRegistryServiceProvider;
@@ -99,6 +100,52 @@ final class ProductionGuardTest extends TestCase
             $this->assertStringContainsString('compute', $e->getMessage());
             $this->assertStringNotContainsString('dns', $e->getMessage());
         }
+    }
+
+    #[Test]
+    public function a_suspension_policy_the_platform_does_not_implement_refuses_to_boot(): void
+    {
+        /*
+         * The value is only read when a customer stops paying. Left to be
+         * discovered then, a typo surfaces as an exception inside a queued
+         * listener on the night the suspension was supposed to happen — and
+         * the operator who set it has every reason to believe suspension is
+         * configured.
+         */
+        config()->set('compute.suspension_policy', 'power_off_and_locked');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/suspension_policy/');
+
+        $this->guard()->assertSuspensionPolicyIsUnderstood();
+    }
+
+    #[Test]
+    public function the_suspension_policy_error_lists_the_values_that_would_work(): void
+    {
+        config()->set('compute.suspension_policy', 'lock');
+
+        try {
+            $this->guard()->assertSuspensionPolicyIsUnderstood();
+            $this->fail('Expected the guard to refuse this configuration.');
+        } catch (RuntimeException $e) {
+            foreach (SuspensionPolicy::cases() as $policy) {
+                $this->assertStringContainsString($policy->value, $e->getMessage());
+            }
+        }
+    }
+
+    #[Test]
+    public function a_deployment_that_says_nothing_about_suspension_gets_enforcement(): void
+    {
+        // Silence must not mean bookkeeping. The strictest policy is the
+        // default so that an operator who never heard of the setting still
+        // gets a suspension the customer cannot undo.
+        config()->set('compute.suspension_policy', null);
+
+        $this->guard()->assertSuspensionPolicyIsUnderstood();
+
+        $this->assertSame(SuspensionPolicy::PowerOffAndLock, SuspensionPolicy::configured());
     }
 
     #[Test]
