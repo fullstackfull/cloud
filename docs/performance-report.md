@@ -172,9 +172,9 @@ everything else.
 
 ## 6. The metrics endpoint, after Phase 29
 
-Phase 29 added a ninth collector — scheduler liveness — to an endpoint that is
-scraped every fifteen seconds for ever, so its cost is worth a number rather
-than an assurance.
+Phase 29 added a ninth collector — scheduler liveness — and a tenth series
+group for unresolved drift, to an endpoint scraped every fifteen seconds for
+ever. Its cost is worth a number rather than an assurance.
 
 Reproduce with:
 
@@ -184,21 +184,29 @@ php artisan test --filter=MetricsCostMeasurementTest
 
 | | Measured |
 | --- | --- |
-| Metrics | 18 |
-| Series | 258 |
-| Queries per scrape | 14 |
-| Wall clock | 38.4 ms |
+| Metrics | 19 |
+| Series | 270 |
+| Queries per scrape | 15 |
+| Wall clock | 46.6 – 52.8 ms over three runs |
 
-Fourteen queries for nine collectors, and that is the figure to watch rather
+Fifteen queries for nine collectors, and that is the figure to watch rather
 than the milliseconds: `MetricsQueryBudgetTest` asserts both a ceiling on it
 and — the assertion that actually matters — that it **does not change when the
 amount of data does**. A collector that loops once per pool, node or customer
 would pass a threshold on an empty database and take the endpoint down on a
-full one. The scheduler collector adds exactly one query, and its label
-cardinality is the number of entries in `routes/console.php`.
+full one.
 
-The 38 ms is on a machine also running the test database, and is dominated by
-the same framework boot that dominates every other figure in this report.
+Each of the two additions costs exactly one query and a fixed number of series:
+the scheduler collector's label values are the entries in
+`routes/console.php`, and drift's are the cross product of three kinds and
+three severities — nine series whether there is no drift or ten thousand.
+`DriftIsAlertableTest` asserts the second of those directly, by creating fifty
+drifts and checking the series count did not move.
+
+The wall clock is quoted as a range because a single figure from a machine
+also running the test database is a figure with no error bars. It is dominated
+by the same framework boot that dominates every other measurement in this
+report.
 
 ## 7. Scheduler and queue, with a real worker
 

@@ -152,7 +152,7 @@ over, and a drift metric labelled by machine would explode on exactly the
 incident it exists to report. `MetricsQueryBudgetTest` asserts that the query
 count does not change when the amount of data does.
 
-Measured: 18 metrics, 258 series, 14 queries, 38.4 ms per scrape.
+Measured: 19 metrics, 270 series, 15 queries, 47–53 ms per scrape.
 
 ## G. Security
 
