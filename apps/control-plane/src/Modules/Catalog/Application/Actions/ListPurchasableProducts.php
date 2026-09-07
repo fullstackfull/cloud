@@ -22,15 +22,31 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
  * plans are all unlisted reports zero rather than advertising configurations
  * that cannot be bought.
  *
+ * The page-size ceiling is enforced here rather than only at the HTTP edge.
+ * A bound that lives in a controller is a bound that a queue worker, a console
+ * command or the next caller of this action does not have, and "one request
+ * must not be able to read the whole table" is a property of listing the
+ * catalogue, not of the controller that happens to list it today.
+ *
  * @phpstan-type ProductPaginator LengthAwarePaginator<int, Product>
  */
 final class ListPurchasableProducts
 {
+    /** Nobody gets more than this in one page, whoever is asking. */
+    public const int MAX_PER_PAGE = 100;
+
+    private const int DEFAULT_PER_PAGE = 25;
+
     /**
      * @return LengthAwarePaginator<int, Product>
      */
-    public function execute(?ProductKind $kind = null, int $perPage = 25): LengthAwarePaginator
+    public function execute(?ProductKind $kind = null, int $perPage = self::DEFAULT_PER_PAGE): LengthAwarePaginator
     {
+        // Clamped, not rejected: a caller asking for more than the ceiling
+        // gets the ceiling. Zero and negatives are a nonsense page rather than
+        // a small one, so they fall back to the default instead of to 1.
+        $perPage = $perPage < 1 ? self::DEFAULT_PER_PAGE : min($perPage, self::MAX_PER_PAGE);
+
         return Product::query()
             ->purchasable()
             ->when($kind !== null, static fn (Builder $query): Builder => $query->where('kind', $kind?->value))

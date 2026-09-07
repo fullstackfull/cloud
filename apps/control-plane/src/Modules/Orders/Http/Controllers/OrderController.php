@@ -11,13 +11,13 @@ use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Actions\CancelOrder;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
-use Lynomia\Modules\Orders\Domain\Exceptions\AccountPermissionRequiredException;
 use Lynomia\Modules\Orders\Http\Requests\CancelOrderRequest;
 use Lynomia\Modules\Orders\Http\Requests\ListOrdersRequest;
 use Lynomia\Modules\Orders\Http\Requests\PlaceOrderRequest;
 use Lynomia\Modules\Orders\Http\Resources\OrderResource;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Queries\CustomerOrders;
+use Lynomia\Modules\Shared\Domain\Exceptions\AccountPermissionRequiredException;
 
 /**
  * The customer-facing order surface.

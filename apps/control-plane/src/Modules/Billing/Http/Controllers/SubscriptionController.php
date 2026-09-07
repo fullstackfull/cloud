@@ -7,8 +7,8 @@ namespace Lynomia\Modules\Billing\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Lynomia\Http\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Billing\Application\Actions\CancelCustomerSubscription;
-use Lynomia\Modules\Billing\Http\Controllers\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Billing\Http\Requests\CancelSubscriptionRequest;
 use Lynomia\Modules\Billing\Http\Requests\ListSubscriptionsRequest;
 use Lynomia\Modules\Billing\Http\Resources\SubscriptionResource;
@@ -99,6 +99,13 @@ final class SubscriptionController
      * period is a refund — a different operation, with different authorisation
      * — and issuing one from a cancel route would move money through an
      * endpoint nobody reviewed as one.
+     *
+     * The immediate form additionally carries `confirm_subscription_id`, which
+     * must repeat the id in the path. It is irreversible — the state machine
+     * has no edge back out of cancelled — and a boolean alone is not a
+     * confirmation for something irreversible: it is a field generated clients
+     * default and retry loops resend. The comparison itself belongs to
+     * CancelCustomerSubscription, so a support script gets the same gate.
      */
     public function cancel(CancelSubscriptionRequest $request, string $subscription): JsonResponse
     {
@@ -108,7 +115,11 @@ final class SubscriptionController
             ->whereKey($subscription)
             ->firstOrFail();
 
-        $cancelled = $this->cancelSubscription->execute($found, $request->immediately());
+        $cancelled = $this->cancelSubscription->execute(
+            $found,
+            $request->immediately(),
+            $request->confirmation(),
+        );
 
         return (new SubscriptionResource($cancelled))->response();
     }

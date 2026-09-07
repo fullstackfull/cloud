@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Wallet\Application\Actions;
 
+use Brick\Money\Exception\MoneyException;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Domain\Exceptions\UnsupportedAccountCurrencyException;
 use Lynomia\Modules\Wallet\Domain\ValueObjects\WalletBalance;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use Lynomia\Modules\Wallet\Infrastructure\Queries\CustomerWallets;
@@ -39,6 +42,18 @@ use Lynomia\Modules\Wallet\Infrastructure\Queries\CustomerWallets;
  * the disagreement is a defect to be reported — that is what reconcile() and
  * WalletReconciliation are for — not something a customer endpoint should
  * quietly paper over by showing the figure nothing else in the platform obeys.
+ *
+ * ---------------------------------------------------------------------------
+ * When the currency itself is not a currency
+ * ---------------------------------------------------------------------------
+ *
+ * `customers.currency` is client-supplied at registration and validated only
+ * as three letters, so an account can hold "ZZZ". Brick refuses an unknown
+ * ISO-4217 code, so every Money built from one throws — and until that was
+ * caught here it escaped as a bare vendor RuntimeException and this endpoint
+ * answered `server.error`. It is now UnsupportedAccountCurrencyException:
+ * still a 5xx, because the platform's data is what is wrong, but named, coded
+ * and carrying the offending currency so it can be alerted on and fixed.
  */
 final class GetCustomerWalletBalances
 {
@@ -56,9 +71,12 @@ final class GetCustomerWalletBalances
         $balances = CustomerWallets::of($customer)
             ->orderBy('currency')
             ->get()
-            ->map(static fn (Wallet $wallet): WalletBalance => new WalletBalance(
+            ->map(fn (Wallet $wallet): WalletBalance => new WalletBalance(
                 walletId: (string) $wallet->getKey(),
-                balance: $wallet->balance(),
+                balance: $this->expressible(
+                    static fn (): Money => $wallet->balance(),
+                    $wallet->currency,
+                ),
                 // When the balance last moved. The ledger row carries the
                 // narrative; this is just "is what I am looking at fresh".
                 updatedAt: $wallet->updated_at,
@@ -80,7 +98,14 @@ final class GetCustomerWalletBalances
             // session write a wallets row on a GET, and would leave every
             // account that ever looked at its balance holding a wallet it
             // never used.
-            $balances[] = WalletBalance::unopened($accountCurrency);
+            try {
+                $balances[] = WalletBalance::unopened($accountCurrency);
+            } catch (MoneyException $e) {
+                // Money::zero() carries no guard of its own, so an account
+                // currency Brick does not know arrives here as a bare vendor
+                // RuntimeException. Named rather than swallowed.
+                throw UnsupportedAccountCurrencyException::forCurrency($accountCurrency, $e);
+            }
         }
 
         usort($balances, static function (WalletBalance $a, WalletBalance $b) use ($accountCurrency): int {
@@ -96,5 +121,28 @@ final class GetCustomerWalletBalances
         });
 
         return array_values($balances);
+    }
+
+    /**
+     * Build one amount, turning "that is not a currency" into a named failure.
+     *
+     * Money::ofMinor already converts Brick's arithmetic and range errors into
+     * InvalidMoneyException, but an unknown currency code leaves Brick as a
+     * RuntimeException that nothing catches — and Money::zero() has no guard at
+     * all. Both are MoneyException, so this is the one place the module has to
+     * name them, and it names them rather than substituting a zero: a balance
+     * the platform cannot express is not a balance of nothing.
+     *
+     * @param  callable(): Money  $build
+     *
+     * @throws UnsupportedAccountCurrencyException
+     */
+    private function expressible(callable $build, string $currency): Money
+    {
+        try {
+            return $build();
+        } catch (MoneyException $e) {
+            throw UnsupportedAccountCurrencyException::forCurrency($currency, $e);
+        }
     }
 }

@@ -6,9 +6,9 @@ namespace Lynomia\Modules\Payments\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Enum;
+use Lynomia\Http\Concerns\BoundsPageSize;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
-use Lynomia\Modules\Payments\Http\Requests\Concerns\BoundsPageSize;
 
 /**
  * Filtering and paging for the payment history.

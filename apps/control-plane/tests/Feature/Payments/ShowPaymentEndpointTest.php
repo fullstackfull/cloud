@@ -39,6 +39,27 @@ final class ShowPaymentEndpointTest extends PaymentsApiTestCase
     }
 
     #[Test]
+    public function a_refused_payment_is_not_reported_as_settled(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+
+        $payment = Transaction::factory()->forCustomer($customer)->failed()->create();
+
+        $this->actingAs($user)
+            ->getJson("/api/v1/payments/{$payment->id}")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'failed')
+            /*
+             * "Settled" is a claim about money, not about whether the provider
+             * has stopped talking. A declined card that reports itself settled
+             * is how a dashboard shows a paid invoice for a payment that never
+             * landed, and how a client stops polling for the capture that is
+             * still to come.
+             */
+            ->assertJsonPath('data.is_settled', false);
+    }
+
+    #[Test]
     public function another_customers_payment_is_not_found(): void
     {
         [, $mine] = $this->accountWithOwner();

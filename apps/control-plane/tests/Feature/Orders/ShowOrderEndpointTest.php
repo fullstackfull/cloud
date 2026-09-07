@@ -6,6 +6,7 @@ namespace Tests\Feature\Orders;
 
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -110,6 +111,71 @@ final class ShowOrderEndpointTest extends OrdersApiTestCase
             ->getJson('/api/v1/orders/'.$foreign->id)
             ->assertStatus(403)
             ->assertJsonPath('error.code', 'tenancy.account_unavailable');
+    }
+
+    #[Test]
+    public function a_user_who_belongs_to_both_accounts_still_sees_only_the_one_they_act_for(): void
+    {
+        [$mine, $user] = $this->accountWithOwner();
+        [$theirs] = $this->accountWithOwner();
+
+        /*
+         * The harder shape than a stranger's id: the caller is a genuine,
+         * accepted owner of *both* accounts, so the tenancy middleware succeeds
+         * whichever one the header names and every authorisation check passes.
+         * The only thing standing between the two histories is that the query
+         * hangs off the account the request resolved to. If the lookup were a
+         * global fetch with a membership check bolted on afterwards, this is
+         * the request that would sail through it.
+         */
+        $this->memberOf($theirs, user: $user);
+
+        $ours = Order::factory()->create(['customer_id' => $mine->id]);
+        $foreign = Order::factory()->create(['customer_id' => $theirs->id]);
+
+        $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $mine->id)
+            ->getJson('/api/v1/orders/'.$foreign->id)
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
+
+        $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $mine->id)
+            ->getJson('/api/v1/orders/'.$ours->id)
+            ->assertOk()
+            ->assertJsonPath('data.id', $ours->id);
+
+        // The list obeys the same boundary, and the header is what moves it.
+        $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $theirs->id)
+            ->getJson('/api/v1/orders')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $foreign->id);
+    }
+
+    #[Test]
+    public function cancelling_another_accounts_order_while_belonging_to_both_is_refused(): void
+    {
+        [$mine, $user] = $this->accountWithOwner();
+        [$theirs] = $this->accountWithOwner();
+
+        $this->memberOf($theirs, user: $user);
+
+        $foreign = Order::factory()->create([
+            'customer_id' => $theirs->id,
+            'status' => OrderStatus::PendingPayment,
+        ]);
+
+        $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $mine->id)
+            ->postJson('/api/v1/orders/'.$foreign->id.'/cancel')
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
+
+        // A write is the expensive half of getting this wrong: the order the
+        // caller was not acting for is untouched.
+        $this->assertSame(OrderStatus::PendingPayment, $foreign->fresh()->status);
     }
 
     #[Test]

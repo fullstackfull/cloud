@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Billing\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Lynomia\Modules\Billing\Http\Resources\Concerns\SerialisesMoney;
+use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 
@@ -51,13 +51,13 @@ final class InvoiceResource extends JsonResource
             'status' => $this->status->value,
             'currency' => $this->currency,
 
-            'subtotal' => $this->money($this->subtotal_minor, $this->currency),
-            'discount' => $this->money($this->discount_minor, $this->currency),
-            'tax' => $this->money($this->tax_minor, $this->currency),
-            'total' => $this->money($this->total_minor, $this->currency),
-            'amount_paid' => $this->money($this->amount_paid_minor, $this->currency),
-            'amount_refunded' => $this->money($this->amount_refunded_minor, $this->currency),
-            'amount_due' => $this->money($this->amount_due_minor, $this->currency),
+            'subtotal' => $this->moneyOfMinor($this->subtotal_minor, $this->currency),
+            'discount' => $this->moneyOfMinor($this->discount_minor, $this->currency),
+            'tax' => $this->moneyOfMinor($this->tax_minor, $this->currency),
+            'total' => $this->moneyOfMinor($this->total_minor, $this->currency),
+            'amount_paid' => $this->moneyOfMinor($this->amount_paid_minor, $this->currency),
+            'amount_refunded' => $this->moneyOfMinor($this->amount_refunded_minor, $this->currency),
+            'amount_due' => $this->moneyOfMinor($this->amount_due_minor, $this->currency),
 
             // Asked of the enum that decides, so a client's "can I pay this?"
             // cannot drift away from what the platform would actually accept.

@@ -6,8 +6,8 @@ namespace Lynomia\Modules\Orders\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Orders\Application\Actions\CancelOrder;
-use Lynomia\Modules\Orders\Http\Resources\Concerns\SerialisesMoney;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
 
@@ -43,15 +43,24 @@ final class OrderResource extends JsonResource
             'status' => $this->status->value,
             'currency' => $this->currency,
 
-            'subtotal' => $this->money($this->subtotal_minor, $this->currency),
-            'discount' => $this->money($this->discount_minor, $this->currency),
-            'tax' => $this->money($this->tax_minor, $this->currency),
-            'total' => $this->money($this->total_minor, $this->currency),
+            'subtotal' => $this->moneyOfMinor($this->subtotal_minor, $this->currency),
+            'discount' => $this->moneyOfMinor($this->discount_minor, $this->currency),
+            'tax' => $this->moneyOfMinor($this->tax_minor, $this->currency),
+            'total' => $this->moneyOfMinor($this->total_minor, $this->currency),
 
             // The customer's own note back to them, not an operator's.
             'notes' => $this->notes,
 
-            'is_paid' => $this->status->isPaid(),
+            /*
+             * From paid_at, not from OrderStatus::isPaid(). The enum answers
+             * true for MANUAL_REVIEW, which is reachable from PENDING_PAYMENT
+             * before any capture, so a status-derived flag reports "paid" on an
+             * order that shows `paid_at: null` two lines below it — the same
+             * payload contradicting itself. paid_at is stamped by
+             * TransitionOrder on the move into PAID and is the only field here
+             * that means money changed hands.
+             */
+            'is_paid' => $this->paid_at !== null,
             // Asked of the action that decides, so the flag cannot drift away
             // from what the endpoint would actually do.
             'is_cancellable' => CancelOrder::isCancellable($this->resource),

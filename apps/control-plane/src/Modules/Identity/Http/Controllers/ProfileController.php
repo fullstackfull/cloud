@@ -9,7 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
-use Lynomia\Modules\Identity\Http\Controllers\Concerns\ConfirmsCurrentPassword;
+use Lynomia\Http\Concerns\ConfirmsCurrentPassword;
 use Lynomia\Modules\Identity\Http\Resources\UserResource;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 

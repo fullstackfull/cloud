@@ -6,8 +6,8 @@ namespace Lynomia\Modules\Billing\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Enum;
+use Lynomia\Http\Concerns\BoundsPageSize;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
-use Lynomia\Modules\Billing\Http\Requests\Concerns\BoundsPageSize;
 
 /**
  * Filtering and paging for the subscription list.

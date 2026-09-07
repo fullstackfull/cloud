@@ -32,7 +32,32 @@ final class ApiTokenServiceProvider extends ServiceProvider
                     return false;
                 }
 
-                return $token->allowsRequestFrom(request()->ip());
+                $address = request()->ip();
+
+                if (! $token->allowsRequestFrom($address)) {
+                    return false;
+                }
+
+                /*
+                 * The address is recorded here because this is the only place
+                 * every token-authenticated request passes through, and because
+                 * the whole justification for revoking a token by recording it
+                 * rather than deleting the row is that "which token did this,
+                 * and from where?" stays answerable afterwards. A column that
+                 * is advertised in the API and never written is not a forensic
+                 * trail; it is a claim.
+                 *
+                 * Written only when it changes. Sanctum already touches
+                 * last_used_at on every request, and a token polled once a
+                 * second from one address does not need a second write of the
+                 * same string - but a token that starts appearing from a new
+                 * address is exactly the event worth having a row for.
+                 */
+                if (is_string($address) && $address !== $token->last_used_ip) {
+                    $token->forceFill(['last_used_ip' => $address])->saveQuietly();
+                }
+
+                return true;
             }
         );
     }

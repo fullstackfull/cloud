@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Billing\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Lynomia\Modules\Billing\Http\Resources\Concerns\SerialisesMoney;
+use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -49,7 +49,7 @@ final class SubscriptionResource extends JsonResource
             'status' => $this->status->value,
             'currency' => $this->currency,
             'billing_period' => $this->billing_period->value,
-            'recurring_amount' => $this->money($this->recurring_amount_minor, $this->currency),
+            'recurring_amount' => $this->moneyOfMinor($this->recurring_amount_minor, $this->currency),
 
             // The catalogue plan and the order this came from — both within
             // the acting account, so a client can link back to either.
@@ -69,12 +69,26 @@ final class SubscriptionResource extends JsonResource
             // Null unless a payment has failed.
             'grace_period_ends_at' => $this->grace_period_ends_at?->toIso8601String(),
 
-            // Both asked of the model that decides, so neither can drift away
-            // from what the platform will do. A scheduled cancellation is
-            // honoured by serviceIsRunning even before the sweep moves the
-            // status, so a client is never told a service is up on a day the
-            // customer has not paid for.
-            'is_scheduled_to_cancel' => $this->resource->isScheduledToCancel(),
+            /*
+             * Asked of the model that decides, so neither can drift away from
+             * what the platform will do — but `is_scheduled_to_cancel` is
+             * qualified by whether the subscription has actually ended.
+             *
+             * Subscription::isScheduledToCancel() is the cancellation sweep's
+             * predicate: it answers "does this row still need the sweep to act
+             * on it", and the sweep only ever asks it of a live row. Asked of
+             * an ended one it still says yes, because `cancel_at` is left
+             * standing when an immediate cancellation overtakes a scheduled
+             * one. A client branching on that — which is the only reason the
+             * field exists — would tell a customer their service runs until
+             * the first of next month on the day it actually stopped.
+             */
+            'is_scheduled_to_cancel' => $this->resource->ended_at === null
+                && $this->resource->isScheduledToCancel(),
+
+            // A scheduled cancellation is honoured by serviceIsRunning even
+            // before the sweep moves the status, so a client is never told a
+            // service is up on a day the customer has not paid for.
             'service_is_running' => $this->resource->serviceIsRunning(),
 
             'created_at' => $this->created_at?->toIso8601String(),

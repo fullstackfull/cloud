@@ -6,8 +6,8 @@ namespace Lynomia\Modules\Wallet\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Enum;
+use Lynomia\Http\Concerns\BoundsPageSize;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
-use Lynomia\Modules\Wallet\Http\Requests\Concerns\BoundsPageSize;
 
 /**
  * Filtering and paging for the ledger.
@@ -34,10 +34,20 @@ final class ListWalletTransactionsRequest extends FormRequest
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'kind' => ['sometimes', 'nullable', new Enum(WalletTransactionKind::class)],
-            // An ISO-4217 code, refused rather than clamped: "USDD" is a typo,
-            // and answering it with an empty page would let a client ship a
-            // currency filter that silently shows nothing.
-            'currency' => ['sometimes', 'nullable', 'string', 'size:3', 'alpha'],
+            /*
+             * Three ASCII letters, refused rather than clamped: "USDD" is a
+             * typo, and answering it with an empty page would let a client
+             * ship a currency filter that silently shows nothing.
+             *
+             * `alpha:ascii`, not bare `alpha`. Laravel's unqualified `alpha`
+             * matches any Unicode letter, and `size` counts characters rather
+             * than bytes, so a Cyrillic "КWD" passed both rules — and then
+             * strtoupper(), which is byte-wise, left it unchanged and it
+             * matched no wallet. The result was a 200 with an empty statement
+             * for a currency that is not a currency: exactly the silent
+             * nothing this rule exists to prevent.
+             */
+            'currency' => ['sometimes', 'nullable', 'string', 'size:3', 'alpha:ascii'],
         ];
     }
 

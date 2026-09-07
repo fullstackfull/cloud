@@ -80,6 +80,8 @@ final readonly class PlaceOrder
 
         $existing = $this->findByIdempotencyKey($customer, $request->idempotencyKey);
         if ($existing !== null) {
+            $this->assertSameRequest($existing, $request);
+
             return $existing;
         }
 
@@ -106,6 +108,33 @@ final readonly class PlaceOrder
         return $coupon->isPercentage()
             ? $this->pricing->price($pricingLines, $taxRate, percentageDiscount: $coupon->percentageRate(), couponCode: $couponCode)
             : $this->pricing->price($pricingLines, $taxRate, fixedDiscount: $coupon->fixedAmount(), couponCode: $couponCode);
+    }
+
+    /**
+     * A key that comes back with a different basket is a conflict, not a replay.
+     *
+     * Returning the original order would be the worst of the three options: the
+     * client believes its new basket was accepted, the customer has a
+     * confirmation for something else, and nothing anywhere records that the
+     * two disagreed. Placing a second order would be worse still - the key
+     * exists precisely to stop that. So it is refused, loudly, and the client
+     * can retry with a new key.
+     *
+     * An order written before the fingerprint column existed has none, and
+     * keeps replaying exactly as it did before rather than starting to answer
+     * 409 to clients that never changed.
+     */
+    private function assertSameRequest(Order $existing, CheckoutRequest $request): void
+    {
+        if ($existing->request_fingerprint === null) {
+            return;
+        }
+
+        if (! hash_equals($existing->request_fingerprint, $request->fingerprint())) {
+            throw CheckoutRejectedException::becauseIdempotencyKeyWasReused(
+                (string) $request->idempotencyKey,
+            );
+        }
     }
 
     private function findByIdempotencyKey(Customer $customer, ?string $key): ?Order
@@ -137,7 +166,22 @@ final readonly class PlaceOrder
         foreach ($ids as $id) {
             $plan = $plans->get($id);
 
-            if ($plan === null || ! $plan->is_active || $plan->product === null || ! $plan->product->is_active) {
+            /*
+             * The same predicate the catalogue uses to decide what is on sale —
+             * Plan::scopePurchasable(), applied to the plan and inherited from
+             * its product. Checking only is_active would leave every unlisted
+             * plan buyable by anyone who knows its id, which is precisely the
+             * set of plans that are priced for somebody else: a retired tier
+             * still held for legacy customers, an internal or staff plan, a
+             * negotiated rate. GET /catalog/plans/{plan} 404s all of them, and
+             * a checkout that accepts what the catalogue refuses to show is the
+             * catalogue's visibility rule being enforced in one place only.
+             */
+            if ($plan === null || ! $plan->is_active || ! $plan->is_public) {
+                throw CheckoutRejectedException::becausePlanIsUnavailable($id);
+            }
+
+            if ($plan->product === null || ! $plan->product->is_active || ! $plan->product->is_public) {
                 throw CheckoutRejectedException::becausePlanIsUnavailable($id);
             }
         }
@@ -152,6 +196,20 @@ final readonly class PlaceOrder
     private function buildPricingLines(Customer $customer, CheckoutRequest $request, Collection $plans): array
     {
         $lines = [];
+
+        /*
+         * Quantities already claimed by earlier lines of *this* basket.
+         *
+         * assertStock() counts what the database holds, and nothing in this
+         * basket is in the database yet. Without this accumulator a basket that
+         * names the same plan twice is checked twice against the same untouched
+         * count, and two lines of one each both pass a limit of one — which
+         * turns "one per customer" into "one per line" and oversells a plan
+         * whose stock_limit is the whole reason it is listed.
+         *
+         * @var array<string, int> $claimedInThisBasket
+         */
+        $claimedInThisBasket = [];
 
         foreach ($request->lines as $line) {
             if ($line->quantity < 1) {
@@ -171,7 +229,9 @@ final readonly class PlaceOrder
                 );
             }
 
-            $this->assertStock($customer, $plan, $line->quantity);
+            $claimedInThisBasket[$line->planId] = ($claimedInThisBasket[$line->planId] ?? 0) + $line->quantity;
+
+            $this->assertStock($customer, $plan, $claimedInThisBasket[$line->planId]);
 
             $lines[] = new PricingLine(
                 description: $plan->nameFor($customer->users()->first()?->locale ?? (string) config('app.locale')),
@@ -299,6 +359,7 @@ final readonly class PlaceOrder
                     'total_minor' => $priced->total->minorUnits(),
                     'coupon_id' => $coupon?->getKey(),
                     'idempotency_key' => $request->idempotencyKey,
+                    'request_fingerprint' => $request->idempotencyKey === null ? null : $request->fingerprint(),
                     'billing_snapshot' => $this->billingSnapshot($customer),
                     'notes' => $request->notes,
                 ]);

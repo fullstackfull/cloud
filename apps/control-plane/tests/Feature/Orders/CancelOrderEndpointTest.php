@@ -152,6 +152,60 @@ final class CancelOrderEndpointTest extends OrdersApiTestCase
     }
 
     #[Test]
+    public function an_order_under_review_before_capture_is_not_described_as_paid(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+
+        // PENDING_PAYMENT -> MANUAL_REVIEW is a risk check diverting an order
+        // before anybody's card is touched, so paid_at is null and no money has
+        // moved. OrderStatus::isPaid() answers true for the status all the
+        // same, and a refusal derived from it tells this customer their order
+        // has been paid and that cancelling it would be a refund — a statement
+        // about their money that is false, and one that sends them to request a
+        // refund of a payment that never happened.
+        $order = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::ManualReview,
+            'placed_at' => now(),
+            'paid_at' => null,
+        ]);
+
+        $this->actingAs($user)
+            ->postJson('/api/v1/orders/'.$order->id.'/cancel')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'order.not_cancellable');
+
+        // Still refused — the account under review does not close its own case.
+        $this->assertSame(OrderStatus::ManualReview, $order->fresh()->status);
+    }
+
+    #[Test]
+    public function the_paid_flag_reports_capture_and_not_the_status_name(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+
+        $underReview = Order::factory()->create([
+            'customer_id' => $customer->id,
+            'status' => OrderStatus::ManualReview,
+            'paid_at' => null,
+        ]);
+        $captured = Order::factory()->paid()->create(['customer_id' => $customer->id]);
+
+        // The flag and paid_at are the same fact, so a payload that says
+        // "is_paid": true beside "paid_at": null is contradicting itself.
+        $this->actingAs($user)
+            ->getJson('/api/v1/orders/'.$underReview->id)
+            ->assertOk()
+            ->assertJsonPath('data.is_paid', false)
+            ->assertJsonPath('data.paid_at', null);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/orders/'.$captured->id)
+            ->assertOk()
+            ->assertJsonPath('data.is_paid', true);
+    }
+
+    #[Test]
     public function another_customers_order_is_a_404_and_not_a_403(): void
     {
         [, $user] = $this->accountWithOwner();

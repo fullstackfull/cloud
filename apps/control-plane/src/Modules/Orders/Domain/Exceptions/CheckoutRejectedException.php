@@ -22,6 +22,15 @@ final class CheckoutRejectedException extends DomainException
      */
     private string $errorCode = 'checkout.rejected';
 
+    /*
+     * Almost every rejection here is 422 - the request was understood and the
+     * basket was not acceptable. A reused idempotency key is different: the
+     * request is perfectly valid and conflicts with one already recorded, which
+     * is what 409 means and what a client library needs to see to stop retrying
+     * the same key.
+     */
+    private int $httpStatus = 422;
+
     public static function becauseBasketIsEmpty(): self
     {
         return (new self('An order must contain at least one item.'))->as('checkout.empty_basket');
@@ -80,9 +89,31 @@ final class CheckoutRejectedException extends DomainException
         return $exception->as('checkout.invalid_quantity');
     }
 
+    public static function becauseIdempotencyKeyWasReused(string $key): self
+    {
+        $exception = new self(
+            'This idempotency key was already used for a different order. Retry with a new key.'
+        );
+        $exception->errorCode = 'checkout.idempotency_key_reused';
+        $exception->httpStatus = 409;
+
+        /*
+         * The key is echoed because the client sent it and already knows it.
+         * Nothing about the original order is: what somebody else - or the same
+         * customer in another tab - bought under that key is not this request's
+         * business.
+         */
+        return $exception->withContext(['idempotency_key' => $key]);
+    }
+
     public function errorCode(): string
     {
         return $this->errorCode;
+    }
+
+    public function httpStatus(): int
+    {
+        return $this->httpStatus;
     }
 
     private function as(string $code): self
