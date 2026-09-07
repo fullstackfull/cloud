@@ -58,8 +58,9 @@ recorded responses. None of them has spoken to the real thing.
 | Proxmox Backup Server | `BLOCKED_HARDWARE` | Ansible role only; see the gap below |
 | Monitoring stack deployment | `BLOCKED_HARDWARE` | Prometheus, Alloy and Grafana configuration committed, never deployed |
 | OpenTofu / Ansible execution | `BLOCKED_HARDWARE` | 15 roles, 11 playbooks, never run against a host |
-| PHPStan in CI | `BLOCKED_NETWORK` | Runs clean here by another route; see below |
-| GitHub Actions | not observed | The workflow has never been seen to execute |
+| PHPStan in CI | `RUNTIME_VERIFIED` | Passes in GitHub Actions; still `BLOCKED_NETWORK` for its install path *here* |
+| Scheduled work (renewals, dunning, backups) | `RUNTIME_VERIFIED` | Three sweeps, three commands, a schedule and a test that it is not empty |
+| GitHub Actions | `RUNTIME_VERIFIED` | Observed, diagnosed and fixed: six failed runs, then green (see below) |
 | DNS and reverse DNS — Cloudflare | `BLOCKED_CREDENTIALS` | Adapter, zone discovery and PTR capability detection written and tested against recorded responses |
 | Backups — Proxmox Backup Server | `BLOCKED_CREDENTIALS` | Adapter, state machine, API and reconciliation written and tested; no restore has been performed |
 | OpenAPI 3.1 description | `RUNTIME_VERIFIED` | Generated from the route table, validated by redocly, three gates that fail the build on drift |
@@ -129,7 +130,7 @@ and these are its actual outputs.
 ### Backend
 
 ```text
-php artisan test                        1753 tests, 41240 assertions, 0 failures
+php artisan test                        1797 tests, 41371 assertions, 0 failures
 ./vendor/bin/pint --test                PASS
 composer validate --strict              PASS  (./composer.json is valid)
 ```
@@ -207,6 +208,34 @@ build: it ran from the application root, where there is no `phpstan.neon`, so
 and stopped. It is fixed, and a test now checks that the invocation names a
 configuration file which exists.
 
+### GitHub Actions, observed
+
+The workflow had run six times and failed six times, and this pass is the first
+time anybody read the logs. Every failure was in the pipeline's own setup:
+
+```text
+run 1-6   composer install died in `artisan package:discover`: no .env on the
+          runner, so APP_ENV defaulted to production and the provider guard
+          refused. The suite, the migrations, the style check and PHPStan had
+          therefore never executed in CI at all.
+          composer audit ran without installing anything.
+          the analyser was invoked with no configuration, from a second
+          toolchain directory that had none to find.
+          the PHP 8.3 matrix entry could not install a single package: the lock
+          file pins Symfony 8, which needs PHP >= 8.4.1.
+          the browser job's readiness probe opened a session — which now lives
+          in PostgreSQL — against a database the suite had not yet migrated.
+
+run 9     backend 8.4/PG16, backend 8.4/PG18, static analysis, frontend,
+          API description, security checks, production guards, browser E2E:
+          all eight green — the first green run this repository has had.
+          https://github.com/fullstackfull/cloud/actions/runs/34139048572
+```
+
+The guard was also made to distinguish a chosen production environment from a
+defaulted one, so tooling no longer trips it; the static-analysis job passes
+without being told what environment it is in.
+
 ### CI gates, run exactly as CI runs them
 
 ```text
@@ -225,6 +254,23 @@ on a fresh checkout — added a third template that declares `fake` deliberately
 because a test run that reaches a real provider bills a real card or creates a
 real machine. The exclusion now names it, still by exact name, and the gate was
 re-verified against a planted violation, which it still fails.
+
+### A clean-room clone
+
+```text
+git clone --depth 1 --branch claude/hv-t6hq1p …
+composer install                      85 packages, no failures
+cp .env.testing.example .env.testing  + database credentials
+APP_ENV=testing php artisan test      1793 passed, 41363 assertions, 3m00s
+npm ci && npm run typecheck           PASS
+npm run test --workspace=apps/web     42 passed
+npm run build                         PASS
+```
+
+Two things a fresh clone needs that the example file cannot carry: the database
+password, and `APP_ENV=testing` — because `artisan test` boots the application
+before PHPUnit, and Laravel does not read `.env.testing` unless the environment
+says so. `make test-backend` now sets it; the clean-room run is what found that.
 
 ### What has been verified in a browser
 
