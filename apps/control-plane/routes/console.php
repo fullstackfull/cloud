@@ -49,6 +49,28 @@ Schedule::command('subscriptions:sweep')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
+/*
+ * Reconciliation fans out: this command only dispatches one job per cluster, so
+ * a hypervisor that is down delays nobody else and no single process holds a
+ * conversation with the whole estate. Read-only at every provider — drift is
+ * recorded and alerted on, never silently repaired.
+ */
+Schedule::command('infrastructure:reconcile')
+    ->everyThirtyMinutes()
+    ->withoutOverlapping(25)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * More often than reconciliation, because a stuck provisioning job is a
+ * customer waiting for a machine while nothing at all is happening.
+ */
+Schedule::command('provisioning:detect-stale')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
 Schedule::command('backups:reconcile')
     ->everyFiveMinutes()
     ->withoutOverlapping(10)

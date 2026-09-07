@@ -44,6 +44,7 @@ return [
         // is actively waiting for, so its tolerance is the tightest.
         'redis:provisioning' => 60,
         'redis:payments' => 60,
+        'redis:infrastructure' => 900,
         'redis:default' => 180,
     ],
 
@@ -123,6 +124,23 @@ return [
             'nice' => 0,
         ],
 
+        'supervisor-infrastructure' => [
+            'connection' => 'redis',
+            'queue' => ['infrastructure'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 192,
+            // Reconciliation talks to every node in a cluster in turn; a large
+            // estate takes minutes, and being killed halfway means a partial
+            // picture rather than none.
+            'timeout' => 1800,
+            'tries' => 1,
+            'nice' => 5,
+        ],
+
         'supervisor-default' => [
             'connection' => 'redis',
             'queue' => ['default'],
@@ -150,6 +168,11 @@ return [
                 'balanceMaxShift' => 2,
                 'balanceCooldown' => 5,
             ],
+            'supervisor-infrastructure' => [
+                'maxProcesses' => (int) env('HORIZON_INFRASTRUCTURE_PROCESSES', 2),
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 5,
+            ],
             'supervisor-default' => [
                 'maxProcesses' => (int) env('HORIZON_DEFAULT_PROCESSES', 3),
                 'balanceMaxShift' => 1,
@@ -160,12 +183,14 @@ return [
         'staging' => [
             'supervisor-provisioning' => ['maxProcesses' => 2],
             'supervisor-payments' => ['maxProcesses' => 2],
+            'supervisor-infrastructure' => ['maxProcesses' => 1],
             'supervisor-default' => ['maxProcesses' => 1],
         ],
 
         'local' => [
             'supervisor-provisioning' => ['maxProcesses' => 1],
             'supervisor-payments' => ['maxProcesses' => 1],
+            'supervisor-infrastructure' => ['maxProcesses' => 1],
             'supervisor-default' => ['maxProcesses' => 1],
         ],
     ],

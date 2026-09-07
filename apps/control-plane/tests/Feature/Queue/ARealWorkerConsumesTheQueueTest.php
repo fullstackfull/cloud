@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
+use Lynomia\Modules\Compute\Application\Jobs\ReconcileCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
@@ -60,6 +61,9 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
     /** @var list<string> */
     private array $customerIds = [];
 
+    /** @var list<string> */
+    private array $clusterIds = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -104,6 +108,10 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
     {
         foreach ($this->customerIds as $id) {
             Customer::on(self::CONNECTION)->whereKey($id)->forceDelete();
+        }
+
+        foreach ($this->clusterIds as $id) {
+            ComputeCluster::on(self::CONNECTION)->whereKey($id)->delete();
         }
 
         try {
@@ -218,7 +226,7 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
     /**
      * Runs a real worker until the queue is empty, and returns its output.
      */
-    private function runWorker(int $timeoutSeconds = 120): Process
+    private function runWorker(int $timeoutSeconds = 120, string $queue = self::QUEUE): Process
     {
         $worker = new Process(
             [
@@ -226,7 +234,7 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
                 'artisan',
                 'queue:work',
                 'redis',
-                '--queue='.self::QUEUE,
+                '--queue='.$queue,
                 '--stop-when-empty',
                 '--tries=1',
                 '--no-interaction',
@@ -320,5 +328,56 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
             DB::connection(self::CONNECTION)->table('virtual_machines')
                 ->where('service_id', $finished->service_id)->count(),
         );
+    }
+
+    #[Test]
+    public function the_scheduler_dispatches_work_that_a_worker_then_does(): void
+    {
+        /*
+         * The chain the platform depends on and had never run end to end:
+         * a scheduled command puts a job on Redis, the command returns, and a
+         * separate worker picks the job up and changes the database. Until this
+         * phase there was no scheduled command that dispatched anything at all.
+         */
+        $cluster = ComputeCluster::factory()->make(['status' => 'active']);
+        $cluster->setConnection(self::CONNECTION)->save();
+        $this->clusterIds[] = (string) $cluster->getKey();
+
+        $node = ComputeNode::factory()->withCapacity(8, 16_384, 500)->make([
+            'cluster_id' => $cluster->id,
+        ]);
+        $node->setConnection(self::CONNECTION)->save();
+
+        $this->artisan('infrastructure:reconcile', ['--cluster' => (string) $cluster->getKey()])
+            ->assertExitCode(0);
+
+        // Dispatched, not done: the scheduler's process has finished and the
+        // work is waiting for somebody else.
+        $this->assertSame(1, (int) Redis::connection()->llen('queues:'.ReconcileCluster::QUEUE));
+
+        $this->assertNull($cluster->fresh()->last_synced_at);
+
+        $worker = $this->runWorker(queue: ReconcileCluster::QUEUE);
+
+        $this->assertTrue($worker->isSuccessful(), $worker->getErrorOutput().$worker->getOutput());
+
+        $this->assertNotNull(
+            ComputeCluster::on(self::CONNECTION)->findOrFail($cluster->getKey())->last_synced_at,
+            'A worker consumed the reconciliation job but the cluster was never marked as synced: '
+            .$worker->getOutput(),
+        );
+
+        // The node the fake hypervisor reports is discovered, and — because
+        // discovery is not authorisation — parked in maintenance rather than
+        // opened for placement.
+        $discovered = ComputeNode::on(self::CONNECTION)
+            ->where('cluster_id', $cluster->getKey())
+            ->whereKeyNot($node->getKey())
+            ->get();
+
+        $this->assertNotEmpty($discovered, 'The reconciliation pass recorded no hardware at all.');
+        $this->assertSame(['maintenance'], $discovered->pluck('status')->map(fn ($s) => $s->value)->unique()->all());
+
+        $this->assertSame(0, (int) Redis::connection()->llen('queues:'.ReconcileCluster::QUEUE));
     }
 }
