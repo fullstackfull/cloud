@@ -16,7 +16,11 @@
     "theme": "Theme",
     "yes": "Yes",
     "no": "No",
-    "close": "Close"
+    "close": "Close",
+    "previous": "Previous",
+    "next": "Next",
+    "pagination": "Pagination",
+    "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -36,7 +40,12 @@
     "notifications": "Notifications",
     "apiKeys": "API Keys",
     "profile": "Profile",
-    "security": "Security"
+    "security": "Security",
+    "primary": "Main navigation",
+    "more": "More",
+    "catalogue": "Catalogue",
+    "orders": "Orders",
+    "subscriptions": "Subscriptions"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -90,7 +99,22 @@
     "failed": "Failed",
     "suspended": "Suspended",
     "active": "Active",
-    "pending": "Pending"
+    "pending": "Pending",
+    "draft": "Draft",
+    "open": "Open",
+    "paid": "Paid",
+    "void": "Void",
+    "past_due": "Past due",
+    "pending_payment": "Awaiting payment",
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "terminated": "Terminated",
+    "on": "On",
+    "off": "Off",
+    "unknown": "Unknown",
+    "removing": "Removing",
+    "revoked": "Revoked",
+    "succeeded": "Succeeded"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -165,5 +189,160 @@
       "password_reset": "Password reset",
       "failed_password_confirmation": "Password guess in session"
     }
+  },
+  "catalogue": {
+    "subtitle": "What you can buy, priced in your account's currency.",
+    "filterByKind": "Filter by product kind",
+    "allKinds": "Everything",
+    "kinds": {
+      "vps": "Cloud VPS",
+      "dedicated": "Dedicated servers",
+      "shared_hosting": "Shared hosting"
+    },
+    "viewPlans": "View plans",
+    "empty": "Nothing is on sale in this category yet.",
+    "noPriceInCurrency": "Not priced in your account's currency.",
+    "checkoutTitle": "Place an order",
+    "quantity": "Quantity",
+    "couponCode": "Coupon code",
+    "couponHint": "Optional. Applied when the order is placed, consumed when it is paid.",
+    "placeOrder": "Place order",
+    "priceIsServerSide": "The price is resolved on the server from the plan you chose. Nothing on this page can change it.",
+    "planCount_one": "{{count}} plan available",
+    "planCount_other": "{{count}} plans available"
+  },
+  "billingPeriod": {
+    "hourly": "hourly",
+    "daily": "daily",
+    "monthly": "monthly",
+    "quarterly": "quarterly",
+    "yearly": "yearly"
+  },
+  "resources": {
+    "vcpu": "vCPU",
+    "memory_mib": "Memory (MiB)",
+    "disk_gib": "Disk (GiB)",
+    "bandwidth_tib": "Transfer (TiB)",
+    "ipv4_count": "IPv4 addresses",
+    "ipv6_count": "IPv6 addresses",
+    "disk_quota_mib": "Disk (MiB)",
+    "bandwidth_quota_mib": "Transfer (MiB)",
+    "max_addon_domains": "Add-on domains",
+    "max_databases": "Databases",
+    "max_email_accounts": "Mailboxes",
+    "hardware_profile": "Hardware",
+    "cpu_cores": "CPU cores",
+    "uplink_gbps": "Uplink (Gbps)",
+    "chassis": "Chassis"
+  },
+  "orders": {
+    "subtitle": "Everything you have ordered.",
+    "number": "Number",
+    "status": "Status",
+    "total": "Total",
+    "placed": "Placed",
+    "empty": "No orders yet.",
+    "detailTitle": "Order {{number}}",
+    "items": "Items",
+    "summary": "Summary",
+    "subtotal": "Subtotal",
+    "discount": "Discount",
+    "tax": "Tax",
+    "cancel": "Cancel order"
+  },
+  "invoices": {
+    "subtitle": "Issued invoices and what is still owed.",
+    "number": "Number",
+    "status": "Status",
+    "total": "Total",
+    "amountDue": "Due",
+    "dueAt": "Due by",
+    "pay": "Pay",
+    "empty": "No invoices yet."
+  },
+  "subscriptions": {
+    "subtitle": "What renews, and when.",
+    "status": "Status",
+    "recurring": "Amount",
+    "renews": "Renews",
+    "endsOn": "Ends {{date}}",
+    "cancel": "Cancel",
+    "empty": "No subscriptions."
+  },
+  "services": {
+    "subtitle": "Everything running on your account.",
+    "label": "Service",
+    "kind": "Kind",
+    "state": "State",
+    "activated": "Since",
+    "unnamed": "Unnamed service",
+    "empty": "Nothing is running yet."
+  },
+  "vps": {
+    "subtitle": "Your virtual machines.",
+    "hostname": "Hostname",
+    "spec": "Specification",
+    "address": "Address",
+    "power": "Power",
+    "empty": "No virtual machines.",
+    "actions": {
+      "start": "Start",
+      "shutdown": "Shut down",
+      "stop": "Force off",
+      "reboot": "Reboot"
+    }
+  },
+  "dedicated": {
+    "subtitle": "Your physical machines.",
+    "machine": "Machine",
+    "status": "Status",
+    "power": "Power",
+    "since": "Since",
+    "empty": "No dedicated servers.",
+    "actions": {
+      "on": "Power on",
+      "off": "Force off",
+      "cycle": "Power cycle"
+    }
+  },
+  "hosting": {
+    "subtitle": "Your hosting accounts.",
+    "domain": "Domain",
+    "status": "Status",
+    "package": "Package",
+    "openPanel": "Open panel",
+    "empty": "No hosting accounts."
+  },
+  "ips": {
+    "subtitle": "Addresses assigned to your services.",
+    "address": "Address",
+    "primary": "primary",
+    "reverseDns": "Reverse DNS",
+    "setReverseDns": "Set reverse DNS",
+    "hostname": "Hostname",
+    "reverseDnsHint": "Published out of band. The change is queued, not immediate.",
+    "empty": "No addresses assigned."
+  },
+  "wallet": {
+    "subtitle": "Stored credit on your account.",
+    "balance": "Balance",
+    "updated": "Updated {{when}}",
+    "none": "No wallet yet.",
+    "howItFills": "Credit arrives when a payment exceeds what was owed, or when support adds it. You cannot top it up directly."
+  },
+  "tokens": {
+    "subtitle": "Credentials for the API, bound to this account.",
+    "createTitle": "Create a token",
+    "createSubtitle": "Shown once, when it is created.",
+    "name": "Name",
+    "create": "Create token",
+    "existing": "Your tokens",
+    "status": "Status",
+    "lastUsed": "Last used",
+    "neverUsed": "Never used",
+    "revoke": "Revoke",
+    "empty": "No tokens.",
+    "copyItNow": "Copy this token now",
+    "shownOnce": "This is the only time it is shown. It cannot be retrieved again."
   }
 }

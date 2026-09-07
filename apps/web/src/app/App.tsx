@@ -4,6 +4,19 @@ import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { DashboardPage } from '@/features/account/DashboardPage'
+import { InvoicesPage } from '@/features/billing/InvoicesPage'
+import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
+import { CataloguePage } from '@/features/catalog/CataloguePage'
+import { ProductPage } from '@/features/catalog/ProductPage'
+import { DedicatedPage } from '@/features/infrastructure/DedicatedPage'
+import { HostingPage } from '@/features/infrastructure/HostingPage'
+import { IpAddressesPage } from '@/features/infrastructure/IpAddressesPage'
+import { VpsPage } from '@/features/infrastructure/VpsPage'
+import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
+import { OrdersPage } from '@/features/orders/OrdersPage'
+import { ServicesPage } from '@/features/services/ServicesPage'
+import { ApiTokensPage } from '@/features/tokens/ApiTokensPage'
+import { WalletPage } from '@/features/wallet/WalletPage'
 import { ProfilePage } from '@/features/account/ProfilePage'
 import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
@@ -61,8 +74,25 @@ export function App() {
             <Route element={<RequireAuth />}>
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
+
+                <Route path="/catalogue" element={<CataloguePage />} />
+                <Route path="/catalogue/:slug" element={<ProductPage />} />
+
+                <Route path="/orders" element={<OrdersPage />} />
+                <Route path="/orders/:id" element={<OrderDetailPage />} />
+                <Route path="/invoices" element={<InvoicesPage />} />
+                <Route path="/subscriptions" element={<SubscriptionsPage />} />
+                <Route path="/wallet" element={<WalletPage />} />
+
+                <Route path="/services" element={<ServicesPage />} />
+                <Route path="/vps" element={<VpsPage />} />
+                <Route path="/dedicated" element={<DedicatedPage />} />
+                <Route path="/hosting" element={<HostingPage />} />
+                <Route path="/ips" element={<IpAddressesPage />} />
+
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />
+                <Route path="/api-tokens" element={<ApiTokensPage />} />
               </Route>
             </Route>
 

@@ -11,7 +11,11 @@ The customer-facing single-page application in `apps/web`.
 | Dashboard: billing accounts, security posture | built |
 | Profile: name, language, time zone, phone | built |
 | Security: second factor, password, signed-in devices, sign-in history | built |
-| Catalogue, checkout, orders, invoices, services, VPS, dedicated, hosting | **not built** — the API does not serve them yet, see `docs/api.md` |
+| Catalogue and checkout | built |
+| Orders, invoices, subscriptions, wallet | built |
+| Services, VPS with power control, dedicated servers, hosting accounts, IP addresses with reverse DNS | built |
+| API tokens | built |
+| VPS reinstall and console, hosting usage detail, invoice documents | **not built** — the endpoints exist for some of these; the screens do not |
 | Administrative interface | **not built** |
 
 The navigation lists only what is reachable. A link to a page that does not
@@ -120,6 +124,11 @@ not throw:
 - **Routing** — that the guards actually gate. Both directions: a signed-out
   visitor cannot reach the security page, and a signed-in one is not shown the
   sign-in form.
+
+- **Plural forms** — English needs two and Arabic needs six, and i18next picks
+  between them by key suffix. A pluralised key carrying only `_other` in Arabic
+  renders "2 خطة" where the language wants "خطتان": grammatically wrong, and
+  invisible to anyone reading the English side. The test requires all six.
 
 There is no browser end-to-end suite. When one is added it will be reported
 here; until then, no part of this repository claims to have run one.

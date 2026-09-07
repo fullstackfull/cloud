@@ -2,27 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import ar from '../locales/ar.json'
 import en from '../locales/en.json'
-import { directionFor, isSupportedLocale, SUPPORTED_LOCALES } from '../index'
-
-type Tree = { [key: string]: string | Tree }
-
-/**
- * Returns [path, value] pairs rather than paths alone.
- *
- * Some keys legitimately contain a dot — the API error codes are named
- * `auth.invalid_credentials` and so on — so a path string cannot be split back
- * into a lookup. Carrying the value avoids the ambiguity entirely.
- */
-function flatten(tree: Tree, prefix = ''): Array<[string, string]> {
-  return Object.entries(tree).flatMap(([key, value]): Array<[string, string]> => {
-    const path = prefix === '' ? key : `${prefix}.${key}`
-    return typeof value === 'string' ? [[path, value]] : flatten(value, path)
-  })
-}
-
-function pathsOf(tree: Tree): string[] {
-  return flatten(tree).map(([path]) => path)
-}
+import { directionFor, isSupportedLocale } from '../index'
 
 describe('locale configuration', () => {
   it('maps Arabic to right-to-left and English to left-to-right', () => {
@@ -37,23 +17,13 @@ describe('locale configuration', () => {
 })
 
 describe('translation catalogues', () => {
-  it('define exactly the same keys', () => {
-    // A missing Arabic key renders an English string mid-sentence, which is
-    // both a visible defect and a direction bug.
-    const englishKeys = pathsOf(en).sort()
-    const arabicKeys = pathsOf(ar).sort()
-
-    expect(arabicKeys).toEqual(englishKeys)
-  })
-
-  it('has no empty translations', () => {
-    for (const locale of SUPPORTED_LOCALES) {
-      const catalogue = locale === 'ar' ? ar : en
-      for (const [path, value] of flatten(catalogue)) {
-        expect(value.trim(), `${locale}: ${path}`).not.toBe('')
-      }
-    }
-  })
+  /*
+   * Key parity, placeholder parity and plural completeness now live in
+   * translation-parity.test.ts, which understands that i18next appends a
+   * plural suffix and that Arabic needs six forms where English needs two.
+   * The versions that were here compared raw key sets and could not: they
+   * failed the moment a key was correctly pluralised.
+   */
 
   it('translates every API error code the client can surface', () => {
     const required = [

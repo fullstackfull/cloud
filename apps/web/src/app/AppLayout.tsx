@@ -22,6 +22,27 @@ interface NavItem {
  */
 const NAV: NavItem[] = [
   { to: '/', labelKey: 'nav.dashboard' },
+  { to: '/catalogue', labelKey: 'nav.catalogue' },
+  { to: '/services', labelKey: 'nav.services' },
+  { to: '/invoices', labelKey: 'nav.invoices' },
+]
+
+/**
+ * Everything else, behind the account menu.
+ *
+ * The top bar holds what a customer opens most; a bar with fourteen items in it
+ * is a bar nobody reads. These are still one click away and still in the
+ * navigation landmark, so nothing is hidden from a screen reader.
+ */
+const SECONDARY_NAV: NavItem[] = [
+  { to: '/orders', labelKey: 'nav.orders' },
+  { to: '/subscriptions', labelKey: 'nav.subscriptions' },
+  { to: '/wallet', labelKey: 'nav.wallet' },
+  { to: '/vps', labelKey: 'nav.vps' },
+  { to: '/dedicated', labelKey: 'nav.dedicated' },
+  { to: '/hosting', labelKey: 'nav.hosting' },
+  { to: '/ips', labelKey: 'nav.ips' },
+  { to: '/api-tokens', labelKey: 'nav.apiKeys' },
   { to: '/profile', labelKey: 'nav.profile' },
   { to: '/security', labelKey: 'nav.security' },
 ]
@@ -44,10 +65,21 @@ export function AppLayout() {
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
           <span className="font-semibold text-[var(--text-primary)]">{t('common.appName')}</span>
 
-          <nav className="hidden flex-1 items-center gap-1 sm:flex" aria-label={t('nav.dashboard')}>
+          <nav className="hidden flex-1 items-center gap-1 sm:flex" aria-label={t('nav.primary')}>
             {NAV.map((item) => (
               <NavItemLink key={item.to} item={item} />
             ))}
+
+            <details className="relative ms-1">
+              <summary className="cursor-pointer list-none rounded-md px-3 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+                {t('nav.more')}
+              </summary>
+              <div className="absolute z-20 mt-1 flex w-56 flex-col gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-lg">
+                {SECONDARY_NAV.map((item) => (
+                  <NavItemLink key={item.to} item={item} />
+                ))}
+              </div>
+            </details>
           </nav>
 
           <div className="ms-auto flex items-center gap-2 sm:ms-0">
