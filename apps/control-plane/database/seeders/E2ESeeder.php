@@ -6,14 +6,15 @@ namespace Database\Seeders;
 
 use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
-use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use RuntimeException;
@@ -45,6 +46,16 @@ class E2ESeeder extends Seeder
     /** One that is settled, so the two states can be told apart on screen. */
     public const string PAID_INVOICE_NUMBER = 'INV-E2E-0002';
 
+    /**
+     * A staff login holding billing authority and nothing else.
+     *
+     * DevelopmentSeeder's operator is a super admin, which can prove that an
+     * admin screen renders but can prove nothing about a boundary: every check
+     * passes for it. The permission boundary is only observable from a login
+     * that holds one half of the platform and not the other.
+     */
+    public const string BILLING_ADMIN_EMAIL = 'billing@lynomia.local';
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -58,9 +69,10 @@ class E2ESeeder extends Seeder
         $this->virtualMachine($customer);
         $this->invoices($customer);
         $this->wallet($customer);
+        $this->billingAdmin();
 
         $this->announce(sprintf(
-            'E2E fixtures seeded: machine %s, invoices %s and %s.',
+            'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
             self::VPS_HOSTNAME,
             self::OPEN_INVOICE_NUMBER,
             self::PAID_INVOICE_NUMBER,
@@ -91,9 +103,12 @@ class E2ESeeder extends Seeder
                 'os_version' => '12',
             ]);
 
-        // One of each state the backups screen has to render differently: a
-        // finished one the customer could restore from, and one that stopped
-        // being trackable and is waiting for a person.
+        // One of each state the backups API reports differently: a finished one
+        // the customer could restore from, and one that stopped being trackable
+        // and is waiting for a person. No portal screen reads either yet — see
+        // docs/build-status.md — so these are asserted at the API level, and are
+        // seeded here so that the screen, when it exists, has both states to
+        // render from the first run.
         Backup::factory()->succeeded()->create([
             'customer_id' => $customer->getKey(),
             'service_id' => $service->getKey(),
@@ -111,6 +126,28 @@ class E2ESeeder extends Seeder
             'node_name' => 'e2e-node',
             'datastore' => 'e2e-datastore',
         ]);
+    }
+
+    /**
+     * A Billing Admin, for the boundary specs.
+     *
+     * The role is granted by name and its permissions come from the role's own
+     * default set, so this fixture cannot drift from the platform's idea of
+     * what a Billing Admin may do — which is the thing under test.
+     */
+    private function billingAdmin(): void
+    {
+        $user = User::firstOrCreate(
+            ['email' => self::BILLING_ADMIN_EMAIL],
+            [
+                'name' => 'Billing Administrator',
+                'password' => 'password',
+                'email_verified_at' => now(),
+                'password_changed_at' => now(),
+            ],
+        );
+
+        $user->syncRoles([Role::BillingAdmin->value]);
     }
 
     private function invoices(Customer $customer): void

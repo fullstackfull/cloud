@@ -10,6 +10,9 @@ import { expect, type Page } from '@playwright/test'
 export const users = {
   customer: { email: 'customer@lynomia.local', password: 'password' },
   operator: { email: 'admin@lynomia.local', password: 'password' },
+  // Billing authority and nothing else — the login the boundary specs need,
+  // since every check passes for a super admin.
+  billingAdmin: { email: 'billing@lynomia.local', password: 'password' },
   noc: { email: 'noc@lynomia.local', password: 'password' },
 } as const
 
