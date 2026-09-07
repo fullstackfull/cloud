@@ -67,6 +67,25 @@ test('the services list shows the seeded VPS', async ({ page }) => {
   await expect(page.getByText(new RegExp(fixtures.vpsHostname, 'i'))).toBeVisible()
 })
 
+test('the subscriptions screen tells a renewal apart from a cancellation', async ({ page }) => {
+  /*
+   * The seeder writes two subscriptions on purpose. The renewal date and the
+   * cancellation date come from the same pair of columns, so a screen that
+   * showed only one of them would look perfectly correct against a fixture
+   * that only had one.
+   */
+  await page.goto('/subscriptions')
+
+  await expect(page.getByText(/KWD/).first()).toBeVisible()
+
+  // One is renewing and offers a way out; the other has already been
+  // cancelled, and offering to cancel it again would be a button that does
+  // nothing.
+  await expect(page.getByRole('button', { name: /cancel/i })).toHaveCount(1)
+  // "Ends <date>", the string the cancelled row actually renders.
+  await expect(page.getByText(/^Ends /i)).toBeVisible()
+})
+
 test('the VPS list shows the machine and its address', async ({ page }) => {
   await page.goto('/vps')
 

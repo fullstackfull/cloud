@@ -52,7 +52,7 @@ names the test that proves it.
 
 | Capability | Portal | API | Status | Proven by |
 | --- | --- | --- | --- | --- |
-| See subscriptions and when they renew | `/subscriptions` | `GET /subscriptions` | `CODE_COMPLETE` | Endpoint and screen both exist; no browser spec yet |
+| See subscriptions and when they renew | `/subscriptions` | `GET /subscriptions` | `RUNTIME_VERIFIED` | `e2e/portal.e2e.ts` — a renewing subscription and a cancelled one, told apart |
 | Cancel a subscription | `/subscriptions` | `POST /subscriptions/{subscription}/cancel` | `TESTED` | `CancelSubscriptionTest`, `SweepSubscriptionLifecycleTest` |
 | Change plan mid-cycle | — | `POST /subscriptions/{subscription}/plan` | `CODE_COMPLETE` | `ChangeSubscriptionPlanTest` proves the proration. **No portal screen** — a customer must use the API. |
 | Be renewed automatically | — | — | `TESTED` | `RenewDueSubscriptionsTest` + `subscriptions:renew` on the scheduler |

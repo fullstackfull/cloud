@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use Carbon\CarbonImmutable;
 use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -16,6 +20,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use RuntimeException;
 
@@ -56,6 +61,9 @@ class E2ESeeder extends Seeder
      */
     public const string BILLING_ADMIN_EMAIL = 'billing@lynomia.local';
 
+    /** 9.000 KWD — three minor digits, as the currency requires. */
+    public const int SUBSCRIPTION_AMOUNT_MINOR = 9_000;
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -67,6 +75,7 @@ class E2ESeeder extends Seeder
         $customer = Customer::query()->where('billing_email', 'customer@lynomia.local')->firstOrFail();
 
         $this->virtualMachine($customer);
+        $this->subscriptions($customer);
         $this->invoices($customer);
         $this->wallet($customer);
         $this->billingAdmin();
@@ -134,6 +143,44 @@ class E2ESeeder extends Seeder
      * default set, so this fixture cannot drift from the platform's idea of
      * what a Billing Admin may do — which is the thing under test.
      */
+    /**
+     * Two subscriptions, because one renewing and one ending are the two
+     * things the screen has to tell apart.
+     *
+     * The renewal date and the cancellation date read from the same column
+     * pair, and a screen showing only one of them looks correct on a fixture
+     * that only has one. This gives the browser suite both to distinguish.
+     */
+    private function subscriptions(Customer $customer): void
+    {
+        if (Subscription::query()->where('customer_id', $customer->getKey())->exists()) {
+            return;
+        }
+
+        $plan = Plan::query()->orderBy('created_at')->firstOrFail();
+
+        Subscription::factory()
+            ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
+            ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
+            ->create([
+                'customer_id' => $customer->getKey(),
+                'plan_id' => $plan->getKey(),
+                'status' => SubscriptionStatus::Active,
+            ]);
+
+        Subscription::factory()
+            ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
+            ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
+            ->create([
+                'customer_id' => $customer->getKey(),
+                'plan_id' => $plan->getKey(),
+                'status' => SubscriptionStatus::Active,
+                // Cancelled at the end of the period the customer has already
+                // paid for, which is what "ends on" means on the screen.
+                'cancel_at' => CarbonImmutable::now()->endOfMonth(),
+            ]);
+    }
+
     private function billingAdmin(): void
     {
         $user = User::firstOrCreate(

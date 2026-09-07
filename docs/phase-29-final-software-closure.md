@@ -13,7 +13,7 @@ creating a VPS — could reach a worker that would do it.
 - **Date:** 2026-09-07
 - **Baseline:** `docs/phase-29-baseline.md`
 - **Backend suite:** 1875 tests, 42,000+ assertions
-- **Frontend:** 45 unit tests, 39 browser tests
+- **Frontend:** 45 unit tests, 40 browser tests
 - **CI:** run #21 on `claude/hv-t6hq1p`, all eight jobs green — PHP 8.4 against
   PostgreSQL 16 **and** 18, browser end-to-end, PHPStan level 6, Pint, security
   audit, OpenAPI validation, production guards.
@@ -114,7 +114,7 @@ Each was verified to bite by removing the fix and watching the test fail.
 | # | Gap | Status |
 | --- | --- | --- |
 | 1 | Customer backups screen does not exist | **Closed.** `/backups`, with restore behind a typed confirmation. 9 API tests, 3 component tests, 3 browser specs. |
-| 2 | Subscription / renewal screen does not exist | **Closed for viewing and cancelling** (the screen existed by this phase); plan change is API-only and reported as such. |
+| 2 | Subscription / renewal screen does not exist | **Closed for viewing and cancelling.** The screen existed by this phase but had never been driven with data — the E2E seeder wrote no subscription, so it had only ever rendered its empty state. It now seeds a renewing one and a cancelled one, because both dates come from the same pair of columns and a fixture with one of them makes a half-built screen look correct. Plan change remains API-only and is reported as such. |
 | 3 | Zero-total orders become PAID but never fulfil | **Closed** by the `OrderFinanciallySettled` domain concept — a settlement basis of `NoPaymentRequired`, with no fake payment record, no fake Stripe event and no zero-value transaction. |
 | 4 | Reconciliation/drift actions with no execution path | **Closed**, and the audit that closed it found eight more. |
 | 5 | Queue processing never proven with a real worker | **Closed.** Scheduler → Redis → separate `queue:work` → database, plus provider refusal and SIGKILL mid-build. |
@@ -130,7 +130,7 @@ Proven against a real running system, not a fake:
 | Two deliveries of one job build one machine | `two_deliveries_build_one_machine` |
 | Provider refusal → recorded, rescheduled with backoff, nothing built, no `failed_jobs` row | `a_provider_refusal_is_recorded_and_rescheduled_rather_than_lost` |
 | Worker SIGKILLed mid-build → a second worker builds nothing | `a_worker_killed_mid_build_does_not_produce_a_second_machine` |
-| The portal, in Chromium, in both languages and both colour schemes | 39 browser specs |
+| The portal, in Chromium, in both languages and both colour schemes | 40 browser specs |
 
 `QUEUE_CONNECTION=sync` was not used for any of the above. The queue tests run
 a real `php artisan queue:work` subprocess against an isolated Redis database.
