@@ -3,7 +3,13 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # Feature branches too, not only main. CI that runs solely on a pull request
+    # is CI that first reports a week of work as broken; and a branch that is
+    # pushed but never opened as a PR — which is how this repository has been
+    # worked — was never built at all.
+    branches: [main, 'claude/**']
+  # So a run can be asked for without opening a pull request.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
