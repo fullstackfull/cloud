@@ -433,6 +433,34 @@ export function useDedicatedPower() {
   })
 }
 
+export interface DedicatedReinstallRequest {
+  id: string
+  confirm_serial: string
+  idempotency_key: string
+}
+
+/**
+ * Rebuild a physical machine.
+ *
+ * The serial is sent as typed. The server compares it against the machine's
+ * own serial and refuses a mismatch; this client does not pre-check it,
+ * because a check that lives only here is one an operator script skips.
+ */
+export function useDedicatedReinstall() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, confirm_serial, idempotency_key }: DedicatedReinstallRequest) =>
+      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/reinstall`, {
+        confirm_serial,
+        idempotency_key,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dedicated'] })
+    },
+  })
+}
+
 /* ---------------------------------------------------------------- hosting */
 
 export function useHostingAccounts(pageNumber = 1) {

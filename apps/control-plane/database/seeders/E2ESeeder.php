@@ -14,7 +14,11 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
+use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
@@ -47,6 +51,9 @@ class E2ESeeder extends Seeder
     /** The machine the VPS specs open. */
     public const string VPS_HOSTNAME = 'e2e-web-01';
 
+    /** The physical machine the dedicated specs open. */
+    public const string DEDICATED_SERIAL = 'E2E-SN-000117';
+
     /** An invoice that is payable, so the pay button has something to do. */
     public const string OPEN_INVOICE_NUMBER = 'INV-E2E-0001';
 
@@ -77,6 +84,7 @@ class E2ESeeder extends Seeder
         $customer = Customer::query()->where('billing_email', 'customer@lynomia.local')->firstOrFail();
 
         $this->virtualMachine($customer);
+        $this->dedicatedServer($customer);
         $this->subscriptions($customer);
         $this->notifications($customer);
         $this->invoices($customer);
@@ -154,6 +162,39 @@ class E2ESeeder extends Seeder
      * pair, and a screen showing only one of them looks correct on a fixture
      * that only has one. This gives the browser suite both to distinguish.
      */
+    /**
+     * One physical machine, delivered and running.
+     *
+     * Present so the browser suite can exercise the rebuild confirmation on a
+     * dedicated server — a different screen, a different identifier to type
+     * and a different warning from the VPS one, and each of those is a place
+     * the wrong copy could ship.
+     */
+    private function dedicatedServer(Customer $customer): void
+    {
+        if (DedicatedServer::query()->where('serial', self::DEDICATED_SERIAL)->exists()) {
+            return;
+        }
+
+        $datacenter = Datacenter::query()->orderBy('created_at')->first() ?? Datacenter::factory()->create();
+
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'kind' => 'dedicated',
+            'label' => 'Dedicated — '.self::DEDICATED_SERIAL,
+        ]);
+
+        DedicatedServer::factory()
+            ->inDatacenter($datacenter)
+            ->create([
+                'serial' => self::DEDICATED_SERIAL,
+                'status' => DedicatedServerStatus::Active,
+                'power_state' => PowerState::On,
+                'customer_id' => $customer->getKey(),
+                'service_id' => $service->getKey(),
+            ]);
+    }
+
     private function subscriptions(Customer $customer): void
     {
         if (Subscription::query()->where('customer_id', $customer->getKey())->exists()) {

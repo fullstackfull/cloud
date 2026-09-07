@@ -73,6 +73,26 @@ final class DedicatedServerStateMachine extends AbstractStateMachine
             ],
 
             DedicatedServerStatus::Active->value => [
+                // The customer asked for their own machine to be rebuilt. It
+                // stays theirs throughout, which is why this is not a return
+                // to `provisioning`.
+                DedicatedServerStatus::Reinstalling,
+                DedicatedServerStatus::Maintenance,
+                DedicatedServerStatus::Failed,
+                DedicatedServerStatus::Retired,
+            ],
+
+            DedicatedServerStatus::Reinstalling->value => [
+                DedicatedServerStatus::Active,
+                /*
+                 * Not to `available`, ever, and for the same reason
+                 * `provisioning` has no such edge: a machine whose rebuild
+                 * went wrong may be carrying a half-written filesystem, and
+                 * the one irreversible mistake available here is handing it to
+                 * the next customer. An operator clears it through `failed` or
+                 * `maintenance`, which is the step that makes somebody look at
+                 * the disks.
+                 */
                 DedicatedServerStatus::Maintenance,
                 DedicatedServerStatus::Failed,
                 DedicatedServerStatus::Retired,

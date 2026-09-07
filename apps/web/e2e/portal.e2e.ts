@@ -262,3 +262,35 @@ test('escape closes the reinstall dialogue without rebuilding anything', async (
   // And nothing was queued: the rebuild column still shows no operation.
   await expect(page.getByText(/replacing the disk/i)).toHaveCount(0)
 })
+
+test('the dedicated rebuild dialogue warns about the operating system and needs the serial typed', async ({ page }) => {
+  /*
+   * A different screen, a different identifier and a different warning from
+   * the VPS one — each of which is a place the wrong copy could ship, and the
+   * warning is the only thing standing between a customer and an erased
+   * physical machine.
+   */
+  await page.goto('/dedicated')
+
+  await page.getByRole('button', { name: /^reinstall$/i }).first().click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  await expect(
+    dialog.getByText(
+      /reinstalling this server will erase the installed operating system and may permanently destroy data on the machine\./i,
+    ),
+  ).toBeVisible()
+
+  const confirm = dialog.getByRole('button', { name: /reinstall this server/i })
+  await expect(confirm).toBeDisabled()
+
+  // The hostname of the customer's *other* machine is not this machine's
+  // serial, and a confirmation that accepted it would be no confirmation.
+  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await expect(confirm).toBeDisabled()
+
+  await dialog.getByRole('textbox').fill(fixtures.dedicatedSerial)
+  await expect(confirm).toBeEnabled()
+})

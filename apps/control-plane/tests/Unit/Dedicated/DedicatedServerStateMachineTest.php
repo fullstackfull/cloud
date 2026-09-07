@@ -135,15 +135,52 @@ final class DedicatedServerStateMachineTest extends TestCase
     }
 
     #[Test]
-    public function only_a_provisioning_machine_may_be_network_installed(): void
+    public function a_network_install_is_legal_in_exactly_two_states(): void
     {
+        /*
+         * Building a machine nobody has taken delivery of, and rebuilding one
+         * at its owner's request. Nothing else, and the sweep is over the
+         * whole enum so that a status added later has to be considered here
+         * rather than inheriting an answer.
+         *
+         * `active` is the one that matters: PXE on a running customer server
+         * is that server erased. A rebuild reaches `reinstalling` only by way
+         * of a typed serial number, which is why the second door exists at all.
+         */
+        $allowed = [DedicatedServerStatus::Provisioning, DedicatedServerStatus::Reinstalling];
+
         foreach (DedicatedServerStatus::cases() as $status) {
             $this->assertSame(
-                $status === DedicatedServerStatus::Provisioning,
+                in_array($status, $allowed, strict: true),
                 $status->permitsNetworkInstall(),
-                sprintf('"%s" must not permit a network install.', $status->value),
+                sprintf('"%s" permits a network install and should not.', $status->value),
             );
         }
+
+        $this->assertFalse(DedicatedServerStatus::Active->permitsNetworkInstall());
+    }
+
+    #[Test]
+    public function a_rebuild_starts_from_active_and_never_ends_in_stock(): void
+    {
+        // The customer's own machine, so the route in is from active — and the
+        // route out never goes straight to available, for the same reason an
+        // unfinished install does not: the disks may be half written.
+        $this->assertTrue($this->machine->canTransition(DedicatedServerStatus::Active, DedicatedServerStatus::Reinstalling));
+
+        $this->assertFalse($this->machine->canTransition(DedicatedServerStatus::Reinstalling, DedicatedServerStatus::Available));
+        $this->assertTrue($this->machine->canTransition(DedicatedServerStatus::Reinstalling, DedicatedServerStatus::Active));
+        $this->assertTrue($this->machine->canTransition(DedicatedServerStatus::Reinstalling, DedicatedServerStatus::Maintenance));
+        $this->assertTrue($this->machine->canTransition(DedicatedServerStatus::Reinstalling, DedicatedServerStatus::Failed));
+    }
+
+    #[Test]
+    public function a_machine_being_rebuilt_is_not_sellable(): void
+    {
+        // It belongs to somebody. Counting it as stock would sell one machine
+        // twice.
+        $this->assertFalse(DedicatedServerStatus::Reinstalling->isAllocatable());
+        $this->assertTrue(DedicatedServerStatus::Reinstalling->isCustomerHeld());
     }
 
     #[Test]

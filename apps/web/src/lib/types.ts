@@ -228,6 +228,22 @@ export interface DedicatedServer {
   is_powered_on: boolean
   service_id: string | null
   activated_at?: string | null
+  /**
+   * The machine's most recent rebuild, or null if it has never had one.
+   *
+   * `data_destroyed` is true from the moment the machine was told to boot into
+   * an installer — including when the platform never heard back — so it is the
+   * field to read before saying anything reassuring about a failed rebuild.
+   */
+  reinstall: {
+    id: string
+    state: string
+    in_flight: boolean
+    needs_attention: boolean
+    data_destroyed: boolean
+    requested_at: string
+    completed_at: string | null
+  } | null
 }
 
 export interface HostingAccount {

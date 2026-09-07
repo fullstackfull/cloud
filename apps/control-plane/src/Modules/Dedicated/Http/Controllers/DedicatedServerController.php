@@ -18,6 +18,7 @@ use Lynomia\Modules\Dedicated\Http\Resources\DedicatedServerResource;
 use Lynomia\Modules\Dedicated\Http\Resources\ReinstallRequestResource;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
+use Lynomia\Modules\Dedicated\Infrastructure\Queries\LatestServerReinstalls;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 
 /**
@@ -87,8 +88,17 @@ final class DedicatedServerController
             // caller asked for.
             ->paginate($request->perPage());
 
+        $reinstalls = LatestServerReinstalls::forServers(
+            $servers->getCollection()->map(static fn (DedicatedServer $server): string => (string) $server->getKey())->all(),
+        );
+
         return response()->json([
-            'data' => DedicatedServerResource::collection($servers->getCollection()),
+            'data' => $servers->getCollection()
+                ->map(static fn (DedicatedServer $server): DedicatedServerResource => new DedicatedServerResource(
+                    $server,
+                    $reinstalls[(string) $server->getKey()] ?? null,
+                ))
+                ->all(),
             'meta' => [
                 'page' => $servers->currentPage(),
                 'per_page' => $servers->perPage(),
@@ -112,6 +122,8 @@ final class DedicatedServerController
 
         $found = $this->serverForActingCustomer($server);
 
+        $serverId = (string) $found->getKey();
+
         return (new DedicatedServerResource(
             $found->load([
                 'components' => static fn ($query) => $query->orderBy('kind')->orderBy('id'),
@@ -119,7 +131,8 @@ final class DedicatedServerController
                 // is when the platform racked it, which is not what a customer
                 // is asking when they ask how long they have had the machine.
                 'service',
-            ])
+            ]),
+            LatestServerReinstalls::forServers([$serverId])[$serverId] ?? null,
         ))->response();
     }
 
@@ -142,7 +155,7 @@ final class DedicatedServerController
 
         $operation = $this->changePower->execute($found, $action);
 
-        return (new DedicatedServerResource($found))
+        return (new DedicatedServerResource($found, LatestServerReinstalls::forServers([(string) $found->getKey()])[(string) $found->getKey()] ?? null))
             ->additional([
                 'meta' => [
                     'action' => $action->value,

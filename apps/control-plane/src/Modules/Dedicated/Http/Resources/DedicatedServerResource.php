@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Dedicated\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 
 /**
@@ -61,6 +62,20 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
  */
 final class DedicatedServerResource extends JsonResource
 {
+    public function __construct(
+        DedicatedServer $resource,
+        /**
+         * The machine's most recent rebuild.
+         *
+         * Passed in rather than read through a relation, so the list endpoint
+         * resolves every machine's rebuild in one query instead of one per
+         * row — the same reason the VPS resource takes its addresses this way.
+         */
+        private readonly ?DedicatedReinstall $reinstall = null,
+    ) {
+        parent::__construct($resource);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -111,6 +126,27 @@ final class DedicatedServerResource extends JsonResource
                 fn (): ?string => $this->resource->service?->activated_at?->toIso8601String(),
                 null,
             ),
+
+            /*
+             * The machine's most recent rebuild, when it has had one.
+             *
+             * `data_destroyed` is the field a client reads before saying
+             * anything reassuring: it is true from the moment the machine was
+             * told to boot into an installer, including when the platform
+             * never heard back. The failure code and message are deliberately
+             * absent — they are the platform's vocabulary for its own
+             * controllers, and a customer reading
+             * "dedicated.reinstall_timed_out" learns nothing they can act on.
+             */
+            'reinstall' => $this->reinstall === null ? null : [
+                'id' => (string) $this->reinstall->getKey(),
+                'state' => $this->reinstall->state->value,
+                'in_flight' => $this->reinstall->state->isInFlight(),
+                'needs_attention' => $this->reinstall->state->needsAttention(),
+                'data_destroyed' => $this->reinstall->destroyedData(),
+                'requested_at' => $this->reinstall->created_at->toIso8601String(),
+                'completed_at' => $this->reinstall->completed_at?->toIso8601String(),
+            ],
 
             // Loaded only where the caller asked for one machine; a list of
             // servers does not need every disk in every one of them.

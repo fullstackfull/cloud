@@ -6,6 +6,9 @@ namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Dedicated\Application\Handlers\ProvisionDedicatedHandler;
+use Lynomia\Modules\Dedicated\Application\Handlers\ReinstallDedicatedHandler;
+use Lynomia\Modules\Dedicated\Domain\Contracts\HostReachability;
+use Lynomia\Modules\Dedicated\Infrastructure\Reachability\TcpHostReachability;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -37,6 +40,16 @@ final class InfrastructureServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        /*
+         * How the platform checks that a rebuilt physical machine came back.
+         *
+         * Bound to a plain TCP connect, which is the only in-band check the
+         * platform is entitled to make: it holds no key to a customer's
+         * machine and should not. A deployment whose machines are only
+         * reachable through a bastion binds something that knows how.
+         */
+        $this->app->bind(HostReachability::class, TcpHostReachability::class);
+
         $this->app->singleton(ProvisioningHandlerRegistry::class);
         $this->app->bind(HandlerRegistry::class, ProvisioningHandlerRegistry::class);
 
@@ -99,5 +112,6 @@ final class InfrastructureServiceProvider extends ServiceProvider
         $handlers->register(ReinstallVpsHandler::class, ProvisioningJobKind::ReinstallVps);
         $handlers->register(CreateHostingAccountHandler::class, ProvisioningJobKind::CreateHostingAccount);
         $handlers->register(ProvisionDedicatedHandler::class, ProvisioningJobKind::ProvisionDedicated);
+        $handlers->register(ReinstallDedicatedHandler::class, ProvisioningJobKind::ReinstallDedicated);
     }
 }

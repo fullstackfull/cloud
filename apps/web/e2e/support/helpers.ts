@@ -19,6 +19,7 @@ export const users = {
 /** Fixtures the specs assert on by name. Mirrors E2ESeeder's constants. */
 export const fixtures = {
   vpsHostname: 'e2e-web-01',
+  dedicatedSerial: 'E2E-SN-000117',
   openInvoice: 'INV-E2E-0001',
   paidInvoice: 'INV-E2E-0002',
 } as const

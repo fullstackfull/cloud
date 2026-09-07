@@ -191,6 +191,19 @@ return [
             'is_powered_on' => ['type' => 'boolean'],
             'service_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'activated_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            /*
+             * The machine's most recent rebuild, or null. Its inner fields are
+             * listed flat below, the same way the VPS resource's are: the
+             * parity check between these schemas and the resources compares
+             * one level.
+             */
+            'reinstall' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'state' => ['type' => ['string', 'null']],
+            'requested_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'in_flight' => ['type' => ['boolean', 'null']],
+            'needs_attention' => ['type' => ['boolean', 'null']],
+            'data_destroyed' => ['type' => ['boolean', 'null']],
+            'completed_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'components' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/ServerComponent']],
         ],
     ],

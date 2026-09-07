@@ -89,6 +89,34 @@ test.describe('Arabic layout', () => {
     expect(direction).toBe('ltr')
   })
 
+  test('both rebuild warnings read in Arabic', async ({ page }) => {
+    /*
+     * The destructive sentences are the copy that must never fall back to
+     * English: a customer reading the page in Arabic and confirming from a
+     * half-translated dialogue has not been warned. Both screens are checked
+     * in one spec because they are two different sentences on two different
+     * pages, and shipping one translated and the other not is exactly the
+     * failure that would go unnoticed.
+     */
+    await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
+
+    await page.goto('/dedicated')
+    await page.getByRole('button', { name: /إعادة التثبيت/ }).first().click()
+
+    const dedicated = page.getByRole('dialog')
+    await expect(dedicated).toBeVisible()
+    await expect(dedicated.getByText(/ستمسح نظام التشغيل المثبَّت/)).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await page.goto('/vps')
+    await page.getByRole('button', { name: /إعادة التثبيت/ }).first().click()
+
+    const vps = page.getByRole('dialog')
+    await expect(vps).toBeVisible()
+    await expect(vps.getByText(/سيتم استبدال قرص الخادم/)).toBeVisible()
+  })
+
   test('money keeps Western numerals in Arabic', async ({ page }) => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
     await page.goto('/wallet')

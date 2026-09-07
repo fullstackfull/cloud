@@ -325,7 +325,32 @@
     "actions": {
       "on": "Power on",
       "off": "Force off",
-      "cycle": "Power cycle"
+      "cycle": "Power cycle",
+      "reinstall": "Reinstall"
+    },
+    "rebuild": "Rebuild",
+    "reinstall": {
+      "title": "Reinstall server {{serial}}",
+      "warning": "Reinstalling this server will erase the installed operating system and may permanently destroy data on the machine.",
+      "advice": "The machine keeps its address, its hardware and its hostname. Everything on its disks is replaced. A rebuild takes tens of minutes and the server is offline throughout.",
+      "confirmLabel": "Reinstall this server",
+      "phraseLabel": "Type the serial number to confirm"
+    },
+    "reinstallState": {
+      "requested": "Rebuild requested",
+      "queued": "Rebuild queued",
+      "validating": "Checking the machine",
+      "bmc_configuring": "Configuring the management controller",
+      "pxe_booting": "Starting the installer",
+      "installing": "Installing",
+      "configuring": "Configuring the new system",
+      "verifying": "Checking the machine came back",
+      "completed": "Rebuilt",
+      "failed": "The rebuild did not run",
+      "hardware_unavailable": "The machine could not be reached, so nothing was changed",
+      "provisioning_timeout": "The install did not report back and our team is looking at it",
+      "indeterminate": "The rebuild is unconfirmed and our team is looking at it",
+      "needs_review": "The rebuild stopped and our team is looking at it"
     }
   },
   "hosting": {

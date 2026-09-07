@@ -242,6 +242,10 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
             'service_id' => $job->service_id,
             'customer_id' => $job->customer_id,
             'reserved_until' => null,
+            // What the machine is now running. Recorded here, where an install
+            // has actually completed, rather than when one was authorised: the
+            // difference is what was attempted and what is on the disks.
+            'os_install_profile_id' => $profile->getKey(),
         ])->save();
 
         // Addresses are committed only now, against a machine that is actually
