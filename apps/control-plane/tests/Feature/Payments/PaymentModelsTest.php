@@ -17,6 +17,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\WebhookEvent;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\SecretFixtures;
 use Tests\TestCase;
 
 final class PaymentModelsTest extends TestCase
@@ -43,7 +44,7 @@ final class PaymentModelsTest extends TestCase
                 'object' => [
                     'id' => 'pi_test_1',
                     'client_secret' => 'pi_test_1_secret_abcdefghijklmno',
-                    'note' => 'retried with sk_live_abcdefghijklmnop',
+                    'note' => 'retried with '.SecretFixtures::STRIPE_SECRET_KEY,
                 ],
                 'attempt' => 2,
             ],
@@ -54,7 +55,7 @@ final class PaymentModelsTest extends TestCase
         $raw = (string) DB::table('transactions')->where('id', $transaction->id)->value('provider_metadata');
 
         $this->assertStringNotContainsString('pi_test_1_secret_abcdefghijklmno', $raw);
-        $this->assertStringNotContainsString('sk_live_abcdefghijklmnop', $raw);
+        $this->assertStringNotContainsString(SecretFixtures::STRIPE_SECRET_KEY, $raw);
 
         $stored = $transaction->refresh()->provider_metadata;
         $this->assertSame(SecretRedactor::PLACEHOLDER, $stored['object']['client_secret']);
@@ -67,7 +68,7 @@ final class PaymentModelsTest extends TestCase
     public function a_refunds_provider_metadata_is_redacted_too(): void
     {
         $refund = Refund::factory()->create([
-            'provider_metadata' => ['api_key' => 'rk_live_abcdefghijklmnop', 'reason' => 'duplicate'],
+            'provider_metadata' => ['api_key' => SecretFixtures::STRIPE_RESTRICTED_KEY, 'reason' => 'duplicate'],
         ]);
 
         $this->assertSame(SecretRedactor::PLACEHOLDER, $refund->refresh()->provider_metadata['api_key']);

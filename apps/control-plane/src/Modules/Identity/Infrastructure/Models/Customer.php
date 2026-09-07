@@ -54,6 +54,7 @@ class Customer extends Model
         return $this->belongsToMany(User::class, 'customer_members')
             ->using(CustomerMember::class)
             ->withPivot(['id', 'role', 'accepted_at'])
+            ->wherePivotNotNull('accepted_at')
             ->withTimestamps();
     }
 

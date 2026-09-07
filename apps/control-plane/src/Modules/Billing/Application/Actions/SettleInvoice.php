@@ -107,10 +107,20 @@ final readonly class SettleInvoice
              * whether the payments side attached it before calling or leaves
              * the attaching to this action, which is what makes a redelivered
              * webhook and a pre-attached capture take the same path.
+             *
+             * Filtered by currency and customer for the same reasons
+             * assertSettleable() applies them to the capture in hand. Nothing
+             * stops a row being attached to an invoice it does not belong to —
+             * RecordPaymentCapture copies invoice_id out of provider metadata
+             * — and summing amount_minor across currencies adds cents to fils
+             * as if they were the same unit, which is a conversion by accident
+             * and in the payer's favour.
              */
             $otherChargesMinor = (int) Transaction::query()
                 ->where('invoice_id', $locked->getKey())
                 ->whereKeyNot($capture->getKey())
+                ->where('currency', $locked->currency)
+                ->where('customer_id', $locked->customer_id)
                 ->where('kind', TransactionKind::Charge->value)
                 ->where('status', TransactionStatus::Succeeded->value)
                 ->sum('amount_minor');

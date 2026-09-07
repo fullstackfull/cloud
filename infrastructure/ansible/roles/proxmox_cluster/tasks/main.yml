@@ -58,6 +58,40 @@
   failed_when: false
   become: true
 
+# "COULD NOT READ THE CLUSTER" IS NOT "THIS NODE IS IN NO CLUSTER".
+#
+# `pvecm status` runs with `failed_when: false` because a genuinely standalone
+# node exits non-zero from it, and every guard below plus both irreversible
+# `pvecm` commands are gated on `proxmox_cluster_current_name == ''`. A node
+# whose corosync or pmxcfs is degraded exits non-zero too, so without this check
+# a broken member is indistinguishable from a standalone node and the mismatch
+# assertion beneath — the one that exists to stop a node being moved between
+# clusters — cannot fire in exactly the case it was written for.
+#
+# /etc/pve/corosync.conf is the unambiguous signal: it exists only on a node
+# that holds a cluster identity. roles/proxmox reads it the same way before it
+# will touch a clustered node's hostname.
+- name: Read whether this node already holds a cluster configuration
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: proxmox_cluster_corosync_conf
+  check_mode: false
+  become: true
+
+- name: Refuse to act on a node whose cluster membership could not be determined
+  ansible.builtin.assert:
+    that:
+      - proxmox_cluster_status.rc == 0 or not proxmox_cluster_corosync_conf.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} holds /etc/pve/corosync.conf — it is already a
+      cluster member — but `pvecm status` exited
+      {{ proxmox_cluster_status.rc }}, so which cluster it belongs to could not
+      be read. Nothing has been changed. A check that could not run is not a
+      check that passed, and treating this node as standalone is what would let
+      `pvecm` replace /etc/pve, which is where the configuration of every
+      machine on it lives. Fix corosync or pmxcfs and re-run.
+    quiet: true
+
 - name: Determine the current cluster name
   ansible.builtin.set_fact:
     proxmox_cluster_current_name: >-

@@ -6,13 +6,15 @@ namespace Lynomia\Modules\Identity\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Lynomia\Modules\Identity\Application\Actions\ManageTwoFactor;
+use Lynomia\Modules\Identity\Http\Controllers\Concerns\ConfirmsCurrentPassword;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class TwoFactorController
 {
+    use ConfirmsCurrentPassword;
+
     public function __construct(
         private readonly ManageTwoFactor $twoFactor,
     ) {}
@@ -101,10 +103,6 @@ final class TwoFactorController
             'current_password' => ['required', 'string'],
         ]);
 
-        if (! Hash::check($validated['current_password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'current_password' => 'That password is incorrect.',
-            ]);
-        }
+        $this->confirmCurrentPassword($request, $user, $validated['current_password']);
     }
 }

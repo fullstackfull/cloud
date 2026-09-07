@@ -169,9 +169,18 @@ return [
     | to the server if the browser has a HTTPS connection. This will keep
     | the cookie from being sent to you when it can't be done securely.
     |
+    | Derived from FORCE_HTTPS, which is the single transport switch the
+    | production checklist names ("HSTS is sent and session cookies carry
+    | Secure"). HSTS without Secure is a contradiction: until an HSTS entry is
+    | pinned the browser still attaches the session, remember-me and XSRF
+    | cookies in cleartext to the first http:// request it makes to this host,
+    | and the 301 that follows does not un-send them. SESSION_SECURE_COOKIE
+    | may still turn the flag on by itself; it can no longer turn it off under
+    | forced HTTPS.
+    |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => (bool) env('FORCE_HTTPS', false) || (bool) env('SESSION_SECURE_COOKIE', false),
 
     /*
     |--------------------------------------------------------------------------

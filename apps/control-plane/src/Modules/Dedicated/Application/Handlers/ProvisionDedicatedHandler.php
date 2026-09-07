@@ -101,6 +101,32 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
         /** @var array<string, mixed> $payload */
         $payload = $job->payload;
 
+        /*
+         * The customer the job names has to be a customer that exists.
+         *
+         * IpAllocator::assertScopeMayServe() — the one check that stops a
+         * management address being written onto a machine that runs customer
+         * code — is skipped entirely when it is handed a null customer. Passing
+         * null because the row could not be loaded therefore does not fail the
+         * build, it disarms the guard; and Customer is soft-deleted, so a
+         * cancelled customer's job takes that route silently. If the job names
+         * a customer, that customer is either loaded or the job is refused.
+         */
+        $customer = null;
+
+        if ($job->customer_id !== null) {
+            $customer = Customer::query()->find($job->customer_id);
+
+            if ($customer === null) {
+                return ProvisioningResult::failed(
+                    FailureClass::Permanent,
+                    'provisioning.unknown_customer',
+                    sprintf('No customer exists with the id "%s".', (string) $job->customer_id),
+                    metadata: ['customer_id' => (string) $job->customer_id],
+                );
+            }
+        }
+
         try {
             $server = $this->reserveServer->execute(
                 hardwareProfile: (string) ($payload['hardware_profile'] ?? ''),
@@ -134,7 +160,7 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
             $reservations = $this->ipAllocator->reserve(
                 scope: IpPool::query()->findOrFail((string) $payload['ip_pool_id']),
                 provisioningJobId: (string) $job->getKey(),
-                customer: $job->customer_id !== null ? Customer::query()->find($job->customer_id) : null,
+                customer: $customer,
                 count: (int) ($payload['ipv4_count'] ?? 1),
             );
         } catch (IpPoolExhaustedException $e) {
@@ -160,11 +186,17 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
                 authorisedByUserId: isset($payload['authorised_by_user_id']) ? (string) $payload['authorised_by_user_id'] : null,
                 provisioningJobId: (string) $job->getKey(),
                 variables: [
+                    // The payload's extras go FIRST so the platform's own
+                    // values win. An `install_variables` entry naming
+                    // ipv4_address would otherwise install the machine with an
+                    // address IPAM never allocated, while the platform commits
+                    // and bills the one it did — an address conflict at best,
+                    // a silent hijack of another tenant's address at worst.
+                    ...$this->profileVariables($payload),
                     'hostname' => (string) ($payload['hostname'] ?? 'srv-'.strtolower((string) $job->getKey())),
                     'ipv4_address' => $address->address,
                     'ipv4_prefix_length' => $address->subnet->prefix_length,
                     'ipv4_gateway' => $address->subnet->gateway,
-                    ...$this->profileVariables($payload),
                 ],
             );
         } catch (PxeAuthorisationRefusedException|InstallProfileNotRenderableException $e) {

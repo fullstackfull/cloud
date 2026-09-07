@@ -23,6 +23,7 @@ use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\SecretFixtures;
 use Tests\TestCase;
 
 /**
@@ -383,7 +384,7 @@ final class IngestWebhookEventTest extends TestCase
                 'currency' => 'KWD',
                 'metadata' => ['customer_id' => $this->customer->id],
                 'client_secret' => 'pi_live_secret_abcdefghijklmnop',
-                'note' => 'authorised with sk_live_abcdefghijklmnop',
+                'note' => 'authorised with '.SecretFixtures::STRIPE_SECRET_KEY,
             ],
         ], JSON_THROW_ON_ERROR);
 
@@ -393,7 +394,7 @@ final class IngestWebhookEventTest extends TestCase
         // Key-based redaction catches the credential field…
         $this->assertSame(SecretRedactor::PLACEHOLDER, $stored['client_secret']);
         // …and pattern-based redaction catches the key pasted into free text.
-        $this->assertStringNotContainsString('sk_live_abcdefghijklmnop', (string) $stored['note']);
+        $this->assertStringNotContainsString(SecretFixtures::STRIPE_SECRET_KEY, (string) $stored['note']);
 
         $metadata = $result->transaction?->provider_metadata ?? [];
         $this->assertSame(SecretRedactor::PLACEHOLDER, $metadata['object']['client_secret']);

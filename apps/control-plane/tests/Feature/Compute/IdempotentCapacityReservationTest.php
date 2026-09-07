@@ -95,6 +95,43 @@ final class IdempotentCapacityReservationTest extends TestCase
     }
 
     #[Test]
+    public function a_duplicate_release_does_not_take_another_machines_capacity(): void
+    {
+        /*
+         * The release-by-key guard only works if something marks the
+         * reservation released. While nothing did, the row stayed live for
+         * ever, every duplicate release passed the check, and the counters
+         * were decremented again — invisible while the node was empty, because
+         * the clamp at zero hides it, and a machine's worth of commitment
+         * every time it was not.
+         *
+         * A node that under-reports what it has committed is a node the
+         * scheduler places onto: memory is never overcommitted by policy, so
+         * the bill arrives as the OOM killer choosing a customer's workload.
+         */
+        $reserve = app(ReserveNodeCapacity::class);
+        $release = app(ReleaseNodeCapacity::class);
+
+        $reserve->execute($this->node, $this->resources(), reservationKey: 'job-a');
+        $reserve->execute($this->node, $this->resources(), reservationKey: 'job-b');
+
+        $release->execute($this->node, $this->resources(), reservationKey: 'job-a');
+        $release->execute($this->node, $this->resources(), reservationKey: 'job-a');
+
+        $node = $this->node->fresh();
+
+        // Machine B is still running here and still holding every byte of it.
+        $this->assertSame(4, $node->allocated_cpu_cores);
+        $this->assertSame(8192, (int) $node->allocated_memory_mib);
+        $this->assertSame(80, (int) $node->allocated_storage_gib);
+        $this->assertSame(1, $node->vm_count);
+
+        $reservation = NodeCapacityReservation::query()->where('reservation_key', 'job-a')->sole();
+        $this->assertNotNull($reservation->released_at, 'A released reservation has to be stamped, or the guard never fires.');
+        $this->assertFalse($reservation->isLive());
+    }
+
+    #[Test]
     public function a_release_for_an_unknown_key_changes_nothing(): void
     {
         $reserve = app(ReserveNodeCapacity::class);

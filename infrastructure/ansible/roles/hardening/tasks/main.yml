@@ -34,6 +34,35 @@
       connect from.
     quiet: true
 
+# "NO EXCEPTIONS WERE COLLECTED" IS NOT "THIS HOST NEEDS NO PORTS OPEN".
+#
+# This role writes a COMPLETE ruleset. Every play that applies it to a host
+# running a service collects that host's roles' `*_inbound_rules` into
+# `hardening_allowed_inbound` in a pre_task first (see
+# playbooks/control-plane.yml). A play that does not — playbooks/hardening.yml
+# targets `all:!dedicated:!firewall` and collects nothing — reaches here with
+# the empty default, and the ruleset it writes allows management SSH and ICMP
+# and drops everything else: 443 on the API, 5432 on the database, 8006 on the
+# hypervisors, 9100 everywhere, and on a hosting node every customer site and
+# mailbox. Refusing is the only safe answer, because the alternative is silent
+# and fleet-wide.
+- name: Refuse to build a ruleset that drops this host's own service ports
+  ansible.builtin.assert:
+    that:
+      - (group_names | intersect(hardening_service_groups) | length) == 0 or (hardening_allowed_inbound | default([]) | length) > 0
+    fail_msg: >-
+      {{ inventory_hostname }} is in
+      {{ group_names | intersect(hardening_service_groups) | join(', ') }}, and no
+      inbound exceptions were collected for it. This role replaces the whole
+      ruleset, so applying it now would close every port this host serves —
+      including {{ monitoring_node_exporter_port | default(9100) }}, so the
+      monitoring that would have told you goes down with it. Run the playbook
+      that owns this host (see infrastructure/README.md): it collects that
+      host's roles' `*_inbound_rules` before applying this role. A hosting node
+      is not hardened by this repository at all — its panel owns the machine's
+      firewall.
+    quiet: true
+
 - name: Refuse to disable password authentication with no key to replace it
   ansible.builtin.assert:
     that:

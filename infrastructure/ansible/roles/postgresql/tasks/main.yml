@@ -141,6 +141,26 @@
     - postgresql_controldata.rc == 0
     - "'Data page checksum version:            0' in postgresql_controldata.stdout"
 
+# And the mirror image, for the same reason the `pending_restart` check below
+# has one: the task above runs with `failed_when: false`, so a pg_controldata
+# that could not run at all — a wrong binary path for the installed major
+# version, a data directory the postgres user cannot read — leaves the check
+# skipped and the play green. A cluster whose checksum state was never
+# established is not a cluster that has checksums.
+- name: Refuse to report success when the cluster's checksum state could not be read
+  ansible.builtin.fail:
+    msg: >-
+      Could not read {{ inventory_hostname }}'s control file — `pg_controldata`
+      exited {{ postgresql_controldata.rc | default('n/a') }} — so this play
+      cannot tell whether the cluster has data checksums, which policy
+      (group_vars/database.yml) requires. That is not a pass: a cluster without
+      them is indistinguishable from one with them until silent storage
+      corruption in the billing data is discovered by a customer disputing an
+      invoice.
+  when:
+    - postgresql_data_checksums | bool
+    - postgresql_controldata.rc | default(1) != 0
+
 - name: Apply the PostgreSQL configuration
   ansible.builtin.template:
     src: lynomia.conf.j2

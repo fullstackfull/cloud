@@ -17,7 +17,7 @@
 # Falling through to the local disk is the safe failure. Installing is not.
 # ---------------------------------------------------------------------------
 
-set base http://{{ ansible_host }}/profiles
+set base http://{{ pxe_provisioning_address }}/profiles
 set profile ${base}/${mac:hexhyp}.ipxe
 
 echo Lynomia provisioning — {{ pxe_provisioning_cidr }}

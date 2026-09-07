@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Laravel\Sanctum\PersonalAccessToken as SanctumPersonalAccessToken;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Symfony\Component\HttpFoundation\IpUtils;
 
 /**
  * A scoped API token for the public customer API.
@@ -73,6 +74,28 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
     public function isUsable(): bool
     {
         return ! $this->isRevoked() && ! $this->isExpired();
+    }
+
+    /**
+     * Whether the token's CIDR allow-list, if it has one, admits this address.
+     *
+     * An empty or absent list means "anywhere". A list that is set but cannot
+     * be evaluated — no resolvable client address — fails closed: an allow-list
+     * that silently stops applying is worse than no allow-list at all.
+     */
+    public function allowsRequestFrom(?string $ipAddress): bool
+    {
+        $ranges = $this->allowed_ip_ranges;
+
+        if ($ranges === null || $ranges === []) {
+            return true;
+        }
+
+        if ($ipAddress === null || $ipAddress === '') {
+            return false;
+        }
+
+        return IpUtils::checkIp($ipAddress, array_values($ranges));
     }
 
     public function revoke(string $reason): void

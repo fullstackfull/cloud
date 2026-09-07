@@ -178,6 +178,12 @@ export const api = {
     request<T>(path, { ...options, method: 'PATCH', body }),
   put: <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(path, { ...options, method: 'PUT', body }),
-  delete: <T>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>) =>
-    request<T>(path, { ...options, method: 'DELETE' }),
+  /*
+   * DELETE carries a body here, which is unusual but correct for the operations
+   * that need it: disabling two-factor authentication is a deletion that must
+   * be re-authenticated, and putting the password in a query string would place
+   * it in the access log of every proxy on the path.
+   */
+  delete: <T>(path: string, body?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
+    request<T>(path, { ...options, method: 'DELETE', ...(body !== undefined ? { body } : {}) }),
 }

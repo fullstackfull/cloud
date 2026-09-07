@@ -59,7 +59,7 @@ A subsystem exercised only against fake providers is **never** reported as done.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md)
+- [Architecture](docs/architecture.md) · [API](docs/api.md) · [Portal](docs/portal.md)
 - [Local development](docs/local-development.md)
 - [Deployment](docs/deployment.md)
 - [Production checklist](docs/production-checklist.md)

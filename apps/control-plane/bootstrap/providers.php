@@ -12,12 +12,14 @@ use Lynomia\Providers\InfrastructureServiceProvider;
 use Lynomia\Providers\NotificationRoutingServiceProvider;
 use Lynomia\Providers\ProviderRegistryServiceProvider;
 use Lynomia\Providers\RateLimitServiceProvider;
+use Lynomia\Providers\TenancyServiceProvider;
 
 return [
     AppServiceProvider::class,
     DomainServiceProvider::class,
     AuthorizationServiceProvider::class,
     RateLimitServiceProvider::class,
+    TenancyServiceProvider::class,
     NotificationRoutingServiceProvider::class,
     ApiTokenServiceProvider::class,
     ProviderRegistryServiceProvider::class,

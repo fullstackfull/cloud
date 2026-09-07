@@ -22,6 +22,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Catalog\Infrastructure\Models\TaxRule;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedVerifyEmail;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
@@ -93,7 +94,7 @@ final class PurchaseToActiveServiceTest extends TestCase
             'password_confirmation' => 'correct-horse-9',
             'country' => 'KW',
             'accepts_terms' => true,
-        ])->assertCreated();
+        ])->assertAccepted();
 
         $user = User::query()->where('email', 'amal@example.com')->sole();
         $customer = Customer::query()->sole();
@@ -103,11 +104,32 @@ final class PurchaseToActiveServiceTest extends TestCase
         $this->assertFalse($user->hasVerifiedEmail());
 
         // ---- 3. They verify their address ------------------------------------
-        $this->get(URL::temporarySignedRoute(
-            'api.v1.verification.verify',
-            now()->addHour(),
-            ['id' => $user->id, 'hash' => sha1($user->email)],
-        ))->assertOk();
+        /*
+         * The link is taken out of the mail that was actually sent, not built
+         * here with URL::temporarySignedRoute.
+         *
+         * Building it is the tempting shortcut and it is what let a real defect
+         * through for weeks: the User model carried Laravel's MustVerifyEmail
+         * trait without implementing the contract, so no verification mail was
+         * ever sent and nothing ever checked the address — while this test,
+         * signing its own URL, went green the whole time. A step performed by
+         * the test proves the endpoint works. It says nothing about whether the
+         * product ever reaches it.
+         */
+        $verificationUrl = null;
+
+        Notification::assertSentTo(
+            $user,
+            QueuedVerifyEmail::class,
+            function (QueuedVerifyEmail $notification) use ($user, &$verificationUrl): bool {
+                $verificationUrl = $notification->toMail($user)->actionUrl;
+
+                return true;
+            },
+        );
+
+        $this->assertIsString($verificationUrl);
+        $this->get($this->apiPathOf($verificationUrl))->assertOk();
 
         $this->assertTrue($user->fresh()->hasVerifiedEmail());
 
@@ -334,5 +356,17 @@ final class PurchaseToActiveServiceTest extends TestCase
 
         $this->call('POST', route('webhooks.receive', ['provider' => 'fake']), server: $server, content: $signed->rawPayload)
             ->assertOk();
+    }
+
+    /**
+     * The verification link is absolute and points at the API host. The test
+     * client wants a path, and reducing it here keeps the signature intact —
+     * rebuilding the URL would defeat the point of reading it from the mail.
+     */
+    private function apiPathOf(string $url): string
+    {
+        $parts = parse_url($url);
+
+        return ($parts['path'] ?? '/').(isset($parts['query']) ? '?'.$parts['query'] : '');
     }
 }

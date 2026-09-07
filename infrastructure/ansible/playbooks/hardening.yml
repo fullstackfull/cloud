@@ -12,13 +12,29 @@
 # you have opened a second one:
 #
 #   ansible-playbook -i inventories/staging playbooks/hardening.yml \
-#       --limit web-stg-1.stg.example --check --diff
+#       --limit <one host> --check --diff
 #   ansible-playbook -i inventories/staging playbooks/hardening.yml \
-#       --limit web-stg-1.stg.example --diff
+#       --limit <one host> --diff
 #
 # `--diff` on this playbook is worth reading line by line: it shows exactly
 # which keys are being installed and exactly which networks will still be able
 # to reach port 22.
+
+# IT ALSO DOES NOT KNOW WHICH PORTS A HOST SERVES.
+#
+# Unlike control-plane.yml, database.yml, redis.yml, monitoring.yml,
+# proxmox-postinstall.yml, pbs-configure.yml and pxe.yml, this play collects no
+# `*_inbound_rules` before applying the role — it cannot, because it does not
+# apply the roles that own them. The hardening role writes a COMPLETE ruleset,
+# so running it here against a host that serves anything would replace that
+# host's exceptions with none: 443 on the API, 5432 on the database, 8006 on the
+# hypervisors, 9100 everywhere at once.
+#
+# roles/hardening therefore refuses on any host in `hardening_service_groups`
+# that reaches it with an empty exception list. Those hosts are hardened by the
+# playbook that owns them, which does the same SSH, fail2ban and nftables work
+# with their ports collected first. What is left for this playbook is a host in
+# no service group at all.
 
 - name: Harden platform hosts
   hosts: all:!dedicated:!firewall

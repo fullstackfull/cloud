@@ -37,6 +37,29 @@ final class InstallProfileNotRenderableException extends DomainException
         ]);
     }
 
+    /**
+     * A value that would write more than the placeholder it stands in for.
+     *
+     * An answer file is line-oriented: kickstart, preseed and autoinstall all
+     * read a newline as the end of one directive and the start of the next, so
+     * a variable carrying CR or LF does not fill in a value, it appends
+     * instructions — a `%post` block runs as root on a physical machine that
+     * has just been authorised to erase its disks. Refused at render time
+     * rather than escaped, because there is no escaping that is correct for
+     * all three installers at once.
+     */
+    public static function unsafeVariable(string $profileSlug, string $key): self
+    {
+        $exception = new self(sprintf(
+            'The value supplied for "%s" in install profile "%s" contains a line break and would write '
+            .'directives the profile does not contain.',
+            $key,
+            $profileSlug,
+        ));
+
+        return $exception->withContext(['profile' => $profileSlug, 'variable' => $key]);
+    }
+
     public static function inactiveProfile(string $profileSlug): self
     {
         $exception = new self(sprintf(

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Identity\Infrastructure\Models;
 
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -16,10 +17,18 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Date;
 use Laravel\Sanctum\HasApiTokens;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
+use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedVerifyEmail;
 use Spatie\Permission\Traits\HasRoles;
 
 /**
  * A login. Not a commercial entity — see Customer for that.
+ *
+ * The MustVerifyEmail *contract* is what the framework tests, not the trait
+ * that Authenticatable already supplies: both the listener that sends the
+ * verification mail on Registered and the `verified` middleware are
+ * `instanceof` checks against this interface. Without it the model would have
+ * every verification method and none of the enforcement.
  *
  * @property string $id
  * @property string $name
@@ -31,7 +40,7 @@ use Spatie\Permission\Traits\HasRoles;
  * @property int $failed_login_attempts
  * @property ?CarbonImmutable $locked_until
  */
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, HasRoles, HasUlids, Notifiable, SoftDeletes;
@@ -88,6 +97,7 @@ class User extends Authenticatable
         return $this->belongsToMany(Customer::class, 'customer_members')
             ->using(CustomerMember::class)
             ->withPivot(['id', 'role', 'accepted_at'])
+            ->wherePivotNotNull('accepted_at')
             ->withTimestamps();
     }
 
@@ -157,6 +167,31 @@ class User extends Authenticatable
         $membership = $this->memberships
             ->firstWhere('customer_id', $customerId);
 
-        return $membership?->role;
+        // An invitation that has not been accepted is an offer, not a grant.
+        // Acceptance is a precondition of the role, not a column a caller has
+        // to remember to check.
+        if ($membership === null || ! $membership->isAccepted()) {
+            return null;
+        }
+
+        return $membership->role;
+    }
+
+    /**
+     * Both of these are queued rather than sent inside the request.
+     *
+     * The reset and registration endpoints answer identically whether or not
+     * the address has an account, which is only true of the response body. If
+     * one path sends a mail synchronously and the other does not, the clock
+     * says what the status code refuses to.
+     */
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new QueuedResetPassword($token));
+    }
+
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->notify(new QueuedVerifyEmail);
     }
 }

@@ -81,10 +81,8 @@ final readonly class RecordPaymentCapture
             [$transaction, $captured] = $this->settle($provider, $event, $reference, $customerId, $invoiceId);
         }
 
-        // Dispatched outside the transaction: a listener that marks an invoice
-        // paid must not run against a capture that is still uncommitted.
         if ($captured) {
-            event(new PaymentCaptured(
+            $captureRecorded = new PaymentCaptured(
                 transactionId: $transaction->id,
                 customerId: $transaction->customer_id,
                 invoiceId: $transaction->invoice_id,
@@ -92,7 +90,30 @@ final readonly class RecordPaymentCapture
                 providerReference: $reference,
                 amount: $transaction->amount(),
                 capturedAt: $transaction->processed_at ?? now()->toImmutable(),
-            ));
+            );
+
+            /*
+             * Held until the outermost transaction commits, not merely until
+             * the inner one above closes. This action is normally called from
+             * inside IngestWebhookEvent's own transaction, so dispatching at
+             * that level pushes a job onto a queue that shares no transaction
+             * with the database: a worker can dequeue it and find the capture
+             * row not yet visible. The listener that settles the invoice
+             * treats a capture it cannot find as data loss, so the charge
+             * would stand with nothing settled and nothing retrying.
+             *
+             * The level is checked rather than left to afterCommit's own
+             * fallback because the transaction manager's pending list spans
+             * connections: with nothing open here the announcement belongs
+             * now, not behind some other connection's commit.
+             */
+            if (DB::transactionLevel() > 0) {
+                DB::afterCommit(static function () use ($captureRecorded): void {
+                    event($captureRecorded);
+                });
+            } else {
+                event($captureRecorded);
+            }
         }
 
         return $transaction;

@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Security;
 
+use Lynomia\Modules\Compute\Infrastructure\Providers\ProxmoxConnection;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
+use Lynomia\Modules\SharedHosting\Infrastructure\Providers\WhmConnection;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\SecretFixtures;
 
 final class SecretRedactorTest extends TestCase
 {
@@ -76,7 +79,7 @@ final class SecretRedactorTest extends TestCase
             'Request failed: Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abcdefgh',
         ];
         yield 'stripe secret key' => [
-            'Stripe rejected key sk_live_51ABCDEfghijkLMNOP',
+            'Stripe rejected key '.SecretFixtures::STRIPE_SECRET_KEY,
         ];
         yield 'proxmox ticket' => [
             'auth cookie PVEAuthCookie:PVE:root@pam:5F3A2B::abcdefgh== was rejected',
@@ -87,6 +90,64 @@ final class SecretRedactorTest extends TestCase
         yield 'ipmi command line' => [
             'ipmitool -H 10.0.0.5 -U admin -P SuperSecret123 power status',
         ];
+        // A process exception stringifies argv shell-quoted, so the separator
+        // is not adjacent to the flag: `'-P' 'secret'`, not `-P secret`.
+        yield 'shell-quoted ipmi argv from a process exception' => [
+            'The process "\'ipmitool\' \'-H\' \'10.0.0.5\' \'-P\' \'SuperSecret123\'" exceeded the timeout',
+        ];
+    }
+
+    /**
+     * The credential shapes the platform's own adapters actually put on the
+     * wire, taken from the connection objects rather than hand-written, so a
+     * change to a header format cannot silently outrun the pattern list.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function providerAuthorizationHeaders(): iterable
+    {
+        yield 'proxmox api token' => [(new ProxmoxConnection(
+            endpoint: 'https://pve-01.internal:8006',
+            tokenId: 'lynomia@pve!control-plane',
+            tokenSecret: '1f2e3d4c-5b6a-7890-abcd-ef0123456789',
+        ))->authorizationHeader()];
+
+        yield 'whm api token' => [(new WhmConnection(
+            endpoint: 'https://web-01.internal:2087',
+            user: 'root',
+            apiToken: 'PLQ7XKQ2NRT9ZM4V8W1CJH6YB3GDF5SA',
+        ))->authorizationHeader()];
+    }
+
+    #[Test]
+    #[DataProvider('providerAuthorizationHeaders')]
+    public function it_masks_the_authorization_headers_the_adapters_send(string $header): void
+    {
+        $redacted = $this->redactor->redactString(
+            'the node refused the request carrying Authorization: '.$header,
+        );
+
+        $this->assertStringContainsString(SecretRedactor::PLACEHOLDER, $redacted);
+        $this->assertStringNotContainsString($header, $redacted);
+    }
+
+    #[Test]
+    public function it_scrubs_the_whole_previous_chain_of_a_throwable(): void
+    {
+        $throwable = new \RuntimeException(
+            'outer, carrying Authorization: Bearer abcdefghijklmnop',
+            0,
+            new \RuntimeException('inner: sshpass -p hunter2 ssh root@web-01'),
+        );
+
+        $normalised = $this->redactor->redact(['exception' => $throwable]);
+
+        $encoded = json_encode($normalised, JSON_THROW_ON_ERROR);
+
+        $this->assertStringNotContainsString('abcdefghijklmnop', $encoded);
+        $this->assertStringNotContainsString('hunter2', $encoded);
+        $this->assertSame(\RuntimeException::class, $normalised['exception']['class']);
+        $this->assertArrayHasKey('previous', $normalised['exception']);
     }
 
     #[Test]
@@ -103,11 +164,11 @@ final class SecretRedactorTest extends TestCase
     #[Test]
     public function it_masks_a_private_key_block(): void
     {
-        $message = "failed to parse key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow...\n-----END RSA PRIVATE KEY-----\n";
+        $message = "failed to parse key:\n".SecretFixtures::PRIVATE_KEY_PEM."\n";
 
         $redacted = $this->redactor->redactString($message);
 
-        $this->assertStringNotContainsString('BEGIN RSA PRIVATE KEY', $redacted);
+        $this->assertStringNotContainsString('BEGIN'.' RSA PRIVATE KEY', $redacted);
         $this->assertStringContainsString(SecretRedactor::PLACEHOLDER, $redacted);
     }
 

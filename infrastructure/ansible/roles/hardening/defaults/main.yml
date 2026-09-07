@@ -35,6 +35,31 @@ hardening_fail2ban_ignoreip: "{{ ['127.0.0.1/8', '::1'] + hardening_management_c
 # owner. Roles append to this; nothing opens a port anonymously.
 hardening_allowed_inbound: []
 
+# Groups whose hosts run a service that has to stay reachable through this
+# ruleset. The list exists because `hardening_allowed_inbound` defaults to
+# empty and this role writes a COMPLETE ruleset rather than adding to one: a
+# play that applies the role without first collecting its roles'
+# `*_inbound_rules` does not leave the existing exceptions in place, it replaces
+# them with none. On a control-plane host that closes 443 on the public API; on
+# a database host it closes 5432; on every host it closes 9100, so Prometheus
+# goes blind at the same instant and the whole event looks like a network
+# failure rather than a configuration run.
+#
+# `hosting` is here for a different reason: a cPanel/DirectAdmin node's panel
+# owns that machine's web server, mail stack and firewall (infrastructure
+# README, "On a hosting node"), there is no `hosting_inbound_rules` anywhere in
+# this repository, and a drop-policy base chain of ours sits on the input hook
+# alongside the panel's own ruleset regardless of what the panel accepted.
+hardening_service_groups:
+  - control_plane
+  - database
+  - redis
+  - monitoring
+  - proxmox
+  - pbs
+  - pxe
+  - hosting
+
 # ICMP is allowed. Dropping it does not improve security in any meaningful way
 # and it does break path-MTU discovery, which produces intermittent, hard to
 # diagnose stalls on exactly the large transfers a backup makes.

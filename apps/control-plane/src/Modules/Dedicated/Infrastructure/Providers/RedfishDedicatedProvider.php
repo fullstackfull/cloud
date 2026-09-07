@@ -695,7 +695,7 @@ class RedfishDedicatedProvider implements DedicatedProvider
         try {
             $request = $this->request();
 
-            return match ($method) {
+            $response = match ($method) {
                 'GET' => $request->get($path),
                 'POST' => $request->post($path, $payload),
                 'PATCH' => $request->patch($path, $payload),
@@ -703,6 +703,10 @@ class RedfishDedicatedProvider implements DedicatedProvider
                     'provider_message' => sprintf('unsupported HTTP method "%s"', $method),
                 ]),
             };
+
+            $this->assertNotRedirect($response, $operation, ['path' => $path]);
+
+            return $response;
         } catch (ConnectionException $e) {
             /*
              * Caught by type and re-thrown as our own, because a connection
@@ -733,6 +737,36 @@ class RedfishDedicatedProvider implements DedicatedProvider
         }
     }
 
+    /**
+     * A 3xx is not an answer, it is a destination — and it is chosen by the
+     * device, not by the platform.
+     *
+     * Redirects are disabled on the client, so one arrives here as an ordinary
+     * response with no body. It is refused rather than parsed: `failed()` is
+     * false for a 3xx, so an unrefused redirect would be read as an empty
+     * success. Flagged indeterminate because a controller that answered a
+     * reset with a redirect may still have accepted the reset.
+     *
+     * @param  array<string, scalar|null>  $context
+     *
+     * @throws DedicatedProviderException
+     */
+    protected function assertNotRedirect(Response $response, string $operation, array $context = []): void
+    {
+        if ($response->status() < 300 || $response->status() > 399) {
+            return;
+        }
+
+        throw DedicatedProviderException::unexpectedResponse(
+            static::NAME,
+            $operation,
+            'the controller answered with a redirect, which is not followed because every request this '
+            .'adapter makes carries the controller credential',
+            [...$context, 'status' => $response->status()],
+            indeterminate: true,
+        );
+    }
+
     protected function request(): PendingRequest
     {
         return Http::baseUrl($this->connection->baseUrl())
@@ -748,7 +782,14 @@ class RedfishDedicatedProvider implements DedicatedProvider
             // Explicit rather than left to the client default, so that a change
             // to that default cannot silently disable certificate verification
             // for every controller in the fleet at once.
-            ->withOptions(['verify' => $this->connection->verifyTls])
+            //
+            // Redirects are refused for the same reason resolveLink() refuses
+            // an off-host @odata.id: a Location header is response data too,
+            // and following one would let a controller point any request this
+            // adapter makes at a host of its choosing — with the worker on the
+            // management network — without the URL ever becoming a link in a
+            // body that resolveLink() could inspect.
+            ->withOptions(['verify' => $this->connection->verifyTls, 'allow_redirects' => false])
             ->timeout($this->connection->timeoutSeconds)
             ->acceptJson()
             ->asJson();

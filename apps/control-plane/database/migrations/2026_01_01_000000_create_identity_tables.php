@@ -77,7 +77,7 @@ return new class extends Migration
             // Recorded even for failures, where user_id may be null because the
             // address did not match an account.
             $table->string('email_attempted')->nullable();
-            $table->string('outcome', 32);              // success | failed | locked | two_factor_failed
+            $table->string('outcome', 32);              // Lynomia\Modules\Identity\Domain\Enums\LoginOutcome
             $table->string('ip_address', 45)->nullable();
             $table->text('user_agent')->nullable();
             $table->string('country', 2)->nullable();

@@ -41,7 +41,7 @@ tftp-root={{ pxe_tftp_root }}
 # tag test stops the loop — without it, iPXE would be told to fetch iPXE.
 dhcp-match=set:ipxe,175
 dhcp-boot=tag:!ipxe,{{ 'ipxe.efi' }}
-dhcp-boot=tag:ipxe,http://{{ ansible_host }}/boot.ipxe
+dhcp-boot=tag:ipxe,http://{{ pxe_provisioning_address }}/boot.ipxe
 
 # Log every lease and every boot request. When a machine installs the wrong
 # image, this file is the only record of what it was told to fetch.

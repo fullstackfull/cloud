@@ -86,4 +86,40 @@ enum ReleaseReason: string
             default => false,
         };
     }
+
+    /**
+     * Whether the quarantine this reason takes ends on a clock, or only when
+     * somebody has been and looked.
+     *
+     * Every other quarantine is a waiting period: the address WAS in service,
+     * its reputation decays, and after the pool's window it is safe to hand
+     * on. A timeout is not a waiting period, because time answers none of its
+     * question — the platform still does not know whether a machine was built
+     * with this address configured on it, and it will not know a week later
+     * either. Sweeping such a row back into the pool on a schedule puts the
+     * next customer's NIC on an address a machine may still be answering on,
+     * which is the exact outcome the timeout rule exists to prevent.
+     *
+     * Clearing it is an operator's act: they look at the provider, and then
+     * either the resource is adopted (the address stays with the machine) or
+     * it demonstrably does not exist (the address is released by hand, as
+     * OperatorAction).
+     */
+    public function requiresOperatorClearance(): bool
+    {
+        return $this === self::ProvisioningTimedOut;
+    }
+
+    /**
+     * The reasons whose quarantine an automatic sweep must never end.
+     *
+     * @return list<string>
+     */
+    public static function requiringOperatorClearance(): array
+    {
+        return array_values(array_map(
+            static fn (self $reason): string => $reason->value,
+            array_filter(self::cases(), static fn (self $reason): bool => $reason->requiresOperatorClearance()),
+        ));
+    }
 }

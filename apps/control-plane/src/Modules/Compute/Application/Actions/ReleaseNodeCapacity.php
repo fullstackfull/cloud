@@ -67,6 +67,16 @@ final readonly class ReleaseNodeCapacity
             $locked->vm_count = max(0, $locked->vm_count - 1);
             $locked->save();
 
+            /*
+             * Stamped in the same transaction as the decrement, which is what
+             * makes the guard at the top of this method mean anything: an
+             * unstamped reservation is live for ever, so every duplicate
+             * release passes the check and takes another machine's worth of
+             * commitment off a node that is still running it. Clamping hides
+             * that only while the node is empty.
+             */
+            $reservation?->forceFill(['released_at' => now()])->save();
+
             // The pool's committed figure is what placement actually trusts for
             // shared storage, so it has to be given back on the same clamped
             // terms as the node's counters.

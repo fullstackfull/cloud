@@ -17,6 +17,7 @@ use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingNodeUnlicensedException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingUsernameConflictException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\NodeAtCapacityException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\NoHostingCapacityException;
 use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
@@ -135,6 +136,21 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
             // next attempt scores the fleet again and lands somewhere else.
             return ProvisioningResult::failed(
                 FailureClass::Capacity,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: $this->redactor->redact($e->context()),
+            );
+        } catch (HostingUsernameConflictException $e) {
+            /*
+             * Permanent, and deliberately not Capacity. The name is taken on
+             * this node by another customer and every retry of this job asks
+             * for the same name; retrying only delays an operator finding out.
+             * Nothing was created and nothing was reserved — the refusal is
+             * thrown before the slot is taken — so there is nothing to
+             * compensate.
+             */
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
                 $e->errorCode(),
                 $e->getMessage(),
                 metadata: $this->redactor->redact($e->context()),

@@ -127,17 +127,32 @@ final readonly class RecordInvoiceRefund
     /**
      * Links the refund to the invoice, reporting whether this call is the one
      * that did it.
+     *
+     * `recorded_on_invoice_at` is the marker rather than `invoice_id`, because
+     * invoice_id says which document the refund belongs to and not whether that
+     * document has counted it — IssueRefund fills invoice_id in when it creates
+     * the row, so reading it as "already recorded" made the first and only
+     * booking of a real refund return early and left amount_refunded_minor at
+     * zero.
      */
     private function attach(Refund $refund, Invoice $invoice): bool
     {
         /** @var Refund $locked */
         $locked = Refund::query()->lockForUpdate()->findOrFail($refund->getKey());
 
-        if ($locked->invoice_id === $invoice->getKey()) {
+        if ($locked->recorded_on_invoice_at !== null) {
+            if ((string) $locked->invoice_id !== (string) $invoice->getKey()) {
+                throw UnsettleablePaymentException::refundAttachedElsewhere(
+                    (string) $locked->getKey(),
+                    (string) $locked->invoice_id,
+                    (string) $invoice->getKey(),
+                );
+            }
+
             return false;
         }
 
-        if ($locked->invoice_id !== null) {
+        if ($locked->invoice_id !== null && $locked->invoice_id !== $invoice->getKey()) {
             throw UnsettleablePaymentException::refundAttachedElsewhere(
                 (string) $locked->getKey(),
                 (string) $locked->invoice_id,
@@ -164,6 +179,7 @@ final readonly class RecordInvoiceRefund
         }
 
         $locked->invoice_id = (string) $invoice->getKey();
+        $locked->recorded_on_invoice_at = now();
         $locked->save();
 
         return true;

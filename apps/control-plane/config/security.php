@@ -12,9 +12,17 @@ return [
     /*
      * Origins allowed to call the API with credentials. Never "*", because the
      * API uses cookie authentication for the portals.
+     *
+     * "*" is dropped rather than passed through, because the CORS layer does
+     * NOT reject it the way the sentence above assumes: with
+     * supports_credentials the wildcard falls through to origin reflection and
+     * echoes every requesting origin with Access-Control-Allow-Credentials:
+     * true. Dropping it leaves no allowed origin at all, so the portal breaks
+     * loudly in staging instead of shipping a credentialed open CORS policy.
      */
     'allowed_origins' => array_values(array_filter(
-        array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', 'http://localhost:5173')))
+        array_map('trim', explode(',', (string) env('CORS_ALLOWED_ORIGINS', 'http://localhost:5173'))),
+        static fn (string $origin): bool => $origin !== '' && $origin !== '*',
     )),
 
     /*

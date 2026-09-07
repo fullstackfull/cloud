@@ -12,15 +12,29 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class RateLimitServiceProvider extends ServiceProvider
 {
+    /**
+     * How much roomier the per-IP ceiling is than the per-identity bucket.
+     *
+     * It has to sit well above what a shared egress address (an office NAT, a
+     * carrier CGNAT) produces legitimately, or the ceiling becomes a way to
+     * deny sign-in to everyone behind it — while still being far below the
+     * "unlimited" that keying on a caller-chosen address currently permits.
+     */
+    private const int PER_IP_MULTIPLIER = 6;
+
     public function boot(): void
     {
         /*
-         * Authentication limiters key on address *and* source IP together.
+         * Authentication limiters return two limits, not one.
          *
-         * Keying on the address alone would let anyone lock a known customer
-         * out by hammering their address; keying on IP alone would let a single
-         * host spray many addresses. Requiring both to match bounds each attack
-         * without enabling the other.
+         * The tight bucket keys on the submitted identity *and* the source IP:
+         * keying on the identity alone would let anyone lock a known customer
+         * out by hammering their address. But that bucket alone bounds nothing
+         * for a host that varies the address — every new address is a fresh
+         * bucket — so a second, deliberately roomier bucket keyed on the source
+         * IP alone caps how much unauthenticated auth traffic one host may
+         * generate across *all* identities. Password spraying, credential
+         * stuffing and bulk registration all live in that gap.
          */
         $this->defineAuthLimiter('login', 'login');
         $this->defineAuthLimiter('register', 'register');
@@ -67,12 +81,51 @@ final class RateLimitServiceProvider extends ServiceProvider
     {
         $attempts = (int) config("security.rate_limits.{$configKey}.attempts", 5);
         $decay = (int) config("security.rate_limits.{$configKey}.decay_minutes", 1);
+        $perIpAttempts = (int) config(
+            "security.rate_limits.{$configKey}.per_ip_attempts",
+            $attempts * self::PER_IP_MULTIPLIER,
+        );
 
-        RateLimiter::for($name, static function (Request $request) use ($attempts, $decay): Limit {
-            $email = strtolower(trim((string) $request->input('email')));
+        RateLimiter::for($name, static function (Request $request) use ($name, $attempts, $decay, $perIpAttempts): array {
+            $ip = $request->ip() ?? 'unknown';
 
-            return Limit::perMinutes($decay, $attempts)
-                ->by($email.'|'.($request->ip() ?? 'unknown'));
+            return [
+                Limit::perMinutes($decay, $attempts)
+                    ->by($name.'|'.self::identityFor($request).'|'.$ip),
+
+                Limit::perMinutes($decay, $perIpAttempts)->by($name.'|ip|'.$ip),
+            ];
         });
+    }
+
+    /**
+     * The subject a limiter bucket belongs to.
+     *
+     * Most auth endpoints carry the address. The two-factor challenge does not
+     * — it is submitted with a challenge token and a code, and nothing else —
+     * so keying it on `email` would collapse every user's second-factor
+     * attempts into one shared per-IP bucket: one visitor behind an office NAT
+     * could stop everyone else there from completing sign-in. The challenge
+     * token identifies the attempt precisely, and is hashed so a limiter key
+     * never holds a live credential.
+     */
+    private static function identityFor(Request $request): string
+    {
+        $challenge = $request->input('challenge_token');
+
+        if (is_string($challenge) && $challenge !== '') {
+            return 'challenge:'.hash('sha256', $challenge);
+        }
+
+        $email = $request->input('email');
+
+        /*
+         * Read defensively: a limiter closure runs inside ThrottleRequests
+         * BEFORE any validation, so it sees whatever shape the caller sent.
+         * Casting an array to string raises a PHP warning that the framework's
+         * error handler turns into a 500 thrown before RateLimiter::attempt()
+         * — a request shape that always fails and is never counted.
+         */
+        return is_string($email) ? strtolower(trim($email)) : 'non-string';
     }
 }

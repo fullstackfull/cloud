@@ -15,6 +15,7 @@ use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -66,7 +67,15 @@ final class CreateVpsHandlerTest extends TestCase
             'available_gib' => 2048,
         ]);
 
-        $subnet = Subnet::factory()->forBlock('198.51.100.8/29', gateway: '198.51.100.9')->create();
+        // A customer-facing network, because a machine is only ever attached
+        // to a segment the platform can name: the handler refuses to build
+        // against a subnet whose network is missing, inactive, management or
+        // has no bridge recorded.
+        $network = Network::factory()->create(['bridge' => 'vmbr1', 'vlan_id' => 1234]);
+
+        $subnet = Subnet::factory()
+            ->forBlock('198.51.100.8/29', gateway: '198.51.100.9')
+            ->create(['network_id' => $network->getKey()]);
         app(SeedSubnetAddresses::class)->execute($subnet);
         $this->pool = $subnet->ipPool;
 
@@ -192,6 +201,39 @@ final class CreateVpsHandlerTest extends TestCase
         // Nothing was built and nothing was taken.
         $this->assertSame(0, VirtualMachine::query()->count());
         $this->assertSame(0, IpAssignment::query()->count());
+    }
+
+    #[Test]
+    public function a_job_whose_customer_row_cannot_be_loaded_is_refused_before_anything_is_allocated(): void
+    {
+        /*
+         * IpAllocator::assertScopeMayServe() — the check that stops a
+         * management address, which reaches the hypervisor and BMC control
+         * planes, being written onto a machine that runs customer code — is
+         * skipped entirely when it is handed a null customer. Resolving the
+         * customer with find() and passing whatever comes back therefore does
+         * not fail the build when the row is gone, it disarms the check. And
+         * Customer is soft-deleted, so a cancelled customer's job takes that
+         * route silently.
+         */
+        $this->customer->delete();
+
+        $result = app(CreateVpsHandler::class)->execute($this->job());
+
+        $this->assertTrue($result->isFailure());
+        $this->assertSame(FailureClass::Permanent, $result->failureClass);
+        $this->assertSame('provisioning.unknown_customer', $result->errorCode);
+
+        // Nothing was placed, committed or taken out of the pool.
+        $this->assertSame(0, VirtualMachine::query()->count());
+        $this->assertSame(0, $this->node->fresh()->vm_count);
+        $this->assertSame(
+            0,
+            $this->pool->subnets()->first()->addresses()
+                ->whereNot('status', IpAddressStatus::Available->value)
+                ->whereNot('status', IpAddressStatus::Unavailable->value)
+                ->count(),
+        );
     }
 
     #[Test]
