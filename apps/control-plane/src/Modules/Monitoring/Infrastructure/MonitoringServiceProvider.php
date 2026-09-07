@@ -12,6 +12,7 @@ use Lynomia\Modules\Monitoring\Application\Collectors\PaymentsCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ProvisioningCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\QueueCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\RevenueCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\SchedulerCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ServicesCollector;
 use Lynomia\Modules\Monitoring\Domain\Services\MetricsRegistry;
 
@@ -41,6 +42,7 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(CapacityCollector::class),
                 $app->make(PaymentsCollector::class),
                 $app->make(RevenueCollector::class),
+                $app->make(SchedulerCollector::class),
             );
         });
     }

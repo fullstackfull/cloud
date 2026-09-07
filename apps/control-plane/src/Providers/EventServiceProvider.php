@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
+use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
@@ -71,6 +72,25 @@ final class EventServiceProvider extends BaseEventServiceProvider
         RefundIssued::class => [
             RecordRefundAgainstTheInvoice::class,
         ],
+
+    ];
+
+    /**
+     * Subscribers, which map several events to their own methods.
+     *
+     * Scheduler liveness lives here rather than in $listen because it listens
+     * to three of Laravel's own console events and needs a different method
+     * for each: finished, failed, and skipped — where "skipped" deliberately
+     * records nothing.
+     *
+     * The failure being watched for is not a command that errors. It is a
+     * command that stops being invoked at all — a crashed scheduler, a cron
+     * entry lost in a redeploy — and every one of those is silent.
+     *
+     * @var list<class-string>
+     */
+    protected $subscribe = [
+        RecordScheduledRun::class,
     ];
 
     /**
