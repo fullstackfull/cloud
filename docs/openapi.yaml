@@ -78,6 +78,7 @@ tags:
     description: "Physical machines, controlled through a BMC the API never exposes."
   - name: "IP addresses"
     description: "Addresses assigned to the account, and their reverse DNS."
+  - name: "Notifications"
   - name: "Operator"
     description: "The NOC surface. Same guard as the customer API — what separates them is that every route here names the permission it needs."
   - name: "Orders"
@@ -3531,6 +3532,182 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/notifications":
+    get:
+      operationId: "api_v1_notifications_index"
+      tags:
+        - "Notifications"
+      summary: "The customer's inbox"
+      description: "Newest first, with the unread count in the same response so the portal needs no second request per page load. Pass unread=true for only the unread ones."
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "unread"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "per_page"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "page"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/NotificationPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/notifications/read-all":
+    post:
+      operationId: "api_v1_notifications_read_all"
+      tags:
+        - "Notifications"
+      summary: "Mark every notification read"
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/NotificationsMarkedReadResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/notifications/{notification}/read":
+    post:
+      operationId: "api_v1_notifications_read"
+      tags:
+        - "Notifications"
+      summary: "Mark one notification read"
+      description: "Idempotent, and it does not restamp: a second call must not move the time somebody actually read it."
+      parameters:
+        - name: "notification"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/NotificationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/orders":
     get:
       operationId: "api_v1_orders_index"
@@ -6734,6 +6911,75 @@ components:
           type: "string"
           examples:
             - "9.000"
+    Notification:
+      type: "object"
+      additionalProperties: false
+      description: "One thing the platform told this customer. Title and body are rendered per request in the caller's language: the row stores facts, not prose, so a customer who switches to Arabic sees their whole history in Arabic."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        type:
+          type:
+            - "string"
+            - "null"
+        category:
+          type:
+            - "string"
+            - "null"
+          description: "security and billing cannot be silenced; service and operational can be, by email only."
+        title:
+          type:
+            - "string"
+            - "null"
+        body:
+          type:
+            - "string"
+            - "null"
+        is_failure:
+          type: "boolean"
+        link:
+          type:
+            - "string"
+            - "null"
+          description: "A portal path, not a URL, so it stays correct when the host changes."
+        read_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    NotificationPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Notification"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    NotificationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Notification"
+    NotificationsMarkedRead:
+      type: "object"
+      additionalProperties: false
+      properties:
+        marked_read:
+          type: "integer"
+        unread:
+          type: "integer"
+    NotificationsMarkedReadResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/NotificationsMarkedRead"
     Order:
       type: "object"
       additionalProperties: false

@@ -12,6 +12,9 @@ use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
+use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnBillingEvent;
+use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnProvisioningOutcome;
+use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnSubscriptionChange;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
@@ -73,6 +76,7 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         SubscriptionStatusChanged::class => [
             EnforceServiceStateForSubscription::class,
+            NotifyOnSubscriptionChange::class,
         ],
         OrderFinanciallySettled::class => [
             FulfilOrderOnSettlement::class,
@@ -99,6 +103,17 @@ final class EventServiceProvider extends BaseEventServiceProvider
      */
     protected $subscribe = [
         RecordScheduledRun::class,
+
+        /*
+         * The three provisioning outcome events were raised and nobody
+         * listened, which is how a customer could order a server, have it
+         * built, and never be told — or have it fail and find out by logging
+         * in and looking at a status badge.
+         */
+        NotifyOnProvisioningOutcome::class,
+
+        // Money. These are the notifications a customer cannot switch off.
+        NotifyOnBillingEvent::class,
     ];
 
     /**

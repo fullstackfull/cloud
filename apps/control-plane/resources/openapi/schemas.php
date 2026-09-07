@@ -696,6 +696,30 @@ return [
             'resolved_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'Notification' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One thing the platform told this customer. Title and body are rendered per request in the caller\'s language: the row stores facts, not prose, so a customer who switches to Arabic sees their whole history in Arabic.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'type' => ['type' => ['string', 'null']],
+            'category' => ['type' => ['string', 'null'], 'description' => 'security and billing cannot be silenced; service and operational can be, by email only.'],
+            'title' => ['type' => ['string', 'null']],
+            'body' => ['type' => ['string', 'null']],
+            'is_failure' => ['type' => 'boolean'],
+            'link' => ['type' => ['string', 'null'], 'description' => 'A portal path, not a URL, so it stays correct when the host changes.'],
+            'read_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'NotificationsMarkedRead' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'marked_read' => ['type' => 'integer'],
+            'unread' => ['type' => 'integer'],
+        ],
+    ],
     'AdminHostingAccountState' => [
         'type' => 'object',
         'additionalProperties' => false,

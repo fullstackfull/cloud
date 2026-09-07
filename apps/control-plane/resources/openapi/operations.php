@@ -492,6 +492,24 @@ return [
         'body' => ['confirmation'],
         'response' => $one('Backup', 202),
     ],
+    'api.v1.notifications.index' => [
+        'tag' => 'Notifications',
+        'summary' => 'The customer\'s inbox',
+        'description' => 'Newest first, with the unread count in the same response so the portal needs no second request per page load. Pass unread=true for only the unread ones.',
+        'query' => ['unread', 'per_page', 'page'],
+        'response' => $many('Notification'),
+    ],
+    'api.v1.notifications.read' => [
+        'tag' => 'Notifications',
+        'summary' => 'Mark one notification read',
+        'description' => 'Idempotent, and it does not restamp: a second call must not move the time somebody actually read it.',
+        'response' => $one('Notification'),
+    ],
+    'api.v1.notifications.read_all' => [
+        'tag' => 'Notifications',
+        'summary' => 'Mark every notification read',
+        'response' => $one('NotificationsMarkedRead'),
+    ],
     'api.v1.subscriptions.plan' => [
         'tag' => 'Billing',
         'summary' => 'Change a subscription\'s plan',

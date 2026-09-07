@@ -31,6 +31,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
  * @property ?string $subscription_id
  * @property ?string $plan_id
  * @property string $kind
+ * @property ?string $label
  * @property ServiceStatus $status
  * @property array<string, mixed> $resources
  * @property ?CarbonImmutable $activated_at

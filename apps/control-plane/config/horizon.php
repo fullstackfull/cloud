@@ -45,6 +45,9 @@ return [
         'redis:provisioning' => 60,
         'redis:payments' => 60,
         'redis:infrastructure' => 900,
+        // A minute. A customer told their server is ready two minutes late has
+        // been told late, and this is the queue where lateness is visible.
+        'redis:notifications' => 60,
         'redis:default' => 180,
     ],
 
@@ -141,6 +144,31 @@ return [
             'nice' => 5,
         ],
 
+        /*
+         * Notifications get their own supervisor so that a customer waiting to
+         * be told their server is ready never sits behind a fleet-wide
+         * reconciliation. The work is short and network-bound — one SMTP
+         * conversation — so the timeout is small and the processes are cheap.
+         *
+         * `tries` is 1 here and the retries live in the job instead. The
+         * delivery row is the record of what happened to a message, and a
+         * worker retrying underneath it would leave that row's attempt count
+         * disagreeing with reality.
+         */
+        'supervisor-notifications' => [
+            'connection' => 'redis',
+            'queue' => ['notifications'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'timeout' => 90,
+            'tries' => 1,
+            'nice' => 0,
+        ],
+
         'supervisor-default' => [
             'connection' => 'redis',
             'queue' => ['default'],
@@ -173,6 +201,11 @@ return [
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 5,
             ],
+            'supervisor-notifications' => [
+                'maxProcesses' => (int) env('HORIZON_NOTIFICATION_PROCESSES', 3),
+                'balanceMaxShift' => 2,
+                'balanceCooldown' => 5,
+            ],
             'supervisor-default' => [
                 'maxProcesses' => (int) env('HORIZON_DEFAULT_PROCESSES', 3),
                 'balanceMaxShift' => 1,
@@ -184,6 +217,7 @@ return [
             'supervisor-provisioning' => ['maxProcesses' => 2],
             'supervisor-payments' => ['maxProcesses' => 2],
             'supervisor-infrastructure' => ['maxProcesses' => 1],
+            'supervisor-notifications' => ['maxProcesses' => 1],
             'supervisor-default' => ['maxProcesses' => 1],
         ],
 
@@ -191,6 +225,7 @@ return [
             'supervisor-provisioning' => ['maxProcesses' => 1],
             'supervisor-payments' => ['maxProcesses' => 1],
             'supervisor-infrastructure' => ['maxProcesses' => 1],
+            'supervisor-notifications' => ['maxProcesses' => 1],
             'supervisor-default' => ['maxProcesses' => 1],
         ],
     ],

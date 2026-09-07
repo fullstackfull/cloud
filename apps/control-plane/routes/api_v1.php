@@ -128,6 +128,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->gro
         'hosting',
         'ipam',
         'api-tokens',
+        'notifications',
     ] as $module) {
         $file = __DIR__.'/v1/'.$module.'.php';
 
