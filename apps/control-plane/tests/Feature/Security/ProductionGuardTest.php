@@ -61,6 +61,46 @@ final class ProductionGuardTest extends TestCase
     }
 
     #[Test]
+    public function a_production_deployment_whose_sessions_cannot_be_listed_refuses_to_boot(): void
+    {
+        /*
+         * Found by a browser test, not by this suite: the shipped configuration
+         * put sessions in Redis while the account-security screen reads the
+         * `sessions` table, so a signed-in customer was shown "No active
+         * sessions" and "sign out other devices" answered 204 without deleting
+         * anything. The unit tests never caught it because they insert the rows
+         * the controller reads.
+         */
+        config()->set('session.driver', 'redis');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/SESSION_DRIVER/');
+
+        $this->guard()->assertSessionsAreEnumerable();
+    }
+
+    #[Test]
+    public function the_database_session_driver_is_accepted(): void
+    {
+        config()->set('session.driver', 'database');
+
+        $this->guard()->assertSessionsAreEnumerable();
+
+        $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function the_shipped_configuration_stores_sessions_where_they_can_be_revoked(): void
+    {
+        // The example file is what an operator copies on day one, so it is the
+        // file that decides whether the feature works in the field.
+        $example = file_get_contents(base_path('.env.example'));
+
+        $this->assertIsString($example);
+        $this->assertMatchesRegularExpression('/^SESSION_DRIVER=database$/m', $example);
+    }
+
+    #[Test]
     public function the_check_is_case_insensitive(): void
     {
         config()->set('billing.providers', ['payment' => 'FAKE']);

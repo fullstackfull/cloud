@@ -28,6 +28,9 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
 {
     private const string FAKE = 'fake';
 
+    /** The only session driver whose rows the account-security surface can read. */
+    private const string ENUMERABLE_SESSION_DRIVER = 'database';
+
     public function boot(): void
     {
         if (! $this->app->isProduction()) {
@@ -36,6 +39,7 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
 
         $this->assertNoFakeProviders();
         $this->assertEveryConfiguredDriverExists();
+        $this->assertSessionsAreEnumerable();
     }
 
     /**
@@ -117,6 +121,46 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
                 ReverseDnsProviderFactory::drivers(),
             )),
         );
+    }
+
+    /**
+     * Refuses a production deployment whose sessions cannot be listed or
+     * revoked.
+     *
+     * The account-security screen shows a customer every device signed in to
+     * their account and lets them revoke one, or all the others. Both read and
+     * write the `sessions` table, which only the database driver populates.
+     * Under any other driver the platform does not fail — it answers. The
+     * device list comes back empty, so a customer who suspects their password
+     * has been taken is shown no intruder and reassured; "sign out other
+     * devices" deletes nothing and answers 204, so they believe they have just
+     * evicted whoever it was. A security feature that silently does nothing is
+     * worse than one that is absent, because the absent one does not get
+     * trusted.
+     *
+     * Redis remains the cache and queue backend; this is only about where a
+     * session row lives.
+     *
+     * @throws RuntimeException
+     */
+    public function assertSessionsAreEnumerable(): void
+    {
+        $driver = config('session.driver');
+
+        if (is_string($driver) && strtolower(trim($driver)) === self::ENUMERABLE_SESSION_DRIVER) {
+            return;
+        }
+
+        throw new RuntimeException(sprintf(
+            'Refusing to run in production with SESSION_DRIVER="%s". The account-security '
+            .'surface lists and revokes a customer\'s signed-in devices through the `sessions` '
+            .'table, which only the "%s" driver writes: under any other driver that screen shows '
+            .'no devices to a customer who has them, and revocation silently does nothing. '
+            .'Set SESSION_DRIVER=%s.',
+            is_string($driver) ? $driver : gettype($driver),
+            self::ENUMERABLE_SESSION_DRIVER,
+            self::ENUMERABLE_SESSION_DRIVER,
+        ));
     }
 
     /**
