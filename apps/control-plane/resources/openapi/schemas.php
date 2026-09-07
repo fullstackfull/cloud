@@ -696,6 +696,27 @@ return [
             'resolved_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'AdminHostingAccountState' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'PlanChange' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'Both halves of the proration, not only the net: a customer owed a credit and charged a larger amount should see both numbers rather than one they cannot check.',
+        'properties' => [
+            'subscription' => ['$ref' => '#/components/schemas/Subscription'],
+            'credit' => ['$ref' => '#/components/schemas/Money'],
+            'charge' => ['$ref' => '#/components/schemas/Money'],
+            'net' => ['$ref' => '#/components/schemas/Money'],
+            'effective_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'period_end' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
     'AdminAdoptedJob' => [
         'type' => 'object',
         'additionalProperties' => false,

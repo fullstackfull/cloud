@@ -10,10 +10,14 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Billing\Application\Actions\CancelCustomerSubscription;
 use Lynomia\Modules\Billing\Http\Requests\CancelSubscriptionRequest;
+use Lynomia\Modules\Billing\Http\Requests\ChangePlanRequest;
 use Lynomia\Modules\Billing\Http\Requests\ListSubscriptionsRequest;
 use Lynomia\Modules\Billing\Http\Resources\SubscriptionResource;
 use Lynomia\Modules\Billing\Infrastructure\Queries\CustomerSubscriptions;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
+use Lynomia\Modules\Subscriptions\Application\Actions\ChangeSubscriptionPlan;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -122,5 +126,55 @@ final class SubscriptionController
         );
 
         return (new SubscriptionResource($cancelled))->response();
+    }
+
+    /**
+     * Move a running subscription onto another plan.
+     *
+     * ChangeSubscriptionPlan has always been able to do this — crediting the
+     * unused remainder of the plan being left and charging the same remainder
+     * at the new one, through the same proration call so that an upgrade and
+     * an immediate downgrade net to exactly zero — and no route reached it. A
+     * customer who outgrew their plan had one option: cancel, and buy again.
+     *
+     * The billing anniversary does not move. A plan change is not a renewal,
+     * and the next invoice arrives when it always would have.
+     */
+    public function changePlan(ChangePlanRequest $request, string $subscription): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'billing.pay');
+
+        $found = CustomerSubscriptions::of($this->actingCustomer->get())
+            ->whereKey($subscription)
+            ->firstOrFail();
+
+        /*
+         * Read from the catalogue, never from the request beyond their ids.
+         * A price is money, and a price supplied by the client is a price the
+         * client chose.
+         */
+        $plan = Plan::query()->findOrFail($request->planId());
+        $price = PlanPrice::query()->findOrFail($request->priceId());
+
+        $proration = app(ChangeSubscriptionPlan::class)->execute(
+            subscription: $found,
+            newPlan: $plan,
+            newPrice: $price,
+            units: $request->units(),
+        );
+
+        return response()->json([
+            'data' => [
+                'subscription' => new SubscriptionResource($found->refresh()),
+                // Both halves published, not just the net. A customer owed a
+                // credit and charged a larger amount should see both numbers
+                // rather than one figure they cannot check.
+                'credit' => $proration->credit->jsonSerialize(),
+                'charge' => $proration->charge->jsonSerialize(),
+                'net' => $proration->net()->jsonSerialize(),
+                'effective_at' => $proration->changeAt->toIso8601String(),
+                'period_end' => $proration->periodEnd->toIso8601String(),
+            ],
+        ]);
     }
 }

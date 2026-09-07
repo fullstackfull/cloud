@@ -46,42 +46,27 @@ final class NoDeadCapabilitiesTest extends TestCase
     /**
      * Classes that legitimately have no caller in application code.
      *
-     * This list is a to-do, not an exemption. Every entry is a capability
-     * that presents to a customer or an operator as working and cannot
-     * complete its lifecycle, kept here only so the gate can be turned on
-     * before the last one is fixed. It must reach empty, and nothing new may
-     * be added to it.
+     * An entry here is a promise that something outside this repository
+     * invokes the class — and a promise that the gap it leaves is reported
+     * honestly rather than papered over. Everything else belongs wired up or
+     * deleted.
      *
      * @var list<string>
      */
     private const array INTENTIONALLY_UNREFERENCED = [
         /*
-         * Found dead by this test on the day it was written, and being wired
-         * up one at a time rather than in one unreviewable change. Each is a
-         * feature that presents to somebody and cannot complete:
+         * The console gateway's entry point, and the gateway is a separate
+         * process that is not part of this repository. The action lives here
+         * anyway because "single-use" is a claim about behaviour, and a claim
+         * nothing can execute is a claim nothing tests: with it, redeeming
+         * twice can be proven to fail.
          *
-         *  - ChangeSubscriptionPlan: a customer cannot change plan at all;
-         *  - ConfirmPaymentFromReturn: nothing confirms a payment when the
-         *    customer comes back from the provider;
-         *  - ReapExpiredReservations / ReleaseQuarantinedAddresses: addresses
-         *    are taken out of circulation and never put back;
-         *  - RedeemConsoleSession: a console link cannot be exchanged for a
-         *    session;
-         *  - ReleaseNodeCapacity: capacity is reserved and never freed, so the
-         *    fleet fills up permanently;
-         *  - SyncAccountUsage: hosting disk and bandwidth are never refreshed;
-         *  - TerminateHostingAccount: an account cannot be terminated.
-         *
-         * This list must reach empty. Nothing new may be added to it.
+         * This is an honest internal, and it is still a gap at the platform
+         * level — a customer can be issued a console permit and there is
+         * nothing to spend it on. That is reported as NOT_IMPLEMENTED rather
+         * than hidden by this entry.
          */
-        'ChangeSubscriptionPlan',
-        'ConfirmPaymentFromReturn',
-        'ReapExpiredReservations',
         'RedeemConsoleSession',
-        'ReleaseNodeCapacity',
-        'ReleaseQuarantinedAddresses',
-        'SyncAccountUsage',
-        'TerminateHostingAccount',
     ];
 
     #[Test]

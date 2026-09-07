@@ -86,4 +86,13 @@ Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {
     Route::post('{subscription}/cancel', [SubscriptionController::class, 'cancel'])
         ->middleware('throttle:30,1')
         ->name('cancel');
+
+    /*
+     * Changing plan mid-cycle. Limited harder than cancelling: each change
+     * settles money both ways, and a client flapping between two plans would
+     * write a proration pair per request.
+     */
+    Route::post('{subscription}/plan', [SubscriptionController::class, 'changePlan'])
+        ->middleware('throttle:10,1,plan-change:')
+        ->name('plan');
 });

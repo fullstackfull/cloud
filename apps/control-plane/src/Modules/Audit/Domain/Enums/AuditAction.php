@@ -26,6 +26,7 @@ enum AuditAction: string
     case CustomerSuspended = 'customer.suspended';
     case CustomerUnsuspended = 'customer.unsuspended';
     case HostingAccountUnsuspended = 'hosting_account.unsuspended';
+    case HostingAccountTerminated = 'hosting_account.terminated';
     case SubscriptionCancelled = 'subscription.cancelled';
 
     // Data that cannot be recovered once it is gone.

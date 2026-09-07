@@ -492,6 +492,13 @@ return [
         'body' => ['confirmation'],
         'response' => $one('Backup', 202),
     ],
+    'api.v1.subscriptions.plan' => [
+        'tag' => 'Billing',
+        'summary' => 'Change a subscription\'s plan',
+        'description' => 'Mid-cycle. The unused remainder of the old plan is credited and the same remainder charged at the new one, through one proration call - so an upgrade and an immediate downgrade net to zero. The billing anniversary does not move: a plan change is not a renewal.',
+        'body' => ['plan_id', 'price_id', 'units'],
+        'response' => $one('PlanChange'),
+    ],
     'api.admin.invoices.void' => [
         'tag' => 'Operator',
         'summary' => 'Void an invoice',
@@ -499,6 +506,22 @@ return [
         'permission' => 'invoice.manage',
         'body' => ['reason'],
         'response' => $one('AdminVoidedInvoice'),
+    ],
+    'api.admin.hosting_accounts.unsuspend' => [
+        'tag' => 'Operator',
+        'summary' => 'Put a suspended hosting account back into service',
+        'description' => 'The manual way in. The automated one is the subscription listener - the customer pays and the account comes back.',
+        'permission' => 'hosting_account.manage',
+        'body' => ['reason'],
+        'response' => $one('AdminHostingAccountState'),
+    ],
+    'api.admin.hosting_accounts.terminate' => [
+        'tag' => 'Operator',
+        'summary' => 'Terminate a hosting account',
+        'description' => 'The retention window is enforced by the action. Skipping it with `force` additionally requires service.terminate: clearing out accounts whose retention has elapsed and deleting a live customer\'s site today are different decisions. Both are recorded in the audit trail, and distinguishably.',
+        'permission' => 'hosting_account.manage',
+        'body' => ['reason', 'force'],
+        'response' => $one('AdminHostingAccountState'),
     ],
     'api.admin.provisioning.adopt' => [
         'tag' => 'Operator',

@@ -16,6 +16,8 @@ use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
 use Lynomia\Modules\Vps\Infrastructure\IpamReservationReleaser;
+use Lynomia\Modules\Vps\Infrastructure\NodeCapacityReleaser;
+use Lynomia\Support\Provisioning\EveryReservationReleaser;
 
 /**
  * Where the provisioning engine meets the things it provisions.
@@ -38,12 +40,26 @@ final class InfrastructureServiceProvider extends ServiceProvider
         $this->app->bind(HandlerRegistry::class, ProvisioningHandlerRegistry::class);
 
         /*
-         * Compensation is bound to IPAM. The engine decides WHETHER to release
-         * or quarantine — that decision follows from the failure class and
-         * belongs to the engine — while this adapter decides what those words
-         * mean for an IP address.
+         * Compensation reaches every scarce resource a build takes, not one of
+         * them. The engine decides WHETHER to release or quarantine — that
+         * follows from the failure class and belongs to the engine — while
+         * each adapter decides what those words mean for the thing it
+         * allocated.
+         *
+         * This was a single binding to IPAM, and the effect was that a failed
+         * build handed back its address and kept the node's cpu, memory and
+         * storage for ever. ReleaseNodeCapacity had been written for exactly
+         * this and had no caller; there was only ever room for one releaser.
+         *
+         * The two adapters point opposite ways on quarantine, deliberately. An
+         * address that may be in use is held OUT of the pool; capacity that may
+         * be in use is held AS committed. Both are "do not let anyone else have
+         * this until a person has looked".
          */
-        $this->app->bind(ResourceReservationReleaser::class, IpamReservationReleaser::class);
+        $this->app->bind(ResourceReservationReleaser::class, static fn ($app) => new EveryReservationReleaser([
+            $app->make(IpamReservationReleaser::class),
+            $app->make(NodeCapacityReleaser::class),
+        ]));
 
         /*
          * There is deliberately no global ComputeProvider binding. The driver

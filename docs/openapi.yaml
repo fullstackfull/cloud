@@ -512,6 +512,157 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/hosting-accounts/{account}":
+    delete:
+      operationId: "api_admin_hosting_accounts_terminate"
+      tags:
+        - "Operator"
+      summary: "Terminate a hosting account"
+      description: |-
+        The retention window is enforced by the action. Skipping it with `force` additionally requires service.terminate: clearing out accounts whose retention has elapsed and deleting a live customer's site today are different decisions. Both are recorded in the audit trail, and distinguishably.
+
+        Requires the `hosting_account.manage` permission.
+      parameters:
+        - name: "account"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+                force:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminHostingAccountStateResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/hosting-accounts/{account}/unsuspend":
+    post:
+      operationId: "api_admin_hosting_accounts_unsuspend"
+      tags:
+        - "Operator"
+      summary: "Put a suspended hosting account back into service"
+      description: |-
+        The manual way in. The automated one is the subscription listener - the customer pays and the account comes back.
+
+        Requires the `hosting_account.manage` permission.
+      parameters:
+        - name: "account"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminHostingAccountStateResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/clusters/{cluster}/reconcile":
     post:
       operationId: "api_admin_infrastructure_reconcile"
@@ -4256,6 +4407,82 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/subscriptions/{subscription}/plan":
+    post:
+      operationId: "api_v1_subscriptions_plan"
+      tags:
+        - "Billing"
+      summary: "Change a subscription's plan"
+      description: "Mid-cycle. The unused remainder of the old plan is credited and the same remainder charged at the new one, through one proration call - so an upgrade and an immediate downgrade net to zero. The billing anniversary does not move: a plan change is not a renewal."
+      parameters:
+        - name: "subscription"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                plan_id:
+                  description: "See the endpoint description; validated server-side."
+                price_id:
+                  description: "See the endpoint description; validated server-side."
+                units:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/PlanChangeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/vps":
     get:
       operationId: "api_v1_vps_index"
@@ -5331,6 +5558,23 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminDrift"
+    AdminHostingAccountState:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+    AdminHostingAccountStateResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminHostingAccountState"
     AdminHostingNode:
       type: "object"
       additionalProperties: false
@@ -6745,6 +6989,30 @@ components:
             - "object"
             - "null"
           additionalProperties: true
+    PlanChange:
+      type: "object"
+      additionalProperties: false
+      description: "Both halves of the proration, not only the net: a customer owed a credit and charged a larger amount should see both numbers rather than one they cannot check."
+      properties:
+        subscription:
+          "$ref": "#/components/schemas/Subscription"
+        credit:
+          "$ref": "#/components/schemas/Money"
+        charge:
+          "$ref": "#/components/schemas/Money"
+        net:
+          "$ref": "#/components/schemas/Money"
+        effective_at:
+          "$ref": "#/components/schemas/Timestamp"
+        period_end:
+          "$ref": "#/components/schemas/Timestamp"
+    PlanChangeResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/PlanChange"
     PlanPrice:
       type: "object"
       additionalProperties: false

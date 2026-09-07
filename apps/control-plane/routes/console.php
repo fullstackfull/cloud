@@ -91,3 +91,52 @@ Schedule::command('backups:reconcile')
     ->withoutOverlapping(10)
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Address reclamation, every ten minutes.
+ *
+ * Both directions out of a pool were one-way: a reservation whose build never
+ * finished stayed reserved, and an address quarantined by a timed-out call
+ * stayed quarantined. A pool is finite, and the symptom of running one dry is
+ * not "the pool is empty" — it is orders failing to place, days later, for
+ * reasons nobody connects to builds that failed weeks before.
+ *
+ * Ten minutes rather than hourly: this is cheap, local, and the thing it
+ * returns is the thing an order needs to complete.
+ */
+Schedule::command('ipam:reclaim')
+    ->everyTenMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Hosting usage, hourly.
+ *
+ * Every account's disk and bandwidth read zero, for ever, because nothing ran
+ * the sync: an account filling a node looked exactly like an empty one until
+ * the node ran out of space. Hourly is the cadence the panels themselves
+ * recompute at, so asking more often would return the same numbers.
+ */
+Schedule::command('hosting:sync-usage')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Payment reconciliation, every five minutes.
+ *
+ * The webhook is the primary path and this is the backstop for when one is
+ * lost: a customer who paid, closed the tab, and whose order would otherwise
+ * sit unfulfilled for ever. ConfirmPaymentFromReturn had no caller at all, so
+ * a dropped webhook was permanent.
+ *
+ * It only looks at attempts older than its grace period, so it does not race
+ * the webhook and double every provider call the platform makes.
+ */
+Schedule::command('payments:reconcile')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));

@@ -7,6 +7,7 @@ use Lynomia\Modules\Admin\Http\Controllers\AuditController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
+use Lynomia\Modules\Admin\Http\Controllers\HostingController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
@@ -134,6 +135,26 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
 
     // Read-only, permanently. The table is append-only at the model and there
     // is no endpoint here that could amend it.
+    /*
+     * Putting a suspended account back, by hand. The automated path is the
+     * subscription listener — pay and it comes back — and this is the other
+     * way in: abuse that has been investigated, or a payment that arrived
+     * outside the platform.
+     */
+    Route::post('hosting-accounts/{account}/unsuspend', [HostingController::class, 'unsuspend'])
+        ->middleware('permission:'.Permission::HostingAccountManage->value)
+        ->name('hosting_accounts.unsuspend');
+
+    /*
+     * Deleting an account and everything on it. The retention window is
+     * enforced by the action; skipping it needs the same permission again
+     * inside the controller, because "terminate what has expired" and "delete
+     * a live customer's data today" are different decisions.
+     */
+    Route::delete('hosting-accounts/{account}', [HostingController::class, 'terminate'])
+        ->middleware('permission:'.Permission::HostingAccountManage->value)
+        ->name('hosting_accounts.terminate');
+
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)
         ->name('audit.index');
