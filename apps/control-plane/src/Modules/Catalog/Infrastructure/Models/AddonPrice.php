@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Catalog\Infrastructure\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
@@ -13,7 +12,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 class AddonPrice extends Model
 {
-    use HasFactory, HasUlids;
+    use HasUlids;
 
     protected $guarded = ['id'];
 

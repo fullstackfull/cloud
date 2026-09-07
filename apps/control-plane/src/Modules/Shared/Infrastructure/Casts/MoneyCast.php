@@ -23,7 +23,12 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  * char(3). Neither is ever a floating point or decimal column, so no value can
  * be rounded by the database engine on the way in or out.
  *
- * @implements CastsAttributes<Money|null, Money|null>
+ * Declared with `mixed` on the way in rather than Money: Eloquent hands a
+ * cast whatever was assigned to the attribute, and the guard in set() —
+ * which is the whole reason a scalar cannot become money by accident — is
+ * only reachable, and only checkable, if the signature admits that.
+ *
+ * @implements CastsAttributes<Money|null, mixed>
  */
 final class MoneyCast implements CastsAttributes
 {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Date;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
@@ -24,6 +25,8 @@ use RuntimeException;
  */
 final class DevelopmentSeeder extends Seeder
 {
+    use AnnouncesProgress;
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -80,7 +83,7 @@ final class DevelopmentSeeder extends Seeder
             ['role' => CustomerRole::Owner, 'accepted_at' => Date::now()],
         );
 
-        $this->command?->info('Development accounts seeded (password: "password").');
+        $this->announce('Development accounts seeded (password: "password").');
 
         $this->call([
             CatalogueSeeder::class,

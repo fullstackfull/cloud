@@ -51,7 +51,7 @@ final readonly class FindPurchasableProduct
             // Counted through the same predicate the plans are loaded through,
             // so the count and the list can never disagree about what is on
             // sale — only about how much of it fits in one response.
-            ->withCount(['plans' => static fn (Builder $query): Builder => $query->purchasable()])
+            ->withCount(['plans' => self::onlyPurchasablePlans(...)])
             ->with(['plans' => static fn ($relation) => $relation
                 ->purchasable()
                 ->with('prices')
@@ -63,5 +63,14 @@ final readonly class FindPurchasableProduct
         $product->plans->each(fn (Plan $plan): Plan => $this->prices->apply($plan, $currency));
 
         return $product;
+    }
+
+    /**
+     * @param  Builder<Plan>  $query
+     * @return Builder<Plan>
+     */
+    private static function onlyPurchasablePlans(Builder $query): Builder
+    {
+        return $query->purchasable();
     }
 }

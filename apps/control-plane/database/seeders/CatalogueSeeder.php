@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
@@ -27,6 +28,8 @@ use RuntimeException;
  */
 final class CatalogueSeeder extends Seeder
 {
+    use AnnouncesProgress;
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -40,7 +43,7 @@ final class CatalogueSeeder extends Seeder
         $this->sharedHosting();
         $this->taxRules();
 
-        $this->command?->info(sprintf(
+        $this->announce(sprintf(
             'Catalogue seeded: %d products, %d plans, %d prices.',
             Product::count(),
             Plan::count(),

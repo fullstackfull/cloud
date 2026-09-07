@@ -7,6 +7,7 @@ namespace Tests\Feature\Compute;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Lynomia\Modules\Compute\Domain\Enums\ComputeDriver;
 use Lynomia\Modules\Compute\Domain\Exceptions\ClusterNotConfiguredException;
 use Lynomia\Modules\Compute\Domain\Exceptions\FakeProviderInProductionException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
@@ -36,6 +37,31 @@ final class ComputeProviderFactoryTest extends TestCase
 
         $this->assertInstanceOf(FakeComputeProvider::class, $provider);
         $this->assertSame('fake', $provider->name());
+    }
+
+    #[Test]
+    public function every_driver_the_enum_names_has_an_adapter(): void
+    {
+        /*
+         * The factory's match has no default arm, on purpose: an exhaustive
+         * match over an enum is a guarantee the analyser can check, and a
+         * default branch guarding a case that cannot occur is dead code that
+         * reads like a safety net. This is the safety net — it runs at build
+         * time, where a driver added without an adapter is a failing test
+         * rather than an UnhandledMatchError in front of a customer.
+         */
+        config()->set('compute.credentials.exhaustiveness', [
+            'token_id' => 'lynomia@pve!control-plane',
+            'token_secret' => 'b7f3c1de-4a2e-4f0c',
+        ]);
+
+        foreach (ComputeDriver::cases() as $driver) {
+            $cluster = $driver === ComputeDriver::Proxmox
+                ? ComputeCluster::factory()->proxmox('exhaustiveness', 'https://pve.test:8006')->create()
+                : ComputeCluster::factory()->create(['driver' => $driver]);
+
+            $this->assertNotNull($this->factory()->for($cluster), $driver->value);
+        }
     }
 
     #[Test]

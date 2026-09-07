@@ -83,7 +83,7 @@ final class InfrastructureController
             'name' => $pool->name,
             'ip_version' => $pool->ip_version->value,
             'scope' => $pool->scope->value,
-            'datacenter' => $pool->datacenter?->slug,
+            'datacenter' => $pool->datacenter->slug,
             'subnets_count' => $pool->subnets_count,
             'quarantine_days' => $pool->quarantine_days,
             'is_active' => $pool->is_active,

@@ -58,8 +58,6 @@ final class MetricsTokenGuard
             $this->refuse($request, 'missing_token');
         }
 
-        /** @var string $expected */
-        /** @var string $presented */
         if (! hash_equals(hash('sha256', $expected), hash('sha256', $presented))) {
             $this->refuse($request, 'token_mismatch');
         }

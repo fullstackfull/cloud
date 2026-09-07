@@ -162,7 +162,11 @@ final class ListVirtualMachinesEndpointTest extends VpsApiTestCase
 
         $response->assertJsonCount(1, 'data.0.addresses')
             ->assertJsonPath('data.0.addresses.0.address', '192.0.2.10')
-            ->assertJsonPath('data.0.addresses.0.is_primary', true);
+            ->assertJsonPath('data.0.addresses.0.is_primary', true)
+            // Named as the IPAM endpoints name it, and a number as they send
+            // it. assertJsonPath compares strictly, so this fails if the
+            // int-backed enum is ever stringified on the way out.
+            ->assertJsonPath('data.0.addresses.0.ip_version', 4);
 
         $this->assertStringNotContainsString('192.0.2.11', $response->getContent() ?: '');
     }

@@ -234,7 +234,7 @@ final readonly class PlaceOrder
             $this->assertStock($customer, $plan, $claimedInThisBasket[$line->planId]);
 
             $lines[] = new PricingLine(
-                description: $plan->nameFor($customer->users()->first()?->locale ?? (string) config('app.locale')),
+                description: $plan->nameFor($customer->users()->first()->locale ?? (string) config('app.locale')),
                 quantity: $line->quantity,
                 unitPrice: $price->recurring(),
                 setupFee: $price->setup(),

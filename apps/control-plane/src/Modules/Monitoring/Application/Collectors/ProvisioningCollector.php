@@ -146,12 +146,12 @@ final readonly class ProvisioningCollector implements MetricsCollector
 
                 $samples[] = new MetricSample(
                     ['kind' => $kind->value, 'le' => (string) $boundary],
-                    (float) ($row?->{$property} ?? 0),
+                    (float) ($row->{$property} ?? 0),
                     '_bucket',
                 );
             }
 
-            $observations = (float) ($row?->observations ?? 0);
+            $observations = (float) ($row->observations ?? 0);
 
             // The +Inf bucket is mandatory and must equal _count. A histogram
             // missing it is silently useless: histogram_quantile() has no
@@ -164,7 +164,7 @@ final readonly class ProvisioningCollector implements MetricsCollector
 
             $samples[] = new MetricSample(
                 ['kind' => $kind->value],
-                (float) ($row?->elapsed_sum ?? 0),
+                (float) ($row->elapsed_sum ?? 0),
                 '_sum',
             );
 

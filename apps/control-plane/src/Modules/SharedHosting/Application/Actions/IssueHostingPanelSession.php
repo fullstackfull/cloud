@@ -10,7 +10,6 @@ use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingNodeNotConfiguredExce
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingPanelSessionFailedException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingPanelSessionUnavailableException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
-use Lynomia\Modules\SharedHosting\Domain\Exceptions\UnknownHostingPanelException;
 use Lynomia\Modules\SharedHosting\Infrastructure\HostingProviderFactory;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 
@@ -121,11 +120,6 @@ final readonly class IssueHostingPanelSession
             }
 
             throw HostingPanelSessionFailedException::panelUnreachable($id, $e);
-        } catch (UnknownHostingPanelException $e) {
-            // The node row names a panel this build cannot drive. Its context
-            // names the node and the config key its root API token is read
-            // from, which is precisely what must not travel.
-            throw HostingPanelSessionFailedException::platformMisconfigured($id, $e);
         }
     }
 }

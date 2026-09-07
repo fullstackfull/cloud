@@ -238,7 +238,7 @@ final class IpmiDedicatedProvider implements DedicatedProvider
             '-p', (string) $endpoint->effectivePort(),
             '-U', $this->connection->username,
             '-P', $this->connection->password,
-            ...array_values($arguments),
+            ...$arguments,
         ];
     }
 

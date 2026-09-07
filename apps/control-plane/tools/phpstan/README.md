@@ -35,7 +35,19 @@ against that checkout in a scratch composer root outside this repository, and
 the analysis ran from the application root against this same configuration:
 level 6, the same four paths, Larastan and the deprecation rules included.
 
-**141 errors, at level 6.** The list is genuine and is being worked through;
-none of it has been silenced, and there is still no `ignoreErrors` block and no
-baseline. What CI reports on its first run should match, package versions being
-identical — and if it does not, CI is right and this note is wrong.
+The first run reported **141 errors at level 6**. Seventy-one of them were the
+analyser rather than the code: this project declares casts in the `casts()`
+method, and Larastan reads the `$casts` property unless `parseModelCastsMethod`
+is set, so it saw no casts at all and reported every cast attribute as its raw
+column type. That is now set, in `phpstan.neon`, with the reasoning next to it.
+
+The remaining seventy were worked through one at a time, and the run is now at
+**zero**. Three were defects — a missing Eloquent relation that made an operator
+endpoint 500 as soon as it had a row to return, a call to a brick/money method
+that does not exist, and a catch block that could never run and so misreported a
+configuration mistake as a panel outage. The rest were annotations that claimed
+more than the code guaranteed, defensive branches an exhaustive match had
+already made unreachable, and a factory trait on four models that had no
+factory. Every one of them was fixed rather than silenced: there is still no
+`ignoreErrors` block and no baseline, and if CI's first run disagrees with this
+note, CI is right and this note is wrong.

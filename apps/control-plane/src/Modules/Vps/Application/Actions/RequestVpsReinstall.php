@@ -88,8 +88,8 @@ final readonly class RequestVpsReinstall
                 'hostname' => $machine->hostname,
                 'template_id' => $template?->getKey(),
                 'template_reference' => $template?->provider_reference,
-                'os_family' => $template?->os_family?->value ?? $machine->os_family,
-                'ssh_keys' => array_values($sshKeys),
+                'os_family' => $template !== null ? $template->os_family->value : $machine->os_family,
+                'ssh_keys' => $sshKeys,
             ],
             /*
              * One attempt, deliberately, against the engine's default of

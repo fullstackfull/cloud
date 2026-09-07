@@ -46,7 +46,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 final class VirtualMachineResource extends JsonResource
 {
     /**
-     * @param  list<array{address: string, version: string, is_primary: bool}>  $addresses
+     * @param  list<array{address: string, ip_version: int, is_primary: bool}>  $addresses
      */
     public function __construct(
         VirtualMachine $resource,

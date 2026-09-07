@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Catalog\Application\Actions;
 
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 
 /**
@@ -50,12 +51,21 @@ final class ListPurchasableProducts
         return Product::query()
             ->purchasable()
             ->when($kind !== null, static fn (Builder $query): Builder => $query->where('kind', $kind?->value))
-            ->withCount(['plans' => static fn (Builder $query): Builder => $query->purchasable()])
+            ->withCount(['plans' => self::onlyPurchasablePlans(...)])
             // sort_order is the merchandising decision; slug is the tiebreak
             // that keeps paging stable, because a page boundary that shifts
             // between requests silently drops rows from the second page.
             ->orderBy('sort_order')
             ->orderBy('slug')
             ->paginate($perPage);
+    }
+
+    /**
+     * @param  Builder<Plan>  $query
+     * @return Builder<Plan>
+     */
+    private static function onlyPurchasablePlans(Builder $query): Builder
+    {
+        return $query->purchasable();
     }
 }

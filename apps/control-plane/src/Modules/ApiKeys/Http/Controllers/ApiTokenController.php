@@ -191,9 +191,6 @@ final class ApiTokenController
      * that revocation wins over expiry — because a list filtered by "revoked"
      * that disagrees with the `status` printed on each row is worse than no
      * filter at all.
-     *
-     * @param  Builder<*>  $query
-     * @return Builder<*>
      */
     private function constrainToStatus(Builder $query, ApiTokenStatus $status): Builder
     {

@@ -38,7 +38,10 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
      */
     public function assertNoFakeProviders(): void
     {
-        /** @var array<string, string> $providers */
+        // Not annotated as a map of strings: this is deployment
+        // configuration, and the check below is what establishes that a value
+        // is one.
+        /** @var array<string, mixed> $providers */
         $providers = config('billing.providers', []);
 
         $fake = array_keys(array_filter(

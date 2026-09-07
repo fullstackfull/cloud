@@ -51,7 +51,7 @@ final class RateLimitServiceProvider extends ServiceProvider
             // A personal access token may carry its own ceiling; otherwise the
             // configured default applies.
             $token = $user->currentAccessToken();
-            $perMinute = is_object($token) && isset($token->rate_limit_per_minute) && $token->rate_limit_per_minute !== null
+            $perMinute = isset($token->rate_limit_per_minute)
                 ? (int) $token->rate_limit_per_minute
                 : (int) config('security.rate_limits.api_token.attempts', 120);
 

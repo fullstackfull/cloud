@@ -7,8 +7,15 @@ namespace Lynomia\Modules\Identity\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
 
 /**
+ * `$pivot` is not on Customer and is not always here: it exists only when this
+ * resource was built from the members relation, which is what whenPivotLoaded
+ * checks before reading it.
+ *
+ * @property-read CustomerMember|null $pivot
+ *
  * @mixin Customer
  */
 final class CustomerResource extends JsonResource

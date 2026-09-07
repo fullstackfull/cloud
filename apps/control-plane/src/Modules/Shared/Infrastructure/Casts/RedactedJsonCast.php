@@ -38,7 +38,11 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * explain to an operator what happened, and what happened can be explained
  * without the credentials it happened with.
  *
- * @implements CastsAttributes<array<string, mixed>|null, array<string, mixed>|null>
+ * Declared with `mixed` on the way in: Eloquent hands a cast whatever was
+ * assigned, and a provider payload arriving as something other than an array
+ * is exactly the case set() wraps rather than drops.
+ *
+ * @implements CastsAttributes<array<string, mixed>|null, mixed>
  */
 final class RedactedJsonCast implements CastsAttributes
 {

@@ -243,7 +243,7 @@ final readonly class PreflightHostingNode
             return array_change_key_case($configured);
         }
 
-        return self::FALLBACK_SUPPORTED_OS[$panel->value] ?? [];
+        return self::FALLBACK_SUPPORTED_OS[$panel->value];
     }
 
     /**
@@ -258,7 +258,7 @@ final readonly class PreflightHostingNode
             return array_values(array_map(intval(...), array_filter($configured, is_numeric(...))));
         }
 
-        return self::FALLBACK_PORTS[$panel->value] ?? [];
+        return self::FALLBACK_PORTS[$panel->value];
     }
 
     /**

@@ -303,6 +303,11 @@ final class StripePaymentProvider implements PaymentProvider
         $error = $e->getError();
         $intent = $error?->payment_intent?->id;
 
+        // Hoisted rather than read inside the `??` chain below: a `?->` on the
+        // left of `??` is redundant, because `??` already absorbs the null, and
+        // writing both reads as though one of them were load-bearing.
+        $declineCode = $error?->decline_code;
+
         return new PaymentIntentResult(
             reference: is_string($intent) && $intent !== ''
                 ? $intent
@@ -311,7 +316,7 @@ final class StripePaymentProvider implements PaymentProvider
             amount: $request->amount,
             // A decline code is more specific than the error code and is what
             // dunning branches on, so prefer it when the issuer supplied one.
-            failureCode: $error?->decline_code ?? $e->getStripeCode() ?? 'card_declined',
+            failureCode: $declineCode ?? $e->getStripeCode() ?? 'card_declined',
             failureMessage: $this->redactor->redactString((string) $e->getMessage()),
             metadata: $this->safeMetadata(['declined' => true, 'error_type' => $error?->type]),
         );
@@ -331,6 +336,10 @@ final class StripePaymentProvider implements PaymentProvider
     {
         $error = $e->getError();
 
+        // Hoisted for the same reason as in declinedResult(): `?->` on the left
+        // of `??` is redundant.
+        $providerMessage = $error?->message;
+
         return PaymentProviderException::requestFailed(
             self::NAME,
             $operation,
@@ -341,7 +350,7 @@ final class StripePaymentProvider implements PaymentProvider
                 'decline_code' => $error?->decline_code,
                 'http_status' => $e->getHttpStatus(),
                 'request_id' => $e->getRequestId(),
-                'provider_message' => $this->redactor->redactString((string) ($error?->message ?? $e->getMessage())),
+                'provider_message' => $this->redactor->redactString((string) ($providerMessage ?? $e->getMessage())),
             ],
             previous: $e,
         );

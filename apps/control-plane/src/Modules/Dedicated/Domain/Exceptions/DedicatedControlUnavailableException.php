@@ -16,9 +16,8 @@ use Throwable;
  * Why this class exists at all
  * ---------------------------------------------------------------------------
  *
- * {@see DedicatedProviderException}, {@see BmcNotConfiguredException} and
- * {@see UnknownBmcProtocolException} are excellent exceptions — for an
- * operator. They carry the adapter's name, the operation verb, the Redfish
+ * {@see DedicatedProviderException} and {@see BmcNotConfiguredException} are
+ * excellent exceptions — for an operator. They carry the adapter's name, the operation verb, the Redfish
  * path, the controller's HTTP status, the controller's own prose, the BMC
  * endpoint id, the management address and the name of the configuration key the
  * BMC password is read from. Every one of those is deliberate, because until

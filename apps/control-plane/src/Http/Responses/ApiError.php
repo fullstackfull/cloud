@@ -6,7 +6,6 @@ namespace Lynomia\Http\Responses;
 
 use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 
 /**
  * The single JSON error shape every API endpoint returns.
@@ -54,9 +53,7 @@ final readonly class ApiError implements Responsable
                 'details' => $this->details !== [] ? $this->details : null,
                 // Correlates a customer-reported failure with the exact log
                 // lines and provisioning job for that request.
-                'request_id' => $request instanceof Request
-                    ? $request->attributes->get('request_id')
-                    : null,
+                'request_id' => $request->attributes->get('request_id'),
             ], static fn (mixed $value): bool => $value !== null),
         ];
 

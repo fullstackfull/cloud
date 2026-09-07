@@ -16,6 +16,8 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Date;
 use Laravel\Sanctum\HasApiTokens;
+use Laravel\Sanctum\PersonalAccessToken;
+use Laravel\Sanctum\TransientToken;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedVerifyEmail;
@@ -42,7 +44,16 @@ use Spatie\Permission\Traits\HasRoles;
  */
 class User extends Authenticatable implements MustVerifyEmail
 {
-    /** @use HasFactory<UserFactory> */
+    /**
+     * Sanctum defaults TToken to PersonalAccessToken, and on a cookie-session
+     * request that is not what `currentAccessToken()` returns: the stateful
+     * middleware sets a TransientToken, which has `can()` and `cant()` and no
+     * `delete()`. Naming both is what makes the difference visible to anything
+     * that reads this model rather than only to whoever hits the fatal.
+     *
+     * @use HasApiTokens<PersonalAccessToken|TransientToken>
+     * @use HasFactory<UserFactory>
+     */
     use HasApiTokens, HasFactory, HasRoles, HasUlids, Notifiable, SoftDeletes;
 
     /**

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Compute\Infrastructure\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
@@ -18,7 +17,7 @@ use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
  */
 class NodeCapacityReservation extends Model
 {
-    use HasFactory, HasUlids;
+    use HasUlids;
 
     protected $guarded = ['id'];
 
