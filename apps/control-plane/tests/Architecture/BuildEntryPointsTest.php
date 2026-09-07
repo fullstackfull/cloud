@@ -54,6 +54,34 @@ final class BuildEntryPointsTest extends TestCase
     }
 
     #[Test]
+    public function the_static_analyser_is_invoked_with_a_configuration_it_can_find(): void
+    {
+        /*
+         * `make lint-backend` ran phpstan from the application root, where
+         * there is no phpstan.neon — the configuration lives in its own
+         * composer root beside the analyser. The command answered "At least one
+         * path must be specified to analyse" and make stopped, so the gate that
+         * is supposed to fail on a type error failed on itself instead, and it
+         * did so only on a machine where the analyser was actually installed.
+         */
+        $makefile = file_get_contents(self::ROOT.'/Makefile');
+
+        $this->assertIsString($makefile);
+        $this->assertMatchesRegularExpression(
+            '#phpstan analyse -c (\S+\.neon)#',
+            $makefile,
+            'make lint-backend must name the phpstan configuration explicitly.',
+        );
+
+        preg_match('#phpstan analyse -c (\S+\.neon)#', $makefile, $matches);
+
+        $this->assertFileExists(
+            self::ROOT.'/apps/control-plane/'.$matches[1],
+            sprintf('The Makefile analyses with %s, which does not exist.', $matches[1]),
+        );
+    }
+
+    #[Test]
     public function every_inventory_the_makefile_names_exists(): void
     {
         $makefile = file_get_contents(self::ROOT.'/Makefile');

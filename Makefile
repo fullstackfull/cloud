@@ -65,7 +65,7 @@ lint-backend: ## Laravel Pint, plus PHPStan when its toolchain is installed
 	@# never move an application dependency. It is not part of `make bootstrap`
 	@# because it is only needed by CI and by whoever is about to change types.
 	@if [ -x "$(CP)/tools/phpstan/vendor/bin/phpstan" ]; then \
-		cd $(CP) && tools/phpstan/vendor/bin/phpstan analyse --no-progress --memory-limit=1G; \
+		cd $(CP) && tools/phpstan/vendor/bin/phpstan analyse -c tools/phpstan/phpstan.neon --no-progress --memory-limit=1G; \
 	else \
 		echo "phpstan: not installed - run 'composer install --working-dir=$(CP)/tools/phpstan' to enable it"; \
 	fi
