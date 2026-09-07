@@ -1,8 +1,14 @@
 # Phase 30A — progress report
 
-**Branch:** `claude/hv-t6hq1p` · **At commit:** `b044471` · **Status: two of the six
-product gaps are closed. Four are not started, and this document says so
-rather than leaving it to be discovered.**
+**Branch:** `claude/hv-t6hq1p` · **At commit:** `b044471` · **Status: three of the
+six product gaps are closed in software. Three are not started, and this
+document says so rather than leaving it to be discovered.**
+
+"Closed in software" is not "closed". Two of the three — suspension and VPS
+reinstall — are `TESTED` against a fake hypervisor and `BLOCKED_CREDENTIALS`
+against a real one; only the notification system is proven end to end in a
+browser. The table below is the classification that counts; this line is a
+summary of it.
 
 Phase 30A asked for one thing: close the last customer and operator product
 gaps before real infrastructure integration, under a rule that makes the
@@ -220,7 +226,7 @@ still reflects Phase 29 and does not yet describe suspension or reinstall.
 | `npm run test:e2e` (Playwright, real API + PostgreSQL + Redis) | **45 passed** |
 | `npm run openapi:lint` | valid, 1 pre-existing warning |
 
-The suite grew by 70 tests across the two gaps. `openapi:lint` was **failing**
+The suite grew by 70 tests across the two gaps closed in this session — 30A.6 and 30A.1; the notification system landed earlier on this branch. `openapi:lint` was **failing**
 before this session: the notifications operation added in 30A.5 declared
 `page` and `per_page` twice. That is fixed.
 
