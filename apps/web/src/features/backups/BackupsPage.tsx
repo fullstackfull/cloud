@@ -117,7 +117,9 @@ export function BackupsPage() {
       <LoadFailure error={machinesError ?? readError} />
 
       {! machinesPending && rows.length === 0 ? (
-        <EmptyState title={t('backups.noMachines')} description={t('backups.noMachinesHint')} />
+        <EmptyState>
+          {t('backups.noMachines')} {t('backups.noMachinesHint')}
+        </EmptyState>
       ) : (
         <Card>
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
@@ -191,13 +193,19 @@ export function BackupsPage() {
         open
         title={t('backups.restoreTitle')}
         body={t('backups.restoreWarning', { hostname: machine?.hostname ?? '' })}
-        // The server compares this too, and is what decides. This copy exists
-        // so the customer finds out before the request rather than after.
-        requiredPhrase={machine?.hostname}
+        /*
+         * Spread rather than passed as undefined. Under
+         * exactOptionalPropertyTypes an optional prop must be absent, not
+         * present-and-undefined — and the distinction is real here: a
+         * ConfirmDialog with no requiredPhrase confirms on one click, so
+         * "I could not find the machine" must never quietly become "no
+         * confirmation needed".
+         */
+        {...(machine === undefined ? {} : { requiredPhrase: machine.hostname })}
         requiredPhraseLabel={t('backups.restoreConfirmLabel', { hostname: machine?.hostname ?? '' })}
         confirmLabel={t('backups.restore')}
         loading={restore.isPending}
-        error={restoreFailure?.message}
+        {...(restoreFailure === null ? {} : { error: restoreFailure.message })}
         onCancel={() => {
           setRestoring(null)
           restore.reset()

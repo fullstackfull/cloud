@@ -15,20 +15,26 @@ import '@testing-library/jest-dom/vitest'
  * asserted in the browser suite against Chromium, and a rich fake here would
  * only prove that the fake works.
  */
-// Tested with `in` rather than against undefined: the DOM lib declares
-// showModal as always present, so comparing it is a condition the type system
-// considers impossible — while jsdom is precisely the environment where it is
-// absent, which is why this file exists.
-if (! ('showModal' in HTMLDialogElement.prototype)) {
-  HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+/*
+ * Written against a widened alias of the prototype. The DOM lib declares these
+ * methods as always present, so TypeScript narrows the object to `never`
+ * inside any check for their absence — while jsdom is precisely the
+ * environment where they are absent, which is why this file exists. The alias
+ * says "this is the runtime object, not the declared type" once, rather than
+ * casting at each assignment.
+ */
+const dialogPrototype = HTMLDialogElement.prototype as Partial<HTMLDialogElement>
+
+if (dialogPrototype.showModal === undefined) {
+  dialogPrototype.showModal = function showModal(this: HTMLDialogElement) {
     this.open = true
   }
 
-  HTMLDialogElement.prototype.show = function show(this: HTMLDialogElement) {
+  dialogPrototype.show = function show(this: HTMLDialogElement) {
     this.open = true
   }
 
-  HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement, returnValue?: string) {
+  dialogPrototype.close = function close(this: HTMLDialogElement, returnValue?: string) {
     this.open = false
 
     if (returnValue !== undefined) this.returnValue = returnValue
