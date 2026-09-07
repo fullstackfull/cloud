@@ -12,12 +12,15 @@ use Lynomia\Modules\Compute\Application\Jobs\ReconcileCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
+use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -146,11 +149,173 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
         }
     }
 
+    #[Test]
+    public function a_provider_refusal_is_recorded_and_rescheduled_rather_than_lost(): void
+    {
+        /*
+         * The unit tests prove the engine classifies a refusal correctly. This
+         * proves the same thing survives the trip through Redis and a separate
+         * process.
+         *
+         * The refusal arrives before the provider accepted anything, so it is
+         * transient: the machine was never created and asking again is safe.
+         * What the platform must not do is lose the work — the customer has
+         * paid and is waiting — and must not build anything from the failed
+         * attempt.
+         */
+        $job = $this->committedWork(
+            FakeComputeProvider::failingHostname('worker-refused'),
+        );
+
+        RunProvisioningJob::dispatch((string) $job->getKey());
+
+        $worker = $this->runWorker();
+
+        $this->assertTrue($worker->isSuccessful(), $worker->getErrorOutput().$worker->getOutput());
+
+        $settled = ProvisioningJob::on(self::CONNECTION)->findOrFail($job->getKey());
+
+        // Queued again, with the attempt counted and the provider's own words
+        // kept: "it failed" is not an answer an operator can act on.
+        $this->assertSame(ProvisioningJobStatus::Queued, $settled->status);
+        $this->assertSame(FailureClass::Transient, $settled->failure_class);
+        $this->assertSame(1, $settled->attempts);
+        $this->assertNotNull($settled->last_error);
+        $this->assertNotNull($settled->next_attempt_at);
+
+        // Nothing half-built. A refusal that left a machine row behind would
+        // bill a customer for something that does not exist.
+        $this->assertSame(
+            0,
+            VirtualMachine::on(self::CONNECTION)->where('service_id', $settled->service_id)->count(),
+        );
+
+        // The retry is waiting on its backoff rather than sitting ready: a
+        // provider that just refused is not going to answer differently a
+        // millisecond later.
+        $this->assertSame(0, (int) Redis::connection()->llen('queues:'.self::QUEUE));
+        $this->assertGreaterThan(0, (int) Redis::connection()->zcard('queues:'.self::QUEUE.':delayed'));
+
+        // Nothing reached Laravel's failed-jobs table: the engine handled this
+        // itself. A row there would mean the platform had given up on work a
+        // customer is waiting for without recording why in its own tables.
+        $this->assertSame(0, DB::connection(self::CONNECTION)->table('failed_jobs')->count());
+    }
+
+    #[Test]
+    public function a_worker_killed_mid_build_does_not_produce_a_second_machine(): void
+    {
+        /*
+         * The failure a platform cannot test any other way: the process holding
+         * a customer's build disappears — an OOM kill, a node drained, a deploy
+         * — after the hypervisor has been asked to create the machine.
+         *
+         * What must not happen is a second worker starting a second build. The
+         * engine's defence is that it claims the job before calling anybody and
+         * writes the remote identifier before the handler returns, so a job
+         * found in `running` is never picked up again by the claim.
+         */
+        config()->set('compute.fake.task_delay_seconds', 0);
+
+        $job = $this->committedWork();
+
+        RunProvisioningJob::dispatch((string) $job->getKey());
+
+        $worker = $this->startWorker();
+
+        // Wait for the job to be claimed, then kill the process holding it —
+        // without the grace period a normal stop would give it.
+        $this->waitUntil(function () use ($job): bool {
+            return ProvisioningJob::on(self::CONNECTION)->findOrFail($job->getKey())->status
+                !== ProvisioningJobStatus::Queued;
+        });
+
+        $worker->signal(SIGKILL);
+        $worker->wait();
+
+        $afterTheKill = ProvisioningJob::on(self::CONNECTION)->findOrFail($job->getKey());
+        $machinesAfterTheKill = VirtualMachine::on(self::CONNECTION)
+            ->where('service_id', $afterTheKill->service_id)
+            ->count();
+
+        // A second worker comes along, as one really would: the job may still
+        // be on the queue, or Redis may hand it back when the reservation
+        // expires.
+        RunProvisioningJob::dispatch((string) $job->getKey());
+
+        $second = $this->runWorker();
+        $this->assertTrue($second->isSuccessful(), $second->getErrorOutput().$second->getOutput());
+
+        $finalMachines = VirtualMachine::on(self::CONNECTION)
+            ->where('service_id', $afterTheKill->service_id)
+            ->count();
+
+        // The property that matters: the second worker added nothing. Whether
+        // the killed process had got as far as creating the row is a race and
+        // is not asserted; that it cannot be created twice is not.
+        $this->assertSame(
+            $machinesAfterTheKill,
+            $finalMachines,
+            'A worker that died mid-build let a second worker build the customer another machine.',
+        );
+
+        $this->assertLessThanOrEqual(
+            1,
+            $finalMachines,
+            'One order, one machine — whatever happened to the process that was building it.',
+        );
+
+        /*
+         * And the job is not quietly back in the queue pretending to be fresh.
+         * A job the engine claimed stays claimed until something settles it:
+         * the stale-job detector, which runs every five minutes, is what
+         * eventually escalates this to a person. That is the intended outcome
+         * for a build nobody can prove finished.
+         */
+        $this->assertNotSame(
+            ProvisioningJobStatus::Queued,
+            ProvisioningJob::on(self::CONNECTION)->findOrFail($job->getKey())->status,
+        );
+    }
+
+    /**
+     * Starts a worker without waiting for it, so the test can kill it.
+     */
+    private function startWorker(): Process
+    {
+        $worker = $this->buildWorker(120, self::QUEUE);
+
+        $worker->start();
+
+        return $worker;
+    }
+
+    /**
+     * Polls until the condition holds, or fails the test.
+     *
+     * A fixed sleep would be either flaky or slow; the job is claimed in
+     * milliseconds on a warm machine and in a second or two on a cold one.
+     */
+    private function waitUntil(callable $condition, float $timeoutSeconds = 30.0): void
+    {
+        $deadline = microtime(true) + $timeoutSeconds;
+
+        while (microtime(true) < $deadline) {
+            if ($condition() === true) {
+                return;
+            }
+
+            usleep(50_000);
+        }
+
+        $this->fail('The worker never reached the state this test needed to interrupt.');
+    }
+
     /**
      * A committed customer, cluster, node, pool, service and queued job: what a
      * paid order leaves behind for a worker to act on.
      */
-    private function committedWork(): ProvisioningJob
+    private function committedWork(?string $hostname = null): ProvisioningJob
     {
         $customer = Customer::factory()->make(['currency' => 'KWD', 'country' => 'KW']);
         $customer->setConnection(self::CONNECTION)->save();
@@ -215,7 +380,7 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
                 'vcpu' => 2,
                 'memory_mib' => 2048,
                 'disk_gib' => 20,
-                'hostname' => 'worker-test-'.Str::lower(Str::random(6)),
+                'hostname' => $hostname ?? 'worker-test-'.Str::lower(Str::random(6)),
             ],
         ]);
         $job->setConnection(self::CONNECTION)->save();
@@ -228,7 +393,16 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
      */
     private function runWorker(int $timeoutSeconds = 120, string $queue = self::QUEUE): Process
     {
-        $worker = new Process(
+        $worker = $this->buildWorker($timeoutSeconds, $queue);
+
+        $worker->run();
+
+        return $worker;
+    }
+
+    private function buildWorker(int $timeoutSeconds, string $queue): Process
+    {
+        return new Process(
             [
                 PHP_BINARY,
                 'artisan',
@@ -253,10 +427,6 @@ final class ARealWorkerConsumesTheQueueTest extends TestCase
             null,
             $timeoutSeconds,
         );
-
-        $worker->run();
-
-        return $worker;
     }
 
     #[Test]
