@@ -85,7 +85,7 @@ build: ## Production build of the frontend
 
 .PHONY: deploy-staging
 deploy-staging: ## Deploy to staging via Ansible
-	cd infrastructure/ansible && ansible-playbook -i inventories/staging playbooks/deploy-control-plane.yml
+	cd infrastructure/ansible && ansible-playbook -i inventories/staging playbooks/control-plane.yml
 
 # ------------------------------------------------------------- infrastructure
 

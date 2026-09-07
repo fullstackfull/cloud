@@ -91,7 +91,7 @@ and these are its actual outputs.
 ### Backend
 
 ```text
-php vendor/bin/phpunit                  1680 tests, 41070 assertions, 0 failures
+php vendor/bin/phpunit                  1682 tests, 41080 assertions, 0 failures
 ./vendor/bin/pint --test                PASS
 composer validate --strict              PASS  (./composer.json is valid)
 ```
