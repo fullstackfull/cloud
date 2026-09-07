@@ -86,3 +86,7 @@ dump.rdb
 *.rdb
 appendonly.aof
 appendonlydir/
+
+# Playwright output: traces and error-context snapshots from the last local run.
+apps/web/test-results/
+apps/web/playwright-report/
