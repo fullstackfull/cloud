@@ -56,6 +56,23 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         /*
+         * Never redirect a guest. This application serves no HTML, so there is
+         * nowhere to send one.
+         *
+         * Laravel's Authenticate middleware redirects to a route named `login`
+         * unless the request says it expects JSON. No such route exists here,
+         * so `route('login')` threw and every unauthenticated request without
+         * an `Accept: application/json` header — a browser opening an endpoint
+         * directly, a client that forgets the header, a monitoring probe — got
+         * 500 `server.error` reading "Route [login] not defined".
+         *
+         * Returning null makes the middleware throw AuthenticationException
+         * instead, which the renderer below turns into the 401 the caller
+         * should have had all along.
+         */
+        $middleware->redirectGuestsTo(static fn (): ?string => null);
+
+        /*
          * Both of these are global rather than group middleware.
          *
          * Laravel's middleware priority runs authentication before a group's
