@@ -34,7 +34,7 @@ recorded responses. None of them has spoken to the real thing.
 |---|---|---|
 | Repository, CI workflow, developer bootstrap | `RUNTIME_VERIFIED` | Clean-room clone, install and test run |
 | Control plane (Laravel 13.30, PHP 8.4) | `RUNTIME_VERIFIED` | Full suite against PostgreSQL 16 and Redis |
-| Portal SPA (React 19, Vite 8) | `TESTED` | 38 tests, typecheck, lint, production build |
+| Portal SPA (React 19, Vite 8) | `RUNTIME_VERIFIED` | 42 component tests plus 35 browser specs driving the real API |
 | Shared kernel — money, state machines, errors | `RUNTIME_VERIFIED` | Exercised by every module's tests |
 | Identity, RBAC, two-factor, sessions, tokens | `RUNTIME_VERIFIED` | 8 roles, 51 permissions seeded and asserted |
 | Multi-tenancy (`ResolveActingCustomer`) | `RUNTIME_VERIFIED` | One enforcement point, tested from both sides |
@@ -60,28 +60,66 @@ recorded responses. None of them has spoken to the real thing.
 | OpenTofu / Ansible execution | `BLOCKED_HARDWARE` | 15 roles, 11 playbooks, never run against a host |
 | PHPStan in CI | `BLOCKED_NETWORK` | Runs clean here by another route; see below |
 | GitHub Actions | not observed | The workflow has never been seen to execute |
-| **Reverse DNS beyond the fake** | `NOT_IMPLEMENTED` | Contract and fake only |
-| **Backup provider in the application** | `NOT_IMPLEMENTED` | Config key only |
+| DNS and reverse DNS — Cloudflare | `BLOCKED_CREDENTIALS` | Adapter, zone discovery and PTR capability detection written and tested against recorded responses |
+| Backups — Proxmox Backup Server | `BLOCKED_CREDENTIALS` | Adapter, state machine, API and reconciliation written and tested; no restore has been performed |
+| OpenAPI 3.1 description | `RUNTIME_VERIFIED` | Generated from the route table, validated by redocly, three gates that fail the build on drift |
+| Browser end-to-end suite | `RUNTIME_VERIFIED` | 35 Playwright specs, real portal, real API, real PostgreSQL and Redis |
+| **Customer-facing backups screen** | `NOT_IMPLEMENTED` | The API exists and is tested; no portal screen reads it |
 
-### Two gaps that are absences, not blocks
+### The two gaps that were absences are now code, and one new absence
 
-`DNS_PROVIDER` and `BACKUP_PROVIDER` are configurable, and the production guard
-refuses `fake` for both. That guard makes it look as though a real driver exists
-behind each. It does not.
+The previous revision of this file recorded reverse DNS and backups as
+`NOT_IMPLEMENTED` behind a production guard that made them look present. Both
+are now written:
 
-- **Reverse DNS.** `ReverseDnsProviderFactory` resolves exactly one driver,
-  `fake`. There is no Cloudflare adapter. Setting `DNS_PROVIDER=cloudflare`
-  passes the boot-time guard and then throws `UnknownReverseDnsDriverException`
-  the first time a PTR is set. The contract, the factory, the customer-facing
-  PTR endpoints and their authorisation are all written and tested; the adapter
-  is the missing piece.
-- **Backups.** `BACKUP_PROVIDER` is read into `config('billing.providers')` and
-  checked by the production guard, and nothing else in the application refers to
-  it: there is no backup contract, factory or adapter. Backups are handled
-  entirely by the Proxmox Backup Server Ansible role, which has never been run.
+- **DNS and reverse DNS.** A `Dns` module with a Cloudflare adapter — zone
+  discovery, record publication, and a reverse-DNS adapter that detects whether
+  the account actually serves the PTR zone for an address and refuses honestly
+  when it does not, rather than writing a record nobody will resolve. RFC 2317
+  classless delegation is deliberately not attempted. Nothing has yet spoken to
+  Cloudflare, so the status is `BLOCKED_CREDENTIALS`, not verified.
+- **Backups.** A `Backups` module with a Proxmox Backup Server adapter, a state
+  machine whose terminal states are terminal, a customer-facing API, and
+  reconciliation that quarantines an indeterminate task instead of retrying it.
+  **No restore has been performed**, so this cannot become
+  `REAL_INFRA_VERIFIED` under this project's own rule no matter how green the
+  tests are.
 
-Both are recorded here rather than quietly left for someone to discover during a
-deployment.
+The new absence, found by writing a browser test for a screen that turned out
+not to exist:
+
+- **No backups screen.** `GET /api/v1/vps/{vm}/backups` is implemented and
+  tested, the seeder writes both a succeeded and a needs-review backup, and
+  `nav.backups` exists as a translation — but the portal has no page that reads
+  any of it. A customer cannot see their backups. This is recorded rather than
+  papered over with a spec that asserts around it.
+
+### What a browser found that 1,753 backend tests and 42 component tests did not
+
+Five defects, each customer-visible, each invisible to the suites that existed
+because those suites supply the shape they expect:
+
+1. **A funded wallet reported as empty.** The API answers a list of balances,
+   one per currency; the portal declared a single object and read `.balance` off
+   the collection. A customer with money was shown "No wallet yet."
+2. **Every signed-in device list empty.** The shipped configuration stored
+   sessions in Redis while the account-security screen reads the `sessions`
+   table, so device revocation silently did nothing while answering as though it
+   had worked.
+3. **The super admin locked out of the operator area.** Super Admin holds no
+   permission rows by design — the gate grants it everything — and `/me`
+   reported those rows verbatim, so the portal hid every operator screen from
+   the platform's most privileged login.
+4. **A 500 on any unauthenticated non-JSON request**, because the framework
+   redirected to a `login` route this application does not have.
+5. **The API tokens screen unreachable by its own URL**, because the development
+   proxy matched `/api` as a prefix and forwarded `/api-tokens` to the control
+   plane.
+
+Two further classes were fixed alongside them: a failed read anywhere in the
+portal rendered as an empty state rather than as a failure, and `make
+lint-backend` invoked PHPStan without its configuration, so the static-analysis
+gate failed on itself wherever the analyser was installed.
 
 ## Evidence
 
@@ -91,7 +129,7 @@ and these are its actual outputs.
 ### Backend
 
 ```text
-php vendor/bin/phpunit                  1682 tests, 41080 assertions, 0 failures
+php artisan test                        1753 tests, 41240 assertions, 0 failures
 ./vendor/bin/pint --test                PASS
 composer validate --strict              PASS  (./composer.json is valid)
 ```
@@ -131,11 +169,12 @@ first.
 ### Frontend
 
 ```text
-npm run test --workspace=apps/web -- --run   38 tests in 5 files, all passing
-npm run typecheck                             PASS
-npm run lint                                  PASS
-npm run build                                 427.30 kB JS / 126.34 kB gzipped
-                                              23.27 kB CSS / 5.65 kB gzipped
+npm run test --workspace=apps/web -- --run   42 tests in 6 files, all passing
+npm run typecheck                             PASS  (now including the e2e suite)
+npm run lint                                  PASS  (now including the e2e suite)
+npm run build                                 428.45 kB JS / 126.58 kB gzipped
+                                              23.61 kB CSS / 5.71 kB gzipped
+npm run test:e2e --workspace=apps/web         35 specs in 5 files, all passing
 ```
 
 ### Static analysis
@@ -151,14 +190,22 @@ rest were annotations claiming more than the code guaranteed, branches an
 exhaustive match had already made unreachable, and a factory trait on four
 models that had no factory. There is no `ignoreErrors` block and no baseline.
 
-`composer install --working-dir=tools/phpstan` does not complete here:
-`phpstan/phpstan` is distributed as an archive with no git source, and both
-archive endpoints answer 403 through this environment's proxy while plain `git
-clone` succeeds. The run above was made by cloning the PHPStan distribution
-repository at its locked tag into a scratch composer root outside this
-repository, with the same configuration. `apps/control-plane/tools/phpstan/README.md`
-records this. Status: `BLOCKED_NETWORK` for the CI install path, and a real
-result for the analysis itself.
+`composer install --working-dir=tools/phpstan` still does not complete here.
+Composer resolves every package's archive from `api.github.com`, which this
+environment's egress policy answers 403 for; sixty-six of the sixty-seven
+packages fall back to a git clone, which works, and `phpstan/phpstan` cannot,
+because it is distributed as an archive with no installable source. The run
+above was made by fetching the analyser's own signed release at the version the
+lock file pins, assembling it into a scratch composer root outside this
+repository, and analysing with the committed configuration — same version, same
+larastan, same neon file. Status: `BLOCKED_NETWORK` for the CI install path, and
+a real result for the analysis itself.
+
+The Makefile invocation of the analyser was also wrong for the whole of this
+build: it ran from the application root, where there is no `phpstan.neon`, so
+`make lint-backend` answered "At least one path must be specified to analyse"
+and stopped. It is fixed, and a test now checks that the invocation names a
+configuration file which exists.
 
 ### CI gates, run exactly as CI runs them
 
@@ -181,12 +228,31 @@ re-verified against a planted violation, which it still fails.
 
 ### What has been verified in a browser
 
-The sign-in flow was exercised end to end in real Chromium at Phase 1, in
-English/LTR and Arabic/RTL, light and dark, including a failed sign-in showing a
-translated error with its correlation id. **That has not been re-run since**,
-and no other screen has ever been driven in a browser. There is no end-to-end
-suite; when one exists it will be reported here, and until then nothing in this
-repository claims to have run one.
+A Playwright suite of **35 specs across five files**, run in real Chromium
+against the portal, the control plane, PostgreSQL and Redis. Nothing in it stubs
+a network call: it signs in through the form, so the CSRF cookie, the origin
+match and the session cookie are all under test, and every assertion is on a
+value a seeder wrote.
+
+```text
+npm run test:e2e --workspace=apps/web        35 passed
+  auth.e2e.ts        10  sign-in, failure, rate limit, language and direction
+  portal.e2e.ts       9  dashboard, catalogue, product, invoices, wallet,
+                         services, VPS, power controls, not-found
+  appearance.e2e.ts   5  dark and light palettes, Arabic layout, Western numerals
+  account.e2e.ts      5  devices, sign-in history, two-factor, API token, sign-out
+  admin.e2e.ts        6  operator screens and the permission boundary
+```
+
+The suite starts both servers itself, refuses any database whose name does not
+contain "e2e" before migrating it, and runs with one worker and no retries — a
+browser test that passes on the second attempt has said nothing.
+
+It runs in CI as its own job, with the report uploaded when it fails.
+
+What it does **not** yet cover: ordering and paying (no payment provider
+credentials, and a fake capture in a browser would prove nothing about the real
+one), provisioning a machine, and the backups screen, which does not exist.
 
 ## This environment
 
@@ -234,10 +300,13 @@ repository claims to have run one.
    `BLOCKED_CREDENTIALS` to `REAL_INFRA_VERIFIED`. It is the cheapest of these
    to obtain and unblocks the whole order-to-service path end to end.
 2. A Proxmox endpoint and API token, for VPS provisioning.
-3. A Cloudflare token — and first, the Cloudflare adapter, which is not written.
+3. A Cloudflare token. The adapter is written now; nothing has spoken to the API.
 4. A cPanel or DirectAdmin licence and host.
 5. Physical machines with BMCs, for the dedicated and PXE paths.
-6. A first observed GitHub Actions run.
+6. A Proxmox Backup Server datastore — and a restore performed from it, since a
+   backup feature does not become `REAL_INFRA_VERIFIED` until a restore
+   succeeds.
+7. A first observed GitHub Actions run.
 
 Until each of those happens, the corresponding row above stays exactly as it
 reads now.

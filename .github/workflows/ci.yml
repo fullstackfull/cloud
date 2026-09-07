@@ -185,6 +185,83 @@ jobs:
       - name: Validate docs/openapi.yaml
         run: npm run openapi:lint
 
+  browser:
+    name: Browser end-to-end
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: lynomia_e2e
+          POSTGRES_USER: lynomia
+          POSTGRES_PASSWORD: lynomia_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U lynomia -d lynomia_e2e"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+      redis:
+        image: redis:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, redis, intl, mbstring, bcmath, sodium, zip
+          coverage: none
+          tools: composer:v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install PHP dependencies
+        working-directory: apps/control-plane
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - run: npm ci
+
+      # The environment the suite serves the API with. `.env` rather than
+      # `.env.testing`, because the browser suite deliberately runs the
+      # application as a developer runs it — including the session driver, which
+      # is the setting a browser is uniquely able to test.
+      - name: Prepare environment
+        working-directory: apps/control-plane
+        run: |
+          cp .env.example .env
+          sed -i 's/^DB_PASSWORD=$/DB_PASSWORD=lynomia_ci/' .env
+          php artisan key:generate
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      # The suite starts the API and the portal itself, migrates a database
+      # whose name it insists contains "e2e", and seeds fixed fixtures.
+      - name: Run the browser suite
+        working-directory: apps/web
+        env:
+          DB_PASSWORD: lynomia_ci
+          E2E_DB_DATABASE: lynomia_e2e
+        run: npm run test:e2e
+
+      - name: Upload the report when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
   security:
     name: Security checks
     runs-on: ubuntu-latest
