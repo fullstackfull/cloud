@@ -6,11 +6,13 @@ namespace Lynomia\Providers;
 
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as BaseEventServiceProvider;
 use Lynomia\Modules\Billing\Application\Listeners\IssueInvoiceOnOrderPlaced;
+use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnInvoicePaid;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
+use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 
 /**
  * The commerce chain, wired explicitly rather than discovered.
@@ -18,6 +20,7 @@ use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
  *     OrderPlaced     → issue the invoice
  *     PaymentCaptured → settle the invoice
  *     InvoicePaid     → mark the order paid, redeem the coupon, start subscriptions
+ *     RefundIssued    → record the refund against the invoice it came off
  *
  * Listed here rather than auto-discovered on purpose. This mapping is the
  * platform's fulfilment policy: what happens when money arrives is the single
@@ -42,6 +45,9 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         InvoicePaid::class => [
             FulfilOrderOnInvoicePaid::class,
+        ],
+        RefundIssued::class => [
+            RecordRefundAgainstTheInvoice::class,
         ],
     ];
 
