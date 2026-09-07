@@ -485,6 +485,13 @@ return [
         'body' => ['amount_minor', 'reason'],
         'response' => $one('AdminRefund', 201),
     ],
+    'api.v1.backups.restore' => [
+        'tag' => 'Backups',
+        'summary' => 'Restore a backup over its machine',
+        'description' => 'The most destructive operation the customer API offers. Send the machine\'s hostname exactly as `confirmation`; it is compared without case folding, because it is evidence a person read the screen rather than a lookup. Answers 202 - the disks are still being written. A provider that does not answer leaves the backup in needs_review and is never retried automatically.',
+        'body' => ['confirmation'],
+        'response' => $one('Backup', 202),
+    ],
     'api.admin.invoices.void' => [
         'tag' => 'Operator',
         'summary' => 'Void an invoice',

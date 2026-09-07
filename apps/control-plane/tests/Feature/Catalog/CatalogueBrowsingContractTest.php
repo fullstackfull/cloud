@@ -212,10 +212,12 @@ final class CatalogueBrowsingContractTest extends TestCase
             ->assertJsonPath('data.prices', [])
             ->getContent();
 
-        // Asserted on the raw body: a price the customer cannot be charged
-        // must not be reachable at any depth of the document.
-        $this->assertStringNotContainsString('111', $body);
-        $this->assertStringNotContainsString('222', $body);
+        // A price the customer cannot be charged must not be reachable at any
+        // depth of the document — asserted against the numbers the document
+        // quotes rather than as a substring of it, because the body carries
+        // ULIDs and a ULID's base32 alphabet includes the digits.
+        $this->assertNotContains(111, $this->minorUnitsIn($body));
+        $this->assertNotContains(222, $this->minorUnitsIn($body));
     }
 
     #[Test]
@@ -236,12 +238,24 @@ final class CatalogueBrowsingContractTest extends TestCase
         $mine = $this->actingAs($kuwaiti)->getJson('/api/v1/catalog/products/cloud-vps')->assertOk();
         $this->assertSame(['KWD'], $mine->json('data.plans.0.prices.*.currency'));
         $this->assertStringNotContainsString('USD', $mine->getContent());
-        $this->assertStringNotContainsString('3000', $mine->getContent());
+        $this->assertNotContains(3000, $this->minorUnitsIn($mine->getContent()));
 
         $theirs = $this->actingAs($american)->getJson('/api/v1/catalog/products/cloud-vps')->assertOk();
         $this->assertSame(['USD'], $theirs->json('data.plans.0.prices.*.currency'));
         $this->assertStringNotContainsString('KWD', $theirs->getContent());
-        $this->assertStringNotContainsString('9000', $theirs->getContent());
+        $this->assertNotContains(9000, $this->minorUnitsIn($theirs->getContent()));
+    }
+
+    /**
+     * Every price the document quotes, at any depth.
+     *
+     * @return list<int>
+     */
+    private function minorUnitsIn(string $body): array
+    {
+        preg_match_all('/"minor_units":\s*(\d+)/', $body, $matches);
+
+        return array_map(intval(...), $matches[1]);
     }
 
     #[Test]

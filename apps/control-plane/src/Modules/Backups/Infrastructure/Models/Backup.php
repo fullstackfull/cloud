@@ -47,14 +47,18 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?bool $verified
  * @property ?CarbonImmutable $verified_at
  * @property ?string $verification_task_id
+ * @property ?string $restore_task_id
  * @property ?int $retention_days
  * @property ?CarbonImmutable $expires_at
  * @property ?CarbonImmutable $started_at
  * @property ?CarbonImmutable $finished_at
+ * @property ?CarbonImmutable $restore_started_at
+ * @property ?CarbonImmutable $restored_at
  * @property ?CarbonImmutable $last_polled_at
  * @property int $poll_count
  * @property ?string $failure_reason
  * @property ?string $requested_by_user_id
+ * @property ?string $restored_by_user_id
  * @property CarbonImmutable $created_at
  */
 class Backup extends Model
@@ -81,6 +85,8 @@ class Backup extends Model
             'expires_at' => 'immutable_datetime',
             'started_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',
+            'restore_started_at' => 'immutable_datetime',
+            'restored_at' => 'immutable_datetime',
             'last_polled_at' => 'immutable_datetime',
             'created_at' => 'immutable_datetime',
             'updated_at' => 'immutable_datetime',

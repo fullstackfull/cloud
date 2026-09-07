@@ -21,12 +21,6 @@ use Lynomia\Modules\Backups\Http\Controllers\BackupController;
  * What is deliberately not here yet
  * ---------------------------------------------------------------------------
  *
- * **No restore.** The provider contract has one and it works; what does not
- * exist yet is the confirmation flow it needs. A restore replaces every disk
- * on a running machine, so it belongs behind the same kind of typed
- * confirmation as a reinstall — and shipping the endpoint before the
- * confirmation would be shipping the dangerous half first.
- *
  * **No delete.** Deleting a backup is irreversible and interacts with the
  * datastore's own prune policy, which the platform does not own. Until the
  * platform can say what a customer's retention actually is, a delete button
@@ -52,4 +46,20 @@ Route::prefix('vps/{vm}/backups')->as('backups.')->group(function (): void {
         ->name('store');
 
     Route::get('{backup}', [BackupController::class, 'show'])->name('show');
+
+    /*
+     * Restore. The confirmation flow this was waiting for now exists: the
+     * caller must send the machine's hostname exactly, and the action compares
+     * it with hash_equals and refuses to case-fold, because it is not a lookup
+     * — it is evidence that a person read the screen.
+     *
+     * Limited harder than taking a backup and separately from it. A restore
+     * writes over live disks, and the one thing that must not happen is a
+     * client retrying its way into two concurrent restores over the same
+     * machine; the action refuses that as well, and the limiter means it is
+     * not being asked to refuse it fifty times a second.
+     */
+    Route::post('{backup}/restore', [BackupController::class, 'restore'])
+        ->middleware('throttle:5,1,backup-restore:')
+        ->name('restore');
 });
