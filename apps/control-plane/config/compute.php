@@ -81,6 +81,21 @@ return [
         'stop_poll_interval_ms' => (int) env('COMPUTE_REINSTALL_STOP_POLL_INTERVAL_MS', 2000),
     ],
 
+    /*
+     * The fake hypervisor.
+     *
+     * `console_host` and `console_port` point the fake's console endpoint at
+     * whatever upstream a test or a demo environment is running. There is no
+     * default: a fabricated address would let the console gateway's tests pass
+     * against something that does not exist, which is the exact failure this
+     * phase is closing everywhere else.
+     */
+    'fake' => [
+        'task_delay_seconds' => (int) env('COMPUTE_FAKE_TASK_DELAY_SECONDS', 0),
+        'console_host' => env('COMPUTE_FAKE_CONSOLE_HOST'),
+        'console_port' => env('COMPUTE_FAKE_CONSOLE_PORT'),
+    ],
+
     'proxmox' => [
         'timeout_seconds' => (int) env('PROXMOX_TIMEOUT_SECONDS', 30),
         'verify_tls' => (bool) env('PROXMOX_VERIFY_TLS', true),

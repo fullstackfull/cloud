@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Compute\Domain\Contracts;
 
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
@@ -160,6 +161,20 @@ interface ComputeProvider
      * @throws ComputeProviderException
      */
     public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation;
+
+    /**
+     * Where to connect for a console on this machine, and with what.
+     *
+     * Called by the console gateway after a permit has been redeemed, on the
+     * gateway's own server-side connection — never at the moment a permit is
+     * issued. The difference is the whole design: a provider's console ticket
+     * is a bearer credential for a root console, so it is fetched when the
+     * socket is about to open, used once, and never sent to a browser or
+     * written to a log.
+     *
+     * @throws ComputeProviderException
+     */
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint;
 
     /**
      * The hypervisor's view of one machine, or null when it does not have it.

@@ -7,6 +7,7 @@ namespace Tests\Feature\Vps\Doubles;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
@@ -99,6 +100,18 @@ final class PowerRecordingComputeProvider implements ComputeProvider
         $this->calls[] = 'reinstallVm';
 
         return new VmOperation('UPID:reinstall', $nodeName, $providerId, 'reinstall_vm');
+    }
+
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint
+    {
+        // Recorded rather than answered with a plausible address. A double
+        // that invented an upstream would let a test prove a console opened
+        // against a host that does not exist.
+        $this->calls[] = 'consoleEndpoint';
+
+        throw ComputeProviderException::requestFailed('recording', 'console_endpoint', [
+            'provider_message' => 'this double does not serve consoles',
+        ]);
     }
 
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState

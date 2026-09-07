@@ -54,19 +54,6 @@ final class NoDeadCapabilitiesTest extends TestCase
      * @var list<string>
      */
     private const array INTENTIONALLY_UNREFERENCED = [
-        /*
-         * The console gateway's entry point, and the gateway is a separate
-         * process that is not part of this repository. The action lives here
-         * anyway because "single-use" is a claim about behaviour, and a claim
-         * nothing can execute is a claim nothing tests: with it, redeeming
-         * twice can be proven to fail.
-         *
-         * This is an honest internal, and it is still a gap at the platform
-         * level — a customer can be issued a console permit and there is
-         * nothing to spend it on. That is reported as NOT_IMPLEMENTED rather
-         * than hidden by this entry.
-         */
-        'RedeemConsoleSession',
     ];
 
     #[Test]

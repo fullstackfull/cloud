@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Actions;
 
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
@@ -45,6 +47,7 @@ final readonly class RequestVpsReinstall
     public function __construct(
         private CreateProvisioningJob $createJob,
         private VpsOperationGuard $guard,
+        private RecordAuditEntry $audit,
     ) {}
 
     /**
@@ -128,6 +131,26 @@ final readonly class RequestVpsReinstall
             'provider_resource_id' => $machine->provider_id,
             'provider_node' => $machine->node()->first()?->provider_name,
         ]);
+
+        /*
+         * Recorded before the work is queued, and recorded on the request
+         * rather than on the outcome. "Who asked for this machine to be
+         * wiped, and when" is the question after a customer says they did not
+         * — and it has to be answerable whether or not the rebuild then
+         * succeeded.
+         */
+        $this->audit->execute(
+            action: AuditAction::VpsReinstallRequested,
+            subject: $machine,
+            customerId: $machine->service()->first()?->customer_id,
+            context: [
+                'virtual_machine_id' => (string) $machine->getKey(),
+                'hostname' => $machine->hostname,
+                'provisioning_job_id' => (string) $job->getKey(),
+                'reinstall_id' => (string) $operation->getKey(),
+                'template_id' => $template?->getKey(),
+            ],
+        );
 
         if ($job->wasRecentlyCreated) {
             $operation->advanceTo(ReinstallState::Queued);

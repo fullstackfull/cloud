@@ -298,6 +298,35 @@ export function useVpsReinstall() {
   })
 }
 
+export interface IssuedConsoleSession {
+  id: string
+  virtual_machine_id: string
+  token: string
+  gateway: string | null
+  expires_in: number
+  single_use: boolean
+}
+
+/**
+ * Mint a console permit.
+ *
+ * A mutation rather than a query, and never on page load: the permit lives for
+ * sixty seconds, so one fetched when a tab was opened has expired before
+ * anybody presses connect. It is also single use, which a cache would break by
+ * replaying it.
+ */
+export function useConsoleSession() {
+  return useMutation({
+    mutationFn: async ({ id }: { id: string }) => {
+      const response = await api.get<Envelope<IssuedConsoleSession>>(
+        `/vps/${encodeURIComponent(id)}/console`,
+      )
+
+      return response.data
+    },
+  })
+}
+
 /* ---------------------------------------------------------- notifications */
 
 /**

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dedicated\Application\Actions;
 
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedOperationRefusedException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\ReinstallConfirmationMismatchException;
@@ -81,6 +83,7 @@ final readonly class RequestDedicatedReinstall
     public function __construct(
         private CreateProvisioningJob $createJob,
         private DedicatedOperationGuard $guard,
+        private RecordAuditEntry $audit,
     ) {}
 
     /**
@@ -180,6 +183,21 @@ final readonly class RequestDedicatedReinstall
             'bmc_endpoint_id' => $server->preferredBmcEndpoint()?->getKey(),
             'bmc_protocol' => $server->preferredBmcEndpoint()?->protocol->value,
         ]);
+
+        // The same record the virtual path keeps, for the same reason: this is
+        // the moment a person asked for a machine's disks to be erased.
+        $this->audit->execute(
+            action: AuditAction::DedicatedReinstallRequested,
+            subject: $server,
+            customerId: $server->customer_id,
+            context: [
+                'dedicated_server_id' => (string) $server->getKey(),
+                'serial' => $server->serial,
+                'provisioning_job_id' => (string) $job->getKey(),
+                'dedicated_reinstall_id' => (string) $operation->getKey(),
+                'os_install_profile_slug' => $profile?->slug,
+            ],
+        );
 
         if ($job->wasRecentlyCreated) {
             $operation->advanceTo(DedicatedReinstallState::Queued);

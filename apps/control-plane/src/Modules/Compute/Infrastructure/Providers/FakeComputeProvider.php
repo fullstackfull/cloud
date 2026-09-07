@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Compute\Infrastructure\Providers;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
@@ -400,6 +401,43 @@ final class FakeComputeProvider implements ComputeProvider
             providerId: $providerId,
             operation: 'lift_suspension',
             status: RemoteTaskStatus::Succeeded,
+        );
+    }
+
+    /**
+     * A console endpoint pointing at whatever the deployment has told it to.
+     *
+     * The address comes from configuration rather than being invented, because
+     * the point of the fake here is to let the console gateway be proved
+     * end to end against an upstream a test controls — a real socket, a real
+     * handshake, real frames — without a hypervisor. A fake that returned a
+     * plausible-looking Proxmox URL would make the gateway's tests pass
+     * against something that does not exist.
+     */
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint
+    {
+        if ($this->machine($nodeName, $providerId) === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'console_endpoint');
+        }
+
+        $host = config('compute.fake.console_host');
+        $port = config('compute.fake.console_port');
+
+        if (! is_string($host) || $host === '' || ! is_numeric($port)) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'console_endpoint', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'no fake console upstream is configured',
+            ]);
+        }
+
+        return new RemoteConsoleEndpoint(
+            host: $host,
+            port: (int) $port,
+            path: sprintf('/console/%s/%s', rawurlencode($nodeName), rawurlencode($providerId)),
+            tls: false,
+            headers: ['X-Fake-Console' => $providerId],
+            verifyTls: false,
         );
     }
 

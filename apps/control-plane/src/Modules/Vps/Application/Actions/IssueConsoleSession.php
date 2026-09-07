@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Vps\Application\Actions;
 
 use Illuminate\Support\Str;
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Vps\Application\Services\ConsoleSessionStore;
@@ -45,6 +47,7 @@ final readonly class IssueConsoleSession
     public function __construct(
         private ConsoleSessionStore $sessions,
         private VpsOperationGuard $guard,
+        private RecordAuditEntry $audit,
     ) {}
 
     public function execute(VirtualMachine $machine, Customer $customer, ?string $userId = null): ConsoleSession
@@ -67,7 +70,7 @@ final readonly class IssueConsoleSession
             throw ConsoleSessionUnavailableException::notRunnable();
         }
 
-        return $this->sessions->issue(
+        $session = $this->sessions->issue(
             virtualMachineId: (string) $machine->getKey(),
             customerId: (string) $customer->getKey(),
             userId: $userId,
@@ -81,5 +84,29 @@ final readonly class IssueConsoleSession
              */
             token: rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='),
         );
+
+        /*
+         * Recorded at issue as well as at redemption, because the two answer
+         * different questions. This one says who asked for root access to a
+         * machine and when; the gateway's says whether anybody took it. A
+         * permit issued and never redeemed is a very different afternoon from
+         * one redeemed from an address nobody recognises.
+         *
+         * The token is not in the context and never will be. The trail is
+         * queryable by operators, and a trail that carried live console
+         * credentials would be a place to go looking for them.
+         */
+        $this->audit->execute(
+            action: AuditAction::ConsolePermitIssued,
+            subject: $machine,
+            customerId: (string) $customer->getKey(),
+            context: [
+                'session_id' => $session->id,
+                'virtual_machine_id' => (string) $machine->getKey(),
+                'expires_at' => $session->expiresAt->toIso8601String(),
+            ],
+        );
+
+        return $session;
     }
 }

@@ -17,6 +17,7 @@ import { HostingPage } from '@/features/infrastructure/HostingPage'
 import { IpAddressesPage } from '@/features/infrastructure/IpAddressesPage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { BackupsPage } from '@/features/backups/BackupsPage'
+import { ConsolePage } from '@/features/console/ConsolePage'
 import { VpsPage } from '@/features/infrastructure/VpsPage'
 import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
 import { OrdersPage } from '@/features/orders/OrdersPage'
@@ -92,6 +93,7 @@ export function App() {
 
                 <Route path="/services" element={<ServicesPage />} />
                 <Route path="/vps" element={<VpsPage />} />
+                <Route path="/vps/:id/console" element={<ConsolePage />} />
                 <Route path="/backups" element={<BackupsPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
                 <Route path="/dedicated" element={<DedicatedPage />} />

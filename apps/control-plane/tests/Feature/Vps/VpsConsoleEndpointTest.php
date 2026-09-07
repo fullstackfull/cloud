@@ -210,6 +210,43 @@ final class VpsConsoleEndpointTest extends VpsApiTestCase
     }
 
     #[Test]
+    public function the_gateway_url_is_published_when_one_is_configured(): void
+    {
+        /*
+         * This field was read from a config file that did not exist, so it was
+         * null in every deployment — a portal that could never offer a console
+         * however the platform was set up. The test pins it to the key the
+         * gateway itself uses.
+         */
+        config()->set('console_gateway.public_url', 'wss://console.lynomia.test/console');
+
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/vps/'.$machine->id.'/console')
+            ->assertStatus(201)
+            ->assertJsonPath('data.gateway', 'wss://console.lynomia.test/console');
+    }
+
+    #[Test]
+    public function no_gateway_is_published_as_null_rather_than_invented(): void
+    {
+        // A fabricated URL would have the portal ship a connect button that
+        // fails in the browser, which a customer reads as their server being
+        // broken.
+        config()->set('console_gateway.public_url', null);
+
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/vps/'.$machine->id.'/console')
+            ->assertStatus(201)
+            ->assertJsonPath('data.gateway', null);
+    }
+
+    #[Test]
     public function a_member_may_not_open_a_console(): void
     {
         [$customer, $viewer] = $this->accountWithOwner(CustomerRole::Member);

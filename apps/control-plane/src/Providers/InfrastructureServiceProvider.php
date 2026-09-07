@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Console\Domain\Contracts\ConsoleUpstreamResolver;
+use Lynomia\Modules\Console\Infrastructure\Upstream\ProviderConsoleUpstreamResolver;
 use Lynomia\Modules\Dedicated\Application\Handlers\ProvisionDedicatedHandler;
 use Lynomia\Modules\Dedicated\Application\Handlers\ReinstallDedicatedHandler;
 use Lynomia\Modules\Dedicated\Domain\Contracts\HostReachability;
@@ -49,6 +51,16 @@ final class InfrastructureServiceProvider extends ServiceProvider
          * reachable through a bastion binds something that knows how.
          */
         $this->app->bind(HostReachability::class, TcpHostReachability::class);
+
+        /*
+         * The console gateway resolves its upstream through the machine's own
+         * cluster. There is deliberately no alternative binding for a
+         * "default" console host: a platform running two clusters would dial
+         * the wrong one, and a console dialled at the wrong cluster is either
+         * a failure or a connection to somebody else's machine with the same
+         * id.
+         */
+        $this->app->bind(ConsoleUpstreamResolver::class, ProviderConsoleUpstreamResolver::class);
 
         $this->app->singleton(ProvisioningHandlerRegistry::class);
         $this->app->bind(HandlerRegistry::class, ProvisioningHandlerRegistry::class);

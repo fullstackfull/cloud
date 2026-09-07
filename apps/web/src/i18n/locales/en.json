@@ -291,7 +291,8 @@
       "shutdown": "Shut down",
       "stop": "Force off",
       "reboot": "Reboot",
-      "reinstall": "Reinstall"
+      "reinstall": "Reinstall",
+      "console": "Console"
     },
     "reinstall": {
       "title": "Reinstall {{hostname}}",
@@ -530,6 +531,27 @@
       "title": "What we email you",
       "subtitle": "The portal always keeps a record. You can choose what also reaches your inbox.",
       "always": "always sent"
+    }
+  },
+  "console": {
+    "title": "Console",
+    "subtitle": "A direct connection to your server, for when it will not answer any other way.",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "output": "Console output",
+    "input": "Send to the console",
+    "inputPlaceholder": "Type a command and press Enter",
+    "textOnly": "This is a text console. Servers that present a graphical console will send data this page cannot draw.",
+    "noGateway": "Consoles are not available on this deployment. Nothing is wrong with your server.",
+    "refused": "That console link has already been used or has expired. Press Connect to open a new one.",
+    "state": {
+      "idle": "Not connected",
+      "requesting": "Requesting access",
+      "connecting": "Connecting",
+      "open": "Connected",
+      "closed": "Disconnected",
+      "refused": "Refused",
+      "unavailable": "Unavailable"
     }
   }
 }

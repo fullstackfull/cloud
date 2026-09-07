@@ -41,6 +41,21 @@ enum AuditAction: string
     case DriftResolved = 'drift.resolved';
     case ReconciliationRequested = 'infrastructure.reconciliation_requested';
 
+    /*
+     * Consoles. Both halves are recorded because they answer different
+     * questions: issuing says who asked for root access to a machine, and
+     * redeeming says whether anybody actually took it — and a permit issued
+     * and never redeemed is a very different afternoon from one redeemed from
+     * an address nobody recognises.
+     */
+    case ConsolePermitIssued = 'console.permit_issued';
+    case ConsolePermitRedeemed = 'console.permit_redeemed';
+    case ConsolePermitRefused = 'console.permit_refused';
+
+    /* Rebuilds, which destroy data on purpose. */
+    case VpsReinstallRequested = 'vps.reinstall_requested';
+    case DedicatedReinstallRequested = 'dedicated.reinstall_requested';
+
     /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.

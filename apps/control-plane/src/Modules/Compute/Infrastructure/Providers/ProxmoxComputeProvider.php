@@ -12,6 +12,7 @@ use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CloudInitConfig;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
@@ -527,6 +528,71 @@ final class ProxmoxComputeProvider implements ComputeProvider
             nodeName: $nodeName,
             providerId: $providerId,
             operation: 'destroy_vm',
+        );
+    }
+
+    /**
+     * Ask Proxmox for a one-shot console ticket, and say where to spend it.
+     *
+     * Two facts about the ticket decide the shape of this method. It is a
+     * bearer credential for a root console, and it expires within about a
+     * minute of being issued. So it is fetched here — at the moment the
+     * gateway is about to open the socket — rather than when the customer
+     * pressed the button, which may have been thirty seconds and one slow
+     * network ago.
+     *
+     * The websocket endpoint wants the ticket in the query string, which is
+     * Proxmox's design rather than this platform's: it is why the ticket is
+     * kept server-side and why nothing here is ever logged. The API token goes
+     * in a header on the same request, exactly as every other call in this
+     * adapter sends it.
+     */
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint
+    {
+        $data = $this->post(
+            sprintf('/nodes/%s/qemu/%s/vncproxy', $nodeName, $providerId),
+            // Without this Proxmox issues a ticket for its own Java/VNC client
+            // rather than for a websocket, and the socket handshake fails in a
+            // way that reads as a network fault.
+            ['websocket' => 1],
+            'console_endpoint',
+        );
+
+        if (! is_array($data) || ! isset($data['ticket'], $data['port'])) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'console_endpoint', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the cluster issued no console ticket',
+            ]);
+        }
+
+        $url = parse_url($this->connection->baseUrl());
+
+        $host = is_array($url) && is_string($url['host'] ?? null) ? $url['host'] : '';
+        $port = is_array($url) && is_int($url['port'] ?? null) ? $url['port'] : 8006;
+        $scheme = is_array($url) && is_string($url['scheme'] ?? null) ? $url['scheme'] : 'https';
+
+        if ($host === '') {
+            throw ComputeProviderException::requestFailed(self::NAME, 'console_endpoint', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the configured API URL names no host',
+            ]);
+        }
+
+        return new RemoteConsoleEndpoint(
+            host: $host,
+            port: $port,
+            path: sprintf(
+                '/api2/json/nodes/%s/qemu/%s/vncwebsocket?port=%s&vncticket=%s',
+                rawurlencode($nodeName),
+                rawurlencode($providerId),
+                rawurlencode((string) $data['port']),
+                rawurlencode((string) $data['ticket']),
+            ),
+            tls: $scheme === 'https',
+            headers: ['Authorization' => $this->connection->authorizationHeader()],
+            verifyTls: (bool) config('compute.proxmox.verify_tls', true),
         );
     }
 

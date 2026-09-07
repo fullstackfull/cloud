@@ -294,3 +294,35 @@ test('the dedicated rebuild dialogue warns about the operating system and needs 
   await dialog.getByRole('textbox').fill(fixtures.dedicatedSerial)
   await expect(confirm).toBeEnabled()
 })
+
+test('the console page asks for a permit and says honestly when consoles are unavailable', async ({ page }) => {
+  /*
+   * The console button must not be a button that silently does nothing. In an
+   * environment with no gateway configured — which is this one — pressing
+   * connect must produce a sentence explaining that, not a spinner or a blank
+   * terminal.
+   *
+   * The byte-level proof that the gateway actually carries a console lives in
+   * the PHP runtime test, which drives real sockets against a controlled
+   * upstream. A browser cannot prove that without a gateway process in this
+   * harness, and pretending otherwise here would be the kind of claim this
+   * phase exists to remove.
+   */
+  await page.goto('/vps')
+
+  await page.getByRole('link', { name: /^console$/i }).first().click()
+
+  await expect(page.getByRole('heading', { name: /console/i })).toBeVisible()
+
+  // The permit is not requested on load: it lives sixty seconds and one minted
+  // by an open tab has expired before anybody presses connect.
+  await expect(page.getByText(/not connected/i)).toBeVisible()
+
+  const permit = page.waitForResponse((response) => response.url().includes('/console') && response.request().method() === 'GET')
+
+  await page.getByRole('button', { name: /^connect$/i }).click()
+
+  expect((await permit).status()).toBe(201)
+
+  await expect(page.getByText(/consoles are not available on this deployment/i)).toBeVisible()
+})

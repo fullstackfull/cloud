@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
@@ -114,6 +115,18 @@ export function VpsPage() {
               {t(`vps.actions.${action}`)}
             </Button>
           ))}
+          {/*
+            * A link rather than a button: it navigates, and a customer should
+            * be able to open a console in a new tab the way they would any
+            * other page. Not hidden on a stopped machine either — a console is
+            * exactly what somebody needs when the guest will not boot.
+            */}
+          <Link
+            to={`/vps/${vm.id}/console`}
+            className="inline-flex items-center rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]"
+          >
+            {t('vps.actions.console')}
+          </Link>
           <Button
             size="sm"
             variant="danger"
