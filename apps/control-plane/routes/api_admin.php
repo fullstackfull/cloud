@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use Lynomia\Modules\Admin\Http\Controllers\AuditController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
+use Lynomia\Modules\Admin\Http\Controllers\DriftController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
@@ -91,4 +93,38 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('transactions/{transaction}/refunds', [BillingController::class, 'refund'])
         ->middleware('permission:'.Permission::PaymentRefund->value)
         ->name('transactions.refund');
+
+    /*
+     * Cancelling a bill the platform should never have issued. Separate from
+     * refund: this one moves no money, and the action itself refuses any
+     * invoice that has taken any.
+     */
+    Route::post('invoices/{invoice}/void', [BillingController::class, 'voidInvoice'])
+        ->middleware('permission:'.Permission::InvoiceManage->value)
+        ->name('invoices.void');
+
+    /*
+     * The drift queue. Viewing and deciding are separate permissions: an NOC
+     * shift can be given the screen without being given the authority to
+     * declare a customer's missing machine a non-issue.
+     */
+    Route::get('drift', [DriftController::class, 'index'])
+        ->middleware('permission:'.Permission::DriftView->value)
+        ->name('drift.index');
+
+    Route::post('drift/{drift}/review', [DriftController::class, 'review'])
+        ->middleware('permission:'.Permission::DriftResolve->value)
+        ->name('drift.review');
+
+    // Asking for a fresh comparison changes nothing at the provider, but it
+    // does put load on it, so it sits behind managing infrastructure.
+    Route::post('infrastructure/clusters/{cluster}/reconcile', [DriftController::class, 'reconcile'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.reconcile');
+
+    // Read-only, permanently. The table is append-only at the model and there
+    // is no endpoint here that could amend it.
+    Route::get('audit', [AuditController::class, 'index'])
+        ->middleware('permission:'.Permission::AuditView->value)
+        ->name('audit.index');
 });

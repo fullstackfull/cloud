@@ -63,7 +63,13 @@ final class AdminSurfaceTest extends TestCase
             }
 
             $method = $route->methods()[0] ?? 'GET';
-            $routes[] = [$method, '/'.str_replace(['{customer}', '{transaction}'], '01jexampleexampleexample00', $route->uri())];
+            // Every parameter, not a named few: a route added with a new
+            // placeholder would otherwise be probed at a URL containing a
+            // literal brace, which 404s for reasons that have nothing to do
+            // with the permission this test is asserting.
+            $uri = preg_replace('/\{[^}]+\}/', '01jexampleexampleexample00', $route->uri()) ?? $route->uri();
+
+            $routes[] = [$method, '/'.$uri];
         }
 
         return $routes;

@@ -8,6 +8,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -120,5 +123,57 @@ final class BillingController
                 'status' => $refund->status->value,
             ],
         ], 201);
+    }
+
+    /**
+     * Cancel an invoice that should never have been issued.
+     *
+     * VoidInvoice has existed, correct and tested, with no caller. A duplicate
+     * invoice, one raised against the wrong account, or one for an order that
+     * was never fulfilled could be created by the platform and then only ever
+     * sat in the customer's list, unpayable and undismissable, showing up in
+     * their outstanding balance for ever.
+     *
+     * The action refuses an invoice that has taken money — that is a refund,
+     * a different decision with a different permission — so this endpoint does
+     * not need to re-check it, and deliberately does not: two guards that must
+     * agree eventually disagree.
+     */
+    public function voidInvoice(Request $request, string $invoice): JsonResponse
+    {
+        $found = Invoice::query()->findOrFail($invoice);
+
+        $validated = $request->validate([
+            // Required, unlike the action's optional argument. An operator
+            // voiding a customer's bill from a console can be trusted to know
+            // why; a row in the audit trail with no reason is one nobody can
+            // review a year later.
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        $voided = app(VoidInvoice::class)->execute($found, $validated['reason']);
+
+        // After the act, never inside it: an audit row for something that
+        // rolled back is a confusing line, and an act with no audit row is the
+        // hole the table exists to close.
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::InvoiceVoided,
+            subject: $voided,
+            customerId: $voided->customer_id,
+            context: [
+                'reason' => $validated['reason'],
+                'number' => $voided->number,
+                'total_minor' => $voided->total_minor,
+                'currency' => $voided->currency,
+            ],
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $voided->id,
+                'number' => $voided->number,
+                'status' => $voided->status->value,
+            ],
+        ]);
     }
 }
