@@ -233,8 +233,8 @@ final class CouponValidatorTest extends TestCase
         // campaign aimed at one product line into a discount on the catalogue.
         $coupon = Coupon::factory()->create(['applicable_product_kinds' => ['quantum_widget']]);
 
-        $this->assertFalse($this->validator->passes($coupon, $this->context(productKinds: [ProductKind::Vps])));
-        $this->assertTrue($this->validator->passes($coupon, $this->context(productKinds: ['quantum_widget'])));
+        $this->assertFalse($this->passes($coupon, $this->context(productKinds: [ProductKind::Vps])));
+        $this->assertTrue($this->passes($coupon, $this->context(productKinds: ['quantum_widget'])));
     }
 
     #[Test]
@@ -245,8 +245,8 @@ final class CouponValidatorTest extends TestCase
         // Written by an import that stored ids as numbers rather than strings.
         $coupon = Coupon::factory()->create(['applicable_plan_ids' => [12345]]);
 
-        $this->assertFalse($this->validator->passes($coupon, $this->context(planIds: [(string) $covered->id])));
-        $this->assertTrue($this->validator->passes($coupon, $this->context(planIds: ['12345'])));
+        $this->assertFalse($this->passes($coupon, $this->context(planIds: [(string) $covered->id])));
+        $this->assertTrue($this->passes($coupon, $this->context(planIds: ['12345'])));
     }
 
     #[Test]
@@ -413,8 +413,27 @@ final class CouponValidatorTest extends TestCase
 
         $this->validator->validate($coupon, $this->context());
 
-        $this->assertTrue($this->validator->passes($coupon, $this->context()));
-        $this->assertFalse($this->validator->passes($coupon, $this->context(Money::ofMinor(1_000, 'KWD'))));
+        $this->assertTrue($this->passes($coupon, $this->context()));
+        $this->assertFalse($this->passes($coupon, $this->context(Money::ofMinor(1_000, 'KWD'))));
+    }
+
+    /**
+     * Whether the coupon would be accepted, without raising.
+     *
+     * A test convenience, and it lives here rather than on the validator:
+     * production code always wants the exception — a coupon that cannot be
+     * used has a reason, and a boolean throws it away — so a non-throwing
+     * predicate in the domain service was a method nothing called.
+     */
+    private function passes(Coupon $coupon, CouponContext $context): bool
+    {
+        try {
+            $this->validator->validate($coupon, $context);
+
+            return true;
+        } catch (DomainException) {
+            return false;
+        }
     }
 
     /**

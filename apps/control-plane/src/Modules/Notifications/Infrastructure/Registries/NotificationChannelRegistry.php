@@ -39,12 +39,4 @@ final class NotificationChannelRegistry
     {
         return isset($this->channels[$channel->value]);
     }
-
-    /**
-     * @return list<string>
-     */
-    public function registered(): array
-    {
-        return array_keys($this->channels);
-    }
 }

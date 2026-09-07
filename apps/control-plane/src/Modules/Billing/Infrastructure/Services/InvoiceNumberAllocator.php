@@ -35,26 +35,6 @@ final class InvoiceNumberAllocator
         return $this->format((int) $row->nextval);
     }
 
-    /**
-     * Allocates several numbers in one round trip, for batch invoicing runs.
-     *
-     * @return list<string>
-     */
-    public function nextBatch(int $count): array
-    {
-        if ($count < 1) {
-            return [];
-        }
-
-        /** @var list<object{nextval: int|string}> $rows */
-        $rows = DB::select(
-            'SELECT nextval(?) AS nextval FROM generate_series(1, ?)',
-            [self::SEQUENCE, $count],
-        );
-
-        return array_map(fn (object $row): string => $this->format((int) $row->nextval), $rows);
-    }
-
     private function format(int $value): string
     {
         $prefix = (string) config('billing.invoice_number.prefix', 'LYN');

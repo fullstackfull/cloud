@@ -7,7 +7,6 @@ namespace Lynomia\Modules\SharedHosting\Application\Actions;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\NodePreflightFacts;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Domain\Enums\PreflightRefusalReason;
-use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingPreflightFailedException;
 use Lynomia\Modules\SharedHosting\Domain\ValueObjects\PreflightRefusal;
 use Lynomia\Modules\SharedHosting\Domain\ValueObjects\PreflightReport;
 
@@ -211,23 +210,6 @@ final readonly class PreflightHostingNode
         }
 
         return new PreflightReport($facts->hostname, $panel, $refusals);
-    }
-
-    /**
-     * Run the preflight and stop the caller dead if it refused.
-     *
-     * The throwing form exists so that an installer cannot proceed by
-     * forgetting to inspect a returned report.
-     *
-     * @throws HostingPreflightFailedException
-     */
-    public function assertReady(HostingPanel $panel, NodePreflightFacts $facts): PreflightReport
-    {
-        $report = $this->execute($panel, $facts);
-
-        $report->throwIfRefused();
-
-        return $report;
     }
 
     /**

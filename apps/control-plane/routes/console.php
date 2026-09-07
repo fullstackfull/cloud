@@ -50,6 +50,19 @@ Schedule::command('subscriptions:sweep')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * Wallets hold customers' money, and their balance is cached because it is
+ * read on every page that mentions a total. Nightly rather than hourly: a
+ * cache that has drifted stays drifted, and the check reads every wallet.
+ *
+ * It corrects nothing — see the command for why.
+ */
+Schedule::command('wallet:verify')
+    ->dailyAt('03:20')
+    ->withoutOverlapping(30)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Reconciliation fans out: this command only dispatches one job per cluster, so
  * a hypervisor that is down delays nobody else and no single process holds a
  * conversation with the whole estate. Read-only at every provider — drift is
