@@ -40,6 +40,7 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/subscriptions', labelKey: 'nav.subscriptions' },
   { to: '/wallet', labelKey: 'nav.wallet' },
   { to: '/vps', labelKey: 'nav.vps' },
+  { to: '/backups', labelKey: 'nav.backups' },
   { to: '/dedicated', labelKey: 'nav.dedicated' },
   { to: '/hosting', labelKey: 'nav.hosting' },
   { to: '/ips', labelKey: 'nav.ips' },

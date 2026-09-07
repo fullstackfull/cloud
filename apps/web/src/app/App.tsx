@@ -15,6 +15,7 @@ import { ProductPage } from '@/features/catalog/ProductPage'
 import { DedicatedPage } from '@/features/infrastructure/DedicatedPage'
 import { HostingPage } from '@/features/infrastructure/HostingPage'
 import { IpAddressesPage } from '@/features/infrastructure/IpAddressesPage'
+import { BackupsPage } from '@/features/backups/BackupsPage'
 import { VpsPage } from '@/features/infrastructure/VpsPage'
 import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
 import { OrdersPage } from '@/features/orders/OrdersPage'
@@ -90,6 +91,7 @@ export function App() {
 
                 <Route path="/services" element={<ServicesPage />} />
                 <Route path="/vps" element={<VpsPage />} />
+                <Route path="/backups" element={<BackupsPage />} />
                 <Route path="/dedicated" element={<DedicatedPage />} />
                 <Route path="/hosting" element={<HostingPage />} />
                 <Route path="/ips" element={<IpAddressesPage />} />

@@ -159,6 +159,27 @@ export interface VirtualMachine {
   is_operable: boolean
 }
 
+export interface Backup {
+  id: string
+  service_id: string | null
+  state: string
+  trigger: string
+  mode: string
+  /** The three questions a customer actually has about a backup. */
+  is_in_flight: boolean
+  is_restorable: boolean
+  needs_attention: boolean
+  size_bytes: number | null
+  verified: boolean | null
+  verified_at: string | null
+  retention_days: number | null
+  expires_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+  failure_reason: string | null
+}
+
 export interface DedicatedServer {
   id: string
   serial: string

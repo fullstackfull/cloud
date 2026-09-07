@@ -103,12 +103,11 @@ class E2ESeeder extends Seeder
                 'os_version' => '12',
             ]);
 
-        // One of each state the backups API reports differently: a finished one
-        // the customer could restore from, and one that stopped being trackable
-        // and is waiting for a person. No portal screen reads either yet — see
-        // docs/build-status.md — so these are asserted at the API level, and are
-        // seeded here so that the screen, when it exists, has both states to
-        // render from the first run.
+        // One of each state the backups API reports differently: a finished
+        // one the customer could restore from, and one that stopped being
+        // trackable and is waiting for a person. The backups screen renders
+        // both, and the browser suite asserts on both — a screen that showed
+        // only the happy state would be hiding the case that matters.
         Backup::factory()->succeeded()->create([
             'customer_id' => $customer->getKey(),
             'service_id' => $service->getKey(),

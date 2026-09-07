@@ -431,5 +431,26 @@
       "issueRefund": "Issue refund",
       "refundIsRecorded": "The refund records who issued it. The platform refuses to refund more than was captured, however many operators press this at once."
     }
+  },
+  "backups": {
+    "subtitle": "Copies of your servers' disks, and putting one back.",
+    "machine": "Server",
+    "taken": "Taken",
+    "state": "State",
+    "size": "Size",
+    "verified": "Verified",
+    "verifiedYes": "Restore tested",
+    "verifiedNo": "Not tested",
+    "takeOne": "Take a backup",
+    "restore": "Restore",
+    "empty": "No backups for this server yet.",
+    "noMachines": "No servers yet",
+    "noMachinesHint": "Backups are taken of a server. Order one and it will appear here.",
+    "restoreTitle": "Restore this backup?",
+    "restoreWarning": "This replaces every disk on {{hostname}} with the contents of this backup. Anything written since the backup was taken is lost, and the server is unavailable while it runs. This cannot be undone.",
+    "restoreConfirmLabel": "Type {{hostname}} to confirm"
+  },
+  "confirm": {
+    "typeToConfirm": "Type {{phrase}} to confirm"
   }
 }

@@ -73,21 +73,69 @@ test('the VPS list shows the machine and its address', async ({ page }) => {
   await expect(page.getByText(fixtures.vpsHostname)).toBeVisible()
 })
 
-/*
- * There is deliberately no backups spec here.
- *
- * `GET /api/v1/vps/{vm}/backups` exists and is tested at the API level, and the
- * seeder writes one succeeded and one needs-review backup for the machine
- * below — but the portal has no screen that reads either. The VPS list is a
- * table of machines and their power state; there is no machine detail page and
- * no backups page, and `nav.backups` is an orphan translation left over from
- * the navigation being drafted ahead of the screen.
- *
- * Writing a spec that clicked a hostname and looked for "succeeded" is how this
- * gap stayed invisible: the spec failed, and the failure said "selector wrong"
- * rather than "the feature has no user interface". It is recorded as
- * NOT_IMPLEMENTED in docs/build-status.md instead of being asserted around.
- */
+test('the backups screen shows both states the seeder writes', async ({ page }) => {
+  await page.goto('/backups')
+
+  // The seeder writes one finished backup the customer could restore from and
+  // one that stopped being trackable and is waiting for a person. A screen
+  // that showed only the happy one would be hiding the case that matters.
+  await expect(page.getByText(/succeeded/i).first()).toBeVisible()
+  await expect(page.getByText(/needs.review/i).first()).toBeVisible()
+})
+
+test('a backup waiting for a person cannot be restored from', async ({ page }) => {
+  /*
+   * The needs-review backup stopped being trackable: the platform does not
+   * know whether its archive is complete. Offering a restore from it would
+   * offer to overwrite a working machine with an unknown.
+   */
+  await page.goto('/backups')
+
+  await expect(page.getByRole('button', { name: /^restore$/i })).toHaveCount(2)
+  await expect(page.locator('button:disabled', { hasText: /^restore$/i })).toHaveCount(1)
+})
+
+test('a restore cannot be confirmed without typing the hostname', async ({ page }) => {
+  await page.goto('/backups')
+
+  // The enabled one: the other row is the needs-review backup, whose restore
+  // is deliberately refused.
+  await page.locator('button:enabled', { hasText: /^restore$/i }).first().click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  // The customer is told what they are about to lose, in those words.
+  await expect(dialog.getByText(/cannot be undone/i)).toBeVisible()
+
+  const confirm = dialog.getByRole('button', { name: /^restore$/i })
+  await expect(confirm).toBeDisabled()
+
+  // A hostname that is nearly right is still wrong. This is not a lookup.
+  await dialog.getByRole('textbox').fill(fixtures.vpsHostname.toUpperCase())
+  await expect(confirm).toBeDisabled()
+
+  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await expect(confirm).toBeEnabled()
+})
+
+test('escape closes the restore dialog without restoring', async ({ page }) => {
+  /*
+   * The focus trap, the inert background and Escape all come from the native
+   * <dialog> element rather than from hand-written key handling. This asserts
+   * the browser is really giving them to us — jsdom cannot, so the component
+   * test could not check it.
+   */
+  await page.goto('/backups')
+
+  await page.locator('button:enabled', { hasText: /^restore$/i }).first().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByRole('dialog')).toBeHidden()
+  await expect(page.getByText(/restoring/i)).toHaveCount(0)
+})
 
 test('the VPS list offers the two ways of stopping a machine as separate controls', async ({ page }) => {
   await page.goto('/vps')

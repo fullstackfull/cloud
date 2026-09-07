@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type {
   ApiToken,
+  Backup,
   DedicatedServer,
   Envelope,
   HostingAccount,
@@ -261,6 +262,63 @@ export function useVpsPower() {
     mutationFn: ({ id, action, idempotency_key }: PowerRequest) =>
       api.post<unknown>(`/vps/${encodeURIComponent(id)}/power`, { action, idempotency_key }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['vps'] })
+    },
+  })
+}
+
+/* ---------------------------------------------------------------- backups */
+
+/**
+ * Nested under a machine, exactly as the API is. A flat backups collection
+ * would need a service id in the query string, and an id supplied by the
+ * client is the shape this API avoids everywhere else.
+ */
+export function useBackups(vmId: string | null, pageNumber = 1) {
+  return useQuery({
+    queryKey: ['backups', vmId, pageNumber],
+    // Not just disabled-when-null: the key carries the machine, so switching
+    // machines cannot show the previous one's backups while the new ones load.
+    enabled: vmId !== null,
+    queryFn: () =>
+      api.get<Paginated<Backup>>(
+        `/vps/${encodeURIComponent(vmId ?? '')}/backups${page({ page: pageNumber })}`,
+      ),
+  })
+}
+
+export function useCreateBackup() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ vmId }: { vmId: string }) =>
+      api.post<unknown>(`/vps/${encodeURIComponent(vmId)}/backups`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backups'] })
+    },
+  })
+}
+
+export interface RestoreRequest {
+  vmId: string
+  backupId: string
+  /** The machine's hostname. The server compares it and is what decides. */
+  confirmation: string
+}
+
+export function useRestoreBackup() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ vmId, backupId, confirmation }: RestoreRequest) =>
+      api.post<unknown>(
+        `/vps/${encodeURIComponent(vmId)}/backups/${encodeURIComponent(backupId)}/restore`,
+        { confirmation },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backups'] })
+      // The machine's own row changes too: a restore takes it out of service
+      // for the duration.
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
   })
