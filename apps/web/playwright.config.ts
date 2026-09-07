@@ -104,14 +104,20 @@ export default defineConfig({
       // perfectly good signal that Playwright treats as "not ready".
       ignoreHTTPSErrors: true,
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
+      // Generous, because the first boot on a cold CI runner compiles the whole
+      // framework before it can answer anything, and a suite that fails at
+      // exactly sixty seconds is reporting its own impatience rather than a
+      // defect.
+      timeout: 180_000,
+      stdout: 'pipe',
+      stderr: 'pipe',
       env: apiEnvironment,
     },
     {
       command: `npm run dev -- --port ${WEB_PORT} --strictPort`,
       url: WEB_ORIGIN,
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
+      timeout: 120_000,
       env: { VITE_API_URL: API_ORIGIN },
     },
   ],

@@ -118,9 +118,15 @@ jobs:
           php artisan migrate:rollback --env=testing --force --step=100
           php artisan migrate --env=testing --force
 
+      # APP_ENV again, and for the same reason: `artisan test` boots the
+      # application before it hands over to PHPUnit, and the runner has no .env
+      # — only .env.testing, which Laravel does not read unless APP_ENV says
+      # testing. Without it the boot defaults to production, the provider guard
+      # refuses, and the suite fails in under a second having run nothing.
       - name: Run tests
         working-directory: apps/control-plane
         env:
+          APP_ENV: testing
           DB_PASSWORD: lynomia_ci
         run: php artisan test
 
@@ -147,10 +153,16 @@ jobs:
       # Analyser dependencies live in their own manifest so they can never
       # constrain the application's runtime dependency graph.
       - name: Install analysis toolchain
+        working-directory: apps/control-plane
         run: composer install --working-dir=tools/phpstan --no-interaction --prefer-dist --no-progress
 
+      # -c, because the configuration lives beside the analyser in its own
+      # composer root and not in the directory phpstan is run from. Without it
+      # the analyser answers "At least one path must be specified to analyse"
+      # and the job fails on its own invocation rather than on the code.
       - name: Run PHPStan
-        run: tools/phpstan/vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+        working-directory: apps/control-plane
+        run: tools/phpstan/vendor/bin/phpstan analyse -c tools/phpstan/phpstan.neon --no-progress --memory-limit=1G
 
   frontend:
     name: Frontend
