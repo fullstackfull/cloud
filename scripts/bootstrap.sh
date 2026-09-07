@@ -41,6 +41,17 @@ log "Preparing environment files"
 [[ -f "$CP/.env" ]]    || cp "$CP/.env.example" "$CP/.env"
 [[ -f "$WEB/.env" ]]   || cp "$WEB/.env.example" "$WEB/.env"
 
+# The test environment, and not an optional nicety. `make test-backend` runs
+# with APP_ENV=testing; without a .env.testing Laravel falls back to .env, and
+# RefreshDatabase truncates every table in whatever database that names — which
+# on a fresh clone is the developer's own. A first `make test` that destroys
+# your development data is a first impression nobody recovers from.
+#
+# The example points at lynomia_test rather than lynomia for the same reason,
+# so the two are separate even before anybody edits either file. Found by
+# running this script into an empty clone and reading what it left behind.
+[[ -f "$CP/.env.testing" ]] || cp "$CP/.env.testing.example" "$CP/.env.testing"
+
 log "Installing PHP dependencies"
 (cd "$CP" && composer install --no-interaction --prefer-dist)
 

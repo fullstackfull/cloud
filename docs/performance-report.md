@@ -25,8 +25,9 @@ document.
    the throughput figures below are a floor, not a capacity.
 3. **No horizontal scale was tested**, because there is one machine. Anything
    about "N application servers" would be arithmetic, not measurement.
-4. **No queue worker was running.** Everything measured is synchronous request
-   work.
+4. **The HTTP figures in section 3 were taken with no queue worker running.**
+   Everything measured there is synchronous request work. Section 7 measures
+   the queue separately, with a real worker.
 
 What the numbers are good for: comparing endpoints against each other, finding
 which layer dominates a request, and catching a regression on the same hardware.
@@ -169,7 +170,55 @@ lazy-loaded relation in the path.
 sequences and commits twice is dominated by the same framework boot as
 everything else.
 
-## 6. What this says to do next, in order
+## 6. The metrics endpoint, after Phase 29
+
+Phase 29 added a ninth collector — scheduler liveness — to an endpoint that is
+scraped every fifteen seconds for ever, so its cost is worth a number rather
+than an assurance.
+
+Reproduce with:
+
+```bash
+php artisan test --filter=MetricsCostMeasurementTest
+```
+
+| | Measured |
+| --- | --- |
+| Metrics | 18 |
+| Series | 258 |
+| Queries per scrape | 14 |
+| Wall clock | 38.4 ms |
+
+Fourteen queries for nine collectors, and that is the figure to watch rather
+than the milliseconds: `MetricsQueryBudgetTest` asserts both a ceiling on it
+and — the assertion that actually matters — that it **does not change when the
+amount of data does**. A collector that loops once per pool, node or customer
+would pass a threshold on an empty database and take the endpoint down on a
+full one. The scheduler collector adds exactly one query, and its label
+cardinality is the number of entries in `routes/console.php`.
+
+The 38 ms is on a machine also running the test database, and is dominated by
+the same framework boot that dominates every other figure in this report.
+
+## 7. Scheduler and queue, with a real worker
+
+The queue figures elsewhere in this repository are per-test durations, not
+throughput. What Phase 29 established is not how fast the queue is but that it
+runs at all:
+
+| Chain | Measured |
+| --- | --- |
+| `infrastructure:reconcile` → Redis → separate `queue:work` → database changed | 3–4 s per case, `ARealWorkerConsumesTheQueueTest` |
+| Provider refusal → recorded, rescheduled with backoff, nothing built | included above |
+| Worker SIGKILLed mid-build → second worker builds nothing | included above |
+
+These are wall-clock times for a test that starts a PHP process, so they say
+almost nothing about queue throughput and everything about whether the chain is
+connected. Throughput under load has **not** been measured: there is one
+machine, and a load generator competing with a worker and PostgreSQL for four
+vCPU would produce a number that means nothing.
+
+## 8. What this says to do next, in order
 
 1. **Nothing about the queries.** 0.15 ms at half a million rows, no sequential
    scans, no N+1 anywhere. There is no database work worth doing on the strength

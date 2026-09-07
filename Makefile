@@ -50,11 +50,16 @@ test: test-backend test-frontend ## Run the full test suite
 .PHONY: test-backend
 test-backend: ## Run PHP tests (PHPUnit, against real PostgreSQL)
 	@# APP_ENV is set here because `artisan test` boots the application before
-	@# handing over to PHPUnit. On a fresh clone there is a .env.testing and no
-	@# .env, and Laravel does not read .env.testing unless APP_ENV says testing —
-	@# so the boot defaults to production, the provider guard correctly refuses a
-	@# production deployment configured with fakes, and the suite dies in a fifth
-	@# of a second having run nothing. Reproduced from a clean-room clone.
+	@# handing over to PHPUnit, and Laravel does not read .env.testing unless
+	@# APP_ENV already says testing — so without it the boot defaults to
+	@# production, the provider guard correctly refuses a production deployment
+	@# configured with fakes, and the suite dies in a fifth of a second having
+	@# run nothing.
+	@#
+	@# The other half is that .env.testing has to exist. It is not tracked, so
+	@# scripts/bootstrap.sh copies it from the example — without that, this
+	@# target falls back to .env and RefreshDatabase truncates the developer's
+	@# own database. Both halves were found by running a clean-room clone.
 	cd $(CP) && APP_ENV=testing php artisan test
 
 .PHONY: test-frontend
