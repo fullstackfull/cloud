@@ -492,6 +492,19 @@ return [
         'body' => ['confirmation'],
         'response' => $one('Backup', 202),
     ],
+    'api.v1.me.notification_preferences.index' => [
+        'tag' => 'Account',
+        'summary' => 'Which optional messages this person wants',
+        'description' => 'Every category is listed, including the ones that cannot be changed - a screen that omitted them would leave a customer wondering whether they had been switched off silently.',
+        'response' => $many('NotificationPreference'),
+    ],
+    'api.v1.me.notification_preferences.update' => [
+        'tag' => 'Account',
+        'summary' => 'Turn an optional category on or off',
+        'description' => 'Refuses a change it would not honour. A setting that appears to save and then does nothing is worse than one that says no.',
+        'body' => ['category', 'channel', 'enabled'],
+        'response' => $many('NotificationPreference'),
+    ],
     'api.v1.notifications.index' => [
         'tag' => 'Notifications',
         'summary' => 'The customer\'s inbox',

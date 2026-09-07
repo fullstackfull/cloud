@@ -10,6 +10,7 @@ use Lynomia\Modules\Identity\Http\Controllers\ProfileController;
 use Lynomia\Modules\Identity\Http\Controllers\RegistrationController;
 use Lynomia\Modules\Identity\Http\Controllers\SessionController;
 use Lynomia\Modules\Identity\Http\Controllers\TwoFactorController;
+use Lynomia\Modules\Notifications\Http\Controllers\NotificationPreferenceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -81,6 +82,17 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
     Route::delete('me/two-factor', [TwoFactorController::class, 'disable'])->name('me.2fa.disable');
     Route::post('me/two-factor/recovery-codes', [TwoFactorController::class, 'regenerateRecoveryCodes'])
         ->name('me.2fa.recovery_codes');
+
+    /*
+     * Which optional messages this person wants. Here rather than in the
+     * business group because a preference belongs to a login, not to an
+     * account: two people on one customer read different mail, and somebody
+     * who belongs to no account yet still has security mail to receive.
+     */
+    Route::get('me/notification-preferences', [NotificationPreferenceController::class, 'index'])
+        ->name('me.notification_preferences.index');
+    Route::put('me/notification-preferences', [NotificationPreferenceController::class, 'update'])
+        ->name('me.notification_preferences.update');
 });
 
 // Challenge endpoint for a login that has passed the password stage and is

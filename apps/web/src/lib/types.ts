@@ -159,6 +159,27 @@ export interface VirtualMachine {
   is_operable: boolean
 }
 
+export interface AppNotification {
+  id: string
+  type: string
+  category: string
+  /** Rendered by the API in the reader's language, not assembled here. */
+  title: string
+  body: string
+  is_failure: boolean
+  link: string | null
+  read_at: string | null
+  created_at: string
+}
+
+export interface NotificationPreference {
+  category: string
+  channel: string
+  enabled: boolean
+  /** False where the platform will not honour a change. */
+  changeable: boolean
+}
+
 export interface Backup {
   id: string
   service_id: string | null

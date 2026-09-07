@@ -712,6 +712,17 @@ return [
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'NotificationPreference' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One category on one channel. `changeable` is false where the platform will not honour a change - security and billing carry obligations and warnings, and the in-app inbox is the account\'s own record of what happened to it.',
+        'properties' => [
+            'category' => ['type' => 'string'],
+            'channel' => ['type' => 'string'],
+            'enabled' => ['type' => 'boolean'],
+            'changeable' => ['type' => 'boolean'],
+        ],
+    ],
     'NotificationsMarkedRead' => [
         'type' => 'object',
         'additionalProperties' => false,

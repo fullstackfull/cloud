@@ -86,6 +86,54 @@ test('the subscriptions screen tells a renewal apart from a cancellation', async
   await expect(page.getByText(/^Ends /i)).toBeVisible()
 })
 
+test('the notification inbox shows what the platform has told this account', async ({ page }) => {
+  /*
+   * The seeder writes one unread and one read notification on purpose. The
+   * unread count, the emphasis and the "mark read" control all behave
+   * differently between the two, and a fixture with only one state lets half a
+   * screen look finished.
+   */
+  await page.goto('/notifications')
+
+  await expect(page.getByText(/1 unread/i)).toBeVisible()
+
+  /*
+   * Title and body, both rendered by the API in the reader's language with the
+   * hostname interpolated into one whole sentence. Asserted separately rather
+   * than with one loose match, because the hostname appearing in both is the
+   * correct outcome and a single locator would fail on it.
+   */
+  await expect(page.getByText(`${fixtures.vpsHostname} is ready`)).toBeVisible()
+  await expect(page.getByText(new RegExp(`${fixtures.vpsHostname} is now running`))).toBeVisible()
+
+  // Exactly one row offers to be marked read: the other already is.
+  await expect(page.getByRole('button', { name: /^mark read$/i })).toHaveCount(1)
+})
+
+test('marking a notification read clears it from the unread count', async ({ page }) => {
+  await page.goto('/notifications')
+
+  await page.getByRole('button', { name: /^mark read$/i }).click()
+
+  await expect(page.getByText(/0 unread/i)).toBeVisible()
+  await expect(page.getByRole('button', { name: /^mark read$/i })).toHaveCount(0)
+})
+
+test('a customer cannot switch off billing email, and is told so', async ({ page }) => {
+  /*
+   * Shown and disabled rather than omitted. A screen that simply left the
+   * immovable categories out would leave a customer wondering whether they had
+   * been switched off silently; the honest answer is that we will always tell
+   * them their card was declined.
+   */
+  await page.goto('/profile')
+
+  const billing = page.locator('li').filter({ hasText: /^Billing/ })
+
+  await expect(billing.getByText(/always sent/i).first()).toBeVisible()
+  await expect(billing.getByRole('checkbox').first()).toBeDisabled()
+})
+
 test('the VPS list shows the machine and its address', async ({ page }) => {
   await page.goto('/vps')
 

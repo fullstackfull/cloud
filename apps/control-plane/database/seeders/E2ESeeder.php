@@ -17,6 +17,8 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -76,6 +78,7 @@ class E2ESeeder extends Seeder
 
         $this->virtualMachine($customer);
         $this->subscriptions($customer);
+        $this->notifications($customer);
         $this->invoices($customer);
         $this->wallet($customer);
         $this->billingAdmin();
@@ -179,6 +182,38 @@ class E2ESeeder extends Seeder
                 // paid for, which is what "ends on" means on the screen.
                 'cancel_at' => CarbonImmutable::now()->endOfMonth(),
             ]);
+    }
+
+    /**
+     * One unread notification and one read one.
+     *
+     * Two, because the inbox's whole job is telling them apart: the unread
+     * count, the emphasis and the "mark read" control all behave differently,
+     * and a fixture with only one state lets half a screen look finished.
+     */
+    private function notifications(Customer $customer): void
+    {
+        if (Notification::query()->where('customer_id', $customer->getKey())->exists()) {
+            return;
+        }
+
+        Notification::factory()->ofType(NotificationType::ServiceReady)->create([
+            'customer_id' => $customer->getKey(),
+            'data' => ['service' => self::VPS_HOSTNAME],
+            'link' => '/vps',
+            'idempotency_key' => 'e2e:service-ready',
+        ]);
+
+        Notification::factory()->ofType(NotificationType::InvoiceIssued)->read()->create([
+            'customer_id' => $customer->getKey(),
+            'data' => [
+                'number' => self::OPEN_INVOICE_NUMBER,
+                'amount' => 'KWD 9.000',
+                'due_date' => CarbonImmutable::now()->addDays(7)->toDateString(),
+            ],
+            'link' => '/invoices',
+            'idempotency_key' => 'e2e:invoice-issued',
+        ]);
     }
 
     private function billingAdmin(): void

@@ -11,6 +11,10 @@ use Lynomia\Modules\Notifications\Http\Controllers\NotificationController;
  * Included by routes/api_v1.php inside the group that has already applied
  * auth:sanctum, verified, throttle:api and customer.
  *
+ * Preferences are NOT here. They belong to a person rather than an account —
+ * two people on one customer read different mail — so they sit with the other
+ * /me routes, outside the group that resolves an acting customer.
+ *
  * Read and acknowledge only. There is deliberately no endpoint that creates a
  * notification and none that deletes one: notifications are raised by the
  * platform's own events, and a customer who could delete the record of their

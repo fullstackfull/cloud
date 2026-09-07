@@ -452,5 +452,36 @@
   },
   "confirm": {
     "typeToConfirm": "Type {{phrase}} to confirm"
+  },
+  "notifications": {
+    "subtitle": "Everything we have told you about your account.",
+    "empty": "Nothing yet.",
+    "unread": "Unread",
+    "unreadOnly": "Unread only",
+    "unreadCount": "{{count}} unread",
+    "markRead": "Mark read",
+    "markAllRead": "Mark all read",
+    "open": "Open",
+    "channel": {
+      "in_app": "In the portal",
+      "email": "Email"
+    },
+    "category": {
+      "security": "Security",
+      "billing": "Billing",
+      "service": "Your services",
+      "operational": "Maintenance and incidents"
+    },
+    "categoryHint": {
+      "security": "Sign-ins, password changes and two-factor. Always sent.",
+      "billing": "Invoices, payments and anything that could interrupt your service. Always sent.",
+      "service": "Servers being built, suspended, restored or reinstalled.",
+      "operational": "Planned maintenance and incidents affecting what you run."
+    },
+    "preferences": {
+      "title": "What we email you",
+      "subtitle": "The portal always keeps a record. You can choose what also reaches your inbox.",
+      "always": "always sent"
+    }
   }
 }

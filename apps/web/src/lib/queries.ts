@@ -3,12 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type {
   ApiToken,
+  AppNotification,
   Backup,
   DedicatedServer,
   Envelope,
   HostingAccount,
   Invoice,
   IpAssignment,
+  NotificationPreference,
   Order,
   Paginated,
   Payment,
@@ -263,6 +265,63 @@ export function useVpsPower() {
       api.post<unknown>(`/vps/${encodeURIComponent(id)}/power`, { action, idempotency_key }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
+    },
+  })
+}
+
+/* ---------------------------------------------------------- notifications */
+
+/**
+ * The inbox. `meta.unread` rides along with the list so the badge needs no
+ * second request on every page load.
+ */
+export function useNotifications(pageNumber = 1, unreadOnly = false) {
+  return useQuery({
+    queryKey: ['notifications', pageNumber, unreadOnly],
+    queryFn: () =>
+      api.get<Paginated<AppNotification> & { meta: { unread: number } }>(
+        `/notifications${page({ page: pageNumber, ...(unreadOnly ? { unread: 1 } : {}) })}`,
+      ),
+  })
+}
+
+export function useMarkNotificationRead() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) => api.post<unknown>(`/notifications/${encodeURIComponent(id)}/read`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    },
+  })
+}
+
+export function useMarkAllNotificationsRead() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () => api.post<unknown>('/notifications/read-all'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    },
+  })
+}
+
+export function useNotificationPreferences() {
+  return useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: () => api.get<Envelope<NotificationPreference[]>>('/me/notification-preferences'),
+  })
+}
+
+export function useUpdateNotificationPreference() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { category: string; channel: string; enabled: boolean }) =>
+      api.put<Envelope<NotificationPreference[]>>('/me/notification-preferences', input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['notification-preferences'] })
     },
   })
 }
