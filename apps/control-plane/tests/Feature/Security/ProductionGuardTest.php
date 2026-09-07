@@ -71,16 +71,87 @@ final class ProductionGuardTest extends TestCase
     #[Test]
     public function a_fully_real_configuration_passes(): void
     {
+        // `dns` is deliberately absent. This build contains exactly one
+        // reverse-DNS driver and it is the fake, so there is no value for that
+        // key a production deployment could legally carry — which is a fact
+        // about the build, recorded in docs/build-status.md, not a gap in this
+        // test. An unset key is how a deployment says it publishes no PTRs.
         config()->set('billing.providers', [
             'payment' => 'stripe',
             'compute' => 'proxmox',
             'dedicated' => 'redfish',
             'hosting' => 'cpanel',
-            'dns' => 'cloudflare',
             'backup' => 'pbs',
         ]);
 
         $this->guard()->assertNoFakeProviders();
+
+        $this->addToAssertionCount(1);
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * A driver that does not exist
+     * ---------------------------------------------------------------------
+     *
+     * Refusing the fake is only half of it. `PAYMENT_PROVIDER=myfatoorah` and
+     * `DNS_PROVIDER=cloudflare` are settings this build cannot honour, and they
+     * used to pass this guard: production booted, reported healthy, and threw
+     * the first time a customer tried to pay or an operator set a PTR. Failing
+     * at boot is the whole point of having the guard at all.
+     *
+     * Only the two families whose driver actually comes from configuration are
+     * checked. Compute, dedicated and hosting resolve per row — from the
+     * cluster's driver, the endpoint's protocol and the node's panel — so a
+     * config value for them names nothing and cannot be validated against
+     * anything.
+     */
+
+    #[Test]
+    public function a_payment_driver_this_build_does_not_contain_refuses_to_boot(): void
+    {
+        config()->set('billing.providers', ['payment' => 'myfatoorah']);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/payment.*myfatoorah/s');
+
+        $this->guard()->assertEveryConfiguredDriverExists();
+    }
+
+    #[Test]
+    public function a_dns_driver_this_build_does_not_contain_refuses_to_boot(): void
+    {
+        config()->set('billing.providers', ['payment' => 'stripe', 'dns' => 'cloudflare']);
+
+        try {
+            $this->guard()->assertEveryConfiguredDriverExists();
+            $this->fail('A DNS driver with no adapter was accepted.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('cloudflare', $e->getMessage());
+            // The message has to say what it will accept, or an operator is
+            // left guessing at the one string that would have worked.
+            $this->assertStringContainsString('fake', $e->getMessage());
+        }
+    }
+
+    #[Test]
+    public function drivers_this_build_does_contain_are_accepted(): void
+    {
+        config()->set('billing.providers', [
+            'payment' => 'stripe',
+            // The fake exists, so this check accepts it. Refusing it in
+            // production is the other method's job, and keeping the two
+            // separate is what lets each be tested for one thing.
+            'dns' => 'fake',
+            // Named here on purpose: these three are not resolved from
+            // configuration, so whatever they say must not fail the check.
+            'compute' => 'proxmox',
+            'dedicated' => 'redfish',
+            'hosting' => 'cpanel',
+            'backup' => 'pbs',
+        ]);
+
+        $this->guard()->assertEveryConfiguredDriverExists();
 
         $this->addToAssertionCount(1);
     }

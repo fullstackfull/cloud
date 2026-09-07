@@ -26,6 +26,22 @@ final class ReverseDnsProviderFactory
     private ?ReverseDnsProvider $resolved = null;
 
     /**
+     * The drivers this build contains.
+     *
+     * Declared once and read by two callers: make(), below, and the
+     * production boot guard, which refuses to start a deployment configured
+     * for a driver that is not in this list. Two lists would eventually
+     * disagree, and the way you would find out is a deployment that booted
+     * clean and failed on its first PTR.
+     *
+     * @return list<string>
+     */
+    public static function drivers(): array
+    {
+        return [FakeReverseDnsProvider::NAME];
+    }
+
+    /**
      * @throws UnknownReverseDnsDriverException
      */
     public function make(): ReverseDnsProvider
@@ -42,7 +58,7 @@ final class ReverseDnsProviderFactory
             // adapter this build does not contain. ProviderRegistryServiceProvider
             // already refuses to boot production on the fake; this is the other
             // half of the same guard.
-            default => throw UnknownReverseDnsDriverException::named($driver, [FakeReverseDnsProvider::NAME]),
+            default => throw UnknownReverseDnsDriverException::named($driver, self::drivers()),
         };
     }
 

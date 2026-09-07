@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
+use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use RuntimeException;
 
 /**
@@ -31,6 +33,7 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
         }
 
         $this->assertNoFakeProviders();
+        $this->assertEveryConfiguredDriverExists();
     }
 
     /**
@@ -58,5 +61,68 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
                 implode(', ', $fake),
             ));
         }
+    }
+
+    /**
+     * Refuses a production deployment configured for a driver this build does
+     * not contain.
+     *
+     * Refusing the fake is only half the job. `PAYMENT_PROVIDER=myfatoorah` and
+     * `DNS_PROVIDER=cloudflare` are legal settings that nothing here can
+     * honour, and left unchecked they produce the same failure the fake does,
+     * only later and in front of a customer: the deployment boots, reports
+     * healthy, and throws the first time somebody tries to pay or an operator
+     * sets a PTR. A guard that only catches the fake catches the case an
+     * operator was already worried about and misses the one they were not.
+     *
+     * Only the two families whose driver actually comes from configuration are
+     * checked. Compute, dedicated and hosting resolve per row — from the
+     * cluster's driver, the endpoint's protocol and the node's panel — so a
+     * config value for those names nothing, and the control that matters for
+     * them is the row-level refusal in each factory.
+     *
+     * @throws RuntimeException
+     */
+    public function assertEveryConfiguredDriverExists(): void
+    {
+        /** @var array<string, mixed> $providers */
+        $providers = config('billing.providers', []);
+
+        $this->assertDriverExists(
+            'payment',
+            $providers['payment'] ?? null,
+            $this->app->make(PaymentProviderRegistry::class)->names(),
+        );
+
+        $this->assertDriverExists(
+            'dns',
+            $providers['dns'] ?? null,
+            ReverseDnsProviderFactory::drivers(),
+        );
+    }
+
+    /**
+     * @param  list<string>  $available
+     *
+     * @throws RuntimeException
+     */
+    private function assertDriverExists(string $family, mixed $configured, array $available): void
+    {
+        if (! is_string($configured) || $configured === '') {
+            return;
+        }
+
+        if (in_array(strtolower(trim($configured)), $available, true)) {
+            return;
+        }
+
+        throw new RuntimeException(sprintf(
+            'Refusing to run in production: the %s provider is configured as "%s", '
+            .'and this build contains no such driver. It would boot, report healthy, '
+            .'and fail the first time it was used. Available: %s.',
+            $family,
+            $configured,
+            implode(', ', $available),
+        ));
     }
 }
