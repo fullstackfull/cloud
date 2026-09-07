@@ -199,6 +199,33 @@ final class InvoiceEndpointsTest extends BillingApiTestCase
     }
 
     #[Test]
+    public function an_account_the_caller_also_owns_is_still_out_of_scope_for_this_request(): void
+    {
+        [$acting, $other, $user] = $this->twoAccountsOneLogin();
+
+        $mine = $this->invoiceFor($acting, ['issued_at' => now()]);
+        $theirs = $this->invoiceFor($other, ['issued_at' => now()]);
+
+        // The header decided which account this request acts for. Membership of
+        // the second one is not a licence to read it through the first: two
+        // companies can share a bookkeeper, and each is entitled to be billed
+        // in its own right.
+        $list = $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $acting->id)
+            ->getJson('/api/v1/invoices')
+            ->assertOk();
+
+        $list->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mine->id);
+        $this->assertStringNotContainsString($theirs->id, (string) $list->getContent());
+
+        $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $acting->id)
+            ->getJson("/api/v1/invoices/{$theirs->id}")
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
+    }
+
+    #[Test]
     public function a_member_of_the_account_without_billing_permission_may_not_read_invoices(): void
     {
         $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);

@@ -54,6 +54,29 @@ abstract class BillingApiTestCase extends TestCase
     }
 
     /**
+     * Two accounts the *same* login belongs to, and that login.
+     *
+     * This is the shape the other cross-tenant tests cannot reach. They use an
+     * attacker with no membership at all in the victim account, so they would
+     * still pass against an implementation that scoped to "every account this
+     * user belongs to" rather than to the one account the request is acting
+     * for. Here both accounts are the caller's own, the header names one, and
+     * the other must be as unreachable as a stranger's.
+     *
+     * @return array{0: Customer, 1: Customer, 2: User}
+     */
+    protected function twoAccountsOneLogin(): array
+    {
+        $acting = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $other = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+
+        $user = $this->memberOf($acting, CustomerRole::Owner);
+        $this->memberOf($other, CustomerRole::Owner, $user);
+
+        return [$acting, $other, $user];
+    }
+
+    /**
      * An invoice that belongs to a given account.
      *
      * The customer is passed rather than left to the factory to invent, since

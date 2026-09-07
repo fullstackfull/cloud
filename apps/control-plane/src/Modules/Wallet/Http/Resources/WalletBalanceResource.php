@@ -6,8 +6,8 @@ namespace Lynomia\Modules\Wallet\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Wallet\Domain\ValueObjects\WalletBalance;
-use Lynomia\Modules\Wallet\Http\Resources\Concerns\SerialisesMoney;
 
 /**
  * What a customer may see of one of their own balances.

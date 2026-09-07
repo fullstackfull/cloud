@@ -158,6 +158,32 @@ final class SubscriptionEndpointsTest extends BillingApiTestCase
     }
 
     #[Test]
+    public function an_account_the_caller_also_owns_is_still_out_of_scope_for_this_request(): void
+    {
+        [$acting, $other, $user] = $this->twoAccountsOneLogin();
+
+        $mine = $this->subscriptionFor($acting);
+        $theirs = $this->subscriptionFor($other);
+
+        // Membership of a second account is not a licence to read it through
+        // the first. Without this the suite would still pass against a query
+        // scoped to "every account this login belongs to".
+        $list = $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $acting->id)
+            ->getJson('/api/v1/subscriptions')
+            ->assertOk();
+
+        $list->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mine->id);
+        $this->assertStringNotContainsString($theirs->id, (string) $list->getContent());
+
+        $this->actingAs($user)
+            ->withHeader('X-Lynomia-Customer', $acting->id)
+            ->getJson("/api/v1/subscriptions/{$theirs->id}")
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'resource.not_found');
+    }
+
+    #[Test]
     public function a_member_without_billing_permission_may_not_read_subscriptions(): void
     {
         $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);

@@ -21,6 +21,7 @@ use Lynomia\Http\Responses\ApiError;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
@@ -130,7 +131,28 @@ return Application::configure(basePath: dirname(__DIR__))
                     401,
                 ),
 
-                $e instanceof AuthorizationException => ApiError::make(
+                /*
+                 * Both forms, because only one of them ever arrives here.
+                 *
+                 * Laravel converts an AuthorizationException into an
+                 * AccessDeniedHttpException before the renderer runs, so the
+                 * first arm below is unreachable through the normal path and
+                 * the exception used to fall through to the generic
+                 * `http.403` - a different code from the `auth.forbidden` the
+                 * API documents, for the same event. Nine modules independently
+                 * worked around that by inventing their own DomainException
+                 * rather than using the framework's, which is a strong signal
+                 * that the renderer, not the modules, was wrong.
+                 *
+                 * The first arm stays for a caller that throws it directly.
+                 * The third catches `abort(403)`, which produces a plain
+                 * HttpException: a client branches on the code, and it has no
+                 * way to know - and no reason to care - which of the three
+                 * mechanisms inside the application refused it.
+                 */
+                $e instanceof AuthorizationException,
+                $e instanceof AccessDeniedHttpException,
+                $e instanceof HttpExceptionInterface && $e->getStatusCode() === 403 => ApiError::make(
                     'auth.forbidden',
                     'You are not permitted to perform this action.',
                     403,

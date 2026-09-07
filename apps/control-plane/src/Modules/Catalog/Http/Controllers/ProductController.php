@@ -32,20 +32,22 @@ final readonly class ProductController
     {
         $customer = $this->acting->get();
 
-        // The ceiling is here rather than in a validation rule so that an
-        // over-large page size is served, bounded, instead of refused. One
-        // request must never be able to read the whole table.
-        $perPage = min(max($request->integer('per_page', 25), 1), 100);
-
-        $products = $this->list->execute($request->kind(), $perPage);
+        // The ceiling is applied by clamping rather than by a validation
+        // rule, so an over-large page size is served bounded instead of
+        // refused. It is not the guarantee, though: the action applies the
+        // same bound to every caller, HTTP or not.
+        $products = $this->list->execute($request->kind(), $request->perPage());
 
         return ProductResource::collection($products->getCollection())
             ->additional(['meta' => [
-                'current_page' => $products->currentPage(),
+                // The same envelope every other collection on this API uses —
+                // invoices, orders, payments, services, machines, tokens. A
+                // client's paging component is written once.
+                'page' => $products->currentPage(),
                 'per_page' => $products->perPage(),
-                'last_page' => $products->lastPage(),
                 'total' => $products->total(),
-                'has_more' => $products->hasMorePages(),
+                'last_page' => $products->lastPage(),
+                'max_per_page' => ListProductsRequest::MAX_PER_PAGE,
 
                 // Both are decisions the response depends on, so a client can
                 // see which currency it was quoted in and which language it

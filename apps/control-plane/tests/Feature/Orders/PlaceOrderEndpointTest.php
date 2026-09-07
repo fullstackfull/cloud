@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Orders;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
@@ -300,6 +301,75 @@ final class PlaceOrderEndpointTest extends OrdersApiTestCase
             ->assertJsonPath('error.code', 'auth.forbidden');
 
         $this->assertSame(0, Order::query()->count());
+    }
+
+    #[Test]
+    public function an_unlisted_plan_cannot_be_bought_through_the_endpoint(): void
+    {
+        [, $user] = $this->accountWithOwner();
+        $plan = $this->publishedPlan();
+        $plan->forceFill(['is_public' => false])->save();
+
+        /*
+         * GET /catalog/plans/{plan} answers 404 for this plan: it is not on
+         * sale. The set of unlisted plans is exactly the set priced for
+         * somebody else — a retired tier kept for legacy customers, an internal
+         * or staff rate, a negotiated one — so a checkout that accepts the id
+         * lets any customer who learns it buy at a price that was never offered
+         * to them.
+         */
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'a-plan-that-is-not-listed')
+            ->postJson('/api/v1/orders', $this->basket($plan))
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'checkout.plan_unavailable');
+
+        $this->assertSame(0, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_plan_whose_product_is_unlisted_cannot_be_bought_either(): void
+    {
+        [, $user] = $this->accountWithOwner();
+        $plan = $this->publishedPlan();
+        $plan->product->forceFill(['is_public' => false])->save();
+
+        // A plan inherits its product's visibility, or withdrawing a product
+        // from sale leaves every one of its plans reachable by direct id.
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'a-product-that-is-not-listed')
+            ->postJson('/api/v1/orders', $this->basket($plan))
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'checkout.plan_unavailable');
+
+        $this->assertSame(0, Order::query()->count());
+    }
+
+    #[Test]
+    public function the_same_plan_cannot_appear_twice_in_one_basket(): void
+    {
+        [, $user] = $this->accountWithOwner();
+        $plan = $this->publishedPlan();
+        $plan->forceFill(['per_customer_limit' => 1, 'stock_limit' => 1])->save();
+
+        /*
+         * Two lines of one each are not a richer basket than one line of two —
+         * they are the same purchase split so that each half is measured
+         * against a stock count neither half is in yet. One per customer
+         * becomes one per line, and the plan sells twice.
+         */
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'the-same-plan-twice')
+            ->postJson('/api/v1/orders', $this->basket($plan, [
+                ['plan_id' => $plan->id, 'quantity' => 1],
+                ['plan_id' => $plan->id, 'quantity' => 1],
+            ]))
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'validation.failed')
+            ->assertJsonStructure(['error' => ['details' => ['fields' => ['items.1.plan_id']]]]);
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, (int) DB::table('order_items')->sum('quantity'));
     }
 
     #[Test]

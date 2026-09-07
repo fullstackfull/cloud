@@ -6,7 +6,8 @@ namespace Lynomia\Modules\Payments\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Lynomia\Modules\Payments\Http\Resources\Concerns\SerialisesMoney;
+use Lynomia\Http\Concerns\SerialisesMoney;
+use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 
 /**
@@ -26,8 +27,12 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
  *    provider feels like it, and nothing in it is a promise to a customer.
  *
  * `failure_code` and `failure_message` are present: a declined payment that
- * cannot tell the customer why is a support ticket, and both fields are
- * composed for the payer rather than lifted from a provider stack trace.
+ * cannot tell the customer why is a support ticket. `failure_code` is the
+ * stable, provider-normalised reason — `card_declined`, `insufficient_funds` —
+ * and is the field a client should branch on. `failure_message` is the
+ * provider's own sentence, redacted by the adapter and truncated by the ledger
+ * but not composed here, so it is a hint for a human and never a contract; see
+ * StripePaymentProvider, which falls back to the SDK exception's message.
  *
  * @mixin Transaction
  */
@@ -45,7 +50,7 @@ final class PaymentResource extends JsonResource
             'kind' => $this->kind->value,
             'status' => $this->status->value,
 
-            'amount' => $this->money($this->amount_minor, $this->currency),
+            'amount' => $this->moneyOfMinor($this->amount_minor, $this->currency),
 
             // Which of the account's own invoices this payment is against.
             // Within the acting account by construction: the row was reached
@@ -57,7 +62,15 @@ final class PaymentResource extends JsonResource
             // it identifies a driver rather than anything about the account.
             'provider' => $this->provider,
 
-            'is_settled' => $this->status->isFinal(),
+            /*
+             * Settled means the money arrived, not that the provider has
+             * stopped talking. A declined charge is finished but it is not
+             * settled, and reporting it as settled — the only boolean in this
+             * payload, and so the one a client reaches for — is how a
+             * dashboard shows a paid invoice for a payment that never landed.
+             * `status` is where "is it still in flight?" is answered.
+             */
+            'is_settled' => $this->status === TransactionStatus::Succeeded,
 
             'failure_code' => $this->failure_code,
             'failure_message' => $this->failure_message,

@@ -80,18 +80,27 @@ final readonly class CancelOrder
             return $order;
         }
 
-        // paid_at is checked alongside the status because it is the column that
-        // records that money was actually captured. A status that merely
-        // implies payment and a stamped paid_at should never disagree, and if
-        // they ever do, the safe reading is that the customer has paid.
-        if ($order->status->isPaid() || $order->paid_at !== null) {
+        /*
+         * paid_at, not the status, decides *which* refusal the customer is
+         * told about, because paid_at is the column that records a capture and
+         * the status is not: OrderStatus::isPaid() answers true for
+         * MANUAL_REVIEW, which PENDING_PAYMENT reaches when a risk check
+         * diverts an order before anybody's card is touched. Telling that
+         * customer "this order has already been paid — cancelling it is a
+         * refund" is a statement about their money that is simply false, and it
+         * points them at a refund request for a payment that never happened.
+         */
+        if ($order->paid_at !== null) {
             throw OrderCannotBeCancelledException::becauseItIsPaid(
                 (string) $order->getKey(),
                 $order->status,
             );
         }
 
-        if (! in_array($order->status, self::CANCELLABLE, true)) {
+        // Both arms refuse. The status test stays as a second lock so that an
+        // order whose status implies payment while paid_at is somehow unstamped
+        // is still never cancelled from here — it is only described differently.
+        if ($order->status->isPaid() || ! in_array($order->status, self::CANCELLABLE, true)) {
             throw OrderCannotBeCancelledException::becauseOfItsStatus(
                 (string) $order->getKey(),
                 $order->status,

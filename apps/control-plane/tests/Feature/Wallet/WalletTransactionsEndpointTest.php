@@ -6,6 +6,8 @@ namespace Tests\Feature\Wallet;
 
 use Illuminate\Support\Str;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Http\Requests\ListWalletTransactionsRequest;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
@@ -312,6 +314,132 @@ final class WalletTransactionsEndpointTest extends WalletApiTestCase
         ], array_keys($line));
 
         $this->assertSame($entry->invoice_id, $line['invoice_id']);
+    }
+
+    /**
+     * Two accounts, the same currency, both with a ledger.
+     *
+     * The empty-versus-empty version of this test cannot tell a correctly
+     * scoped query from one that simply found nothing. Here the caller has
+     * lines of their own, so a query joined to the wrong customer — or joined
+     * to none — would show up as extra rows rather than as no rows.
+     */
+    #[Test]
+    public function two_accounts_holding_the_same_currency_do_not_see_each_others_lines(): void
+    {
+        [$mineAccount, $mine] = $this->accountWithOwner();
+        [$theirsAccount] = $this->accountWithOwner();
+
+        $myTopup = $this->credit($this->walletFor($mineAccount), 5_000, description: 'My top-up');
+        $theirTopup = $this->credit($this->walletFor($theirsAccount), 40_000, description: 'Their top-up');
+
+        $response = $this->actingAs($mine)
+            ->getJson('/api/v1/wallet/transactions?currency=KWD')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $myTopup->id)
+            ->assertJsonPath('meta.total', 1);
+
+        $body = $response->getContent() ?: '';
+        $this->assertStringNotContainsString($theirTopup->id, $body);
+        $this->assertStringNotContainsString('Their top-up', $body);
+        $this->assertStringNotContainsString((string) $theirsAccount->id, $body);
+    }
+
+    /**
+     * `?wallet_id=` is ignored, which is not the same as narrowing to nothing.
+     *
+     * A caller whose own statement is empty cannot tell the two apart: both
+     * answer with zero rows. So the caller here has a line of their own, and
+     * the assertion is that it is still there — the parameter changed nothing,
+     * rather than having been honoured as a filter that happened to match no
+     * row of theirs.
+     */
+    #[Test]
+    public function a_wallet_id_in_the_query_string_neither_widens_nor_narrows_the_statement(): void
+    {
+        [$mineAccount, $mine] = $this->accountWithOwner();
+        [$theirsAccount] = $this->accountWithOwner();
+
+        $myTopup = $this->credit($this->walletFor($mineAccount), 5_000, description: 'My top-up');
+
+        $theirWallet = $this->walletFor($theirsAccount);
+        $theirTopup = $this->credit($theirWallet, 40_000, description: 'Their top-up');
+
+        $response = $this->actingAs($mine)
+            ->getJson('/api/v1/wallet/transactions?wallet_id='.$theirWallet->id)
+            ->assertOk()
+            // Unchanged: still exactly the caller's own statement.
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $myTopup->id);
+
+        $this->assertStringNotContainsString($theirTopup->id, $response->getContent() ?: '');
+    }
+
+    /**
+     * A currency filter that is not three ASCII letters is refused.
+     *
+     * Laravel's unqualified `alpha` matches any Unicode letter and `size`
+     * counts characters, so a Cyrillic "КWD" passed validation, survived a
+     * byte-wise strtoupper() unchanged, matched no wallet, and came back as a
+     * 200 with an empty statement — a client shipping a mis-encoded currency
+     * filter would have shown its customers an empty ledger and no error.
+     */
+    #[Test]
+    public function a_currency_filter_that_is_not_ascii_is_refused_rather_than_answered_empty(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $this->credit($this->walletFor($customer), 5_000);
+
+        $this->actingAs($user)
+            // "КWD" — a Cyrillic К, three characters, four bytes.
+            ->getJson('/api/v1/wallet/transactions?currency='.rawurlencode("\u{041a}WD"))
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'validation.failed')
+            ->assertJsonStructure(['error' => ['details' => ['fields' => ['currency']]]]);
+    }
+
+    /**
+     * The strongest form of the "nothing internal" assertion: an entry that
+     * actually has an operator behind it.
+     *
+     * The other test posts entries with no actor, so a resource that leaked
+     * `created_by_user_id` would have leaked a null. This one posts an
+     * attributed adjustment and asserts the staff identity appears nowhere in
+     * the body at all.
+     */
+    #[Test]
+    public function an_attributed_adjustment_does_not_name_the_operator_who_posted_it(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+
+        $operator = User::factory()->create([
+            'name' => 'Internal Operator',
+            'email' => 'noc-operator@lynomia.internal',
+        ]);
+
+        $entry = $this->ledger()->credit(
+            wallet: $this->walletFor($customer),
+            amount: Money::ofMinor(1_000, 'KWD'),
+            kind: WalletTransactionKind::Adjustment,
+            description: 'Goodwill credit for the March outage',
+            actor: $operator,
+        );
+
+        // The entry really is attributed; the assertions below are about what
+        // the resource withholds, not about an entry that has nothing to hide.
+        $this->assertSame($operator->id, $entry->created_by_user_id);
+
+        $response = $this->actingAs($user)
+            ->getJson('/api/v1/wallet/transactions')
+            ->assertOk()
+            // The customer is owed the reason.
+            ->assertJsonPath('data.0.description', 'Goodwill credit for the March outage');
+
+        $body = $response->getContent() ?: '';
+        $this->assertStringNotContainsString($operator->id, $body);
+        $this->assertStringNotContainsString('noc-operator@lynomia.internal', $body);
+        $this->assertStringNotContainsString('Internal Operator', $body);
     }
 
     #[Test]

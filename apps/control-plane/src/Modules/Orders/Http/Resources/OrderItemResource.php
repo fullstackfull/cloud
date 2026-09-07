@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Orders\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Lynomia\Modules\Orders\Http\Resources\Concerns\SerialisesMoney;
+use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
 
 /**
@@ -46,11 +46,11 @@ final class OrderItemResource extends JsonResource
             'plan_id' => $this->plan_id,
             'resources' => $this->resources_snapshot,
 
-            'unit_recurring' => $this->money($this->unit_recurring_minor, $this->currency),
-            'unit_setup' => $this->money($this->unit_setup_minor, $this->currency),
-            'discount' => $this->money($this->discount_minor, $this->currency),
-            'tax' => $this->money($this->tax_minor, $this->currency),
-            'total' => $this->money($this->total_minor, $this->currency),
+            'unit_recurring' => $this->moneyOfMinor($this->unit_recurring_minor, $this->currency),
+            'unit_setup' => $this->moneyOfMinor($this->unit_setup_minor, $this->currency),
+            'discount' => $this->moneyOfMinor($this->discount_minor, $this->currency),
+            'tax' => $this->moneyOfMinor($this->tax_minor, $this->currency),
+            'total' => $this->moneyOfMinor($this->total_minor, $this->currency),
 
             'tax_rate' => (string) $this->tax_rate,
             'tax_name' => $this->tax_name,

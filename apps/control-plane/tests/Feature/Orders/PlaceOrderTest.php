@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Orders;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
@@ -255,6 +256,71 @@ final class PlaceOrderTest extends TestCase
         $this->placeOrder->execute($other, $this->request($plan));
 
         $this->assertSame(2, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_limit_cannot_be_split_across_two_lines_of_one_basket(): void
+    {
+        $plan = $this->plan();
+        $plan->forceFill(['per_customer_limit' => 1, 'stock_limit' => 1])->save();
+
+        /*
+         * The limits are counted from what the database holds, and a basket is
+         * not in the database while it is being priced. So the same plan named
+         * twice used to be checked twice against the same untouched count: one
+         * each, twice, both under a limit of one — and a plan held at a single
+         * unit sold two.
+         */
+        try {
+            $this->placeOrder->execute($this->customer, new CheckoutRequest(
+                lines: [
+                    new CheckoutLine($plan->id, 1),
+                    new CheckoutLine($plan->id, 1),
+                ],
+                billingPeriod: BillingPeriod::Monthly,
+                idempotencyKey: 'one-basket-two-lines',
+            ));
+            $this->fail('Expected the second line to be refused against the limit.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertContains($e->errorCode(), ['checkout.per_customer_limit', 'checkout.out_of_stock']);
+        }
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, (int) DB::table('order_items')->sum('quantity'));
+    }
+
+    #[Test]
+    public function an_unlisted_plan_cannot_be_bought_by_id(): void
+    {
+        $plan = $this->plan();
+        $plan->forceFill(['is_public' => false])->save();
+
+        // The catalogue 404s an unlisted plan. A checkout that still sells it
+        // makes the visibility flag a display preference rather than a rule.
+        try {
+            $this->placeOrder->execute($this->customer, $this->request($plan->fresh(['prices', 'product'])));
+            $this->fail('Expected an unlisted plan to be refused.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertSame('checkout.plan_unavailable', $e->errorCode());
+        }
+
+        $this->assertSame(0, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_plan_hanging_off_an_unlisted_product_cannot_be_bought_either(): void
+    {
+        $plan = $this->plan();
+        $plan->product->forceFill(['is_public' => false])->save();
+
+        try {
+            $this->placeOrder->execute($this->customer, $this->request($plan->fresh(['prices', 'product'])));
+            $this->fail('Expected a plan on an unlisted product to be refused.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertSame('checkout.plan_unavailable', $e->errorCode());
+        }
+
+        $this->assertSame(0, Order::query()->count());
     }
 
     #[Test]

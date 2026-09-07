@@ -7,7 +7,7 @@ namespace Lynomia\Modules\Billing\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Lynomia\Modules\Billing\Http\Controllers\Concerns\AuthorisesWithinAccount;
+use Lynomia\Http\Concerns\AuthorisesWithinAccount;
 use Lynomia\Modules\Billing\Http\Requests\ListInvoicesRequest;
 use Lynomia\Modules\Billing\Http\Resources\InvoiceResource;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;

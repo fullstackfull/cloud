@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Billing\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Lynomia\Modules\Billing\Http\Resources\Concerns\SerialisesMoney;
+use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 
 /**
@@ -44,10 +44,10 @@ final class InvoiceItemResource extends JsonResource
             'description' => $this->description,
             'quantity' => $this->quantity,
 
-            'unit_amount' => $this->money($this->unit_amount_minor, $this->currency),
-            'discount' => $this->money($this->discount_minor, $this->currency),
-            'tax' => $this->money($this->tax_minor, $this->currency),
-            'total' => $this->money($this->total_minor, $this->currency),
+            'unit_amount' => $this->moneyOfMinor($this->unit_amount_minor, $this->currency),
+            'discount' => $this->moneyOfMinor($this->discount_minor, $this->currency),
+            'tax' => $this->moneyOfMinor($this->tax_minor, $this->currency),
+            'total' => $this->moneyOfMinor($this->total_minor, $this->currency),
 
             // A decimal string, never a float: 0.15 as a double is not 0.15,
             // and a client that re-derives tax from it would disagree with the

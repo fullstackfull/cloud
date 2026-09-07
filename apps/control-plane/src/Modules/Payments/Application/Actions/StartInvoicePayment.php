@@ -173,6 +173,15 @@ final readonly class StartInvoicePayment
      * An attempt whose transaction has already succeeded means the money is
      * in. The invoice is still open only because settlement has not caught up,
      * and starting a second payment would collect it twice.
+     *
+     * An attempt whose transaction has already *failed* is over, whatever its
+     * own status column still says — nothing marks an attempt closed when the
+     * refusal arrives by webhook, because RecordPaymentFailure writes the
+     * ledger row and does not touch payment_attempts. Reusing it would replay
+     * an idempotency key the provider has already answered, and a key that has
+     * been answered is answered forever: the provider hands back the same
+     * refusal for every card the customer tries after it, and the invoice
+     * becomes unpayable. The ledger is the authority here, not the flag.
      */
     private function openAttemptFor(Invoice $invoice, Money $amount): ?PaymentAttempt
     {
@@ -202,6 +211,18 @@ final readonly class StartInvoicePayment
             );
         }
 
+        if ($transaction->status !== TransactionStatus::Pending) {
+            /*
+             * The provider has already refused this one. Close the attempt so
+             * the count of refusals is right for dunning and support, and open
+             * a fresh key rather than asking the provider to answer a question
+             * it has already answered no to.
+             */
+            $this->closeRefusedAttempt($pending, $transaction);
+
+            return null;
+        }
+
         if ($transaction->amount()->equals($amount)) {
             return $pending;
         }
@@ -209,6 +230,19 @@ final readonly class StartInvoicePayment
         $pending->forceFill(['status' => PaymentAttemptStatus::Abandoned])->save();
 
         return null;
+    }
+
+    /**
+     * Marks an attempt the provider has already refused, so it stops looking
+     * live to the next request and to dunning.
+     */
+    private function closeRefusedAttempt(PaymentAttempt $attempt, Transaction $transaction): void
+    {
+        $attempt->forceFill([
+            'status' => PaymentAttemptStatus::Failed,
+            'failure_code' => $transaction->failure_code,
+            'failure_message' => $transaction->failure_message,
+        ])->save();
     }
 
     /**
@@ -251,12 +285,20 @@ final readonly class StartInvoicePayment
                 ->lockForUpdate()
                 ->first();
 
-            if ($existing !== null && $existing->status === TransactionStatus::Succeeded) {
+            if ($existing !== null && $existing->status->isFinal()) {
                 /*
-                 * The provider settled this intent while we were still
-                 * describing it. The ledger already holds the truth; writing
-                 * "pending" over a recorded capture would un-say it, and the
-                 * invoice would be settled against a payment nothing can find.
+                 * The provider has already answered for this intent and the
+                 * ledger has recorded it — a capture that landed while we were
+                 * still describing the intent, or a refusal for an intent
+                 * whose creation call we never heard back from. Either way the
+                 * row holds the truth and writing "pending" over it would
+                 * un-say it: a recorded capture the invoice would then be
+                 * settled against but nothing can find, or a recorded refusal
+                 * that reappears as a live payment.
+                 *
+                 * The attempt is closed against the row rather than against
+                 * the intent result, so the next request opens a fresh key
+                 * instead of asking the provider the same question again.
                  */
                 $this->linkAttempt($attempt, $existing, $result);
 
@@ -307,6 +349,12 @@ final readonly class StartInvoicePayment
      * A successful attempt is never marked here. "Succeeded" on an attempt
      * means the capture was recorded, which is the webhook's decision to make
      * and not this action's.
+     *
+     * Whether the attempt is dead is read from the ledger row rather than from
+     * the intent result. The two agree on the ordinary path, because the row
+     * was just written from that result; where they disagree the row is the one
+     * that has survived a webhook, and believing the result instead would leave
+     * an attempt looking live against a payment the provider has closed.
      */
     private function linkAttempt(PaymentAttempt $attempt, Transaction $transaction, PaymentIntentResult $result): void
     {
@@ -314,13 +362,14 @@ final readonly class StartInvoicePayment
             return;
         }
 
-        $declined = $result->status->isFinal() && ! $result->status->isSuccessful();
+        $declined = $transaction->status !== TransactionStatus::Pending
+            && $transaction->status !== TransactionStatus::Succeeded;
 
         $attempt->forceFill([
             'transaction_id' => $transaction->getKey(),
             'status' => $declined ? PaymentAttemptStatus::Failed : PaymentAttemptStatus::Pending,
-            'failure_code' => $result->failureCode,
-            'failure_message' => $result->failureMessage,
+            'failure_code' => $result->failureCode ?? $transaction->failure_code,
+            'failure_message' => $result->failureMessage ?? $transaction->failure_message,
         ])->save();
     }
 }

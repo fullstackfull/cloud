@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Catalog\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Lynomia\Http\Concerns\BoundsPageSize;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 
 /**
@@ -16,13 +17,19 @@ use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
  * customer, and a currency accepted from the query string would be a request
  * to be quoted somebody else's price list.
  *
- * per_page has no maximum rule because the ceiling is applied in the
- * controller instead: a caller asking for 100000 rows gets 100, not a 422.
- * Refusing would break paging clients that pass a large page size on purpose,
- * while an unbounded page size is how one request reads the whole table.
+ * `kind` is nullable as well as optional. The framework converts an empty
+ * query value to null before validation, so `?kind=` — which is what a form
+ * sends for "any kind" — would otherwise fail a bare `string` rule and answer
+ * an unfiltered browse with a 422.
+ *
+ * per_page is validated as an integer but deliberately not bounded here; the
+ * clamp in BoundsPageSize, and the one in the action behind it, are what
+ * enforce the ceiling.
  */
 final class ListProductsRequest extends FormRequest
 {
+    use BoundsPageSize;
+
     /**
      * Authorisation is the route's middleware: authenticated, verified and
      * resolved to a customer account. The catalogue itself is the same for
@@ -39,16 +46,23 @@ final class ListProductsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'kind' => ['sometimes', 'string', Rule::enum(ProductKind::class)],
-            'per_page' => ['sometimes', 'integer', 'min:1'],
+            'kind' => ['sometimes', 'nullable', 'string', Rule::enum(ProductKind::class)],
+            'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ];
     }
 
+    /**
+     * Read from the validated data rather than from the raw query string, so
+     * the value the query is built from is the one the rules just passed.
+     */
     public function kind(): ?ProductKind
     {
-        $kind = $this->query('kind');
+        /** @var array<string, mixed> $validated */
+        $validated = $this->validated();
 
-        return is_string($kind) ? ProductKind::tryFrom($kind) : null;
+        $kind = $validated['kind'] ?? null;
+
+        return is_string($kind) && $kind !== '' ? ProductKind::from($kind) : null;
     }
 }

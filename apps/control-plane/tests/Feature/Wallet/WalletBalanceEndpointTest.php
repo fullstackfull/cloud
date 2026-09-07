@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Wallet;
 
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -161,6 +162,97 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
         // The same account, a role that carries billing.view, and the money is
         // there — so the 403 above was about the role and not about the data.
         $this->actingAs($owner)->getJson('/api/v1/wallet')->assertOk();
+    }
+
+    /**
+     * The cross-tenant case that the two-users-two-accounts version cannot
+     * reach.
+     *
+     * One login, a member of two accounts, switching between them with the
+     * header. The acting-customer middleware is the only thing deciding which
+     * balance comes back — there is no id in the route and none in the body —
+     * so this is where a scoping mistake would show: the same token, the same
+     * user, two answers that must not contain each other's money.
+     */
+    #[Test]
+    public function one_login_in_two_accounts_never_sees_the_other_accounts_balance(): void
+    {
+        $first = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $second = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+
+        $user = $this->memberOf($first, CustomerRole::Owner);
+        $this->memberOf($second, CustomerRole::Owner, $user);
+
+        $firstWallet = $this->walletFor($first);
+        $secondWallet = $this->walletFor($second);
+        $this->credit($firstWallet, 11_000);
+        $this->credit($secondWallet, 77_000);
+
+        $onFirst = $this->actingAs($user)
+            ->getJson('/api/v1/wallet', ['X-Lynomia-Customer' => $first->id])
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.wallet_id', $firstWallet->id)
+            ->assertJsonPath('data.0.balance.minor_units', 11_000);
+
+        $this->assertStringNotContainsString($secondWallet->id, $onFirst->getContent() ?: '');
+
+        $onSecond = $this->actingAs($user)
+            ->getJson('/api/v1/wallet', ['X-Lynomia-Customer' => $second->id])
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.wallet_id', $secondWallet->id)
+            ->assertJsonPath('data.0.balance.minor_units', 77_000);
+
+        $this->assertStringNotContainsString($firstWallet->id, $onSecond->getContent() ?: '');
+    }
+
+    /**
+     * A role is held inside one account, not carried between them.
+     */
+    #[Test]
+    public function owning_one_account_does_not_grant_billing_view_in_another(): void
+    {
+        $owned = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $joined = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+
+        $user = $this->memberOf($owned, CustomerRole::Owner);
+        $this->memberOf($joined, CustomerRole::Member, $user);
+
+        $this->credit($this->walletFor($joined), 77_000);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/wallet', ['X-Lynomia-Customer' => $joined->id])
+            ->assertForbidden()
+            ->assertJsonPath('error.code', 'auth.forbidden');
+
+        // The same login, the same request, the account they do own.
+        $this->actingAs($user)
+            ->getJson('/api/v1/wallet', ['X-Lynomia-Customer' => $owned->id])
+            ->assertOk();
+    }
+
+    /**
+     * `customers.currency` is client-supplied at registration and validated
+     * only as three letters, so an account can carry "ZZZ" — which Brick, and
+     * therefore Money, refuses. Before this was caught the refusal escaped as
+     * a bare vendor RuntimeException and the customer got `server.error` with
+     * nothing to branch on and nothing named to alert on.
+     */
+    #[Test]
+    public function an_account_currency_that_is_not_a_currency_is_a_named_failure(): void
+    {
+        $customer = Customer::factory()->create(['currency' => 'ZZZ', 'country' => 'KW']);
+        $user = $this->memberOf($customer);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/wallet')
+            ->assertStatus(500)
+            ->assertJsonPath('error.code', 'wallet.unsupported_currency')
+            ->assertJsonPath('error.details.currency', 'ZZZ')
+            // Not answered with an empty list either: "you hold nothing" is a
+            // different claim from "the platform cannot say".
+            ->assertJsonMissingPath('data');
     }
 
     #[Test]

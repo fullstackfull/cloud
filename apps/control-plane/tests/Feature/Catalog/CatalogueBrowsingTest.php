@@ -142,14 +142,14 @@ final class CatalogueBrowsingTest extends TestCase
         $first = $this->actingAs($user)->getJson('/api/v1/catalog/products?per_page=2')->assertOk();
 
         $this->assertCount(2, $first->json('data'));
-        $this->assertSame(1, $first->json('meta.current_page'));
+        $this->assertSame(1, $first->json('meta.page'));
         $this->assertSame(3, $first->json('meta.last_page'));
-        $this->assertTrue($first->json('meta.has_more'));
+        $this->assertSame(5, $first->json('meta.total'));
 
         $last = $this->actingAs($user)->getJson('/api/v1/catalog/products?per_page=2&page=3')->assertOk();
 
         $this->assertCount(1, $last->json('data'));
-        $this->assertFalse($last->json('meta.has_more'));
+        $this->assertSame(3, $last->json('meta.page'));
     }
 
     #[Test]

@@ -63,7 +63,17 @@ final class PlaceOrderRequest extends FormRequest
             // a stock count and a per-customer limit count at checkout.
             'items' => ['required', 'array', 'min:1', 'max:25'],
             'items.*' => ['required', 'array'],
-            'items.*.plan_id' => ['required', 'string', 'ulid'],
+            /*
+             * `distinct` because a plan appears in a basket once and its count
+             * is the quantity. Two lines naming the same plan are not a richer
+             * basket, they are the same purchase split in two — and split in
+             * two they are checked against a stock or per-customer limit twice
+             * over, each time against a count that does not yet include the
+             * other. Refusing the shape here is clearer than reconciling it,
+             * and PlaceOrder accumulates per plan as well so a caller that is
+             * not this endpoint cannot oversell either.
+             */
+            'items.*.plan_id' => ['required', 'string', 'ulid', 'distinct'],
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:100'],
 
             'billing_period' => ['required', new Enum(BillingPeriod::class)],
@@ -83,6 +93,7 @@ final class PlaceOrderRequest extends FormRequest
             'idempotency_key.min' => 'The Idempotency-Key header must be at least 8 characters.',
             'idempotency_key.max' => 'The Idempotency-Key header must not exceed 128 characters.',
             'idempotency_key.regex' => 'The Idempotency-Key header may contain only letters, digits, dots, colons, hyphens and underscores.',
+            'items.*.plan_id.distinct' => 'Each plan may appear in the basket only once; use the quantity to order more than one.',
         ];
     }
 
