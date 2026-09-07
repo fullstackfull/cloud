@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Billing\Infrastructure\Queries;
 
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 
@@ -31,6 +32,24 @@ final class CustomerInvoices
      */
     public static function of(Customer $customer): HasMany
     {
-        return $customer->hasMany(Invoice::class);
+        /*
+         * Drafts are excluded, and the exclusion belongs here rather than in
+         * each controller that reads invoices.
+         *
+         * A draft is an invoice the platform has begun writing and has not
+         * issued. Today IssueInvoice creates one and transitions it inside the
+         * same transaction, so a committed draft should not exist - but "should
+         * not exist" is a statement about one code path, and this scope is what
+         * every read on the customer surface goes through. A half-written
+         * document that reaches a customer is a bill they were never sent, with
+         * a number allocated from the same sequence as the real ones; whatever
+         * put it there, they must not be looking at it.
+         *
+         * Filtering here also means no controller has to remember, and
+         * `?status=draft` returns an empty page rather than advertising that
+         * the state exists.
+         */
+        return $customer->hasMany(Invoice::class)
+            ->where('status', '!=', InvoiceStatus::Draft->value);
     }
 }

@@ -92,7 +92,25 @@ final class DedicatedServerResource extends JsonResource
             // it is the service on the customer's own machine.
             'service_id' => $this->service_id,
 
-            'created_at' => $this->created_at?->toIso8601String(),
+            /*
+             * The service's activation date, not the row's created_at.
+             *
+             * A dedicated_servers row is stock: it exists before anybody buys
+             * it and survives being wiped and re-sold. Publishing its
+             * created_at gives a client something it will render as "server
+             * created" and a customer will read as "when I got this machine",
+             * and on a re-sold chassis it is neither - it is how long the
+             * platform has had the hardware, which is nobody's business but
+             * the platform's.
+             *
+             * Null until the service is active, which is honest: a machine
+             * being provisioned has no delivery date yet.
+             */
+            'activated_at' => $this->whenLoaded(
+                'service',
+                fn (): ?string => $this->resource->service?->activated_at?->toIso8601String(),
+                null,
+            ),
 
             // Loaded only where the caller asked for one machine; a list of
             // servers does not need every disk in every one of them.

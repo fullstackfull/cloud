@@ -135,18 +135,21 @@ final class StartInvoicePaymentEndpointTest extends PaymentsApiTestCase
     }
 
     #[Test]
-    public function a_draft_invoice_cannot_be_paid(): void
+    public function a_draft_invoice_is_not_even_visible_let_alone_payable(): void
     {
         [$customer, $user] = $this->accountWithOwner();
 
         // Never issued, so nothing is owed yet and a payment against it would
-        // be money the platform cannot account for.
-        $invoice = Invoice::factory()->for($customer)->create();
+        // be money the platform cannot account for. It answers 404 rather than
+        // 409 because the customer surface cannot see a draft at all - the
+        // stronger of the two refusals, and the one that says nothing about
+        // what the platform is part-way through writing.
+        $invoice = Invoice::factory()->for($customer)->draft()->create();
 
         $this->actingAs($user)
             ->postJson("/api/v1/invoices/{$invoice->id}/payments")
-            ->assertStatus(409)
-            ->assertJsonPath('error.code', 'invoice.not_payable');
+            ->assertStatus(404)
+            ->assertJsonPath('error.code', 'resource.not_found');
 
         $this->assertSame(0, Transaction::query()->count());
     }

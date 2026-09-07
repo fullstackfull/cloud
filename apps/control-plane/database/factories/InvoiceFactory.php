@@ -26,7 +26,20 @@ class InvoiceFactory extends Factory
         return [
             'customer_id' => Customer::factory(),
             'number' => 'LYN-'.Str::upper(Str::random(8)),
-            'status' => InvoiceStatus::Draft,
+            /*
+             * Open, not Draft.
+             *
+             * A draft is an invoice the platform has begun writing and has not
+             * issued, and the customer surface deliberately cannot see one -
+             * CustomerInvoices excludes them. A factory that produces drafts by
+             * default therefore builds fixtures that no endpoint can read, and
+             * every test that wanted "an invoice" had to discover that. Open is
+             * what an invoice is for almost all of its life: issued, unpaid,
+             * and the thing a customer is looking at when they open the page.
+             *
+             * ->draft() is still there for the tests that mean it.
+             */
+            'status' => InvoiceStatus::Open,
             'currency' => 'KWD',
             'subtotal_minor' => 9000,
             'discount_minor' => 0,
@@ -44,6 +57,17 @@ class InvoiceFactory extends Factory
     /**
      * Issued and awaiting payment.
      */
+    /**
+     * An invoice mid-write: created and not yet issued.
+     *
+     * Reachable only inside IssueInvoice's transaction in real life, so a
+     * committed one is either a fixture or a bug.
+     */
+    public function draft(): static
+    {
+        return $this->state(fn (): array => ['status' => InvoiceStatus::Draft]);
+    }
+
     public function open(): static
     {
         return $this->state(fn (): array => [

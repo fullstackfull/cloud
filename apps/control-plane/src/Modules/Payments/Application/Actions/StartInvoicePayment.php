@@ -137,6 +137,8 @@ final readonly class StartInvoicePayment
                 throw InvoicePaymentRefusedException::nothingIsOwed((string) $locked->getKey());
             }
 
+            $this->assertNoCaptureIsWaitingToBeApplied($locked);
+
             $open = $this->openAttemptFor($locked, $amount);
 
             if ($open !== null) {
@@ -154,6 +156,47 @@ final readonly class StartInvoicePayment
 
             return [$attempt, $amount];
         });
+    }
+
+    /**
+     * Refuses while money is in and settlement has not caught up.
+     *
+     * The per-attempt check below inspects only the newest pending attempt,
+     * which is the right attempt to reuse but not a complete answer to "has
+     * this invoice already been paid?". An attempt that was abandoned - because
+     * the amount moved while it was open - is not pending any more, and its
+     * capture can still arrive afterwards. The invoice is then open, its
+     * amount_due still positive because settlement has not run, and nothing in
+     * the newest attempt says otherwise. The customer is sent to pay a second
+     * time.
+     *
+     * The test is deliberately not arithmetic. Comparing the sum of succeeded
+     * charges against amount_paid_minor looks equivalent and is not: settlement
+     * subtracts anything an earlier overpayment diverted to the wallet, so the
+     * two are permanently unequal for any invoice that has ever been overpaid,
+     * and a guard written that way would make those invoices unpayable forever.
+     *
+     * `transactions.invoice_id` is settlement's own marker - the code that sets
+     * it says so: attaching is "the closest thing settlement has to an applied
+     * marker". A succeeded capture on this invoice's attempts with a null
+     * invoice_id is exactly, and only, money that has arrived and has not been
+     * applied. No overpayment arithmetic enters into it.
+     */
+    private function assertNoCaptureIsWaitingToBeApplied(Invoice $invoice): void
+    {
+        /** @var Transaction|null $unapplied */
+        $unapplied = Transaction::query()
+            ->whereNull('invoice_id')
+            ->where('status', TransactionStatus::Succeeded)
+            ->whereHas('attempts', static fn ($query) => $query->where('invoice_id', $invoice->getKey()))
+            ->first();
+
+        if ($unapplied !== null) {
+            throw InvoicePaymentRefusedException::aCaptureIsAlreadyRecorded(
+                (string) $invoice->getKey(),
+                (string) $unapplied->getKey(),
+            );
+        }
     }
 
     /**

@@ -79,6 +79,9 @@ final class DedicatedServerController
             // cannot appear on two pages.
             ->orderByDesc('dedicated_servers.created_at')
             ->orderByDesc('dedicated_servers.id')
+            // The delivery date the resource publishes. Eager-loaded so that a
+            // page of machines is two queries rather than one per row.
+            ->with('service')
             // Bounded by the request, which clamps rather than refuses. The
             // clamp is what guarantees the query never sees the number a
             // caller asked for.
@@ -110,7 +113,13 @@ final class DedicatedServerController
         $found = $this->serverForActingCustomer($server);
 
         return (new DedicatedServerResource(
-            $found->load(['components' => static fn ($query) => $query->orderBy('kind')->orderBy('id')])
+            $found->load([
+                'components' => static fn ($query) => $query->orderBy('kind')->orderBy('id'),
+                // Carries the delivery date. The chassis row's own created_at
+                // is when the platform racked it, which is not what a customer
+                // is asking when they ask how long they have had the machine.
+                'service',
+            ])
         ))->response();
     }
 
