@@ -15,6 +15,9 @@ use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
+use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
 
 /**
  * The commerce chain, wired explicitly rather than discovered.
@@ -55,6 +58,12 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         InvoicePaid::class => [
             AnnounceSettlementOnInvoicePaid::class,
+            // A renewal being paid is what ends dunning. Without this the
+            // money arrived and the subscription stayed suspended.
+            ReviveSubscriptionOnRenewalPayment::class,
+        ],
+        SubscriptionStatusChanged::class => [
+            EnforceServiceStateForSubscription::class,
         ],
         OrderFinanciallySettled::class => [
             FulfilOrderOnSettlement::class,
