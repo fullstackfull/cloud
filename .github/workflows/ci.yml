@@ -242,12 +242,18 @@ jobs:
           fi
 
           # Defence in depth over anything the repository itself ships that could
-          # set a provider. `.env.example` is the development template and
-          # documents `fake` on purpose, so it is the one exclusion.
+          # set a provider. Three templates are excluded, by exact name and no
+          # more: the two development templates, and the testing template —
+          # where `fake` is not a lapse but the requirement, because a test run
+          # that reaches a real provider bills a real card or creates a real
+          # machine. Excluding by pattern instead (any `*.example`) would let a
+          # deployment template ship `fake` unnoticed, which is the case this
+          # step exists to catch.
           # Regular files only: a tracked symlink to a directory would make
           # grep emit a warning that reads like an error and hides real ones.
           templates=$(git ls-files -- '*.env*' 'infrastructure/**' 'deployments/**' \
             | grep -vx 'apps/control-plane/.env.example' \
+            | grep -vx 'apps/control-plane/.env.testing.example' \
             | grep -vx '.env.example' \
             | while read -r file; do [ -f "$file" ] && printf '%s\n' "$file"; done || true)
 
