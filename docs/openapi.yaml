@@ -4776,6 +4776,64 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/subscriptions/{subscription}/plan-options":
+    get:
+      operationId: "api_v1_subscriptions_plan_options"
+      tags:
+        - "Billing"
+      summary: "What each plan would cost this subscription"
+      description: "Priced by the platform, through the same proration the confirmation performs. Plans that cannot be taken are listed with their reasons and without their prices — a smaller disk is refused outright, because shrinking one destroys data."
+      parameters:
+        - name: "subscription"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/PlanChangeQuotePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/vps":
     get:
       operationId: "api_v1_vps_index"
@@ -7418,6 +7476,66 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         period_end:
           "$ref": "#/components/schemas/Timestamp"
+    PlanChangeQuote:
+      type: "object"
+      additionalProperties: false
+      properties:
+        plan_id:
+          "$ref": "#/components/schemas/Ulid"
+        price_id:
+          "$ref": "#/components/schemas/Ulid"
+        plan_name:
+          type:
+            - "string"
+            - "null"
+        is_available:
+          type: "boolean"
+        refusals:
+          type: "array"
+          items:
+            type: "string"
+        warnings:
+          type: "array"
+          items:
+            type: "string"
+        current_recurring:
+          "$ref": "#/components/schemas/Money"
+        new_recurring:
+          "$ref": "#/components/schemas/Money"
+        credit:
+          "$ref": "#/components/schemas/Money"
+        charge:
+          "$ref": "#/components/schemas/Money"
+        amount_due_now:
+          "$ref": "#/components/schemas/Money"
+        effective_at:
+          "$ref": "#/components/schemas/Timestamp"
+        period_end:
+          "$ref": "#/components/schemas/Timestamp"
+        current_resources:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        new_resources:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        changes_infrastructure:
+          type: "boolean"
+    PlanChangeQuotePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/PlanChangeQuote"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
     PlanChangeResponse:
       type: "object"
       required:

@@ -74,9 +74,14 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             return;
         }
 
-        $type = $this->isAReinstall($event->kind)
-            ? NotificationType::ReinstallCompleted
-            : NotificationType::ServiceReady;
+        $type = match (true) {
+            $this->isAReinstall($event->kind) => NotificationType::ReinstallCompleted,
+            // A resize is only ever created by a plan change, so this is what
+            // "your upgrade is done" means: the money moved earlier, and the
+            // machine has now caught up.
+            $event->kind === ProvisioningJobKind::Resize => NotificationType::PlanChangeCompleted,
+            default => NotificationType::ServiceReady,
+        };
 
         $this->notify->execute(
             customerId: (string) $service->customer_id,
@@ -96,9 +101,17 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             return;
         }
 
-        $type = $this->isAReinstall($event->kind)
-            ? NotificationType::ReinstallFailed
-            : NotificationType::ServiceProvisioningFailed;
+        $type = match (true) {
+            $this->isAReinstall($event->kind) => NotificationType::ReinstallFailed,
+            /*
+             * The case the phase brief singles out: the customer has been
+             * charged and their machine is still the old size. Telling them is
+             * not optional — the alternative is a customer who paid for an
+             * upgrade discovering months later that they never got it.
+             */
+            $event->kind === ProvisioningJobKind::Resize => NotificationType::PlanChangeFailed,
+            default => NotificationType::ServiceProvisioningFailed,
+        };
 
         /*
          * The failure class and error code are deliberately not passed to the
@@ -151,9 +164,12 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             ProvisioningJobKind::CreateHostingAccount,
             ProvisioningJobKind::ProvisionDedicated,
             ProvisioningJobKind::ReinstallVps,
-            ProvisioningJobKind::ReinstallDedicated => true,
-            // Power operations, resizes and destroys: either the customer is
-            // watching, or a different message covers it.
+            ProvisioningJobKind::ReinstallDedicated,
+            // A plan change is money the customer spent; they are told when
+            // the machine finally matches what they bought.
+            ProvisioningJobKind::Resize => true,
+            // Power operations and destroys: either the customer is watching,
+            // or a different message covers it.
             default => false,
         };
     }

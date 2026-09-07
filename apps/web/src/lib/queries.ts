@@ -15,6 +15,7 @@ import type {
   Paginated,
   Payment,
   Plan,
+  PlanChangeQuote,
   Product,
   Service,
   Subscription,
@@ -323,6 +324,40 @@ export function useConsoleSession() {
       )
 
       return response.data
+    },
+  })
+}
+
+export function usePlanOptions(subscriptionId: string) {
+  return useQuery({
+    queryKey: ['subscriptions', subscriptionId, 'plan-options'],
+    queryFn: async () => {
+      const response = await api.get<{ data: PlanChangeQuote[] }>(
+        `/subscriptions/${encodeURIComponent(subscriptionId)}/plan-options`,
+      )
+
+      return response.data
+    },
+  })
+}
+
+export interface PlanChangeSubmission {
+  subscriptionId: string
+  plan_id: string
+  price_id: string
+  idempotency_key: string
+}
+
+export function useChangePlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ subscriptionId, ...body }: PlanChangeSubmission) =>
+      api.post<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}/plan`, body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      // The machine's shape changes too, once the hypervisor agrees.
+      void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
   })
 }

@@ -121,6 +121,35 @@ export interface Subscription {
   service_is_running: boolean
 }
 
+/**
+ * What moving to one plan would cost, as the backend computed it.
+ *
+ * Every money field is a Money — minor units and a currency — and the portal
+ * renders them and computes nothing. Proration, rounding and currency
+ * behaviour are the platform's rules; a second implementation of them here
+ * would agree with the backend until it did not, and the first customer to
+ * notice would be one charged something other than what this screen said.
+ */
+export interface PlanChangeQuote {
+  plan_id: string
+  price_id: string
+  plan_name: string
+  is_available: boolean
+  /** Stable keys; this portal owns the wording, in both languages. */
+  refusals: string[]
+  warnings: string[]
+  current_recurring: Money
+  new_recurring: Money
+  credit: Money | null
+  charge: Money | null
+  amount_due_now: Money | null
+  effective_at: string
+  period_end: string
+  current_resources: { vcpu: number | null; memory_mib: number | null; disk_gib: number | null }
+  new_resources: { vcpu: number | null; memory_mib: number | null; disk_gib: number | null }
+  changes_infrastructure: boolean
+}
+
 export interface Payment {
   id: string
   kind: string

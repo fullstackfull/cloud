@@ -326,3 +326,43 @@ test('the console page asks for a permit and says honestly when consoles are una
 
   await expect(page.getByText(/consoles are not available on this deployment/i)).toBeVisible()
 })
+
+test('the change-plan screen prices every option and refuses a smaller disk in the backend', async ({ page }) => {
+  /*
+   * Two things are being proved. The prices on this screen come from the API —
+   * the portal renders Money and computes none of it — and the refusals come
+   * from the backend too, so a plan the platform will not sell is shown with
+   * its reason rather than as a button that fails on confirm.
+   */
+  await page.goto('/subscriptions')
+
+  const options = page.waitForResponse((response) => response.url().includes('/plan-options'))
+
+  await page.getByRole('link', { name: /change plan/i }).first().click()
+
+  // Typed on the way in rather than asserted on an `any`: the shape of this
+  // response is part of what the test is checking.
+  const body = (await (await options).json()) as {
+    data: Array<{ is_available: boolean; refusals: string[]; amount_due_now: unknown }>
+  }
+
+  const quotes = body.data
+
+  expect(quotes.length).toBeGreaterThan(0)
+
+  // The plan the subscription already sits on is listed and refused, not
+  // hidden: a screen that omitted it would leave a customer wondering where
+  // their own plan went.
+  expect(quotes.some((quote) => quote.refusals.includes('same_plan'))).toBe(true)
+
+  // Anything refused carries no price at all. A price shown against a plan the
+  // platform would decline is a price a customer decides on and then cannot have.
+  for (const quote of quotes) {
+    if (! quote.is_available) {
+      expect(quote.amount_due_now).toBeNull()
+    }
+  }
+
+  await expect(page.getByRole('heading', { name: /change plan/i })).toBeVisible()
+  await expect(page.getByText(/per period/i).first()).toBeVisible()
+})

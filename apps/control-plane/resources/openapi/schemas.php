@@ -517,6 +517,38 @@ return [
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'PlanChangeQuote' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        /*
+         * Every money field is a Money — minor units and a currency — and a
+         * client is expected to render them, not to arithmetic on them. The
+         * credit, the charge and the amount due now are null for a plan the
+         * platform would refuse: a price shown against something that cannot
+         * be bought is a price a customer decides on and then cannot have.
+         */
+        'properties' => [
+            'plan_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'price_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'plan_name' => ['type' => ['string', 'null']],
+            'is_available' => ['type' => 'boolean'],
+            // Stable keys, not sentences: the portal says them in two
+            // languages and an English refusal is one an Arabic-speaking
+            // customer reads in English.
+            'refusals' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'current_recurring' => ['$ref' => '#/components/schemas/Money'],
+            'new_recurring' => ['$ref' => '#/components/schemas/Money'],
+            'credit' => ['$ref' => '#/components/schemas/Money'],
+            'charge' => ['$ref' => '#/components/schemas/Money'],
+            'amount_due_now' => ['$ref' => '#/components/schemas/Money'],
+            'effective_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'period_end' => ['$ref' => '#/components/schemas/Timestamp'],
+            'current_resources' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'new_resources' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'changes_infrastructure' => ['type' => 'boolean'],
+        ],
+    ],
     'WalletBalance' => [
         'type' => 'object',
         'additionalProperties' => false,

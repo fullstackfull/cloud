@@ -12,12 +12,15 @@ use Lynomia\Modules\Billing\Application\Actions\CancelCustomerSubscription;
 use Lynomia\Modules\Billing\Http\Requests\CancelSubscriptionRequest;
 use Lynomia\Modules\Billing\Http\Requests\ChangePlanRequest;
 use Lynomia\Modules\Billing\Http\Requests\ListSubscriptionsRequest;
+use Lynomia\Modules\Billing\Http\Resources\PlanChangeQuoteResource;
 use Lynomia\Modules\Billing\Http\Resources\SubscriptionResource;
 use Lynomia\Modules\Billing\Infrastructure\Queries\CustomerSubscriptions;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
-use Lynomia\Modules\Subscriptions\Application\Actions\ChangeSubscriptionPlan;
+use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
+use Lynomia\Modules\Subscriptions\Application\Actions\QuotePlanChange;
+use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -39,6 +42,8 @@ final class SubscriptionController
     public function __construct(
         private readonly ActingCustomer $actingCustomer,
         private readonly CancelCustomerSubscription $cancelSubscription,
+        private readonly QuotePlanChange $quotePlanChange,
+        private readonly ApplyPlanChange $applyPlanChange,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -156,12 +161,15 @@ final class SubscriptionController
         $plan = Plan::query()->findOrFail($request->planId());
         $price = PlanPrice::query()->findOrFail($request->priceId());
 
-        $proration = app(ChangeSubscriptionPlan::class)->execute(
+        $outcome = $this->applyPlanChange->execute(
             subscription: $found,
-            newPlan: $plan,
-            newPrice: $price,
+            plan: $plan,
+            price: $price,
             units: $request->units(),
+            idempotencyKey: $request->idempotencyKey(),
         );
+
+        $proration = $outcome->proration;
 
         return response()->json([
             'data' => [
@@ -174,7 +182,49 @@ final class SubscriptionController
                 'net' => $proration->net()->jsonSerialize(),
                 'effective_at' => $proration->changeAt->toIso8601String(),
                 'period_end' => $proration->periodEnd->toIso8601String(),
+
+                /*
+                 * The other half, said out loud. The money has moved and the
+                 * machine has not yet changed; a response that reported only
+                 * the billing would have the portal announce a completed
+                 * upgrade while the customer's server is still the old size.
+                 */
+                'resize' => $outcome->awaitsInfrastructure() ? [
+                    'job_id' => (string) $outcome->resizeJob?->getKey(),
+                    'status' => $outcome->resizeJob?->status->value,
+                ] : null,
+                'awaits_infrastructure' => $outcome->awaitsInfrastructure(),
             ],
+        ]);
+    }
+
+    /**
+     * The plans this subscription may move to, priced.
+     *
+     * Every figure comes from the backend's own proration, through the same
+     * call the confirmation makes. Nothing here is for a client to compute:
+     * a portal that worked out a credit itself would be a second
+     * implementation of this platform's money rules, in a language with one
+     * numeric type, on a device whose clock the customer sets.
+     *
+     * Refused plans are included with their reasons rather than omitted. The
+     * commonest reason a customer opens this screen is to move to something
+     * smaller, and the commonest refusal is exactly that — a screen that
+     * silently hid the plan they were looking for would tell them nothing.
+     */
+    public function planOptions(Request $request, string $subscription): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'billing.view');
+
+        $found = CustomerSubscriptions::of($this->actingCustomer->get())
+            ->whereKey($subscription)
+            ->firstOrFail();
+
+        return response()->json([
+            'data' => array_map(
+                static fn (PlanChangeQuote $quote): array => (new PlanChangeQuoteResource($quote))->toArray($request),
+                $this->quotePlanChange->options($found),
+            ),
         ]);
     }
 }

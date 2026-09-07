@@ -18,6 +18,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRe
 use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\ReinstallVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
@@ -122,6 +123,7 @@ final class InfrastructureServiceProvider extends ServiceProvider
         $handlers->register(StopVpsHandler::class, ProvisioningJobKind::Stop);
         $handlers->register(RestartVpsHandler::class, ProvisioningJobKind::Restart);
         $handlers->register(ReinstallVpsHandler::class, ProvisioningJobKind::ReinstallVps);
+        $handlers->register(ResizeVpsHandler::class, ProvisioningJobKind::Resize);
         $handlers->register(CreateHostingAccountHandler::class, ProvisioningJobKind::CreateHostingAccount);
         $handlers->register(ProvisionDedicatedHandler::class, ProvisioningJobKind::ProvisionDedicated);
         $handlers->register(ReinstallDedicatedHandler::class, ProvisioningJobKind::ReinstallDedicated);

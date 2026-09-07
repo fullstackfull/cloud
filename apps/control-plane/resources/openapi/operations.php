@@ -505,6 +505,12 @@ return [
         'body' => ['category', 'channel', 'enabled'],
         'response' => $many('NotificationPreference'),
     ],
+    'api.v1.subscriptions.plan_options' => [
+        'tag' => 'Billing',
+        'summary' => 'What each plan would cost this subscription',
+        'description' => 'Priced by the platform, through the same proration the confirmation performs. Plans that cannot be taken are listed with their reasons and without their prices — a smaller disk is refused outright, because shrinking one destroys data.',
+        'response' => $many('PlanChangeQuote'),
+    ],
     'api.v1.notifications.index' => [
         'tag' => 'Notifications',
         'summary' => 'The customer\'s inbox',

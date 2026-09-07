@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
@@ -50,17 +51,33 @@ export function SubscriptionsPage() {
     {
       key: 'actions',
       header: '',
-      cell: (s) =>
-        s.is_scheduled_to_cancel ? null : (
-          <Button
-            variant="ghost"
-            size="sm"
-            loading={cancel.isPending && cancel.variables === s.id}
-            onClick={() => { cancel.mutate(s.id); }}
+      cell: (s) => (
+        <div className="flex flex-wrap items-center gap-2">
+          {/*
+            * Offered on a subscription that is ending too. A customer who has
+            * scheduled a cancellation and then decides to stay smaller should
+            * find the option where it always was, rather than having to
+            * un-cancel first.
+            */}
+          <Link
+            to={`/subscriptions/${s.id}/plan`}
+            className="inline-flex items-center rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]"
           >
-            {t('subscriptions.cancel')}
-          </Button>
-        ),
+            {t('subscriptions.changePlan')}
+          </Link>
+
+          {s.is_scheduled_to_cancel ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={cancel.isPending && cancel.variables === s.id}
+              onClick={() => { cancel.mutate(s.id); }}
+            >
+              {t('subscriptions.cancel')}
+            </Button>
+          )}
+        </div>
+      ),
     },
   ]
 

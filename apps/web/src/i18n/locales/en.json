@@ -268,7 +268,8 @@
     "renews": "Renews",
     "endsOn": "Ends {{date}}",
     "cancel": "Cancel",
-    "empty": "No subscriptions."
+    "empty": "No subscriptions.",
+    "changePlan": "Change plan"
   },
   "services": {
     "subtitle": "Everything running on your account.",
@@ -552,6 +553,33 @@
       "closed": "Disconnected",
       "refused": "Refused",
       "unavailable": "Unavailable"
+    }
+  },
+  "planChange": {
+    "title": "Change plan",
+    "subtitle": "Prices, credits and effective dates are calculated by us and shown here exactly as they will be billed.",
+    "newRecurring": "{{amount}} per period",
+    "dueNow": "Due today: {{amount}}",
+    "choose": "Choose",
+    "confirm": "Change plan",
+    "confirmTitle": "Move to {{plan}}",
+    "confirmBody": "You will be charged {{amount}} today. Your billing date does not change.",
+    "confirmResize": "Your server will be resized. It may restart, and it will be briefly unavailable.",
+    "applied": "Your plan has changed. If your server needs resizing, that is under way now and you will be told when it is done.",
+    "refusal": {
+      "different_product": "This plan is for a different product.",
+      "different_currency": "This plan is not sold in your account currency.",
+      "different_billing_period": "This plan is billed on a different cycle.",
+      "same_plan": "You are already on this plan.",
+      "not_available": "This plan is no longer available.",
+      "would_shrink_disk": "This plan has a smaller disk than your server. We do not shrink disks, because it would destroy data.",
+      "subscription_not_running": "This subscription is not currently running.",
+      "service_busy": "Something else is happening to this server. Try again when it has finished."
+    },
+    "warning": {
+      "resize_required": "Your server will be resized as part of this change.",
+      "fewer_vcpu": "This plan has fewer processors than your server has now.",
+      "less_memory": "This plan has less memory than your server has now. Check that what you run fits."
     }
   }
 }

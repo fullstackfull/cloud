@@ -52,6 +52,15 @@ enum AuditAction: string
     case ConsolePermitRedeemed = 'console.permit_redeemed';
     case ConsolePermitRefused = 'console.permit_refused';
 
+    /**
+     * A subscription moved onto another plan.
+     *
+     * Money and capacity both change here, and the customer chose it — so the
+     * trail records who, when, and what it cost, which is what a billing
+     * dispute is settled from.
+     */
+    case PlanChanged = 'subscription.plan_changed';
+
     /* Rebuilds, which destroy data on purpose. */
     case VpsReinstallRequested = 'vps.reinstall_requested';
     case DedicatedReinstallRequested = 'dedicated.reinstall_requested';

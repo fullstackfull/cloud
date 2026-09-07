@@ -95,4 +95,15 @@ Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {
     Route::post('{subscription}/plan', [SubscriptionController::class, 'changePlan'])
         ->middleware('throttle:10,1,plan-change:')
         ->name('plan');
+
+    /*
+     * What the plans on offer would cost this subscription.
+     *
+     * A read, and priced by the backend. The portal renders these numbers and
+     * computes none of them: proration, currency and rounding are the
+     * platform's rules, and a second implementation of them in TypeScript
+     * would agree until it did not.
+     */
+    Route::get('{subscription}/plan-options', [SubscriptionController::class, 'planOptions'])
+        ->name('plan_options');
 });

@@ -47,7 +47,6 @@ final class HandlerCoverageTest extends TestCase
             // work the platform currently offers, and a kind no code can
             // produce needs no handler.
             ProvisioningJobKind::DestroyVps->value => 'no code path creates it; termination is not automated',
-            ProvisioningJobKind::Resize->value => 'no code path creates it; plan changes are not offered',
             ProvisioningJobKind::Suspend->value => 'no code path creates it; suspension runs through the hosting adapter',
             ProvisioningJobKind::Unsuspend->value => 'no code path creates it; restoration runs through the hosting adapter',
         ];
