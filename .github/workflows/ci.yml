@@ -72,8 +72,19 @@ jobs:
           key: composer-${{ matrix.php }}-${{ hashFiles('apps/control-plane/composer.lock') }}
           restore-keys: composer-${{ matrix.php }}-
 
+      # APP_ENV is set for this step because composer's post-autoload-dump hook
+      # runs `artisan package:discover`, which boots the application — and with
+      # no .env file yet on the runner, Laravel defaults APP_ENV to production.
+      # ProviderRegistryServiceProvider then correctly refuses to boot a
+      # production deployment configured with fake providers, composer exits 1,
+      # and every step after it is skipped. That is the guard doing its job in a
+      # context that is not production; naming the environment is the honest fix,
+      # rather than weakening a guard that exists to stop a production system
+      # reporting payments it never took.
       - name: Install dependencies
         working-directory: apps/control-plane
+        env:
+          APP_ENV: testing
         run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Prepare environment
@@ -123,6 +134,8 @@ jobs:
 
       - name: Install application dependencies
         working-directory: apps/control-plane
+        env:
+          APP_ENV: testing
         run: composer install --no-interaction --prefer-dist --no-progress
 
       # Analyser dependencies live in their own manifest so they can never
@@ -226,6 +239,8 @@ jobs:
 
       - name: Install PHP dependencies
         working-directory: apps/control-plane
+        env:
+          APP_ENV: testing
         run: composer install --no-interaction --prefer-dist --no-progress
 
       - run: npm ci
@@ -275,9 +290,14 @@ jobs:
           coverage: none
           tools: composer:v2
 
+      # --locked: this job deliberately does not install, so there are no
+      # installed packages to audit and `composer audit` alone exits 1 with
+      # "No installed packages found" — a failure about the job's own shape
+      # rather than about a vulnerability. The lock file is what pins the
+      # versions a deployment gets, so it is the right thing to audit here.
       - name: Audit PHP dependencies
         working-directory: apps/control-plane
-        run: composer audit --no-interaction
+        run: composer audit --locked --no-interaction
 
       - uses: actions/setup-node@v4
         with:

@@ -61,6 +61,45 @@ final class ProductionGuardTest extends TestCase
     }
 
     #[Test]
+    public function the_refusal_says_when_production_was_a_default_rather_than_a_decision(): void
+    {
+        /*
+         * With no environment file, Laravel falls back to APP_ENV=production and
+         * every provider to the packaged fake, so this guard fires during
+         * `composer install`'s package discovery on a machine that has not
+         * written its .env yet. That is the guard working correctly in a context
+         * nobody intended it for, and it cost six red CI runs before anybody
+         * read past the word "production" in the message.
+         */
+        config()->set('billing.providers', ['payment' => 'fake']);
+
+        $this->app->useEnvironmentPath('/nonexistent-for-this-test');
+
+        try {
+            $this->guard()->assertNoFakeProviders();
+            $this->fail('Expected the guard to refuse this configuration.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('No environment file was found', $e->getMessage());
+            $this->assertStringContainsString('set APP_ENV', $e->getMessage());
+        }
+    }
+
+    #[Test]
+    public function the_refusal_stays_plain_when_the_environment_was_chosen(): void
+    {
+        config()->set('billing.providers', ['payment' => 'fake']);
+
+        try {
+            $this->guard()->assertNoFakeProviders();
+            $this->fail('Expected the guard to refuse this configuration.');
+        } catch (RuntimeException $e) {
+            // The environment file exists here, so the deployment really is
+            // configured with a fake and there is nothing to explain away.
+            $this->assertStringNotContainsString('No environment file was found', $e->getMessage());
+        }
+    }
+
+    #[Test]
     public function a_production_deployment_whose_sessions_cannot_be_listed_refuses_to_boot(): void
     {
         /*

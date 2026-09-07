@@ -63,10 +63,38 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
                 'Refusing to run in production with fake providers configured for: %s. '
                 .'A fake provider reports success without doing anything, which in production '
                 .'means charging customers for services that were never created. '
-                .'Set the corresponding *_PROVIDER environment variables to a real driver.',
+                .'Set the corresponding *_PROVIDER environment variables to a real driver.%s',
                 implode(', ', $fake),
+                $this->environmentHint(),
             ));
         }
+    }
+
+    /**
+     * Says so when "production" is a default rather than a decision.
+     *
+     * With no environment file loaded, Laravel falls back to APP_ENV=production
+     * and every provider to its packaged default, which is the fake — so this
+     * guard fires during `composer install`'s package discovery on any machine
+     * that has not written its .env yet. It is the guard working correctly in a
+     * context nobody intended it for, and without this sentence it reads as a
+     * misconfigured deployment. It cost a CI pipeline six red runs before
+     * anybody looked at what the message actually meant.
+     */
+    private function environmentHint(): string
+    {
+        $path = $this->app->environmentFilePath();
+
+        if (is_file($path)) {
+            return '';
+        }
+
+        return sprintf(
+            ' No environment file was found at %s, so APP_ENV defaulted to "production" '
+            .'and every provider to its packaged default. If this is a build or install step '
+            .'rather than a deployment, set APP_ENV for it.',
+            $path,
+        );
     }
 
     /**
