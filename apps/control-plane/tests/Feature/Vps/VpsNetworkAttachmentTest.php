@@ -7,6 +7,7 @@ namespace Tests\Feature\Vps;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
@@ -257,6 +258,16 @@ final class RecordingComputeProvider implements ComputeProvider
         $this->calls[] = 'liftSuspension';
 
         return new VmOperation('UPID:unsuspend', $nodeName, $providerId, 'lift_suspension');
+    }
+
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation
+    {
+        // Recorded rather than performed. A test asserting that some code path
+        // does not rebuild a customer's machine needs the call to be visible,
+        // and one asserting that it does needs it to be cheap.
+        $this->calls[] = 'reinstallVm';
+
+        return new VmOperation('UPID:reinstall', $nodeName, $providerId, 'reinstall_vm');
     }
 
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState

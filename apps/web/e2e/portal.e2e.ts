@@ -219,3 +219,46 @@ test('an address the portal does not serve renders a not-found page', async ({ p
 
   await expect(page.getByRole('heading', { name: /not found/i })).toBeVisible()
 })
+
+test('the reinstall dialogue says the disk will be replaced and needs the hostname typed', async ({ page }) => {
+  /*
+   * The most destructive control a customer has. Three things are asserted
+   * because each of them is a way this can be got wrong: the warning has to be
+   * present and unambiguous, the confirmation has to require the machine's own
+   * name, and a nearly-right name has to stay refused — the comparison is a
+   * proof that somebody read the screen, not a lookup.
+   */
+  await page.goto('/vps')
+
+  await page.getByRole('button', { name: /^reinstall$/i }).first().click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  await expect(
+    dialog.getByText(/the server disk will be replaced\. existing data may be permanently lost\./i),
+  ).toBeVisible()
+
+  const confirm = dialog.getByRole('button', { name: /reinstall this server/i })
+  await expect(confirm).toBeDisabled()
+
+  await dialog.getByRole('textbox').fill(fixtures.vpsHostname.toUpperCase())
+  await expect(confirm).toBeDisabled()
+
+  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await expect(confirm).toBeEnabled()
+})
+
+test('escape closes the reinstall dialogue without rebuilding anything', async ({ page }) => {
+  await page.goto('/vps')
+
+  await page.getByRole('button', { name: /^reinstall$/i }).first().click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+
+  await page.keyboard.press('Escape')
+
+  await expect(page.getByRole('dialog')).toBeHidden()
+
+  // And nothing was queued: the rebuild column still shows no operation.
+  await expect(page.getByText(/replacing the disk/i)).toHaveCount(0)
+})

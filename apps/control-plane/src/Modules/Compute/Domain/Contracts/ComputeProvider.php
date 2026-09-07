@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Compute\Domain\Contracts;
 
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
@@ -99,16 +100,6 @@ interface ComputeProvider
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation;
 
     /**
-     * The hypervisor's view of one machine, or null when it does not have it.
-     *
-     * Null is a legitimate answer and specifically not an exception: a destroy
-     * that is confirmed by absence, and a reconciliation pass finding a row
-     * for a machine somebody deleted by hand, both depend on being able to ask
-     * without handling a failure.
-     *
-     * @throws ComputeProviderException
-     */
-    /**
      * Make a service policy state true at the provider.
      *
      * Suspension is not "stop the VM". A stop is indistinguishable at the
@@ -139,6 +130,47 @@ interface ComputeProvider
      */
     public function liftSuspension(string $nodeName, string $providerId): VmOperation;
 
+    /**
+     * Replace the machine's disk with a fresh image, keeping the machine.
+     *
+     * The most destructive call in this interface, and the one whose contract
+     * matters most, because everything it must NOT do is invisible in its
+     * signature:
+     *
+     *  - The machine keeps its provider id. An adapter that built a second
+     *    machine and destroyed the first would leave the platform's row
+     *    pointing at a machine that no longer exists, and the customer's
+     *    service mapped to nothing — while the new machine, which no row
+     *    names, is billed to nobody.
+     *  - The machine keeps its network interface, and with it its MAC address.
+     *    A customer's licences, DHCP reservations and firewall rules are all
+     *    keyed on it.
+     *  - The machine keeps its shape. A reinstall is not a resize; changing
+     *    the allocation here would change what the customer uses without
+     *    changing what they pay.
+     *  - Nothing about the address is touched. The platform's IPAM records
+     *    still hold the assignment, and the new guest is configured with the
+     *    same address through cloud-init.
+     *
+     * Must be safe to call on a machine that is running: the adapter powers it
+     * down itself rather than requiring the caller to sequence it, because a
+     * caller that forgets leaves the disk in use and the reinstall failing
+     * halfway.
+     *
+     * @throws ComputeProviderException
+     */
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation;
+
+    /**
+     * The hypervisor's view of one machine, or null when it does not have it.
+     *
+     * Null is a legitimate answer and specifically not an exception: a destroy
+     * that is confirmed by absence, and a reconciliation pass finding a row
+     * for a machine somebody deleted by hand, both depend on being able to ask
+     * without handling a failure.
+     *
+     * @throws ComputeProviderException
+     */
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState;
 
     /**

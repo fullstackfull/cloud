@@ -45,7 +45,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * engine.
  *
  * **The handler for that work does not exist yet.** No `ProvisioningHandler`
- * is registered for {@see ProvisioningJobKind::Reinstall} on physical
+ * is registered for {@see ProvisioningJobKind::ReinstallDedicated} on physical
  * hardware, so a job created here will fail at the worker with
  * `HandlerNotRegisteredException` rather than reinstall anything. That is the
  * correct failure while the handler is missing — loud, recorded against the
@@ -123,7 +123,7 @@ final readonly class RequestDedicatedReinstall
         $this->guard->assertNothingInFlight($server);
 
         $job = $this->createJob->execute(new ProvisioningJobRequest(
-            kind: ProvisioningJobKind::Reinstall,
+            kind: ProvisioningJobKind::ReinstallDedicated,
             idempotencyKey: $key,
             /*
              * The protocol the machine's own best controller speaks, read from

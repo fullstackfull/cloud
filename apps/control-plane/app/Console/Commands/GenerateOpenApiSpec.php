@@ -330,6 +330,7 @@ final class GenerateOpenApiSpec extends Command
             'Cloud VPS' => 'Virtual machines: their state, their power, their console and their reinstalls.',
             'Dedicated servers' => 'Physical machines, controlled through a BMC the API never exposes.',
             'IP addresses' => 'Addresses assigned to the account, and their reverse DNS.',
+            'Notifications' => 'What the platform has told this customer, and what they have read. Security and billing messages cannot be switched off.',
             'Operator' => 'The NOC surface. Same guard as the customer API — what separates them is that every route here names the permission it needs.',
             'Orders' => 'Placing and cancelling orders. Nothing is provisioned until a payment has been verified server-side.',
             'Services' => 'What the account owns, whatever kind it is, and what the platform has done to it.',

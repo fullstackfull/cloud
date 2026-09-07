@@ -352,7 +352,7 @@ final class RunProvisioningJobTest extends ProvisioningTestCase
     #[Test]
     public function an_unwired_kind_fails_permanently_instead_of_retrying_forever(): void
     {
-        $job = $this->queueJob([], ['kind' => ProvisioningJobKind::Reinstall]);
+        $job = $this->queueJob([], ['kind' => ProvisioningJobKind::ReinstallVps]);
 
         // A deployment where nothing handles this kind of work. Rebuild the
         // registry with only one kind wired up.

@@ -269,6 +269,35 @@ export function useVpsPower() {
   })
 }
 
+export interface ReinstallRequest {
+  id: string
+  confirm_hostname: string
+  idempotency_key: string
+}
+
+/**
+ * Rebuild a machine.
+ *
+ * The confirmation is sent as typed. The server compares it against the
+ * machine's own hostname and refuses a mismatch — this client does not
+ * pre-check it, because a check that lives only here is a check an operator
+ * script skips.
+ */
+export function useVpsReinstall() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, confirm_hostname, idempotency_key }: ReinstallRequest) =>
+      api.post<unknown>(`/vps/${encodeURIComponent(id)}/reinstall`, {
+        confirm_hostname,
+        idempotency_key,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['vps'] })
+    },
+  })
+}
+
 /* ---------------------------------------------------------- notifications */
 
 /**

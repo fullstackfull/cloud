@@ -64,6 +64,23 @@ return [
         'max_customer_vms_per_node' => (int) env('COMPUTE_MAX_CUSTOMER_VMS_PER_NODE', 1),
     ],
 
+    /*
+     * Reinstalls.
+     *
+     * A reinstall replaces a machine's disk, which cannot happen while the
+     * guest is using it. The guest is asked to shut down and then asked again,
+     * harder, until it has — and if it never does, the reinstall is refused
+     * before anything is destroyed rather than forced through.
+     *
+     * Two minutes by default. Long enough for a database to flush and a
+     * journal to close; short enough that a customer watching a spinner gets
+     * an answer.
+     */
+    'reinstall' => [
+        'stop_poll_attempts' => (int) env('COMPUTE_REINSTALL_STOP_POLL_ATTEMPTS', 60),
+        'stop_poll_interval_ms' => (int) env('COMPUTE_REINSTALL_STOP_POLL_INTERVAL_MS', 2000),
+    ],
+
     'proxmox' => [
         'timeout_seconds' => (int) env('PROXMOX_TIMEOUT_SECONDS', 30),
         'verify_tls' => (bool) env('PROXMOX_VERIFY_TLS', true),

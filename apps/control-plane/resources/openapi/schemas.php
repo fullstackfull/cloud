@@ -483,6 +483,24 @@ return [
             'os_version' => ['type' => ['string', 'null']],
             'addresses' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
             'is_operable' => ['type' => 'boolean'],
+            /*
+             * The machine's most recent rebuild, or null if it has never had
+             * one. `data_destroyed` is the field a client should read before
+             * offering a customer any recovery advice: it is true from the
+             * moment the disk replacement was attempted, including when the
+             * platform does not know whether it happened.
+             */
+            'reinstall' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            // The fields inside it, listed flat in the same way the machine's
+            // `resources` block is: the parity check between these schemas and
+            // the resources compares one level, and a nested block that
+            // documented its own keys would read as undocumented.
+            'state' => ['type' => ['string', 'null']],
+            'in_flight' => ['type' => ['boolean', 'null']],
+            'needs_attention' => ['type' => ['boolean', 'null']],
+            'data_destroyed' => ['type' => ['boolean', 'null']],
+            'requested_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'completed_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],

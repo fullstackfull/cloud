@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Http;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CloudInitConfig;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
@@ -80,6 +81,11 @@ final class ProxmoxComputeProvider implements ComputeProvider
      * which would reject a task id the cluster never issued.
      */
     private const string SYNCHRONOUS_TASK_PREFIX = 'sync:';
+
+    /** How many times a reinstall asks whether the guest has stopped yet. */
+    private const int DEFAULT_STOP_POLL_ATTEMPTS = 60;
+
+    private const int DEFAULT_STOP_POLL_INTERVAL_MS = 2000;
 
     private const int BYTES_PER_MIB = 1048576;
 
@@ -318,6 +324,188 @@ final class ProxmoxComputeProvider implements ComputeProvider
             status: is_string($data) && $data !== '' ? RemoteTaskStatus::Running : RemoteTaskStatus::Succeeded,
             metadata: [...$config, 'disk_gib_added' => $request->diskGib],
         );
+    }
+
+    /**
+     * Lay a fresh image onto a machine that already exists.
+     *
+     * Proxmox has no "reinstall". What it has is a config that can be edited
+     * one key at a time, and the reinstall is that edit performed in an order
+     * chosen so the machine's identity survives it:
+     *
+     *  1. **Stop the guest, and wait until it really is stopped.** A disk in
+     *     use cannot be replaced, and Proxmox answers the stop before the
+     *     guest has finished stopping. Not waiting is how step 3 fails with
+     *     the volume still attached, halfway through a destructive sequence.
+     *  2. **Detach the disk.** `delete=scsi0` moves the volume to `unused0`;
+     *     it does not remove it. The machine is still the same machine, with
+     *     the same id, the same NIC and the same MAC.
+     *  3. **Destroy the detached volume.** Deleting an `unusedN` entry is what
+     *     actually removes the data. This is the line past which the
+     *     customer's disk is gone.
+     *  4. **Import the new image onto the same disk slot**, and rewrite the
+     *     identity that lives in the config rather than on the disk: name,
+     *     OS type, boot order, and the cloud-init keys and address.
+     *  5. **Start it.**
+     *
+     * What is never touched: `vmid`, `net0` — and therefore the MAC — the
+     * memory and core counts, and anything about where the machine lives. A
+     * clone-and-swap would have been fewer calls and would have produced a
+     * different machine wearing the same hostname, with the platform's row
+     * pointing at the old one.
+     */
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation
+    {
+        $this->stopForReinstall($nodeName, $providerId);
+
+        $configPath = sprintf('/nodes/%s/qemu/%s/config', $nodeName, $providerId);
+
+        /*
+         * Detach, then destroy. Two calls because Proxmox will not remove a
+         * volume that the config still references, and one call that tried to
+         * do both would either leave the old disk attached or leave an orphan
+         * volume on the storage that nothing refers to and nobody reclaims.
+         */
+        $this->put($configPath, ['delete' => 'scsi0'], 'reinstall_vm');
+        $this->put($configPath, ['delete' => 'unused0'], 'reinstall_vm');
+
+        $config = [
+            // The replacement disk, imported from the platform's image. Same
+            // slot, same size, same storage: the machine's shape is not a
+            // reinstall's business.
+            'scsi0' => sprintf(
+                '%s:%d,import-from=%s',
+                $request->storageName,
+                $request->diskGib,
+                $request->templateReference,
+            ),
+            'name' => $request->hostname,
+            'ostype' => $request->osFamily->proxmoxOsType(),
+            'boot' => 'order=scsi0',
+            // Restated because a machine that was suspended and reinstalled
+            // must not inherit the suspension's cleared onboot.
+            'onboot' => 1,
+        ];
+
+        if ($request->cloudInit !== null) {
+            /*
+             * The cloud-init drive itself is not recreated: it already exists
+             * from the build and re-adding it would be refused as an existing
+             * volume. Rewriting the parameters is what matters — a fresh guest
+             * has none of the customer's keys, and its address has to be
+             * handed back to it.
+             */
+            $config += $this->cloudInitParameters($request->cloudInit);
+        }
+
+        $data = $this->put($configPath, $config, 'reinstall_vm');
+
+        // The import can take minutes on a large image, so Proxmox may answer
+        // with a task. When it answers synchronously there is nothing to poll
+        // and a handle is minted rather than a task id that does not exist.
+        $taskId = is_string($data) && $data !== ''
+            ? $data
+            : $this->synchronousTaskId('reinstall_vm', $nodeName, $providerId);
+
+        if ($request->startAfterInstall) {
+            $this->changePowerState($nodeName, $providerId, 'start');
+        }
+
+        return new VmOperation(
+            taskId: $taskId,
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'reinstall_vm',
+            metadata: [
+                'template_reference' => $request->templateReference,
+                'storage' => $request->storageName,
+                'disk_gib' => $request->diskGib,
+            ],
+        );
+    }
+
+    /**
+     * Stops the guest and waits for it to actually be stopped.
+     *
+     * A shutdown is asked for first: a customer rebuilding a server has not
+     * asked to lose whatever the guest is mid-write on, and the polite request
+     * costs nothing when the guest ignores it. The stop that follows is
+     * unconditional, because the disk is about to be replaced anyway.
+     *
+     * A guest that will not stop inside the window is refused *before* the
+     * destructive calls, which is the whole reason this is a separate step:
+     * nothing has been deleted, so the customer still has the machine they
+     * had, and the operation ends as a plain failure rather than a review.
+     *
+     * @throws ComputeProviderException
+     */
+    private function stopForReinstall(string $nodeName, string $providerId): void
+    {
+        $current = $this->getVm($nodeName, $providerId);
+
+        if ($current === null) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the machine does not exist at this node',
+            ]);
+        }
+
+        if (! $current->powerState->isOn()) {
+            return;
+        }
+
+        $this->changePowerState($nodeName, $providerId, 'shutdown');
+
+        /*
+         * Bounded by attempts rather than by a clock. A wall-clock deadline
+         * inside a loop is untestable without either sleeping through it or
+         * freezing time — and frozen time turns the deadline into a loop that
+         * never ends.
+         */
+        $attempts = max(1, $this->stopPollAttempts());
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $state = $this->getVm($nodeName, $providerId);
+
+            if ($state !== null && ! $state->powerState->isOn()) {
+                return;
+            }
+
+            if ($attempt === $attempts) {
+                break;
+            }
+
+            // Escalated from the polite request to the plug. Repeated
+            // deliberately: a stop against a guest that is already on its way
+            // down is a no-op at Proxmox, and one against a guest that ignored
+            // ACPI is the only thing that will work.
+            $this->changePowerState($nodeName, $providerId, 'stop');
+
+            usleep($this->stopPollIntervalMicroseconds());
+        }
+
+        throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+            'node' => $nodeName,
+            'vmid' => $providerId,
+            'provider_message' => 'the guest did not stop, so its disk was left alone',
+        ]);
+    }
+
+    private function stopPollAttempts(): int
+    {
+        $configured = config('compute.reinstall.stop_poll_attempts');
+
+        return is_numeric($configured) ? (int) $configured : self::DEFAULT_STOP_POLL_ATTEMPTS;
+    }
+
+    private function stopPollIntervalMicroseconds(): int
+    {
+        $configured = config('compute.reinstall.stop_poll_interval_ms');
+
+        $milliseconds = is_numeric($configured) ? (int) $configured : self::DEFAULT_STOP_POLL_INTERVAL_MS;
+
+        return max(0, $milliseconds) * 1000;
     }
 
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation

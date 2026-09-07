@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Compute\Infrastructure\Providers;
 
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
@@ -212,6 +213,92 @@ final class FakeComputeProvider implements ComputeProvider
             nodeName: $nodeName,
             providerId: $providerId,
             operation: 'resize_vm',
+        );
+    }
+
+    /**
+     * Replaces the machine's image while keeping the machine.
+     *
+     * The fake models the two properties the real sequence has to have and
+     * that a test could otherwise not observe: the machine keeps its provider
+     * id — no new entry appears and the old one is not removed — and a locked
+     * machine refuses, exactly as Proxmox does. Without the second, a
+     * suspended customer could rebuild their way out of a suspension and the
+     * suite would prove they could not.
+     *
+     * The image is recorded in `raw` so a test can assert that the disk was
+     * actually replaced rather than that a call was made.
+     */
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation
+    {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'reinstall_vm');
+        }
+
+        if ($machine->isLockedAtProvider()) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => sprintf('VM is locked (%s)', $machine->lock),
+            ]);
+        }
+
+        if (self::hostnameCarries($request->hostname, self::PROVIDER_FAILURE_MARKER)) {
+            /*
+             * Refused after the machine was found, which is what makes this
+             * marker useful: the caller has to decide what to do about a
+             * machine whose disk may be half replaced.
+             */
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider refused this reinstall by design',
+            ]);
+        }
+
+        if (self::hostnameCarries($request->hostname, self::TIMEOUT_MARKER)) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider timed out on this reinstall by design',
+            ], indeterminate: true);
+        }
+
+        $this->machines[$nodeName][$providerId] = new RemoteVmState(
+            providerId: $machine->providerId,
+            nodeName: $machine->nodeName,
+            // The hostname is rewritten because cloud-init writes it into the
+            // new guest; everything else about the machine's identity is the
+            // machine's, not the reinstall's.
+            name: $request->hostname,
+            powerState: $request->startAfterInstall ? PowerState::Running : PowerState::Stopped,
+            vcpu: $machine->vcpu,
+            memoryMib: $machine->memoryMib,
+            diskGib: $machine->diskGib,
+            uptimeSeconds: $request->startAfterInstall ? 0 : null,
+            lock: $machine->lock,
+            startsOnBoot: true,
+            raw: [
+                ...$machine->raw,
+                'fake' => true,
+                'installed_template' => $request->templateReference,
+                'storage' => $request->storageName,
+            ],
+        );
+
+        return new VmOperation(
+            taskId: $this->upid(
+                $nodeName,
+                'qmreinstall',
+                $providerId,
+                self::hostnameCarries($request->hostname, self::TASK_FAILURE_MARKER),
+            ),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'reinstall_vm',
+            metadata: ['fake' => true, 'template_reference' => $request->templateReference],
         );
     }
 

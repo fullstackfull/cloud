@@ -98,7 +98,7 @@ final class VpsReviewRegressionTest extends VpsApiTestCase
         ProvisioningJob::factory()->create([
             'service_id' => $machine->service_id,
             'customer_id' => $customer->id,
-            'kind' => ProvisioningJobKind::Reinstall,
+            'kind' => ProvisioningJobKind::ReinstallVps,
             'status' => ProvisioningJobStatus::NeedsReview,
         ]);
 

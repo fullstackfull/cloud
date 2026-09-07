@@ -79,6 +79,7 @@ tags:
   - name: "IP addresses"
     description: "Addresses assigned to the account, and their reverse DNS."
   - name: "Notifications"
+    description: "What the platform has told this customer, and what they have read. Security and billing messages cannot be switched off."
   - name: "Operator"
     description: "The NOC surface. Same guard as the customer API — what separates them is that every route here names the permission it needs."
   - name: "Orders"
@@ -3668,16 +3669,6 @@ paths:
         - "$ref": "#/components/parameters/page"
         - "$ref": "#/components/parameters/perPage"
         - name: "unread"
-          in: "query"
-          required: false
-          schema:
-            type: "string"
-        - name: "per_page"
-          in: "query"
-          required: false
-          schema:
-            type: "string"
-        - name: "page"
           in: "query"
           required: false
           schema:
@@ -8001,6 +7992,31 @@ components:
             additionalProperties: true
         is_operable:
           type: "boolean"
+        reinstall:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        state:
+          type:
+            - "string"
+            - "null"
+        in_flight:
+          type:
+            - "boolean"
+            - "null"
+        needs_attention:
+          type:
+            - "boolean"
+            - "null"
+        data_destroyed:
+          type:
+            - "boolean"
+            - "null"
+        requested_at:
+          "$ref": "#/components/schemas/Timestamp"
+        completed_at:
+          "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
     VirtualMachinePage:

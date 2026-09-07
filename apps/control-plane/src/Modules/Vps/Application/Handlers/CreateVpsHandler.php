@@ -275,6 +275,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             'cluster_id' => $node->cluster_id,
             'node_id' => $node->getKey(),
             'provider_id' => $operation->providerId,
+            // Recorded rather than forgotten: a reinstall has to create the
+            // replacement disk on the storage this one is on, and its only
+            // alternative is to guess at a tier the customer did not buy.
+            'storage_name' => $decision->storageName,
             'hostname' => (string) ($payload['hostname'] ?? 'vps-'.strtolower((string) $job->getKey())),
             'vcpu' => $resources->vcpu,
             'memory_mib' => $resources->memoryMib,

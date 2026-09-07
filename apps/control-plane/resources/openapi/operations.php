@@ -509,7 +509,10 @@ return [
         'tag' => 'Notifications',
         'summary' => 'The customer\'s inbox',
         'description' => 'Newest first, with the unread count in the same response so the portal needs no second request per page load. Pass unread=true for only the unread ones.',
-        'query' => ['unread', 'per_page', 'page'],
+        // Paging is not listed here: a paged response envelope already
+        // documents page and per_page, and naming them again produced two
+        // parameters with the same name on one operation.
+        'query' => ['unread'],
         'response' => $many('Notification'),
     ],
     'api.v1.notifications.read' => [

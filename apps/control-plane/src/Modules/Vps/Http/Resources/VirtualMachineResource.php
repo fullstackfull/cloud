@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Vps\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
 
 /**
  * What a customer may see of their own machine.
@@ -51,6 +52,7 @@ final class VirtualMachineResource extends JsonResource
     public function __construct(
         VirtualMachine $resource,
         private readonly array $addresses = [],
+        private readonly ?VmReinstall $reinstall = null,
     ) {
         parent::__construct($resource);
     }
@@ -95,6 +97,31 @@ final class VirtualMachineResource extends JsonResource
              * an enabled reinstall button.
              */
             'is_operable' => $this->service?->status->isUsable() === true && $this->existsRemotely(),
+
+            /*
+             * The machine's most recent rebuild, when it has had one.
+             *
+             * Present so the portal can say what is happening rather than
+             * showing a machine that reads "running" while its disk is being
+             * replaced. The failure code and message are deliberately not
+             * here: they are the platform's own vocabulary for its scheduler
+             * and its adapters, and a customer reading "vps.reinstall_storage
+             * _unknown" learns nothing they can act on. The state is enough
+             * for the portal to say a true sentence in the customer's own
+             * language.
+             */
+            'reinstall' => $this->reinstall === null ? null : [
+                'id' => (string) $this->reinstall->getKey(),
+                'state' => $this->reinstall->state->value,
+                'in_flight' => $this->reinstall->state->isInFlight(),
+                'needs_attention' => $this->reinstall->state->needsAttention(),
+                // The question a customer actually has when a rebuild goes
+                // wrong, answered plainly rather than left to be inferred from
+                // a state name.
+                'data_destroyed' => $this->reinstall->destroyedData(),
+                'requested_at' => $this->reinstall->created_at->toIso8601String(),
+                'completed_at' => $this->reinstall->completed_at?->toIso8601String(),
+            ],
 
             'created_at' => $this->created_at?->toIso8601String(),
         ];

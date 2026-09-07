@@ -157,6 +157,22 @@ export interface VirtualMachine {
   os_version: string | null
   addresses: Array<{ address: string; ip_version: number; is_primary: boolean }>
   is_operable: boolean
+  /**
+   * The machine's most recent rebuild, or null if it has never had one.
+   *
+   * `data_destroyed` is the field to read before saying anything reassuring:
+   * it is true from the moment the disk replacement was attempted, including
+   * when the platform does not know whether it finished.
+   */
+  reinstall: {
+    id: string
+    state: string
+    in_flight: boolean
+    needs_attention: boolean
+    data_destroyed: boolean
+    requested_at: string
+    completed_at: string | null
+  } | null
 }
 
 export interface AppNotification {

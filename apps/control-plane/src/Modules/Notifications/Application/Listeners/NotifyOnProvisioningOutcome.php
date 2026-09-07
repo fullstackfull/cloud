@@ -74,7 +74,7 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             return;
         }
 
-        $type = $event->kind === ProvisioningJobKind::Reinstall
+        $type = $this->isAReinstall($event->kind)
             ? NotificationType::ReinstallCompleted
             : NotificationType::ServiceReady;
 
@@ -96,7 +96,7 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             return;
         }
 
-        $type = $event->kind === ProvisioningJobKind::Reinstall
+        $type = $this->isAReinstall($event->kind)
             ? NotificationType::ReinstallFailed
             : NotificationType::ServiceProvisioningFailed;
 
@@ -150,11 +150,25 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             ProvisioningJobKind::CreateVps,
             ProvisioningJobKind::CreateHostingAccount,
             ProvisioningJobKind::ProvisionDedicated,
-            ProvisioningJobKind::Reinstall => true,
+            ProvisioningJobKind::ReinstallVps,
+            ProvisioningJobKind::ReinstallDedicated => true,
             // Power operations, resizes and destroys: either the customer is
             // watching, or a different message covers it.
             default => false,
         };
+    }
+
+    /**
+     * Whether this kind rebuilt a machine the customer already had.
+     *
+     * Both reinstalls read the same to a customer — "the server you have is
+     * being rebuilt" — even though the work behind them shares nothing, so
+     * this is the one place the two kinds are deliberately treated alike.
+     */
+    private function isAReinstall(ProvisioningJobKind $kind): bool
+    {
+        return $kind === ProvisioningJobKind::ReinstallVps
+            || $kind === ProvisioningJobKind::ReinstallDedicated;
     }
 
     private function service(?string $serviceId): ?Service

@@ -43,12 +43,14 @@ final class HandlerCoverageTest extends TestCase
     private static function documentedGaps(): array
     {
         return [
-            // RequestVpsReinstall and RequestDedicatedReinstall both create
-            // this kind and both say so: the path from a running customer
-            // server to a rebuilt one has not been designed, and failing loudly
-            // at the worker is better than an HTTP endpoint inventing a
-            // transition that erases a customer's disk.
-            ProvisioningJobKind::Reinstall->value => 'reinstall has no designed path from a running server',
+            /*
+             * RequestDedicatedReinstall creates this and says so. Rebuilding a
+             * physical machine is a one-time boot override, a PXE handshake
+             * and an unattended installer, and none of that is written yet —
+             * so a job of this kind fails loudly at the worker rather than an
+             * endpoint inventing a transition that erases somebody's server.
+             */
+            ProvisioningJobKind::ReinstallDedicated->value => 'the PXE reinstall path for physical machines is not built',
 
             // Nothing creates these. The engine's vocabulary is wider than the
             // work the platform currently offers, and a kind no code can

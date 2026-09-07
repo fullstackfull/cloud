@@ -34,6 +34,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?string $node_id
  * @property ?string $template_id
  * @property ?string $provider_id
+ * @property ?string $storage_name
  * @property string $hostname
  * @property int $vcpu
  * @property int $memory_mib

@@ -290,8 +290,30 @@
       "start": "Start",
       "shutdown": "Shut down",
       "stop": "Force off",
-      "reboot": "Reboot"
-    }
+      "reboot": "Reboot",
+      "reinstall": "Reinstall"
+    },
+    "reinstall": {
+      "title": "Reinstall {{hostname}}",
+      "warning": "The server disk will be replaced. Existing data may be permanently lost.",
+      "advice": "Take a backup first if there is anything on this server you still need. The address, the specification and the hostname stay the same.",
+      "confirmLabel": "Reinstall this server",
+      "phraseLabel": "Type the hostname to confirm",
+      "started": "The rebuild has been queued. This page will show its progress."
+    },
+    "reinstallState": {
+      "requested": "Rebuild requested",
+      "queued": "Rebuild queued",
+      "preparing": "Preparing to rebuild",
+      "reinstalling": "Replacing the disk",
+      "configuring": "Configuring the new system",
+      "verifying": "Checking the rebuilt server",
+      "completed": "Rebuilt",
+      "failed": "The rebuild did not run",
+      "needs_review": "The rebuild stopped and our team is looking at it",
+      "indeterminate": "The rebuild is unconfirmed and our team is looking at it"
+    },
+    "rebuild": "Rebuild"
   },
   "dedicated": {
     "subtitle": "Your physical machines.",

@@ -44,7 +44,7 @@ final class DedicatedServerReinstallEndpointTest extends DedicatedApiTestCase
         $job = ProvisioningJob::query()->sole();
 
         $this->assertSame($job->id, $response->json('data.id'));
-        $this->assertSame(ProvisioningJobKind::Reinstall, $job->kind);
+        $this->assertSame(ProvisioningJobKind::ReinstallDedicated, $job->kind);
         $this->assertSame($server->id, $job->payload['dedicated_server_id'] ?? null);
         $this->assertSame('SNWIPE00001', $job->payload['serial'] ?? null);
         $this->assertSame($customer->id, $job->customer_id);
@@ -258,7 +258,7 @@ final class DedicatedServerReinstallEndpointTest extends DedicatedApiTestCase
             ->postJson("/api/v1/dedicated/{$server->id}/reinstall", ['confirm_serial' => 'SNWIPE00008'])
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'dedicated.operation_refused')
-            ->assertJsonPath('error.details.in_flight_kind', ProvisioningJobKind::Reinstall->value);
+            ->assertJsonPath('error.details.in_flight_kind', ProvisioningJobKind::ReinstallDedicated->value);
 
         $this->assertSame(1, ProvisioningJob::query()->count());
     }
