@@ -12,6 +12,9 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Payments\Application\Actions\RecordPaymentFailure;
+use Lynomia\Modules\Payments\Domain\DTOs\ProviderEvent;
+use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
@@ -183,6 +186,102 @@ final class PaymentAfterSuspensionTest extends TestCase
         }
 
         $this->fail(sprintf('The panel has no account called %s at all.', $username));
+    }
+
+    #[Test]
+    public function a_failed_renewal_starts_the_clock_that_ends_the_subscription(): void
+    {
+        /*
+         * The half that was missing for longer, and whose absence cost the
+         * business rather than the customer: nothing listened to PaymentFailed
+         * and AdvanceDunning::recordFailedPayment had no caller at all. A card
+         * that expired therefore cost nothing — the subscription stayed
+         * active, the lifecycle sweep only looks at subscriptions that are
+         * already past_due or suspended, so it never saw it, and the service
+         * ran indefinitely for somebody who had stopped paying.
+         *
+         * Driven through RecordPaymentFailure rather than by raising the event
+         * by hand: the point is that the real failure path reaches dunning.
+         */
+        $this->travelTo(CarbonImmutable::parse('2026-03-01 09:00:00'));
+
+        [$subscription, $service] = $this->activeSubscriptionWithService();
+        $invoice = $this->openRenewalInvoiceFor($subscription);
+
+        app(RecordPaymentFailure::class)->execute(
+            provider: 'fake',
+            event: new ProviderEvent(
+                providerEventId: 'evt_declined_0001',
+                type: 'payment_intent.payment_failed',
+                kind: ProviderEventKind::PaymentFailed,
+                amount: Money::ofMinor($invoice->total_minor, $invoice->currency),
+                currency: $invoice->currency,
+                providerReference: 'pi_declined_0001',
+                payload: [],
+                failureCode: 'card_expired',
+            ),
+            customerId: (string) $subscription->customer_id,
+            invoiceId: (string) $invoice->getKey(),
+        );
+
+        $subscription->refresh();
+
+        $this->assertSame(SubscriptionStatus::PastDue, $subscription->status);
+        $this->assertSame(1, $subscription->failed_payment_count);
+        $this->assertNotNull(
+            $subscription->grace_period_ends_at,
+            'A failed renewal opened no grace period, so nothing would ever have ended this subscription.',
+        );
+
+        // Not switched off. A declined card opens a grace period; a listener
+        // that suspended immediately would take a customer offline for their
+        // bank's overnight maintenance.
+        $this->assertSame(ServiceStatus::Active, $service->refresh()->status);
+
+        // And the clock really runs out.
+        $this->travelTo(CarbonImmutable::parse('2026-03-20 09:00:00'));
+        app(SweepSubscriptionLifecycle::class)->execute();
+
+        $this->assertSame(SubscriptionStatus::Suspended, $subscription->refresh()->status);
+        $this->assertSame(ServiceStatus::Suspended, $service->refresh()->status);
+    }
+
+    #[Test]
+    public function a_failed_payment_dunning_only_the_subscription_it_belongs_to(): void
+    {
+        // A customer holds several subscriptions. Charging the counter of
+        // whichever was found first would suspend a service the failed payment
+        // had nothing to do with.
+        $this->travelTo(CarbonImmutable::parse('2026-03-01 09:00:00'));
+
+        [$failing] = $this->activeSubscriptionWithService();
+
+        $other = Subscription::factory()
+            ->startingOn(CarbonImmutable::parse('2026-02-01 00:00:00'), BillingPeriod::Monthly)
+            ->priced(9_000)
+            ->create(['customer_id' => $failing->customer_id, 'status' => SubscriptionStatus::Active]);
+
+        $invoice = $this->openRenewalInvoiceFor($failing);
+
+        app(RecordPaymentFailure::class)->execute(
+            provider: 'fake',
+            event: new ProviderEvent(
+                providerEventId: 'evt_declined_0002',
+                type: 'payment_intent.payment_failed',
+                kind: ProviderEventKind::PaymentFailed,
+                amount: Money::ofMinor($invoice->total_minor, $invoice->currency),
+                currency: $invoice->currency,
+                providerReference: 'pi_declined_0002',
+                payload: [],
+                failureCode: 'insufficient_funds',
+            ),
+            customerId: (string) $failing->customer_id,
+            invoiceId: (string) $invoice->getKey(),
+        );
+
+        $this->assertSame(SubscriptionStatus::PastDue, $failing->refresh()->status);
+        $this->assertSame(SubscriptionStatus::Active, $other->refresh()->status);
+        $this->assertSame(0, $other->failed_payment_count);
     }
 
     /**

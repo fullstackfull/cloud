@@ -15,9 +15,11 @@ use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
+use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
+use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
 use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
 
 /**
@@ -56,6 +58,12 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         PaymentCaptured::class => [
             SettleInvoiceOnPaymentCaptured::class,
+        ],
+        PaymentFailed::class => [
+            // Without this a card that expired cost the platform a customer's
+            // subscription for ever: nothing moved them to past_due, and the
+            // lifecycle sweep only looks at subscriptions that already are.
+            StartDunningOnFailedPayment::class,
         ],
         InvoicePaid::class => [
             AnnounceSettlementOnInvoicePaid::class,
