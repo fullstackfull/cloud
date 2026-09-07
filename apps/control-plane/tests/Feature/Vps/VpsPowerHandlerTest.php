@@ -17,11 +17,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\StateMachines\ProvisioningJobStateMachine;
 use Lynomia\Modules\Provisioning\Domain\StateMachines\ServiceStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
-use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
-use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
-use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
-use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\Doubles\PowerRecordingComputeProvider;
 
@@ -33,10 +29,14 @@ use Tests\Feature\Vps\Doubles\PowerRecordingComputeProvider;
  * arranged around, that `stop` and `shutdown` reach two different calls on the
  * hypervisor.
  *
- * These handlers are registered here rather than in the application's
- * InfrastructureServiceProvider, which this module does not own. See the
- * report: four lines are needed there before any of this executes in
- * production.
+ * They now also prove the application reaches them at all. These handlers used
+ * to be registered by this setUp() because InfrastructureServiceProvider
+ * registered only CreateVps, and the effect of testing them that way was that
+ * every assertion below passed while a customer pressing "reboot" in
+ * production got a job no worker could execute. The registration is gone from
+ * here on purpose: everything under test resolves through the container the
+ * application actually boots, so if that wiring is ever removed these tests go
+ * red with it.
  */
 final class VpsPowerHandlerTest extends VpsApiTestCase
 {
@@ -45,12 +45,6 @@ final class VpsPowerHandlerTest extends VpsApiTestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        /** @var ProvisioningHandlerRegistry $handlers */
-        $handlers = app(ProvisioningHandlerRegistry::class);
-        $handlers->register(StartVpsHandler::class, ProvisioningJobKind::Start);
-        $handlers->register(StopVpsHandler::class, ProvisioningJobKind::Stop);
-        $handlers->register(RestartVpsHandler::class, ProvisioningJobKind::Restart);
 
         $this->provider = new PowerRecordingComputeProvider;
     }

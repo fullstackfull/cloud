@@ -9,6 +9,7 @@ use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
+use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
 use Lynomia\Modules\Subscriptions\Domain\StateMachines\SubscriptionStateMachine;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
@@ -63,9 +64,28 @@ final readonly class TransitionSubscription
             // routinely race for the same subscription.
             $this->stateMachine->assertCanTransition($locked->status, $to);
 
+            $from = $locked->status;
+
             $locked->status = $to;
             $this->stampTimestamps($locked, $to, $now);
             $locked->save();
+
+            /*
+             * Announced after the commit, and only for a status that really
+             * moved. Listeners on this event switch customers' machines off
+             * and back on; one that observed a transition still inside an open
+             * transaction could suspend a service for a sweep that then rolled
+             * back, and no amount of care in the listener could undo that.
+             */
+            DB::afterCommit(static function () use ($locked, $from, $to, $now): void {
+                event(new SubscriptionStatusChanged(
+                    subscriptionId: (string) $locked->getKey(),
+                    customerId: (string) $locked->customer_id,
+                    from: $from,
+                    to: $to,
+                    changedAt: $now,
+                ));
+            });
 
             return $locked;
         });

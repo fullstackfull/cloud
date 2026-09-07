@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Dedicated\Application\Handlers\ProvisionDedicatedHandler;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
+use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
 use Lynomia\Modules\Vps\Infrastructure\IpamReservationReleaser;
 
 /**
@@ -55,9 +60,26 @@ final class InfrastructureServiceProvider extends ServiceProvider
         /** @var ProvisioningHandlerRegistry $handlers */
         $handlers = $this->app->make(ProvisioningHandlerRegistry::class);
 
-        // Registered as class strings with their kind stated, so that
-        // registration does not construct every handler — and therefore every
-        // provider client — on every request that touches the container.
+        /*
+         * Registered as class strings with their kind stated, so that
+         * registration does not construct every handler — and therefore every
+         * provider client — on every request that touches the container.
+         *
+         * Every kind any production code path can create must appear here.
+         * For most of this project's life only CreateVps did, and the effect
+         * was not a compile error or a failing test: a customer pressing
+         * "reboot", ordering shared hosting, or buying a dedicated server got
+         * a 202, a job row, and a queued job that died at the worker with
+         * HandlerNotRegisteredException. The handlers had been written; the
+         * suites registered them themselves and passed. HandlerCoverageTest
+         * now derives the required set from the code that creates jobs, so
+         * this list cannot fall behind again.
+         */
         $handlers->register(CreateVpsHandler::class, ProvisioningJobKind::CreateVps);
+        $handlers->register(StartVpsHandler::class, ProvisioningJobKind::Start);
+        $handlers->register(StopVpsHandler::class, ProvisioningJobKind::Stop);
+        $handlers->register(RestartVpsHandler::class, ProvisioningJobKind::Restart);
+        $handlers->register(CreateHostingAccountHandler::class, ProvisioningJobKind::CreateHostingAccount);
+        $handlers->register(ProvisionDedicatedHandler::class, ProvisioningJobKind::ProvisionDedicated);
     }
 }
