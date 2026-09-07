@@ -52,10 +52,22 @@ return [
         'api_version' => env('STRIPE_API_VERSION'),
     ],
 
-    'myfatoorah' => [
-        'api_key' => env('MYFATOORAH_API_KEY'),
-        'base_url' => env('MYFATOORAH_BASE_URL', 'https://apitest.myfatoorah.com'),
-        'webhook_secret' => env('MYFATOORAH_WEBHOOK_SECRET'),
+    /*
+     * Cloudflare. Read by the forward-DNS adapter in the Dns module and by the
+     * reverse-DNS adapter in Ipam, through one connection class, so that a
+     * token configured once is a token used everywhere.
+     *
+     * `account_id` is optional and gates exactly one capability: creating
+     * zones. Without it the adapter reads and writes records in zones the
+     * account already holds and refuses to create new ones, because creating a
+     * zone in the wrong account is not something the platform can undo.
+     */
+    'cloudflare' => [
+        'api_token' => env('CLOUDFLARE_API_TOKEN'),
+        'account_id' => env('CLOUDFLARE_ACCOUNT_ID'),
+        'base_url' => env('CLOUDFLARE_BASE_URL', 'https://api.cloudflare.com/client/v4'),
+        'timeout' => (int) env('CLOUDFLARE_TIMEOUT_SECONDS', 10),
+        'verify_tls' => (bool) env('CLOUDFLARE_VERIFY_TLS', true),
     ],
 
 ];

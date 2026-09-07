@@ -6,7 +6,9 @@ namespace Lynomia\Modules\Ipam\Infrastructure;
 
 use Lynomia\Modules\Ipam\Domain\Contracts\ReverseDnsProvider;
 use Lynomia\Modules\Ipam\Domain\Exceptions\UnknownReverseDnsDriverException;
+use Lynomia\Modules\Ipam\Infrastructure\Providers\CloudflareReverseDnsProvider;
 use Lynomia\Modules\Ipam\Infrastructure\Providers\FakeReverseDnsProvider;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
  * Builds the adapter named by `config('billing.providers.dns')`.
@@ -16,14 +18,17 @@ use Lynomia\Modules\Ipam\Infrastructure\Providers\FakeReverseDnsProvider;
  * family here (compute, dedicated, hosting) is resolved the same way — from
  * configuration, at the point of use, memoised for the life of the container.
  *
- * This build ships one driver. `DNS_PROVIDER=cloudflare` is a legal setting
- * that this code cannot honour, and it raises rather than silently falling back
+ * A driver this build does not contain raises rather than silently falling back
  * to the fake: a fallback would publish nothing while reporting every record as
  * live, which is the single failure this whole module is arranged to avoid.
  */
 final class ReverseDnsProviderFactory
 {
     private ?ReverseDnsProvider $resolved = null;
+
+    public function __construct(
+        private readonly SecretRedactor $redactor,
+    ) {}
 
     /**
      * The drivers this build contains.
@@ -38,7 +43,7 @@ final class ReverseDnsProviderFactory
      */
     public static function drivers(): array
     {
-        return [FakeReverseDnsProvider::NAME];
+        return [FakeReverseDnsProvider::NAME, CloudflareReverseDnsProvider::NAME];
     }
 
     /**
@@ -54,6 +59,7 @@ final class ReverseDnsProviderFactory
 
         return $this->resolved = match ($driver) {
             FakeReverseDnsProvider::NAME => new FakeReverseDnsProvider,
+            CloudflareReverseDnsProvider::NAME => new CloudflareReverseDnsProvider($this->redactor),
             // Reached when a deployment is configured for a provider whose
             // adapter this build does not contain. ProviderRegistryServiceProvider
             // already refuses to boot production on the fake; this is the other

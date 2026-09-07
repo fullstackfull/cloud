@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use RuntimeException;
@@ -94,10 +95,20 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
             $this->app->make(PaymentProviderRegistry::class)->names(),
         );
 
+        /*
+         * One key drives two adapters — forward DNS in the Dns module and
+         * reverse DNS in Ipam — so a driver is only usable if both contain it.
+         * The intersection, rather than either list, is what a deployment can
+         * actually rely on: a driver present in one and missing from the other
+         * boots fine and then fails on whichever half was not there.
+         */
         $this->assertDriverExists(
             'dns',
             $providers['dns'] ?? null,
-            ReverseDnsProviderFactory::drivers(),
+            array_values(array_intersect(
+                DnsProviderFactory::drivers(),
+                ReverseDnsProviderFactory::drivers(),
+            )),
         );
     }
 

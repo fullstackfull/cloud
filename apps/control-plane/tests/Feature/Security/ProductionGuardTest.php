@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Security;
 
+use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
+use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Providers\ProviderRegistryServiceProvider;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
@@ -121,17 +123,36 @@ final class ProductionGuardTest extends TestCase
     #[Test]
     public function a_dns_driver_this_build_does_not_contain_refuses_to_boot(): void
     {
-        config()->set('billing.providers', ['payment' => 'stripe', 'dns' => 'cloudflare']);
+        // Route 53 is a real provider with no adapter here. `cloudflare` stood
+        // in this test until the adapter was written, and swapping it out is
+        // the honest edit: the guarantee under test is "a driver that is not
+        // here is refused", not "cloudflare is not here".
+        config()->set('billing.providers', ['payment' => 'stripe', 'dns' => 'route53']);
 
         try {
             $this->guard()->assertEveryConfiguredDriverExists();
             $this->fail('A DNS driver with no adapter was accepted.');
         } catch (RuntimeException $e) {
-            $this->assertStringContainsString('cloudflare', $e->getMessage());
+            $this->assertStringContainsString('route53', $e->getMessage());
             // The message has to say what it will accept, or an operator is
             // left guessing at the one string that would have worked.
-            $this->assertStringContainsString('fake', $e->getMessage());
+            $this->assertStringContainsString('cloudflare', $e->getMessage());
         }
+    }
+
+    #[Test]
+    public function the_dns_driver_must_exist_on_both_sides_of_the_one_key(): void
+    {
+        // `billing.providers.dns` drives two adapters — forward DNS and
+        // reverse DNS — and a driver present in one list and absent from the
+        // other would boot and then fail on whichever half was missing. The
+        // guard checks the intersection, so both lists have to hold it.
+        config()->set('billing.providers', ['payment' => 'stripe', 'dns' => 'cloudflare']);
+
+        $this->guard()->assertEveryConfiguredDriverExists();
+
+        $this->assertContains('cloudflare', DnsProviderFactory::drivers());
+        $this->assertContains('cloudflare', ReverseDnsProviderFactory::drivers());
     }
 
     #[Test]

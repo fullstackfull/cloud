@@ -17,6 +17,8 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  */
 final class ReverseDnsUnavailableException extends DomainException
 {
+    private string $errorCode = 'ipam.reverse_dns_unavailable';
+
     /**
      * The address is not routed on the public internet.
      *
@@ -47,9 +49,47 @@ final class ReverseDnsUnavailableException extends DomainException
         return $exception->withContext(['assignment_id' => $assignmentId]);
     }
 
+    /**
+     * The configured provider holds no reverse zone covering this address.
+     *
+     * This is a capability answer, not a failure: reverse zones are delegated
+     * by whoever assigned the address block, and holding a domain says nothing
+     * about holding the `in-addr.arpa` delegation for the addresses it points
+     * at. An account can serve every forward zone the platform owns and have no
+     * authority over one PTR.
+     *
+     * It has its own code — the brief calls this state
+     * REVERSE_DNS_PROVIDER_UNAVAILABLE, spelled here in the dotted lowercase
+     * every other error code on this API uses — because the remedy is
+     * different from the other two. "Your address is not internet-routed" is
+     * answered by the customer; this one is answered by an operator arranging
+     * the delegation, and a client that cannot tell them apart will tell the
+     * customer to fix something they cannot reach.
+     *
+     * What it is NOT is a reason to publish nothing and report success.
+     */
+    public static function providerCannotServeZone(string $address, string $provider, string $ptrName): self
+    {
+        $exception = new self(
+            'Reverse DNS for this address cannot be published: the configured DNS provider does not '
+            .'hold the reverse zone for it. This is a platform configuration matter and has been recorded.'
+        );
+
+        $exception->errorCode = 'ipam.reverse_dns_provider_unavailable';
+
+        // The PTR name is named for the operator reading the log — it is what
+        // they will search the provider for. The provider's own name is here
+        // for the same reason. Neither is a secret, and neither is the address.
+        return $exception->withContext([
+            'address' => $address,
+            'provider' => $provider,
+            'ptr_name' => $ptrName,
+        ]);
+    }
+
     public function errorCode(): string
     {
-        return 'ipam.reverse_dns_unavailable';
+        return $this->errorCode;
     }
 
     public function httpStatus(): int
