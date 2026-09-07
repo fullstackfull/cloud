@@ -184,10 +184,27 @@ export interface HostingAccount {
 }
 
 export interface WalletBalance {
-  wallet_id: string
+  // Null until the customer has actually transacted in this currency: the API
+  // reports the account currency whether or not a wallets row was ever opened,
+  // so a zero balance here is a real answer, not a missing one.
+  wallet_id: string | null
   currency: string
   balance: Money
   updated_at: string | null
+}
+
+/**
+ * GET /wallet answers a list, one balance per currency, and never a total —
+ * summing two currencies would need a rate and the platform honours none. The
+ * envelope is spelled out here rather than reusing Envelope<T> so that the
+ * portal cannot go back to reading `.balance` off the collection.
+ */
+export interface WalletBalances {
+  data: WalletBalance[]
+  meta: {
+    account_currency: string
+    currencies: number
+  }
 }
 
 export interface IpAssignment {

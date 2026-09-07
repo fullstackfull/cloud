@@ -16,7 +16,7 @@ import type {
   Service,
   Subscription,
   VirtualMachine,
-  WalletBalance,
+  WalletBalances,
 } from '@/lib/types'
 
 /**
@@ -312,10 +312,9 @@ export function useHostingSso() {
 export function useWallet() {
   return useQuery({
     queryKey: ['wallet'],
-    queryFn: async () => {
-      const response = await api.get<Envelope<WalletBalance>>('/wallet')
-      return response.data
-    },
+    // The whole envelope, not `.data`: the account currency in `meta` is what
+    // tells the screen which of several balances is the customer's own.
+    queryFn: () => api.get<WalletBalances>('/wallet'),
   })
 }
 

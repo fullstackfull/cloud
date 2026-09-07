@@ -327,8 +327,10 @@
     "subtitle": "Stored credit on your account.",
     "balance": "Balance",
     "updated": "Updated {{when}}",
+    "noMovement": "No credit has moved yet.",
     "none": "No wallet yet.",
-    "howItFills": "Credit arrives when a payment exceeds what was owed, or when support adds it. You cannot top it up directly."
+    "howItFills": "Credit arrives when a payment exceeds what was owed, or when support adds it. You cannot top it up directly.",
+    "accountCurrency": "Your account currency."
   },
   "tokens": {
     "subtitle": "Credentials for the API, bound to this account.",
