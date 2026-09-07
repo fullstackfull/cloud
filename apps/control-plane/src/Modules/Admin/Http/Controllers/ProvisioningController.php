@@ -7,6 +7,10 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Provisioning\Application\Actions\AdoptOrphanResource;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 
 /**
@@ -82,6 +86,66 @@ final class ProvisioningController
             'last_error' => $job->last_error,
             'attempts' => $job->attempts,
             'created_at' => $job->created_at?->toIso8601String(),
+        ]);
+    }
+
+    /**
+     * Record that a resource the provider already built belongs to this job.
+     *
+     * The other half of never retrying a timeout, and the half that had no
+     * execution path. AdoptOrphanResource has always been able to do this
+     * correctly — refusing a running job, a settled one, and a reference
+     * another job already claims — and nothing could call it. So a job in
+     * needs_review stayed there: the machine existed at the hypervisor,
+     * unbilled and unmanaged, holding an address the next customer was about
+     * to be given, and the only alternative on offer was to build a second one
+     * and charge for it.
+     *
+     * The operator is asserting something the platform could not check for
+     * itself — "I looked at the hypervisor and that machine is ours" — so the
+     * evidence they looked at is required, not optional, and the whole thing
+     * lands in the audit trail.
+     */
+    public function adopt(Request $request, string $job): JsonResponse
+    {
+        $found = ProvisioningJob::query()->findOrFail($job);
+
+        $validated = $request->validate([
+            'provider_reference' => ['required', 'string', 'max:255'],
+            'remote_job_id' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $user = $request->user();
+
+        $adopted = app(AdoptOrphanResource::class)->execute(
+            job: $found,
+            providerReference: $validated['provider_reference'],
+            remoteJobId: $validated['remote_job_id'] ?? null,
+            evidence: ['note' => $validated['evidence']],
+            adoptedBy: $user instanceof User
+                ? sprintf('%s <%s>', $user->name, $user->email)
+                : 'system',
+        );
+
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::OrphanAdopted,
+            subject: $adopted,
+            customerId: $adopted->customer_id,
+            context: [
+                'provider_reference' => $validated['provider_reference'],
+                'remote_job_id' => $validated['remote_job_id'] ?? null,
+                'evidence' => $validated['evidence'],
+                'service_id' => $adopted->service_id,
+            ],
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $adopted->id,
+                'status' => $adopted->status->value,
+                'service_id' => $adopted->service_id,
+            ],
         ]);
     }
 }

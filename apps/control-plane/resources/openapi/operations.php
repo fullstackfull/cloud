@@ -500,6 +500,14 @@ return [
         'body' => ['reason'],
         'response' => $one('AdminVoidedInvoice'),
     ],
+    'api.admin.provisioning.adopt' => [
+        'tag' => 'Operator',
+        'summary' => 'Adopt a resource the provider already built',
+        'description' => 'The other half of never retrying a timeout: the platform stopped waiting, the provider may not have. The operator states the provider reference and the evidence they looked at, and both land in the audit trail. Refuses a running job, a settled one, and a reference another job already claims (409).',
+        'permission' => 'provisioning.retry',
+        'body' => ['provider_reference', 'remote_job_id', 'evidence'],
+        'response' => $one('AdminAdoptedJob'),
+    ],
     'api.admin.drift.index' => [
         'tag' => 'Operator',
         'summary' => 'Disagreements with the providers',

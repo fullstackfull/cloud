@@ -57,7 +57,10 @@ final readonly class RecordAuditEntry
             // not change what the trail says happened.
             'actor_label' => $this->labelFor($actor),
             'action' => $action,
-            'subject_type' => $subject === null ? null : $subject::class,
+            // getMorphClass, not ::class: if the platform ever registers a
+            // morph map, the trail starts recording the stable alias instead
+            // of a class name that a refactor can change.
+            'subject_type' => $subject?->getMorphClass(),
             'subject_id' => $subject === null ? null : (string) $subject->getKey(),
             'customer_id' => $customerId,
             'context' => $context === [] ? null : $context,

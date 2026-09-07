@@ -696,6 +696,15 @@ return [
             'resolved_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'AdminAdoptedJob' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'service_id' => ['type' => ['string', 'null']],
+        ],
+    ],
     'AdminReconciliationRequest' => [
         'type' => 'object',
         'additionalProperties' => false,

@@ -16,6 +16,9 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -207,6 +210,76 @@ final class OperatorInterventionsAreRecordedTest extends TestCase
         $customer->syncRoles([Role::Customer->value]);
 
         $this->actingAs($customer)->getJson('/api/admin/audit')->assertForbidden();
+    }
+
+    #[Test]
+    public function an_operator_can_adopt_a_machine_the_provider_already_built(): void
+    {
+        /*
+         * The other half of never retrying a timeout. The job stopped waiting;
+         * the hypervisor may well have finished. Until now an operator who
+         * went and looked had no way to say "that one is ours", so the machine
+         * stayed unbilled and unmanaged and the only alternative was to build
+         * a second one and charge for it.
+         */
+        $job = ProvisioningJob::factory()->create([
+            'status' => ProvisioningJobStatus::NeedsReview,
+            'failure_class' => FailureClass::Timeout,
+        ]);
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/provisioning/jobs/'.$job->id.'/adopt', [
+                'provider_reference' => '4412',
+                'evidence' => 'VM 4412 on pve-kw-03 has this order\'s hostname and was created at 02:14.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', ProvisioningJobStatus::Succeeded->value);
+
+        $entry = AuditEntry::query()->sole();
+
+        $this->assertSame(AuditAction::OrphanAdopted, $entry->action);
+        $this->assertSame('4412', $entry->context['provider_reference'] ?? null);
+        $this->assertStringContainsString('pve-kw-03', (string) ($entry->context['evidence'] ?? ''));
+    }
+
+    #[Test]
+    public function adoption_requires_the_evidence_the_operator_looked_at(): void
+    {
+        // The operator is asserting something the platform could not check for
+        // itself. An assertion with no stated basis is not reviewable.
+        $job = ProvisioningJob::factory()->create(['status' => ProvisioningJobStatus::NeedsReview]);
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/provisioning/jobs/'.$job->id.'/adopt', ['provider_reference' => '4412'])
+            ->assertStatus(422);
+
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->refresh()->status);
+        $this->assertSame(0, AuditEntry::query()->count());
+    }
+
+    #[Test]
+    public function a_reference_another_job_already_claims_is_refused(): void
+    {
+        // Two jobs pointing at one machine means the next termination deletes a
+        // server somebody else is still paying for.
+        ProvisioningJob::factory()->create([
+            'status' => ProvisioningJobStatus::Succeeded,
+            'result' => ['provider_reference' => '4412'],
+        ]);
+
+        $job = ProvisioningJob::factory()->create(['status' => ProvisioningJobStatus::NeedsReview]);
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/provisioning/jobs/'.$job->id.'/adopt', [
+                'provider_reference' => '4412',
+                'evidence' => 'Looked at the hypervisor.',
+            ])
+            // 409, not 422: the operator sent nothing wrong. Somebody else's
+            // job already points at that machine.
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'provisioning.adoption_reference_claimed');
+
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->refresh()->status);
     }
 
     private function operator(Role $role = Role::SuperAdmin): User

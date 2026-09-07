@@ -988,6 +988,85 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/provisioning/jobs/{job}/adopt":
+    post:
+      operationId: "api_admin_provisioning_adopt"
+      tags:
+        - "Operator"
+      summary: "Adopt a resource the provider already built"
+      description: |-
+        The other half of never retrying a timeout: the platform stopped waiting, the provider may not have. The operator states the provider reference and the evidence they looked at, and both land in the audit trail. Refuses a running job, a settled one, and a reference another job already claims (409).
+
+        Requires the `provisioning.retry` permission.
+      parameters:
+        - name: "job"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                provider_reference:
+                  description: "See the endpoint description; validated server-side."
+                remote_job_id:
+                  description: "See the endpoint description; validated server-side."
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminAdoptedJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/provisioning/needs-review":
     get:
       operationId: "api_admin_provisioning_needs_review"
@@ -5032,6 +5111,27 @@ components:
       schema:
         type: "string"
   schemas:
+    AdminAdoptedJob:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+    AdminAdoptedJobResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminAdoptedJob"
     AdminCustomer:
       type: "object"
       additionalProperties: false

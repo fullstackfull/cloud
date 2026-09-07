@@ -65,6 +65,16 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::ProvisioningView->value)
         ->name('provisioning.needs_review');
 
+    /*
+     * Adoption: an operator telling the platform that a machine the provider
+     * already built belongs to a job that timed out. Behind provisioning.retry
+     * rather than provisioning.view, because it changes what the platform
+     * believes about the world on the strength of a person's word.
+     */
+    Route::post('provisioning/jobs/{job}/adopt', [ProvisioningController::class, 'adopt'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.adopt');
+
     Route::get('infrastructure/nodes', [InfrastructureController::class, 'nodes'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.nodes');

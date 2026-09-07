@@ -71,6 +71,21 @@ Schedule::command('provisioning:detect-stale')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
+/*
+ * Hourly, not every thirty minutes like the hypervisors.
+ *
+ * A BMC is slow — a full inventory read is seconds per machine, not
+ * milliseconds — and the facts it reports change on the timescale of somebody
+ * physically opening a chassis. Asking every controller in the fleet twice an
+ * hour would spend real time on every machine to learn nothing, and the
+ * controllers themselves are not built for it.
+ */
+Schedule::command('dedicated:sync-inventory')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
 Schedule::command('backups:reconcile')
     ->everyFiveMinutes()
     ->withoutOverlapping(10)
