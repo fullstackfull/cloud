@@ -6,6 +6,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { LocaleSwitcher } from '@/components/LocaleSwitcher'
 import { useCurrentUser, useLogout } from '@/features/auth/useAuth'
+import { useIsOperator } from '@/features/admin/useIsOperator'
 import { cn } from '@/lib/cn'
 
 interface NavItem {
@@ -47,11 +48,26 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/security', labelKey: 'nav.security' },
 ]
 
+/**
+ * Shown only to a login that holds at least one operator permission.
+ *
+ * Hiding it is a courtesy, not a control: the endpoints behind these screens
+ * each check their own permission, and a customer who types the URL gets a 403
+ * from every request the page makes.
+ */
+const OPERATOR_NAV: NavItem[] = [
+  { to: '/admin/customers', labelKey: 'admin.nav.customers' },
+  { to: '/admin/provisioning', labelKey: 'admin.nav.provisioning' },
+  { to: '/admin/infrastructure', labelKey: 'admin.nav.infrastructure' },
+  { to: '/admin/payments', labelKey: 'admin.nav.payments' },
+]
+
 export function AppLayout() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { data: user } = useCurrentUser()
   const logout = useLogout()
+  const isOperator = useIsOperator()
   const [menuOpen, setMenuOpen] = useState(false)
 
   async function signOut() {
@@ -78,6 +94,18 @@ export function AppLayout() {
                 {SECONDARY_NAV.map((item) => (
                   <NavItemLink key={item.to} item={item} />
                 ))}
+
+                {isOperator ? (
+                  <>
+                    <hr className="my-1 border-[var(--border-subtle)]" />
+                    <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
+                      {t('admin.nav.section')}
+                    </p>
+                    {OPERATOR_NAV.map((item) => (
+                      <NavItemLink key={item.to} item={item} />
+                    ))}
+                  </>
+                ) : null}
               </div>
             </details>
           </nav>

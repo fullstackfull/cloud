@@ -89,6 +89,15 @@ export interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   locale?: string
+  /**
+   * Treat `path` as a full path from the origin rather than relative to
+   * `/api/v1`.
+   *
+   * The administrative surface sits under a different prefix, and giving it its
+   * own base rather than letting callers write `../admin/...` means a mistyped
+   * path cannot land an operator call on a customer endpoint or the reverse.
+   */
+  absolute?: boolean
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -119,7 +128,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   let response: Response
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
+    response = await fetch(options.absolute === true ? path : `${BASE_URL}${path}`, {
       method,
       headers,
       credentials: 'include',

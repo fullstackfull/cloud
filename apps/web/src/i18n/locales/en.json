@@ -344,5 +344,90 @@
     "empty": "No tokens.",
     "copyItNow": "Copy this token now",
     "shownOnce": "This is the only time it is shown. It cannot be retrieved again."
+  },
+  "admin": {
+    "nav": {
+      "section": "Operations",
+      "customers": "Customers",
+      "provisioning": "Provisioning",
+      "infrastructure": "Infrastructure",
+      "payments": "Payments"
+    },
+    "customers": {
+      "title": "Customers",
+      "subtitle": "Every account on the platform.",
+      "name": "Account",
+      "status": "Status",
+      "currency": "Currency",
+      "search": "Search",
+      "searchHint": "Name, billing address, or account id.",
+      "empty": "No accounts match.",
+      "suspend": "Suspend",
+      "reactivate": "Reactivate",
+      "suspendTitle": "Suspend {{name}}",
+      "reactivateTitle": "Reactivate {{name}}",
+      "suspendExplains": "Suspension stops the account buying anything more. It does not stop a running service — that is a separate, deliberate act.",
+      "reason": "Reason"
+    },
+    "provisioning": {
+      "title": "Provisioning queue",
+      "subtitle": "What the platform is building, and what it could not.",
+      "kind": "Job",
+      "status": "Status",
+      "attempts": "Attempts",
+      "failure": "Failure",
+      "created": "Created",
+      "empty": "Nothing in the queue.",
+      "needsReviewTitle_other": "{{count}} jobs need a human",
+      "needsReviewBody": "A timed-out job is never retried automatically: the platform stopped waiting, which is not the same as the provider having stopped. Each of these needs a decision.",
+      "failureClass": {
+        "transient": "Transient",
+        "permanent": "Permanent",
+        "timeout": "Timed out",
+        "capacity": "No capacity"
+      },
+      "kinds": {
+        "create_vps": "Create VPS",
+        "destroy_vps": "Destroy VPS",
+        "create_hosting_account": "Create hosting account",
+        "provision_dedicated": "Provision dedicated"
+      },
+      "needsReviewTitle_one": "{{count}} job needs a human"
+    },
+    "infrastructure": {
+      "title": "Infrastructure",
+      "subtitle": "Capacity as the scheduler sees it, not as the hardware advertises it.",
+      "node": "Node",
+      "status": "Status",
+      "cpu": "CPU",
+      "memory": "Memory",
+      "machines": "Machines",
+      "panel": "Panel",
+      "accounts": "Accounts",
+      "unhealthy": "Unhealthy",
+      "unlicensed": "Unlicensed",
+      "computeNodes": "Compute nodes",
+      "hostingNodes": "Hosting nodes",
+      "noNodes": "No compute nodes declared.",
+      "noHostingNodes": "No hosting nodes declared."
+    },
+    "payments": {
+      "title": "Payments",
+      "subtitle": "Every transaction, and refunds.",
+      "transaction": "Transaction",
+      "kind": "Kind",
+      "status": "Status",
+      "amount": "Amount",
+      "when": "Processed",
+      "empty": "No transactions.",
+      "refund": "Refund",
+      "refundTitle": "Issue a refund",
+      "refundSubtitle": "Amount in the minor unit of {{currency}}.",
+      "amountMinor": "Amount ({{currency}} minor units)",
+      "amountHint": "At most {{max}}.",
+      "reason": "Reason",
+      "issueRefund": "Issue refund",
+      "refundIsRecorded": "The refund records who issued it. The platform refuses to refund more than was captured, however many operators press this at once."
+    }
   }
 }

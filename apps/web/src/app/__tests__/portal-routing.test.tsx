@@ -197,6 +197,63 @@ describe('portal routing', () => {
     expect(screen.getAllByText(/KWD/).length).toBeGreaterThanOrEqual(2)
   })
 
+  it('keeps a customer out of the operator area', async () => {
+    vi.stubGlobal('fetch', stubFetch(SIGNED_IN))
+    visit('/admin/customers')
+
+    render(<App />)
+
+    // Redirected to the dashboard rather than shown an empty operator shell.
+    // The API would refuse every request the page made anyway; this is what
+    // stops a customer being shown a screen that only produces 403s.
+    expect(
+      await screen.findByRole('heading', { name: /welcome, sample customer/i }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^customers$/i })).not.toBeInTheDocument()
+  })
+
+  it('lets an operator into the operator area', async () => {
+    const operator = structuredClone(SIGNED_IN)
+    const me = operator['/me']?.body as { data: { permissions: string[]; name: string } }
+    me.data.permissions = ['customer.view_any', 'customer.suspend']
+    me.data.name = 'Platform Administrator'
+
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        ...operator,
+        '/api/admin/customers': {
+          status: 200,
+          body: {
+            data: [
+              {
+                id: '01JCUSTOMER',
+                type: 'individual',
+                status: 'active',
+                display_name: 'Sample Customer',
+                legal_name: null,
+                billing_email: 'customer@lynomia.test',
+                currency: 'KWD',
+                country: 'KW',
+                created_at: null,
+              },
+            ],
+            meta: { page: 1, per_page: 25, total: 1, last_page: 1, max_per_page: 100 },
+          },
+        },
+      }),
+    )
+    visit('/admin/customers')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: /^customers$/i })).toBeInTheDocument()
+
+    // Awaited separately: the heading renders immediately and the table is
+    // still showing its loading state at that point.
+    expect(await screen.findByText('customer@lynomia.test')).toBeInTheDocument()
+  })
+
   it('renders a not-found page for an address the portal does not serve', async () => {
     vi.stubGlobal('fetch', stubFetch(SIGNED_IN))
     visit('/vps/01JEXAMPLE')

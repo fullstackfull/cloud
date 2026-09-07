@@ -16,7 +16,8 @@ The customer-facing single-page application in `apps/web`.
 | Services, VPS with power control, dedicated servers, hosting accounts, IP addresses with reverse DNS | built |
 | API tokens | built |
 | VPS reinstall and console, hosting usage detail, invoice documents | **not built** — the endpoints exist for some of these; the screens do not |
-| Administrative interface | **not built** |
+| Operator area: customers with suspend, provisioning queue, infrastructure capacity, payments with refund | built |
+| Operator: catalogue editing, IPAM management, audit log | **not built** — inventory and pricing are declared in the repository and applied by Ansible, not typed into a form; there is no audit table yet |
 
 The navigation lists only what is reachable. A link to a page that does not
 exist tells a customer the platform can do something it cannot, and they will
@@ -32,6 +33,13 @@ src/
   i18n/         catalogues, locale detection, direction
   lib/          the API client, formatting, error translation
 ```
+
+The operator area is under `features/admin/` and calls `/api/admin` through its
+own client in `lib/adminQueries.ts` rather than the customer one. Separate bases
+mean a mistyped path cannot land an operator call on a customer endpoint or the
+reverse. Hiding the navigation is a courtesy, not a control: every
+administrative endpoint checks its own permission server-side, and a customer
+who types the URL is redirected and would have been refused by the API anyway.
 
 A feature owns its data access. `features/account/useProfile.ts` is where the
 profile and session endpoints live, and nothing outside that directory calls

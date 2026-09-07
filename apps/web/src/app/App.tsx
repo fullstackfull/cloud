@@ -4,6 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { DashboardPage } from '@/features/account/DashboardPage'
+import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
+import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePage'
+import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
+import { AdminProvisioningPage } from '@/features/admin/AdminProvisioningPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
 import { CataloguePage } from '@/features/catalog/CataloguePage'
@@ -29,7 +33,7 @@ import { ApiError } from '@/lib/api'
 import { AppLayout } from './AppLayout'
 import { NotFoundPage } from './NotFoundPage'
 import { PublicLayout } from './PublicLayout'
-import { RequireAuth, RequireGuest } from './guards'
+import { RequireAuth, RequireGuest, RequireOperator } from './guards'
 
 function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -93,6 +97,19 @@ export function App() {
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />
                 <Route path="/api-tokens" element={<ApiTokensPage />} />
+
+                {/*
+                  The operator area. Gated for presentation by RequireOperator
+                  and enforced server-side by a permission on every endpoint —
+                  a customer who types the URL sees an empty shell and gets a
+                  403 from every request it makes.
+                */}
+                <Route element={<RequireOperator />}>
+                  <Route path="/admin/customers" element={<AdminCustomersPage />} />
+                  <Route path="/admin/provisioning" element={<AdminProvisioningPage />} />
+                  <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
+                  <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+                </Route>
               </Route>
             </Route>
 

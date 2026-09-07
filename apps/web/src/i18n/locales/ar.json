@@ -348,5 +348,94 @@
     "empty": "لا مفاتيح.",
     "copyItNow": "انسخ هذا المفتاح الآن",
     "shownOnce": "هذه المرة الوحيدة التي يُعرَض فيها. لا يمكن استرجاعه لاحقاً."
+  },
+  "admin": {
+    "nav": {
+      "section": "العمليات",
+      "customers": "العملاء",
+      "provisioning": "التجهيز",
+      "infrastructure": "البنية التحتية",
+      "payments": "المدفوعات"
+    },
+    "customers": {
+      "title": "العملاء",
+      "subtitle": "كل حساب على المنصّة.",
+      "name": "الحساب",
+      "status": "الحالة",
+      "currency": "العملة",
+      "search": "بحث",
+      "searchHint": "الاسم أو بريد الفوترة أو معرّف الحساب.",
+      "empty": "لا حسابات مطابقة.",
+      "suspend": "تعليق",
+      "reactivate": "إعادة التفعيل",
+      "suspendTitle": "تعليق {{name}}",
+      "reactivateTitle": "إعادة تفعيل {{name}}",
+      "suspendExplains": "التعليق يمنع الحساب من شراء المزيد. لا يوقف خدمة تعمل — ذلك فعل منفصل ومقصود.",
+      "reason": "السبب"
+    },
+    "provisioning": {
+      "title": "طابور التجهيز",
+      "subtitle": "ما تبنيه المنصّة، وما تعذّر عليها.",
+      "kind": "المهمّة",
+      "status": "الحالة",
+      "attempts": "المحاولات",
+      "failure": "الإخفاق",
+      "created": "الإنشاء",
+      "empty": "لا شيء في الطابور.",
+      "needsReviewTitle_two": "مهمّتان تحتاجان تدخّلاً بشرياً",
+      "needsReviewTitle_few": "{{count}} مهام تحتاج تدخّلاً بشرياً",
+      "needsReviewTitle_many": "{{count}} مهمّة تحتاج تدخّلاً بشرياً",
+      "needsReviewTitle_other": "{{count}} مهمّة تحتاج تدخّلاً بشرياً",
+      "needsReviewTitle_zero": "لا مهام تحتاج تدخّلاً",
+      "needsReviewBody": "المهمّة التي انتهت مهلتها لا تُعاد تلقائياً أبداً: المنصّة توقّفت عن الانتظار، وهذا ليس كتوقّف المزوّد. كل واحدة منها تحتاج قراراً.",
+      "failureClass": {
+        "transient": "عابر",
+        "permanent": "دائم",
+        "timeout": "انتهت المهلة",
+        "capacity": "لا سعة"
+      },
+      "kinds": {
+        "create_vps": "إنشاء خادم افتراضي",
+        "destroy_vps": "حذف خادم افتراضي",
+        "create_hosting_account": "إنشاء حساب استضافة",
+        "provision_dedicated": "تجهيز خادم مخصّص"
+      },
+      "needsReviewTitle_one": "مهمّة واحدة تحتاج تدخّلاً بشرياً"
+    },
+    "infrastructure": {
+      "title": "البنية التحتية",
+      "subtitle": "السعة كما يراها المجدول، لا كما يعلنها العتاد.",
+      "node": "العقدة",
+      "status": "الحالة",
+      "cpu": "المعالج",
+      "memory": "الذاكرة",
+      "machines": "الأجهزة",
+      "panel": "اللوحة",
+      "accounts": "الحسابات",
+      "unhealthy": "غير سليمة",
+      "unlicensed": "بلا ترخيص",
+      "computeNodes": "عقد الحوسبة",
+      "hostingNodes": "عقد الاستضافة",
+      "noNodes": "لا عقد حوسبة مُعلَنة.",
+      "noHostingNodes": "لا عقد استضافة مُعلَنة."
+    },
+    "payments": {
+      "title": "المدفوعات",
+      "subtitle": "كل معاملة، والاستردادات.",
+      "transaction": "المعاملة",
+      "kind": "النوع",
+      "status": "الحالة",
+      "amount": "المبلغ",
+      "when": "وقت المعالجة",
+      "empty": "لا معاملات.",
+      "refund": "استرداد",
+      "refundTitle": "إصدار استرداد",
+      "refundSubtitle": "المبلغ بالوحدة الصغرى لـ{{currency}}.",
+      "amountMinor": "المبلغ (وحدات {{currency}} الصغرى)",
+      "amountHint": "بحد أقصى {{max}}.",
+      "reason": "السبب",
+      "issueRefund": "إصدار الاسترداد",
+      "refundIsRecorded": "يُسجَّل الاسترداد باسم من أصدره. وترفض المنصّة استرداد أكثر مما حُصِّل، مهما ضغط عدّة مشغّلين معاً."
+    }
   }
 }
