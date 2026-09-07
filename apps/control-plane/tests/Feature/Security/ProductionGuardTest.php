@@ -83,7 +83,7 @@ final class ProductionGuardTest extends TestCase
             'compute' => 'proxmox',
             'dedicated' => 'redfish',
             'hosting' => 'cpanel',
-            'backup' => 'pbs',
+            'backup' => 'proxmox',
         ]);
 
         $this->guard()->assertNoFakeProviders();
@@ -169,7 +169,11 @@ final class ProductionGuardTest extends TestCase
             'compute' => 'proxmox',
             'dedicated' => 'redfish',
             'hosting' => 'cpanel',
-            'backup' => 'pbs',
+            // `pbs` used to stand here as a plausible-looking value for a
+            // driver that did not exist. It does now, and it is called
+            // proxmox — the hypervisor is what the platform asks, and PBS is
+            // where the archive lands.
+            'backup' => 'proxmox',
         ]);
 
         $this->guard()->assertEveryConfiguredDriverExists();

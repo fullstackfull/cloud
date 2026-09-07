@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
@@ -76,11 +77,11 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
      * sets a PTR. A guard that only catches the fake catches the case an
      * operator was already worried about and misses the one they were not.
      *
-     * Only the two families whose driver actually comes from configuration are
-     * checked. Compute, dedicated and hosting resolve per row — from the
-     * cluster's driver, the endpoint's protocol and the node's panel — so a
-     * config value for those names nothing, and the control that matters for
-     * them is the row-level refusal in each factory.
+     * Only the families whose driver actually comes from configuration are
+     * checked: payment, dns and now backup. Compute, dedicated and hosting
+     * resolve per row — from the cluster's driver, the endpoint's protocol and
+     * the node's panel — so a config value for those names nothing, and the
+     * control that matters for them is the row-level refusal in each factory.
      *
      * @throws RuntimeException
      */
@@ -102,6 +103,12 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
          * actually rely on: a driver present in one and missing from the other
          * boots fine and then fails on whichever half was not there.
          */
+        $this->assertDriverExists(
+            'backup',
+            $providers['backup'] ?? null,
+            BackupProviderFactory::drivers(),
+        );
+
         $this->assertDriverExists(
             'dns',
             $providers['dns'] ?? null,

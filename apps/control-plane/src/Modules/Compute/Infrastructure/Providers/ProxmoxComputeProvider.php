@@ -649,23 +649,10 @@ final class ProxmoxComputeProvider implements ComputeProvider
 
     private function request(): PendingRequest
     {
-        return Http::baseUrl($this->connection->baseUrl())
-            ->withHeaders(['Authorization' => $this->connection->authorizationHeader()])
-            // Explicit rather than left to the client default, so that a
-            // future change to that default cannot silently disable
-            // certificate verification for every cluster at once.
-            //
-            // Redirects are refused as well: a Location header is chosen by
-            // the cluster, and following one would let a compromised node
-            // point any request this adapter makes — the worker sits on the
-            // management network — at a host of its choosing, re-posting the
-            // body on a 307 or 308.
-            ->withOptions(['verify' => $this->connection->verifyTls, 'allow_redirects' => false])
-            ->timeout($this->connection->timeoutSeconds)
-            ->acceptJson()
-            // Proxmox takes form-encoded parameters, not JSON, on every
-            // write endpoint.
-            ->asForm();
+        // The transport rules live on the connection, which is the object that
+        // holds the credential and is shared with the backup adapter. See
+        // ProxmoxConnection::request().
+        return $this->connection->request();
     }
 
     /**
@@ -801,13 +788,7 @@ final class ProxmoxComputeProvider implements ComputeProvider
      */
     private function scrub(string $message): string
     {
-        $withoutToken = str_replace(
-            [$this->connection->tokenSecret, $this->connection->authorizationHeader(), $this->connection->tokenId],
-            SecretRedactor::PLACEHOLDER,
-            $message,
-        );
-
-        return $this->redactor->redactString($withoutToken);
+        return $this->connection->scrub($message, $this->redactor);
     }
 
     private function toMib(mixed $bytes): int
