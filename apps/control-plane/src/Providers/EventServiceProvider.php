@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as BaseEventServiceProvider;
+use Lynomia\Modules\Billing\Application\Listeners\IssueInvoiceOnOrderPlaced;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnInvoicePaid;
+use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 
 /**
  * The commerce chain, wired explicitly rather than discovered.
  *
+ *     OrderPlaced     → issue the invoice
  *     PaymentCaptured → settle the invoice
  *     InvoicePaid     → mark the order paid, redeem the coupon, start subscriptions
  *
@@ -31,6 +34,9 @@ final class EventServiceProvider extends BaseEventServiceProvider
      * @var array<class-string, list<class-string>>
      */
     protected $listen = [
+        OrderPlaced::class => [
+            IssueInvoiceOnOrderPlaced::class,
+        ],
         PaymentCaptured::class => [
             SettleInvoiceOnPaymentCaptured::class,
         ],
