@@ -453,13 +453,17 @@ is below with the jobs that failed and what fixed them. None was re-run into
 green without a code change, and none is omitted.
 
 **Run 69 — [`34236854515`](https://github.com/fullstackfull/cloud/actions/runs/34236854515)**
-· commit `9b1b0a6`, the branch head this report describes · event `push` ·
+· commit `9b1b0a6`, **the last commit of code in this phase** · event `push` ·
 branch `claude/hv-t6hq1p` · started 2026-09-08T14:13:12Z · **conclusion:
 `success`** on all eight jobs.
 
 Run 67 (`5201a86`) was the same, green on all eight. Run 68 (`420b0fe`, the
-report itself) was **cancelled** — superseded by run 69's push before it
-finished, which is the runner's concurrency rule and not a failure.
+first draft of this document) was **cancelled** — superseded by run 69's push
+before it finished, which is the runner's concurrency rule and not a failure.
+
+Everything after `9b1b0a6` on this branch is this document. Their runs are
+recorded here as they land, and none of them can change what the gates said
+about the code, which is what run 69 measured.
 
 | Job | Conclusion | Covers |
 | --- | --- | --- |
