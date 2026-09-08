@@ -29,6 +29,7 @@ use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
  * @property string $customer_id
  * @property ?string $hosting_account_id
  * @property ?string $service_id
+ * @property ?string $order_id
  * @property string $domain
  * @property ?string $domain_id
  * @property WordPressDomainSource $domain_source

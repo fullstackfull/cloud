@@ -29,6 +29,13 @@ final class OrderWordPressSiteRequest extends FormRequest
     {
         return [
             'domain' => ['required', 'string', 'max:253'],
+
+            /*
+             * The hosting plan. Required and not defaulted: this is what the
+             * customer is agreeing to pay for every month, and a platform that
+             * picked one for them would be choosing their bill.
+             */
+            'plan_id' => ['required', 'string', 'ulid'],
             'domain_source' => ['required', Rule::enum(WordPressDomainSource::class)],
 
             /*

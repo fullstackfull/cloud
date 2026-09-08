@@ -8,6 +8,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
+use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
@@ -15,6 +19,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -30,12 +35,55 @@ final class OrderingAWordPressSiteTest extends TestCase
 
     private User $owner;
 
+    private Plan $plan;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
         $this->owner = $this->memberOf($this->customer, CustomerRole::Owner);
+        $this->plan = $this->hostingPlan();
+    }
+
+    /**
+     * A plan and the panel package that goes with it.
+     *
+     * Both, always. A plan without a package cannot be bought at all, and a
+     * fixture that made one without the other would let these tests pass over
+     * an order no customer could actually place.
+     */
+    private function hostingPlan(): Plan
+    {
+        $product = Product::factory()->create(['kind' => 'shared_hosting']);
+
+        $plan = Plan::factory()->create([
+            'product_id' => $product->getKey(),
+            'slug' => 'wordpress-'.uniqid(),
+            'resources' => [
+                'disk_quota_mib' => 10_240,
+                'bandwidth_quota_mib' => 512_000,
+                'max_addon_domains' => 10,
+                'max_databases' => 10,
+            ],
+        ]);
+
+        PlanPrice::factory()->create([
+            'plan_id' => $plan->getKey(),
+            'currency' => 'KWD',
+            'billing_period' => BillingPeriod::Monthly,
+            'recurring_amount_minor' => 9_000,
+            'setup_amount_minor' => 0,
+        ]);
+
+        HostingPackage::factory()->create([
+            'plan_id' => $plan->getKey(),
+            'slug' => 'pkg-wordpress-'.uniqid(),
+            'panel_package_name' => 'lyn_wordpress',
+            'disk_quota_mib' => 10_240,
+        ]);
+
+        return $plan->fresh(['prices', 'product']) ?? $plan;
     }
 
     private function memberOf(Customer $customer, CustomerRole $role): User
@@ -68,6 +116,7 @@ final class OrderingAWordPressSiteTest extends TestCase
         return [
             'domain' => 'mysite.test',
             'domain_source' => WordPressDomainSource::External->value,
+            'plan_id' => (string) $this->plan->getKey(),
             'admin_username' => 'sitemanager',
             'admin_email' => 'owner@mysite.test',
             ...$overrides,

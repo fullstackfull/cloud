@@ -20,6 +20,19 @@ return [
     |
     */
 
+    /*
+     * How long a name stays claimed for an order nobody paid for.
+     *
+     * A registration claims the name here before the invoice is paid, so two
+     * customers cannot buy it in the same minute. Without an expiry on that
+     * claim, one unpaid order holds a name against everybody for ever.
+     *
+     * Generous, because the failure it guards against is a customer whose bank
+     * took a day. Not indefinite, because the cost of that is a name nobody
+     * can ever buy.
+     */
+    'abandoned_order_days' => (int) env('DOMAINS_ABANDONED_ORDER_DAYS', 7),
+
     'quote_ttl_minutes' => (int) env('DOMAIN_QUOTE_TTL_MINUTES', 15),
 
     /*

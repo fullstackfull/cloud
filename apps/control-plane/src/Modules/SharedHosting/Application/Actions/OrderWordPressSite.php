@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
+use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
+use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
@@ -48,6 +52,10 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
  */
 final readonly class OrderWordPressSite
 {
+    public function __construct(
+        private PlaceOrder $orders,
+    ) {}
+
     /**
      * @throws WordPressRefusedException
      */
@@ -55,9 +63,11 @@ final readonly class OrderWordPressSite
         Customer $customer,
         string $domain,
         WordPressDomainSource $source,
+        string $planId,
         string $adminUsername,
         string $adminEmail,
         string $locale = 'en_US',
+        ?string $idempotencyKey = null,
     ): WordPressSite {
         $domain = strtolower(trim($domain, " \t\n\r\0\x0B."));
 
@@ -65,7 +75,7 @@ final readonly class OrderWordPressSite
             throw WordPressRefusedException::becauseTheDomainIsUnusable($domain);
         }
 
-        return DB::transaction(function () use ($customer, $domain, $source, $adminUsername, $adminEmail, $locale): WordPressSite {
+        return DB::transaction(function () use ($customer, $domain, $source, $planId, $adminUsername, $adminEmail, $locale, $idempotencyKey): WordPressSite {
             $taken = WordPressSite::query()
                 ->where('domain', $domain)
                 ->whereNotIn('state', [WordPressSiteState::Removed->value, WordPressSiteState::Failed->value])
@@ -93,8 +103,22 @@ final readonly class OrderWordPressSite
                 throw WordPressRefusedException::becauseTheDomainIsNotHeldHere($domain);
             }
 
+            /*
+             * The order goes through the platform's one checkout, with the
+             * plan the customer chose. A WordPress order that built hosting by
+             * a side path would be a second provisioning engine and a second
+             * set of rules about money — and the hosting this sells is the
+             * hosting this platform already sells.
+             */
+            $order = $this->orders->execute($customer, new CheckoutRequest(
+                lines: [new CheckoutLine(planId: $planId)],
+                billingPeriod: BillingPeriod::Monthly,
+                idempotencyKey: $idempotencyKey ?? 'wordpress-'.$domain.'-'.$customer->getKey(),
+            ));
+
             return WordPressSite::query()->create([
                 'customer_id' => $customer->getKey(),
+                'order_id' => $order->getKey(),
                 'domain' => $domain,
                 'domain_id' => $held?->getKey(),
                 'domain_source' => $source,

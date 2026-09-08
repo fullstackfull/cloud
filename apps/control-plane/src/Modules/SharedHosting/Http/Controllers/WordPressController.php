@@ -72,6 +72,7 @@ final class WordPressController
                 $this->actingCustomer->get(),
                 (string) $request->validated('domain'),
                 WordPressDomainSource::from((string) $request->validated('domain_source')),
+                (string) $request->validated('plan_id'),
                 (string) $request->validated('admin_username'),
                 (string) $request->validated('admin_email'),
                 (string) $request->validated('locale', 'en_US'),

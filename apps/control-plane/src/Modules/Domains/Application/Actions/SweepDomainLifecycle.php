@@ -6,10 +6,12 @@ namespace Lynomia\Modules\Domains\Application\Actions;
 
 use Carbon\CarbonImmutable;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
+use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Domain\Exceptions\DomainRefusedException;
 use Lynomia\Modules\Domains\Domain\ValueObjects\RegistrableDomain;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
@@ -64,7 +66,7 @@ final readonly class SweepDomainLifecycle
     ) {}
 
     /**
-     * @return array{renewals_ordered: int, warned: int, expired: int, redemption: int, deleted: int, skipped: int}
+     * @return array{renewals_ordered: int, warned: int, abandoned: int, expired: int, redemption: int, deleted: int, skipped: int}
      */
     public function execute(?CarbonImmutable $now = null): array
     {
@@ -73,8 +75,89 @@ final readonly class SweepDomainLifecycle
         return [
             'renewals_ordered' => $this->orderAutomaticRenewals($now),
             'warned' => $this->warnAboutExpiry($now),
+            'abandoned' => $this->releaseAbandonedOrders($now),
             ...$this->advanceStates($now),
         ];
+    }
+
+    /**
+     * Give up names that were claimed and never paid for.
+     *
+     * ---------------------------------------------------------------------
+     * Why this has to exist
+     * ---------------------------------------------------------------------
+     *
+     * A registration claims the name inside this platform before the invoice
+     * is paid, so that two customers cannot buy it in the same minute. That
+     * claim has no expiry of its own — and without one, a customer who orders
+     * a name and never pays holds it against everybody else for ever, this
+     * platform included.
+     *
+     * The window is generous, because the failure it guards against is a
+     * customer whose bank took a day. It is not indefinite, because the cost
+     * of that is a name nobody can buy.
+     *
+     * Only `registration_pending` and `transfer_pending` are released, and
+     * only when no payment arrived: a name in any other state either belongs
+     * to somebody or is a question for a person.
+     */
+    private function releaseAbandonedOrders(CarbonImmutable $now): int
+    {
+        $days = max(1, (int) config('domains.abandoned_order_days', 7));
+        $cutoff = $now->subDays($days);
+
+        $abandoned = Domain::query()
+            ->whereIn('state', [
+                DomainState::RegistrationPending->value,
+                DomainState::TransferPending->value,
+            ])
+            ->where('created_at', '<=', $cutoff)
+            ->limit(200)
+            ->get();
+
+        $released = 0;
+
+        foreach ($abandoned as $domain) {
+            $stillWanted = DomainOperation::query()
+                ->where('domain_id', $domain->getKey())
+                ->whereNotIn('state', [
+                    DomainOperationState::Requested->value,
+                    DomainOperationState::Failed->value,
+                ])
+                ->exists();
+
+            if ($stillWanted) {
+                /*
+                 * Somebody paid, or the platform is mid-attempt. Neither is
+                 * abandoned, and releasing the name under a registration that
+                 * is running is how a customer pays for a name the platform
+                 * has just given away.
+                 */
+                continue;
+            }
+
+            $domain->forceFill([
+                'state' => DomainState::Failed,
+                'review_reason' => sprintf(
+                    'The order for this name was never paid for; the claim was released after %d days.',
+                    $days,
+                ),
+            ])->save();
+
+            DomainOperation::query()
+                ->where('domain_id', $domain->getKey())
+                ->where('state', DomainOperationState::Requested->value)
+                ->update([
+                    'state' => DomainOperationState::Failed->value,
+                    'failure_code' => 'domain.order_abandoned',
+                    'failure_message' => 'The invoice for this order was never paid.',
+                    'updated_at' => $now,
+                ]);
+
+            $released++;
+        }
+
+        return $released;
     }
 
     /**
