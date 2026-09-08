@@ -2,8 +2,8 @@
 
 What this phase set out to do: find every place where Lynomia Cloud describes a
 capability it cannot complete, and close it. Eight were named. All eight are
-closed, and closing them found four defects nobody had reported and thirty-six
-strings a customer had been reading in the wrong language.
+closed, and closing them found four defects nobody had reported and forty-six
+states a customer had been reading as raw enum values, in both languages.
 
 Every number here was produced by running the gate named, on the commit named,
 in this session. Nothing is inherited and nothing is estimated.
@@ -381,15 +381,17 @@ same finding in Arabic rather than as `missing_at_provider`.
 translation at all, so `orphan_at_provider` reached an operator's screen as its
 enum value; the drift table showed which provider disagreed but never which
 resource; and seven of the eleven provisioning job kinds were the same. Pulling
-that thread found thirty-four more: `StatusBadge` is one component on seventeen
+that thread found thirty-six more: `StatusBadge` is one component on seventeen
 screens looking up one flat namespace, and its fallback turns a missing string
 into snake case rather than an error — so every DNS state this phase added,
 every backup state past `succeeded`, every dedicated reinstall step, both
 invoice endings and every node state had been shipping untranslated, in Arabic
-too. All are written now, in both languages, and
+too. All forty-six are written now, in both languages, and three translations
+naming drift kinds that no enum has had since some earlier rename were deleted.
 `EveryStateAScreenShowsIsTranslatedTest` binds each portal namespace to the
-enums that reach it, so the next added case fails a test rather than a
-customer's screen.
+enums that reach it — in both directions, so the next added case fails a test
+rather than a customer's screen, and the next renamed one does not leave a
+string behind.
 
 ## T. Clean room
 
@@ -553,7 +555,7 @@ capability that cannot complete: the platform's half is written, wired, guarded
 and tested against a fake that refuses the way a real one would.
 
 The screens are the part that had genuinely stopped short, and this phase found
-it: a drift finding an operator could not read, and thirty-six states rendering
+it: a drift finding an operator could not read, and forty-six states rendering
 as raw enum values on a portal that ships in two languages. Both are closed and
 both now have a gate.
 

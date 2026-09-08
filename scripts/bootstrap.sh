@@ -55,8 +55,17 @@ log "Preparing environment files"
 log "Installing PHP dependencies"
 (cd "$CP" && composer install --no-interaction --prefer-dist)
 
-log "Generating application key"
+log "Generating application keys"
 (cd "$CP" && grep -q '^APP_KEY=base64:' .env || php artisan key:generate)
+
+# And one for the test environment, which is a separate file with a separate
+# empty key. Without it `make test` on a fresh clone dies part-way through with
+# MissingAppKeyException on every test that touches an encrypted value or a
+# session — hundreds of failures whose cause is one blank line in a file the
+# developer has never opened. Found by running a clean-room clone through the
+# documented path and reading what it left behind; CI has always generated this
+# key, which is exactly why nobody noticed the bootstrap did not.
+(cd "$CP" && grep -q '^APP_KEY=base64:' .env.testing || php artisan key:generate --env=testing)
 
 log "Installing JavaScript dependencies"
 (cd "$ROOT" && npm install)
