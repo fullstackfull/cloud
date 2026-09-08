@@ -61,6 +61,15 @@ final class NoDeadMethodsTest extends TestCase
      */
     private const array LAYERS = [
         'Actions', 'Services', 'Handlers', 'Listeners', 'Jobs', 'StateMachines', 'Registries',
+        /*
+         * Provider adapters were added after this gate found nothing and the
+         * product still had a hole in it: `changePackage` was implemented in
+         * both control panel adapters, tested against recorded HTTP exchanges,
+         * and called by nothing, so an upgraded hosting customer kept their
+         * old quota for ever. An adapter method with no caller is a provider
+         * capability the platform advertises to itself and does not have.
+         */
+        'Providers',
     ];
 
     /**
@@ -74,6 +83,13 @@ final class NoDeadMethodsTest extends TestCase
         'prepareForValidation', 'via', 'toMail', 'failed', 'backoff', 'retryUntil', 'uniqueId',
         'middleware', 'tags', 'newFactory', 'getMorphClass', 'resolve', 'answers', 'protocol',
         'definition', 'run', 'up', 'down',
+        // An adapter's statement of which vendor it speaks for, read by the
+        // factory that built it. The same shape as name() and kind().
+        'panel',
+        // A framework hook the service provider's parent calls. Overriding it
+        // to return false is how event discovery is switched off, and the
+        // override having no caller in this codebase is the point of it.
+        'shouldDiscoverEvents',
     ];
 
     /**
@@ -88,18 +104,86 @@ final class NoDeadMethodsTest extends TestCase
      */
     private const array RESERVED = [
         /*
-         * Releasing an address back to its pool, with the quarantine period
-         * that stops the next customer inheriting somebody else's blocklist
-         * entries and abuse reports.
+         * ------------------------------------------------------------------
+         * Provider contract methods with no production caller
+         * ------------------------------------------------------------------
          *
-         * Its caller would be service termination, and the platform does not
-         * terminate services: a customer can cancel a subscription, billing
-         * stops, and the service and its addresses stay exactly where they
-         * are. That is reported as a product gap rather than fixed here —
-         * automated termination destroys customer data and belongs in a phase
-         * that can prove it end to end.
+         * Each is one half of a capability the platform does not offer yet,
+         * and each is listed with the half that is missing rather than
+         * deleted: a provider contract is a description of what a vendor can
+         * do, and removing the description does not remove the gap — it hides
+         * that the gap has a shape. What is not allowed is an entry that says
+         * "later".
+         *
+         * Fakes are not listed. Their extra surface is test scaffolding, and
+         * their contract methods are covered by the real adapters' entries
+         * below.
          */
-        'IpAllocator::releaseAssignment' => 'service termination is not automated',
+
+        // Forward DNS. The platform manages reverse records for the addresses
+        // it hands out and does not sell DNS hosting, so nothing creates,
+        // lists or looks up a zone.
+        'CloudflareDnsProvider::canCreateZones' => 'forward DNS zones are not a product the platform sells',
+        'CloudflareDnsProvider::createZone' => 'forward DNS zones are not a product the platform sells',
+        'CloudflareDnsProvider::zoneFor' => 'forward DNS zones are not a product the platform sells',
+        'CloudflareDnsProvider::zones' => 'forward DNS zones are not a product the platform sells',
+
+        // Resetting a hosting account's password. There is no customer path
+        // and no operator path: a customer reaches their panel through
+        // single sign-on, so the password is never theirs to change.
+        'CpanelHostingProvider::changePassword' => 'no password-reset path; customers reach the panel through SSO',
+        'DirectAdminHostingProvider::changePassword' => 'no password-reset path; customers reach the panel through SSO',
+
+        /*
+         * Listing what a panel actually has. Its caller would be a hosting
+         * reconciler — the shared-hosting equivalent of the compute drift
+         * pass — which does not exist: an account created outside the
+         * platform, or deleted at the panel, is invisible to it.
+         */
+        'CpanelHostingProvider::listAccounts' => 'there is no hosting reconciler; panel-side drift is not detected',
+        'DirectAdminHostingProvider::listAccounts' => 'there is no hosting reconciler; panel-side drift is not detected',
+
+        /*
+         * Asking a hypervisor how a task it accepted is getting on.
+         *
+         * Handlers wait inside the adapter and verify by reading the resource
+         * back, and the task id is recorded for an operator rather than
+         * polled. Asynchronous completion tracking — a job that returns to the
+         * queue to check on a long-running provider task — is not built.
+         */
+        'ProxmoxComputeProvider::getTask' => 'provider tasks are recorded for an operator, never polled',
+
+        // A hard reset of a virtual machine. The customer API offers stop,
+        // shutdown, reboot and start; a reset that discards whatever the guest
+        // had not flushed is not one of them.
+        'ProxmoxComputeProvider::resetVm' => 'the customer API deliberately offers no hard reset for a VPS',
+
+        /*
+         * Cutting a physical machine's power at the rail, and reading its boot
+         * order. The power action deliberately sends an ACPI shutdown instead
+         * — the hard cut costs a customer whatever the host had not flushed —
+         * and the boot order is read only as part of arming an install, which
+         * the reinstall handler does through authorisation rather than by
+         * inspection.
+         */
+        'IpmiDedicatedProvider::powerOff' => 'the customer API sends an ACPI shutdown; the hard cut is an operator decision',
+        'RedfishDedicatedProvider::powerOff' => 'the customer API sends an ACPI shutdown; the hard cut is an operator decision',
+        'IpmiDedicatedProvider::bootOrder' => 'boot order is set for an install and never read back',
+        'RedfishDedicatedProvider::bootOrder' => 'boot order is set for an install and never read back',
+
+        /*
+         * Backup retention and verification.
+         *
+         * Backups are taken, tracked and restored from. Nothing prunes an
+         * expired archive at the provider and nothing asks the provider to
+         * verify one — the `verified` column is written by the reconciler from
+         * what the provider reports, not by a verification this platform
+         * starts.
+         */
+        'ProxmoxBackupProvider::deleteBackup' => 'expired archives are not pruned at the provider',
+        'ProxmoxBackupProvider::listBackups' => 'there is no backup reconciler that lists what the provider holds',
+        'ProxmoxBackupProvider::startVerification' => 'the platform does not start verifications; it records what it is told',
+        'ProxmoxBackupProvider::supportsVerification' => 'the platform does not start verifications; it records what it is told',
 
         /*
          * Taking money out of a wallet.
@@ -141,6 +225,17 @@ final class NoDeadMethodsTest extends TestCase
                 continue;
             }
 
+            /*
+             * A fake adapter's extra surface is test scaffolding — a way for a
+             * test to arrange a refusal or observe what was asked — and
+             * demanding a production caller for it would be demanding that
+             * production code use the fakes. The contract methods a fake
+             * implements are covered by the real adapters beside it.
+             */
+            if (str_contains($file, '/Fake')) {
+                continue;
+            }
+
             $code = self::stripComments((string) file_get_contents($file));
 
             if (! preg_match('/\b(?:final\s+)?(?:readonly\s+)?class\s+(\w+)/', $code, $matches)) {
@@ -177,6 +272,37 @@ final class NoDeadMethodsTest extends TestCase
             .'capability and is not one — wire it up, delete it, or add it to RESERVED with the product gap it '
             ."represents:\n  %s",
             implode("\n  ", $dead),
+        ));
+    }
+
+    #[Test]
+    public function no_reserved_method_has_quietly_acquired_a_caller(): void
+    {
+        /*
+         * The other way this list rots. An entry describes a product gap; when
+         * somebody closes the gap the entry becomes a lie that hides the next
+         * finding, and nothing else would notice — the method now has a caller,
+         * so the main assertion skips it either way.
+         */
+        $haystacks = [];
+
+        foreach (self::filesIn(['src', 'app', 'routes', 'config', 'database/seeders']) as $file) {
+            $haystacks[$file] = self::stripComments((string) file_get_contents($file));
+        }
+
+        $live = [];
+
+        foreach (array_keys(self::RESERVED) as $key) {
+            [, $method] = explode('::', $key, 2);
+
+            if (self::isCalled($method, $haystacks)) {
+                $live[] = $key;
+            }
+        }
+
+        $this->assertSame([], $live, sprintf(
+            "These methods are excused as unreachable and something now calls them:\n  %s",
+            implode("\n  ", $live),
         ));
     }
 

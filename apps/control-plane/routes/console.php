@@ -75,6 +75,22 @@ Schedule::command('infrastructure:reconcile')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * The hosting fleet's own check-up.
+ *
+ * Every twelve hours by default, from the licence recheck interval: the
+ * expensive part is the vendor's licence server, and disk and load move slowly
+ * enough on a shared node that reading them twice a day is the right trade.
+ * Until this existed the scheduler placed accounts using a snapshot of the
+ * fleet taken by hand at seed time — including whether each panel was still
+ * licensed.
+ */
+Schedule::command('hosting:sync-nodes')
+    ->cron(sprintf('17 */%d * * *', max(1, (int) config('hosting.licence.recheck_hours', 12))))
+    ->withoutOverlapping(30)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * More often than reconciliation, because a stuck provisioning job is a
  * customer waiting for a machine while nothing at all is happening.
  */
