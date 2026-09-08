@@ -57,7 +57,19 @@ export function HostingPage() {
     {
       key: 'package',
       header: t('hosting.package'),
-      cell: (account) => account.package ?? '—',
+      cell: (account) =>
+        account.package === null ? (
+          '—'
+        ) : (
+          <div>
+            <p className="technical text-sm text-[var(--text-primary)]">{account.package.slug}</p>
+            {account.package.disk_quota_mib === null ? null : (
+              <p className="text-xs text-[var(--text-muted)]">
+                {t('hosting.diskQuota', { gib: Math.round(account.package.disk_quota_mib / 1024) })}
+              </p>
+            )}
+          </div>
+        ),
     },
     {
       key: 'actions',

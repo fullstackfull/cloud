@@ -161,6 +161,24 @@ test('the VPS list shows the machine and its address', async ({ page }) => {
   await page.goto('/vps')
 
   await expect(page.getByText(fixtures.vpsHostname)).toBeVisible()
+
+  // The address, which the test's name has always claimed and which nothing
+  // asserted: there was no assignment in the fixtures, so the column was empty
+  // and looked exactly like a working one.
+  await expect(machineRow(page).getByText(fixtures.vpsAddress)).toBeVisible()
+})
+
+test('the addresses screen shows the address the machine answers on', async ({ page }) => {
+  await page.goto('/ips')
+
+  await expect(page.getByText(fixtures.vpsAddress)).toBeVisible()
+})
+
+test('the hosting screen shows the account and what it is using', async ({ page }) => {
+  await page.goto('/hosting')
+
+  await expect(page.getByText(fixtures.hostingUsername)).toBeVisible()
+  await expect(page.getByText(/e2e-customer\.test/)).toBeVisible()
 })
 
 test('the backups screen shows both states the seeder writes', async ({ page }) => {

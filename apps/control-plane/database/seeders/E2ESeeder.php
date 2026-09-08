@@ -23,6 +23,12 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
@@ -37,6 +43,11 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
@@ -72,6 +83,12 @@ class E2ESeeder extends Seeder
 
     /** One that is settled, so the two states can be told apart on screen. */
     public const string PAID_INVOICE_NUMBER = 'INV-E2E-0002';
+
+    /** The address the machine answers on, asserted by name on two screens. */
+    public const string VPS_ADDRESS = '198.51.100.24';
+
+    /** The shared hosting account the hosting screens are proved against. */
+    public const string HOSTING_USERNAME = 'e2ehost';
 
     /** A machine whose service is suspended: every action on it must refuse. */
     public const string SUSPENDED_HOSTNAME = 'e2e-suspended-01';
@@ -109,6 +126,8 @@ class E2ESeeder extends Seeder
         $this->invoices($customer);
         $this->wallet($customer);
         $this->billingAdmin();
+        $this->address($customer);
+        $this->hostingAccount($customer);
         $this->servicesInTrouble($customer);
         $this->workNobodyCanSettle($customer);
 
@@ -291,6 +310,82 @@ class E2ESeeder extends Seeder
         );
 
         $user->syncRoles([Role::BillingAdmin->value]);
+    }
+
+    /**
+     * The machine's address, live and primary.
+     *
+     * Two screens read it — the VPS list and the addresses page — and neither
+     * had a fixture, so both were proved against an empty state that looked
+     * exactly like a working one.
+     */
+    private function address(Customer $customer): void
+    {
+        if (IpAssignment::query()->where('customer_id', $customer->getKey())->exists()) {
+            return;
+        }
+
+        $machine = VirtualMachine::query()->where('hostname', self::VPS_HOSTNAME)->firstOrFail();
+
+        $pool = IpPool::query()->firstOrFail();
+        $network = Network::query()->first() ?? Network::factory()->create(['bridge' => 'vmbr1']);
+
+        $subnet = Subnet::factory()->forBlock('198.51.100.16/28', gateway: '198.51.100.17')->create([
+            'ip_pool_id' => $pool->getKey(),
+            'network_id' => $network->getKey(),
+        ]);
+
+        $address = IpAddress::factory()->create([
+            'subnet_id' => $subnet->getKey(),
+            'address' => self::VPS_ADDRESS,
+            'status' => IpAddressStatus::Assigned,
+        ]);
+
+        IpAssignment::factory()->create([
+            'ip_address_id' => $address->getKey(),
+            'customer_id' => $customer->getKey(),
+            'service_id' => $machine->service_id,
+            'assignable_type' => VirtualMachine::class,
+            'assignable_id' => $machine->getKey(),
+            'is_primary' => true,
+            'assigned_at' => now(),
+            'released_at' => null,
+        ]);
+    }
+
+    /**
+     * One shared hosting account, on a node with a panel the platform can
+     * actually talk to.
+     */
+    private function hostingAccount(Customer $customer): void
+    {
+        if (HostingAccount::query()->where('username', self::HOSTING_USERNAME)->exists()) {
+            return;
+        }
+
+        $node = HostingNode::query()->where('panel', HostingPanel::Fake)->first()
+            ?? HostingNode::factory()->create(['panel' => HostingPanel::Fake]);
+
+        $package = HostingPackage::query()->first() ?? HostingPackage::factory()->create();
+
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'kind' => 'shared_hosting',
+            'label' => 'Shared Hosting — '.self::HOSTING_USERNAME,
+        ]);
+
+        HostingAccount::factory()->create([
+            'hosting_node_id' => $node->getKey(),
+            'hosting_package_id' => $package->getKey(),
+            'customer_id' => $customer->getKey(),
+            'service_id' => $service->getKey(),
+            'username' => self::HOSTING_USERNAME,
+            'primary_domain' => 'e2e-customer.test',
+            'status' => HostingAccountStatus::Active,
+            'disk_used_mib' => 2_048,
+            'bandwidth_used_mib' => 10_240,
+            'usage_synced_at' => now(),
+        ]);
     }
 
     /**

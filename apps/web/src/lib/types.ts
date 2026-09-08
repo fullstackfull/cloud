@@ -275,13 +275,32 @@ export interface DedicatedServer {
   } | null
 }
 
+/**
+ * What the platform sold this account, as the API sends it.
+ *
+ * An object, not a name. The portal declared it a string, so every account
+ * with a package behind it rendered an object as a React child and took the
+ * whole hosting table down — which nothing noticed, because no fixture in the
+ * browser suite had an account on it and the seeded catalogue had no packages
+ * at all.
+ */
+export interface HostingPackage {
+  slug: string
+  disk_quota_mib: number | null
+  bandwidth_quota_mib: number | null
+  max_addon_domains: number | null
+  max_subdomains: number | null
+  max_databases: number | null
+  max_email_accounts: number | null
+}
+
 export interface HostingAccount {
   id: string
   service_id: string | null
   username: string
   primary_domain: string | null
   status: string
-  package: string | null
+  package: HostingPackage | null
   disk_quota_mib: number | null
   bandwidth_quota_mib: number | null
 }

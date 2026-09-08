@@ -24,6 +24,8 @@ export const fixtures = {
   paidInvoice: 'INV-E2E-0002',
   suspendedHostname: 'e2e-suspended-01',
   reactivatingHostname: 'e2e-reactivating-01',
+  vpsAddress: '198.51.100.24',
+  hostingUsername: 'e2ehost',
 } as const
 
 /**

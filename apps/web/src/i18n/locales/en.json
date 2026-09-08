@@ -369,7 +369,8 @@
     "status": "Status",
     "package": "Package",
     "openPanel": "Open panel",
-    "empty": "No hosting accounts."
+    "empty": "No hosting accounts.",
+    "diskQuota": "{{gib}} GiB disk"
   },
   "ips": {
     "subtitle": "Addresses assigned to your services.",
