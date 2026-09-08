@@ -13,6 +13,7 @@ use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 
 /*
 |--------------------------------------------------------------------------
@@ -207,4 +208,64 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)
         ->name('audit.index');
+});
+
+/*
+|--------------------------------------------------------------------------
+| Support queue
+|--------------------------------------------------------------------------
+|
+| Three permissions, because they are three different powers. Reading the
+| queue is one thing; answering a customer is another; and changing what a
+| ticket *is* — its priority, who owns it, whether it counts as solved — is a
+| third. A first-line agent should be able to answer without being able to
+| quietly downgrade an urgent ticket nobody then looks at.
+|
+| Every route sits in the same authenticated group as the rest of this file
+| and names its permission, which the route test enforces.
+*/
+Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function (): void {
+    Route::get('support/tickets', [OperatorTicketController::class, 'index'])
+        ->middleware('permission:'.Permission::TicketViewAny->value)
+        ->name('support.tickets');
+
+    Route::get('support/tickets/{ticket}', [OperatorTicketController::class, 'show'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketViewAny->value)
+        ->name('support.ticket');
+
+    Route::get('support/attachments/{attachment}', [OperatorTicketController::class, 'download'])
+        ->whereUlid('attachment')
+        ->middleware('permission:'.Permission::TicketViewAny->value)
+        ->name('support.attachments.download');
+
+    Route::post('support/tickets/{ticket}/replies', [OperatorTicketController::class, 'reply'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketReply->value)
+        ->name('support.ticket_reply');
+
+    Route::put('support/tickets/{ticket}/assignee', [OperatorTicketController::class, 'assign'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketManage->value)
+        ->name('support.ticket_assign');
+
+    Route::put('support/tickets/{ticket}/priority', [OperatorTicketController::class, 'prioritise'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketManage->value)
+        ->name('support.ticket_priority');
+
+    Route::post('support/tickets/{ticket}/resolve', [OperatorTicketController::class, 'resolve'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketManage->value)
+        ->name('support.ticket_resolve');
+
+    Route::post('support/tickets/{ticket}/close', [OperatorTicketController::class, 'close'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketManage->value)
+        ->name('support.ticket_close');
+
+    Route::post('support/tickets/{ticket}/reopen', [OperatorTicketController::class, 'reopen'])
+        ->whereUlid('ticket')
+        ->middleware('permission:'.Permission::TicketManage->value)
+        ->name('support.ticket_reopen');
 });

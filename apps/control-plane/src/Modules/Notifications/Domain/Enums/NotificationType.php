@@ -57,6 +57,10 @@ enum NotificationType: string
     case RestoreFailed = 'service.restore_failed';
 
     // ------------------------------------------------------------- operational
+    case TicketOpened = 'service.ticket_opened';
+    case TicketReplied = 'service.ticket_replied';
+    case TicketResolved = 'service.ticket_resolved';
+    case TicketClosed = 'service.ticket_closed';
     case IncidentAffectingService = 'operational.incident';
     case MaintenanceScheduled = 'operational.maintenance_scheduled';
 

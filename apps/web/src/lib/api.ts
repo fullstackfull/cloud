@@ -126,7 +126,16 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers['Accept-Language'] = options.locale
   }
 
-  if (options.body !== undefined) {
+  /*
+   * FormData sets its own Content-Type, and it has to: the header carries a
+   * multipart boundary the browser generates. Setting application/json over
+   * it produces a request the server parses as JSON, finds unreadable, and
+   * rejects as an empty body — which reads as a validation bug rather than as
+   * a header mistake.
+   */
+  const isMultipart = options.body instanceof FormData
+
+  if (options.body !== undefined && !isMultipart) {
     headers['Content-Type'] = 'application/json'
   }
 
@@ -141,7 +150,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       method,
       headers,
       credentials: 'include',
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      ...(options.body !== undefined
+        ? { body: isMultipart ? (options.body as FormData) : JSON.stringify(options.body) }
+        : {}),
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     })
   } catch (cause) {

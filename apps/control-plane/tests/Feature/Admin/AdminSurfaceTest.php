@@ -42,6 +42,15 @@ final class AdminSurfaceTest extends TestCase
         $this->seed(RolePermissionSeeder::class);
     }
 
+    /**
+     * A syntactically valid ULID that names nothing.
+     *
+     * Crockford base32: no I, L, O or U. Checked by the test below, because a
+     * placeholder that quietly stopped being valid would quietly stop this
+     * whole file from testing the routes that constrain their parameters.
+     */
+    private const string VALID_ULID = '01JAAAAAAAAAAAAAAAAAAAAAAA';
+
     private function operator(Role $role = Role::SuperAdmin): User
     {
         $user = User::factory()->create();
@@ -63,16 +72,38 @@ final class AdminSurfaceTest extends TestCase
             }
 
             $method = $route->methods()[0] ?? 'GET';
-            // Every parameter, not a named few: a route added with a new
-            // placeholder would otherwise be probed at a URL containing a
-            // literal brace, which 404s for reasons that have nothing to do
-            // with the permission this test is asserting.
-            $uri = preg_replace('/\{[^}]+\}/', '01jexampleexampleexample00', $route->uri()) ?? $route->uri();
+            /*
+             * Every parameter, not a named few: a route added with a new
+             * placeholder would otherwise be probed at a URL containing a
+             * literal brace, which 404s for reasons that have nothing to do
+             * with the permission this test is asserting.
+             *
+             * The value has to be a *valid ULID*, not merely ULID-shaped. A
+             * route that constrains its parameter with `whereUlid` answers 404
+             * for anything else — from the router, before any middleware — and
+             * this test would then pass for a route nobody had ever
+             * permission-checked. The old placeholder contained an `l`, which
+             * Crockford base32 excludes, so it silently exempted every
+             * constrained route from the assertion.
+             */
+            $uri = preg_replace('/\{[^}]+\}/', self::VALID_ULID, $route->uri()) ?? $route->uri();
 
             $routes[] = [$method, '/'.$uri];
         }
 
         return $routes;
+    }
+
+    #[Test]
+    public function the_placeholder_this_file_probes_with_is_a_valid_ulid(): void
+    {
+        // Guards the guard. Without this, a typo in the placeholder turns
+        // every assertion about a constrained route into an assertion that
+        // the router rejects a malformed id — which nobody doubted.
+        $this->assertMatchesRegularExpression(
+            '/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/',
+            self::VALID_ULID,
+        );
     }
 
     #[Test]

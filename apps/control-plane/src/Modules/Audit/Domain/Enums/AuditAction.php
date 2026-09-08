@@ -106,6 +106,11 @@ enum AuditAction: string
      * apart either.
      */
     case NotificationPreferenceChanged = 'notification.preference_changed';
+    case TicketAssigned = 'support.ticket_assigned';
+    case TicketPrioritised = 'support.ticket_prioritised';
+    case TicketResolved = 'support.ticket_resolved';
+    case TicketClosed = 'support.ticket_closed';
+    case TicketReopened = 'support.ticket_reopened';
     case MemberInvited = 'membership.invited';
     case MemberInvitationRevoked = 'membership.invitation_revoked';
     case MemberJoined = 'membership.joined';

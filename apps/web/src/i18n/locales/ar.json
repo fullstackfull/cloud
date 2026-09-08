@@ -426,7 +426,8 @@
       "infrastructure": "البنية التحتية",
       "payments": "المدفوعات",
       "operations": "إعادة التثبيت",
-      "drift": "الانحراف"
+      "drift": "الانحراف",
+      "support": "الدعم"
     },
     "customers": {
       "title": "العملاء",
@@ -577,6 +578,28 @@
         "resource_mismatch": "المواصفات مختلفة",
         "suspension_mismatch": "التعليق غير مُطبَّق"
       }
+    },
+    "support": {
+      "title": "طابور الدعم",
+      "subtitle": "الأسوأ أوّلًا، ثمّ الأطول انتظارًا داخل كلّ مستوى.",
+      "queue": "الطابور",
+      "queueEmpty": "لا شيء بالانتظار.",
+      "waitingOnUs": "بانتظارنا",
+      "waitingCount": "{{count}} بانتظارنا",
+      "customer": "الحساب",
+      "assignee": "مُسنَدة إلى",
+      "unassigned": "لا أحد",
+      "waitingSince": "آخر ردّ",
+      "priority": "الأولويّة",
+      "reply": "الردّ على العميل",
+      "internalNote": "ملاحظة داخليّة",
+      "addNote": "إضافة ملاحظة",
+      "sendAsNote": "ملاحظة داخليّة — لن يراها العميل",
+      "noteWarning": "لن تُرسَل إلى العميل، ولا تنقل التذكرة إلى دوره. عدّاد انتظاره لسؤاله يستمرّ.",
+      "resolve": "وسمها محلولة",
+      "reopen": "إعادة الفتح",
+      "close": "إغلاق",
+      "reopenedTimes": "أُعيد فتح هذه التذكرة {{count}} مرّة. قد لا تكون قد حُلّت فعلًا."
     }
   },
   "backups": {
@@ -739,5 +762,48 @@
     "decline": "الرفض",
     "signedInAsSomebodyElseTitle": "أُرسلت هذه الدعوة إلى عنوان آخر",
     "signedInAsSomebodyElse": "أنت داخل بعنوان لم تُرسل إليه هذه الدعوة. ادخل بالعنوان الذي وصلته الرسالة ثمّ افتح هذا الرابط من جديد."
+  },
+  "support": {
+    "subtitle": "اسألنا عن أي شيء يخصّ حسابك أو خدماتك أو فاتورة.",
+    "yourTickets": "طلباتك",
+    "noTickets": "لم تسألنا شيئًا بعد.",
+    "reference": "الرقم المرجعي",
+    "subject": "الموضوع",
+    "status": "الحالة",
+    "priority": "الأولويّة",
+    "category": "بخصوص",
+    "lastReply": "آخر ردّ",
+    "describe": "ما الذي يحدث؟",
+    "attachments": "المرفقات",
+    "attachmentsHint": "سجلّات أو صور للشاشة أو ملف PDF. حتّى خمسة ملفات، كلّ منها 10 ميغابايت.",
+    "newTitle": "اسألنا",
+    "newSubtitle": "أخبرنا بما كنت تفعله وبما حدث بدلًا عمّا توقّعته. صور الشاشة والسجلّات تساعد كثيرًا.",
+    "open": "إرسال الطلب",
+    "yourReply": "ردّك",
+    "send": "إرسال",
+    "close": "إغلاق هذا الطلب",
+    "closedExplanation": "أُغلق هذا الطلب. إن احتجت شيئًا آخر، افتح طلبًا جديدًا واذكر هذا الرقم المرجعي.",
+    "fromSupport": "دعم Lynomia — {{name}}",
+    "fromYou": "أنت",
+    "statuses": {
+      "open": "بانتظارنا",
+      "waiting_for_support": "بانتظارنا",
+      "waiting_for_customer": "بانتظارك",
+      "resolved": "حُلّ",
+      "closed": "مغلق"
+    },
+    "priorities": {
+      "low": "منخفضة",
+      "normal": "عاديّة",
+      "high": "مرتفعة",
+      "urgent": "عاجلة"
+    },
+    "categories": {
+      "technical": "شيء لا يعمل",
+      "billing": "فاتورة أو دفعة",
+      "provisioning": "طلب لم يصل",
+      "abuse": "إساءة استخدام أو أمن",
+      "other": "شيء آخر"
+    }
   }
 }

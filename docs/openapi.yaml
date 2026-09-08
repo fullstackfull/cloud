@@ -88,6 +88,8 @@ tags:
     description: "What the account owns, whatever kind it is, and what the platform has done to it."
   - name: "Shared hosting"
     description: "Panel accounts, their usage, and single-use sign-in links to the panel."
+  - name: "Support"
+    description: "Tickets between an account and the support team. A customer may open, reply and close; resolving is the team's judgement and is not on this surface. Internal notes never appear here at all."
   - name: "Team"
     description: "Who belongs to this account and what each of them may do. The three /invitations routes are the invitee's side, and are the only customer routes that work for somebody who belongs to no account yet."
   - name: "Webhooks"
@@ -1707,6 +1709,581 @@ paths:
                 "$ref": "#/components/schemas/Error"
         422:
           description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/attachments/{attachment}":
+    get:
+      operationId: "api_admin_support_attachments_download"
+      tags:
+        - "Operator"
+      summary: "Download any attachment on any ticket"
+      description: "Requires the `ticket.view_any` permission."
+      parameters:
+        - name: "attachment"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "No content."
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets":
+    get:
+      operationId: "api_admin_support_tickets"
+      tags:
+        - "Operator"
+      summary: "The support queue"
+      description: |-
+        Worst first, longest untouched first within that. Defaults to the tickets waiting on the team rather than to every ticket ever raised. `?status=` and `?assigned_to=` narrow it.
+
+        Requires the `ticket.view_any` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/OperatorTicket"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}":
+    get:
+      operationId: "api_admin_support_ticket"
+      tags:
+        - "Operator"
+      summary: "One ticket, with internal notes"
+      description: "Requires the `ticket.view_any` permission."
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}/assignee":
+    put:
+      operationId: "api_admin_support_ticket_assign"
+      tags:
+        - "Operator"
+      summary: "Assign a ticket, or unassign it"
+      description: |-
+        A null user_id returns it to the unassigned pool. Audited.
+
+        Requires the `ticket.manage` permission.
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                user_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}/close":
+    post:
+      operationId: "api_admin_support_ticket_close"
+      tags:
+        - "Operator"
+      summary: "Close a ticket"
+      description: "Requires the `ticket.manage` permission."
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}/priority":
+    put:
+      operationId: "api_admin_support_ticket_priority"
+      tags:
+        - "Operator"
+      summary: "Change a ticket's priority"
+      description: |-
+        The whole scale including urgent, unlike the customer surface. Audited, because quietly downgrading an urgent ticket is how one stops being looked at.
+
+        Requires the `ticket.manage` permission.
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                priority:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}/reopen":
+    post:
+      operationId: "api_admin_support_ticket_reopen"
+      tags:
+        - "Operator"
+      summary: "Reopen a resolved or closed ticket"
+      description: |-
+        Without writing a message — for an operator who resolved one by mistake and has nothing to say to the customer.
+
+        Requires the `ticket.manage` permission.
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}/replies":
+    post:
+      operationId: "api_admin_support_ticket_reply"
+      tags:
+        - "Operator"
+      summary: "Reply, or write an internal note"
+      description: |-
+        `internal_note: true` writes a message the customer never sees and which does not move the ticket to their turn — the clock on an unanswered question keeps running, which is the point.
+
+        Requires the `ticket.reply` permission.
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                body:
+                  description: "See the endpoint description; validated server-side."
+                internal_note:
+                  description: "See the endpoint description; validated server-side."
+                attachments:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/support/tickets/{ticket}/resolve":
+    post:
+      operationId: "api_admin_support_ticket_resolve"
+      tags:
+        - "Operator"
+      summary: "Mark a ticket resolved"
+      description: |-
+        The team's opinion that the problem is solved. The customer is told, and a reply from them reopens it with its history.
+
+        Requires the `ticket.manage` permission.
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorTicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
           content:
             "application/json":
               schema:
@@ -5562,6 +6139,380 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/support/attachments/{attachment}":
+    get:
+      operationId: "api_v1_support_attachments_download"
+      tags:
+        - "Support"
+      summary: "Download an attachment"
+      description: "Streamed with Content-Disposition: attachment and X-Content-Type-Options: nosniff, so a browser saves the file rather than rendering it. An attachment on an internal note is not found."
+      parameters:
+        - name: "attachment"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "No content."
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/support/tickets":
+    get:
+      operationId: "api_v1_support_index"
+      tags:
+        - "Support"
+      summary: "List this account's tickets"
+      description: "Most recently active first. Internal notes are never included."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Ticket"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_v1_support_store"
+      tags:
+        - "Support"
+      summary: "Open a ticket"
+      description: "Multipart when it carries attachments. `priority` accepts low, normal or high — urgent is what pages somebody out of hours and is an operator's judgement to make. `service_id` and `invoice_id` must belong to the acting account; one that does not answers 404 rather than being silently dropped."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                subject:
+                  description: "See the endpoint description; validated server-side."
+                body:
+                  description: "See the endpoint description; validated server-side."
+                category:
+                  description: "See the endpoint description; validated server-side."
+                priority:
+                  description: "See the endpoint description; validated server-side."
+                service_id:
+                  description: "See the endpoint description; validated server-side."
+                invoice_id:
+                  description: "See the endpoint description; validated server-side."
+                attachments:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/support/tickets/{ticket}":
+    get:
+      operationId: "api_v1_support_show"
+      tags:
+        - "Support"
+      summary: "Read one ticket and its thread"
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/support/tickets/{ticket}/close":
+    post:
+      operationId: "api_v1_support_close"
+      tags:
+        - "Support"
+      summary: "Close a ticket"
+      description: "The end of the conversation. Nothing may be written on a closed ticket by either side; a customer with something else to say opens a new one and quotes the reference."
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/support/tickets/{ticket}/replies":
+    post:
+      operationId: "api_v1_support_reply"
+      tags:
+        - "Support"
+      summary: "Reply on a ticket"
+      description: "Moves the ticket to the support team's turn. A reply to a resolved ticket reopens it with its history intact; a closed one refuses."
+      parameters:
+        - name: "ticket"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                body:
+                  description: "See the endpoint description; validated server-side."
+                attachments:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TicketResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/team/invitations":
     get:
       operationId: "api_v1_team_invitations"
@@ -8662,6 +9613,79 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/NotificationsMarkedRead"
+    OperatorTicket:
+      type: "object"
+      additionalProperties: false
+      description: "The same ticket as the support team sees it: with the account it belongs to, the internal notes, and the two numbers the team measures itself on."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        reference:
+          type: "string"
+        subject:
+          type: "string"
+        category:
+          type: "string"
+        status:
+          type: "string"
+        priority:
+          type: "string"
+        customer_id:
+          "$ref": "#/components/schemas/Ulid"
+        customer_name:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+        invoice_id:
+          type:
+            - "string"
+            - "null"
+        assigned_to_id:
+          type:
+            - "string"
+            - "null"
+          description: "What the assignment endpoint takes back."
+        assigned_to:
+          type:
+            - "string"
+            - "null"
+          description: "Their name."
+        opened_by:
+          type:
+            - "string"
+            - "null"
+        last_reply_at:
+          "$ref": "#/components/schemas/Timestamp"
+        last_reply_by:
+          type:
+            - "string"
+            - "null"
+        first_responded_at:
+          "$ref": "#/components/schemas/Timestamp"
+        reopened_count:
+          type: "integer"
+          description: "A ticket resolved and reopened four times was never fixed."
+        resolved_at:
+          "$ref": "#/components/schemas/Timestamp"
+        closed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        messages:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/TicketMessage"
+    OperatorTicketResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/OperatorTicket"
     Order:
       type: "object"
       additionalProperties: false
@@ -9529,6 +10553,106 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/TeamMember"
+    Ticket:
+      type: "object"
+      additionalProperties: false
+      description: "One support conversation, as the account that raised it may see it. `first_responded_at` is deliberately absent: it is how the support team is measured, not something the customer asked about."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        reference:
+          type: "string"
+          description: "The short human reference, which is what a customer reads over a phone call. Not sequential: neighbouring references would be worth guessing at."
+        subject:
+          type: "string"
+        category:
+          type: "string"
+        status:
+          type: "string"
+          description: "open, waiting_for_support, waiting_for_customer, resolved or closed. Open is a ticket nobody has answered yet; waiting_for_support is a conversation already under way."
+        priority:
+          type: "string"
+        service_id:
+          type:
+            - "string"
+            - "null"
+        invoice_id:
+          type:
+            - "string"
+            - "null"
+        assigned_to:
+          type:
+            - "string"
+            - "null"
+          description: "A name, not a user id."
+        opened_by:
+          type:
+            - "string"
+            - "null"
+        last_reply_at:
+          "$ref": "#/components/schemas/Timestamp"
+        last_reply_by:
+          type:
+            - "string"
+            - "null"
+        awaiting_customer:
+          type: "boolean"
+        resolved_at:
+          "$ref": "#/components/schemas/Timestamp"
+        closed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        messages:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/TicketMessage"
+    TicketAttachment:
+      type: "object"
+      additionalProperties: false
+      description: "A file on a message. No path and no disk: where the platform keeps a file is not a caller's business, and a path in a response is a path somebody will try to request."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type: "string"
+        mime_type:
+          type: "string"
+          description: "Decided from the bytes at upload, never from what the client claimed."
+        size_bytes:
+          type: "integer"
+    TicketMessage:
+      type: "object"
+      additionalProperties: false
+      description: "One thing somebody said. `is_internal_note` is always false on the customer surface — notes are excluded by the query rather than by this field."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        author:
+          type:
+            - "string"
+            - "null"
+          description: "A name. Null for a message the platform wrote itself."
+        author_kind:
+          type: "string"
+          description: "customer, operator or system."
+        body:
+          type: "string"
+        is_internal_note:
+          type: "boolean"
+        attachments:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/TicketAttachment"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    TicketResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Ticket"
     Timestamp:
       type:
         - "string"

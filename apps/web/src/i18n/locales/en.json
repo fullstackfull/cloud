@@ -422,7 +422,8 @@
       "infrastructure": "Infrastructure",
       "payments": "Payments",
       "operations": "Rebuilds",
-      "drift": "Drift"
+      "drift": "Drift",
+      "support": "Support"
     },
     "customers": {
       "title": "Customers",
@@ -569,6 +570,28 @@
         "resource_mismatch": "Shape differs",
         "suspension_mismatch": "Suspension not enforced"
       }
+    },
+    "support": {
+      "title": "Support queue",
+      "subtitle": "Worst first, longest untouched first within that.",
+      "queue": "The queue",
+      "queueEmpty": "Nothing is waiting.",
+      "waitingOnUs": "Waiting on us",
+      "waitingCount": "{{count}} waiting on us",
+      "customer": "Account",
+      "assignee": "Assigned to",
+      "unassigned": "Nobody",
+      "waitingSince": "Last reply",
+      "priority": "Priority",
+      "reply": "Reply to the customer",
+      "internalNote": "Internal note",
+      "addNote": "Add note",
+      "sendAsNote": "Internal note — the customer will not see this",
+      "noteWarning": "This will not be sent to the customer, and it does not move the ticket to their turn. The clock on their question keeps running.",
+      "resolve": "Mark resolved",
+      "reopen": "Reopen",
+      "close": "Close",
+      "reopenedTimes": "This ticket has been reopened {{count}} time(s). It may not have been fixed."
     }
   },
   "backups": {
@@ -731,5 +754,48 @@
     "decline": "Decline",
     "signedInAsSomebodyElseTitle": "This invitation was sent to a different address",
     "signedInAsSomebodyElse": "You are signed in with an address this invitation was not sent to. Sign in with the address that received it, and then open this link again."
+  },
+  "support": {
+    "subtitle": "Ask us anything about your account, your services or an invoice.",
+    "yourTickets": "Your requests",
+    "noTickets": "You have not asked us anything yet.",
+    "reference": "Reference",
+    "subject": "Subject",
+    "status": "Status",
+    "priority": "Priority",
+    "category": "About",
+    "lastReply": "Last reply",
+    "describe": "What is happening?",
+    "attachments": "Attachments",
+    "attachmentsHint": "Logs, screenshots or a PDF. Up to five files, 10 MB each.",
+    "newTitle": "Ask us something",
+    "newSubtitle": "Tell us what you were doing and what happened instead. Screenshots and logs help.",
+    "open": "Send request",
+    "yourReply": "Your reply",
+    "send": "Reply",
+    "close": "Close this request",
+    "closedExplanation": "This request is closed. If you need anything else, open a new one and quote this reference.",
+    "fromSupport": "Lynomia Support — {{name}}",
+    "fromYou": "You",
+    "statuses": {
+      "open": "Waiting for us",
+      "waiting_for_support": "Waiting for us",
+      "waiting_for_customer": "Waiting for you",
+      "resolved": "Resolved",
+      "closed": "Closed"
+    },
+    "priorities": {
+      "low": "Low",
+      "normal": "Normal",
+      "high": "High",
+      "urgent": "Urgent"
+    },
+    "categories": {
+      "technical": "Something is broken",
+      "billing": "An invoice or a payment",
+      "provisioning": "An order that has not arrived",
+      "abuse": "Abuse or security",
+      "other": "Something else"
+    }
   }
 }

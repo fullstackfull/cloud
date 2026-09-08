@@ -332,3 +332,120 @@ export function useIssueRefund() {
     },
   })
 }
+
+/* --------------------------------------------------------------------------
+ | Support queue
+ |
+ | The queue refetches on a timer for the same reason the drift list does: an
+ | operator leaves it open on a second screen, and a queue that is only as
+ | fresh as the last navigation shows a ticket as unanswered long after a
+ | colleague answered it.
+ */
+
+export interface OperatorTicketMessage {
+  id: string
+  author: string | null
+  author_kind: 'customer' | 'operator' | 'system'
+  body: string
+  is_internal_note: boolean
+  attachments: Array<{ id: string; name: string; mime_type: string; size_bytes: number }>
+  created_at: string
+}
+
+export interface OperatorTicket {
+  id: string
+  reference: string
+  subject: string
+  category: string
+  status: string
+  priority: string
+  customer_id: string
+  customer_name: string | null
+  service_id: string | null
+  invoice_id: string | null
+  assigned_to_id: string | null
+  assigned_to: string | null
+  opened_by: string | null
+  last_reply_at: string | null
+  last_reply_by: string | null
+  first_responded_at: string | null
+  reopened_count: number
+  resolved_at: string | null
+  closed_at: string | null
+  created_at: string
+  messages: OperatorTicketMessage[]
+}
+
+export function useSupportQueue(status: string) {
+  return useQuery({
+    queryKey: ['admin', 'support', 'queue', status],
+    queryFn: () =>
+      admin.get<{ data: OperatorTicket[]; meta: { total: number; waiting_on_support: number } }>(
+        '/support/tickets',
+        status === '' ? {} : { status },
+      ),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useOperatorTicket(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'support', 'ticket', id],
+    queryFn: () => admin.get<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(id ?? '')}`),
+    enabled: id !== null,
+  })
+}
+
+function useTicketMutation<TVariables>(mutationFn: (variables: TVariables) => Promise<unknown>) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'support'] })
+    },
+  })
+}
+
+export function useReplyToTicketAsOperator() {
+  return useTicketMutation((payload: { id: string; body: string; internal_note: boolean }) =>
+    admin.post<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(payload.id)}/replies`, {
+      body: payload.body,
+      internal_note: payload.internal_note,
+    }),
+  )
+}
+
+export function useSetTicketPriority() {
+  return useTicketMutation((payload: { id: string; priority: string }) =>
+    admin.put<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(payload.id)}/priority`, {
+      priority: payload.priority,
+    }),
+  )
+}
+
+export function useAssignTicket() {
+  return useTicketMutation((payload: { id: string; user_id: string | null }) =>
+    admin.put<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(payload.id)}/assignee`, {
+      user_id: payload.user_id,
+    }),
+  )
+}
+
+export function useResolveTicket() {
+  return useTicketMutation((id: string) =>
+    admin.post<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(id)}/resolve`, {}),
+  )
+}
+
+export function useCloseTicketAsOperator() {
+  return useTicketMutation((id: string) =>
+    admin.post<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(id)}/close`, {}),
+  )
+}
+
+export function useReopenTicket() {
+  return useTicketMutation((id: string) =>
+    admin.post<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(id)}/reopen`, {}),
+  )
+}

@@ -51,6 +51,12 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Support\Domain\Enums\MessageAuthorKind;
+use Lynomia\Modules\Support\Domain\Enums\TicketCategory;
+use Lynomia\Modules\Support\Domain\Enums\TicketPriority;
+use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
+use Lynomia\Modules\Support\Infrastructure\Models\SupportMessage;
+use Lynomia\Modules\Support\Infrastructure\Models\SupportTicket;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
@@ -95,6 +101,19 @@ class E2ESeeder extends Seeder
      * amount would leave the second untested.
      */
     public const string LARGE_INVOICE_NUMBER = 'INV-E2E-0003';
+
+    /**
+     * A ticket in mid-conversation, with an internal note on it.
+     *
+     * The note is the fixture that matters: the customer's screen must not
+     * show it and the operator's must, and only a browser can prove both of
+     * those about the same row.
+     */
+    public const string TICKET_REFERENCE = 'LYN-E2E-000001';
+
+    public const string TICKET_SUBJECT = 'Cannot reach my server over SSH';
+
+    public const string TICKET_INTERNAL_NOTE = 'Node 3 firmware reboot at 08:50, do not mention the batch';
 
     /** The address the machine answers on, asserted by name on two screens. */
     public const string VPS_ADDRESS = '198.51.100.24';
@@ -149,6 +168,7 @@ class E2ESeeder extends Seeder
         $this->servicesInTrouble($customer);
         $this->workNobodyCanSettle($customer);
         $this->team($customer);
+        $this->ticket($customer);
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -572,6 +592,57 @@ class E2ESeeder extends Seeder
                 'last_sent_at' => now(),
             ],
         );
+    }
+
+    /**
+     * One live ticket with three messages, one of which is internal.
+     */
+    private function ticket(Customer $customer): void
+    {
+        if (SupportTicket::query()->where('reference', self::TICKET_REFERENCE)->exists()) {
+            return;
+        }
+
+        $opener = User::query()->where('email', 'customer@lynomia.local')->first();
+        $agent = User::query()->where('email', 'admin@lynomia.local')->first();
+
+        /** @var SupportTicket $ticket */
+        $ticket = SupportTicket::query()->create([
+            'customer_id' => $customer->getKey(),
+            'opened_by_user_id' => $opener?->getKey(),
+            'reference' => self::TICKET_REFERENCE,
+            'subject' => self::TICKET_SUBJECT,
+            'category' => TicketCategory::Technical,
+            'status' => TicketStatus::WaitingForCustomer,
+            'priority' => TicketPriority::High,
+            'last_reply_at' => now()->subMinutes(20),
+            'last_reply_by' => MessageAuthorKind::Operator,
+            'first_responded_at' => now()->subMinutes(25),
+        ]);
+
+        SupportMessage::query()->create([
+            'ticket_id' => $ticket->getKey(),
+            'author_user_id' => $opener?->getKey(),
+            'author_kind' => MessageAuthorKind::Customer,
+            'body' => 'It has been refusing connections since about nine this morning.',
+            'is_internal_note' => false,
+        ]);
+
+        SupportMessage::query()->create([
+            'ticket_id' => $ticket->getKey(),
+            'author_user_id' => $agent?->getKey(),
+            'author_kind' => MessageAuthorKind::Operator,
+            'body' => self::TICKET_INTERNAL_NOTE,
+            'is_internal_note' => true,
+        ]);
+
+        SupportMessage::query()->create([
+            'ticket_id' => $ticket->getKey(),
+            'author_user_id' => $agent?->getKey(),
+            'author_kind' => MessageAuthorKind::Operator,
+            'body' => 'That node was rebooted for firmware. Your machine is back up — can you confirm?',
+            'is_internal_note' => false,
+        ]);
     }
 
     private function invoices(Customer $customer): void

@@ -21,11 +21,13 @@ import type {
   Service,
   Subscription,
   TeamInvitation,
-  WalletCreditQuote,
   TeamMember,
   TeamRole,
+  Ticket,
+  TicketPriority,
   VirtualMachine,
   WalletBalances,
+  WalletCreditQuote,
 } from '@/lib/types'
 
 /**
@@ -583,6 +585,108 @@ export function useSetReverseDns() {
 }
 
 /* ----------------------------------------------------------- api tokens */
+
+/* --------------------------------------------------------------------------
+ | Support
+ |
+ | The list and one ticket are separate queries rather than one filtered
+ | client-side: the list deliberately does not carry message threads, and a
+ | page that had to load every thread to show a list of subjects would grow
+ | with the account's whole support history.
+ */
+
+export function useTickets() {
+  return useQuery({
+    queryKey: ['support', 'tickets'],
+    queryFn: () => api.get<{ data: Ticket[]; meta: { total: number } }>('/support/tickets'),
+  })
+}
+
+export function useTicket(id: string | null) {
+  return useQuery({
+    queryKey: ['support', 'ticket', id],
+    queryFn: () => api.get<Envelope<Ticket>>(`/support/tickets/${encodeURIComponent(id ?? '')}`),
+    enabled: id !== null,
+  })
+}
+
+/**
+ * Opening and replying both go up as multipart, always — not only when a file
+ * is attached. One code path means the case with attachments is the one that
+ * is exercised on every request rather than the rare one nobody tries until a
+ * customer does.
+ */
+function ticketForm(fields: Record<string, string>, files: File[]): FormData {
+  const form = new FormData()
+
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== '') form.append(key, value)
+  }
+
+  for (const file of files) {
+    form.append('attachments[]', file)
+  }
+
+  return form
+}
+
+export function useOpenTicket() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: {
+      subject: string
+      body: string
+      category: string
+      priority: TicketPriority
+      service_id?: string
+      files: File[]
+    }) =>
+      api.post<Envelope<Ticket>>(
+        '/support/tickets',
+        ticketForm(
+          {
+            subject: payload.subject,
+            body: payload.body,
+            category: payload.category,
+            priority: payload.priority,
+            service_id: payload.service_id ?? '',
+          },
+          payload.files,
+        ),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['support'] })
+    },
+  })
+}
+
+export function useReplyToTicket() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { id: string; body: string; files: File[] }) =>
+      api.post<Envelope<Ticket>>(
+        `/support/tickets/${encodeURIComponent(payload.id)}/replies`,
+        ticketForm({ body: payload.body }, payload.files),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['support'] })
+    },
+  })
+}
+
+export function useCloseTicket() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<Envelope<Ticket>>(`/support/tickets/${encodeURIComponent(id)}/close`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['support'] })
+    },
+  })
+}
 
 /* --------------------------------------------------------------------------
  | Paying from stored credit

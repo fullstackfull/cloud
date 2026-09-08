@@ -6,6 +6,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { DashboardPage } from '@/features/account/DashboardPage'
 import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
 import { AdminDriftPage } from '@/features/admin/AdminDriftPage'
+import { AdminSupportPage } from '@/features/admin/AdminSupportPage'
 import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePage'
 import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
 import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
@@ -25,6 +26,7 @@ import { VpsPage } from '@/features/infrastructure/VpsPage'
 import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
 import { OrdersPage } from '@/features/orders/OrdersPage'
 import { ServicesPage } from '@/features/services/ServicesPage'
+import { SupportPage } from '@/features/support/SupportPage'
 import { InvitationPage } from '@/features/team/InvitationPage'
 import { TeamPage } from '@/features/team/TeamPage'
 import { ApiTokensPage } from '@/features/tokens/ApiTokensPage'
@@ -109,6 +111,7 @@ export function App() {
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />
                 <Route path="/api-tokens" element={<ApiTokensPage />} />
+                <Route path="/support" element={<SupportPage />} />
                 <Route path="/settings/team" element={<TeamPage />} />
                 {/*
                   The invitee's landing page. Authenticated like everything
@@ -129,6 +132,7 @@ export function App() {
                   <Route path="/admin/provisioning" element={<AdminProvisioningPage />} />
                   <Route path="/admin/operations" element={<AdminOperationsPage />} />
                   <Route path="/admin/drift" element={<AdminDriftPage />} />
+                  <Route path="/admin/support" element={<AdminSupportPage />} />
                   <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
                   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
                 </Route>

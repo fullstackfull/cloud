@@ -546,6 +546,119 @@ return [
     ],
 
     /* ---------------------------------------------------------------------
+     | Support
+     |
+     | A customer may open, read, reply and close. They may not resolve:
+     | resolved is the support team's opinion that the problem is solved, and
+     | closed is the account saying it is finished with the conversation.
+     |
+     | Internal notes are excluded in the query rather than in the serialiser,
+     | so no customer response can carry one.
+     */
+
+    'api.v1.support.index' => [
+        'tag' => 'Support',
+        'summary' => 'List this account\'s tickets',
+        'description' => 'Most recently active first. Internal notes are never included.',
+        'response' => ['envelope' => 'list', 'schema' => 'Ticket'],
+    ],
+    'api.v1.support.store' => [
+        'tag' => 'Support',
+        'summary' => 'Open a ticket',
+        'description' => 'Multipart when it carries attachments. `priority` accepts low, normal or high — urgent is what pages somebody out of hours and is an operator\'s judgement to make. `service_id` and `invoice_id` must belong to the acting account; one that does not answers 404 rather than being silently dropped.',
+        'body' => ['subject', 'body', 'category', 'priority', 'service_id', 'invoice_id', 'attachments'],
+        'response' => $one('Ticket', 201),
+    ],
+    'api.v1.support.show' => [
+        'tag' => 'Support',
+        'summary' => 'Read one ticket and its thread',
+        'response' => $one('Ticket'),
+    ],
+    'api.v1.support.reply' => [
+        'tag' => 'Support',
+        'summary' => 'Reply on a ticket',
+        'description' => 'Moves the ticket to the support team\'s turn. A reply to a resolved ticket reopens it with its history intact; a closed one refuses.',
+        'body' => ['body', 'attachments'],
+        'response' => $one('Ticket'),
+    ],
+    'api.v1.support.close' => [
+        'tag' => 'Support',
+        'summary' => 'Close a ticket',
+        'description' => 'The end of the conversation. Nothing may be written on a closed ticket by either side; a customer with something else to say opens a new one and quotes the reference.',
+        'response' => $one('Ticket'),
+    ],
+    'api.v1.support.attachments.download' => [
+        'tag' => 'Support',
+        'summary' => 'Download an attachment',
+        'description' => 'Streamed with Content-Disposition: attachment and X-Content-Type-Options: nosniff, so a browser saves the file rather than rendering it. An attachment on an internal note is not found.',
+        'response' => ['envelope' => 'none', 'status' => 200],
+    ],
+
+    'api.admin.support.tickets' => [
+        'tag' => 'Operator',
+        'summary' => 'The support queue',
+        'description' => 'Worst first, longest untouched first within that. Defaults to the tickets waiting on the team rather than to every ticket ever raised. `?status=` and `?assigned_to=` narrow it.',
+        'permission' => 'ticket.view_any',
+        'response' => ['envelope' => 'list', 'schema' => 'OperatorTicket'],
+    ],
+    'api.admin.support.ticket' => [
+        'tag' => 'Operator',
+        'summary' => 'One ticket, with internal notes',
+        'permission' => 'ticket.view_any',
+        'response' => $one('OperatorTicket'),
+    ],
+    'api.admin.support.attachments.download' => [
+        'tag' => 'Operator',
+        'summary' => 'Download any attachment on any ticket',
+        'permission' => 'ticket.view_any',
+        'response' => ['envelope' => 'none', 'status' => 200],
+    ],
+    'api.admin.support.ticket_reply' => [
+        'tag' => 'Operator',
+        'summary' => 'Reply, or write an internal note',
+        'description' => '`internal_note: true` writes a message the customer never sees and which does not move the ticket to their turn — the clock on an unanswered question keeps running, which is the point.',
+        'permission' => 'ticket.reply',
+        'body' => ['body', 'internal_note', 'attachments'],
+        'response' => $one('OperatorTicket'),
+    ],
+    'api.admin.support.ticket_assign' => [
+        'tag' => 'Operator',
+        'summary' => 'Assign a ticket, or unassign it',
+        'description' => 'A null user_id returns it to the unassigned pool. Audited.',
+        'permission' => 'ticket.manage',
+        'body' => ['user_id'],
+        'response' => $one('OperatorTicket'),
+    ],
+    'api.admin.support.ticket_priority' => [
+        'tag' => 'Operator',
+        'summary' => 'Change a ticket\'s priority',
+        'description' => 'The whole scale including urgent, unlike the customer surface. Audited, because quietly downgrading an urgent ticket is how one stops being looked at.',
+        'permission' => 'ticket.manage',
+        'body' => ['priority'],
+        'response' => $one('OperatorTicket'),
+    ],
+    'api.admin.support.ticket_resolve' => [
+        'tag' => 'Operator',
+        'summary' => 'Mark a ticket resolved',
+        'description' => 'The team\'s opinion that the problem is solved. The customer is told, and a reply from them reopens it with its history.',
+        'permission' => 'ticket.manage',
+        'response' => $one('OperatorTicket'),
+    ],
+    'api.admin.support.ticket_close' => [
+        'tag' => 'Operator',
+        'summary' => 'Close a ticket',
+        'permission' => 'ticket.manage',
+        'response' => $one('OperatorTicket'),
+    ],
+    'api.admin.support.ticket_reopen' => [
+        'tag' => 'Operator',
+        'summary' => 'Reopen a resolved or closed ticket',
+        'description' => 'Without writing a message — for an operator who resolved one by mistake and has nothing to say to the customer.',
+        'permission' => 'ticket.manage',
+        'response' => $one('OperatorTicket'),
+    ],
+
+    /* ---------------------------------------------------------------------
      | Team
      |
      | Who belongs to the acting customer's account. No customer id appears in

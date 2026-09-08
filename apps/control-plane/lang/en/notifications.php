@@ -153,6 +153,22 @@ return [
             'title' => 'Restore of :service did not complete',
             'body' => 'The restore of :service did not finish. Our team has been alerted.',
         ],
+        'ticket_opened' => [
+            'title' => 'We have your request :reference',
+            'body' => 'Your support request ":subject" has reached us. Somebody will reply on the ticket; you do not need to send it again.',
+        ],
+        'ticket_replied' => [
+            'title' => 'Support replied to :reference',
+            'body' => 'There is a new reply on your support request ":subject". Open the ticket to read it and answer.',
+        ],
+        'ticket_resolved' => [
+            'title' => ':reference has been marked resolved',
+            'body' => 'We believe your request ":subject" is solved. If it is not, reply on the ticket and it reopens with all of its history.',
+        ],
+        'ticket_closed' => [
+            'title' => ':reference is closed',
+            'body' => 'Your support request ":subject" is closed. If you need anything else, open a new request and quote this reference.',
+        ],
     ],
     'operational' => [
         'incident' => [

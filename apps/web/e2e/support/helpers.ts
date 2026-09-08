@@ -29,6 +29,9 @@ export const fixtures = {
   hostingUsername: 'e2ehost',
   teammateEmail: 'teammate@lynomia.local',
   pendingInvitationEmail: 'invited@lynomia.local',
+  ticketReference: 'LYN-E2E-000001',
+  ticketSubject: 'Cannot reach my server over SSH',
+  ticketInternalNote: 'do not mention the batch',
 } as const
 
 /**

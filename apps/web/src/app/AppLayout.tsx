@@ -46,6 +46,7 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/hosting', labelKey: 'nav.hosting' },
   { to: '/ips', labelKey: 'nav.ips' },
   { to: '/api-tokens', labelKey: 'nav.apiKeys' },
+  { to: '/support', labelKey: 'nav.support' },
   { to: '/settings/team', labelKey: 'nav.team' },
   { to: '/profile', labelKey: 'nav.profile' },
   { to: '/security', labelKey: 'nav.security' },
@@ -63,6 +64,7 @@ const OPERATOR_NAV: NavItem[] = [
   { to: '/admin/provisioning', labelKey: 'admin.nav.provisioning' },
   { to: '/admin/operations', labelKey: 'admin.nav.operations' },
   { to: '/admin/drift', labelKey: 'admin.nav.drift' },
+  { to: '/admin/support', labelKey: 'admin.nav.support' },
   { to: '/admin/infrastructure', labelKey: 'admin.nav.infrastructure' },
   { to: '/admin/payments', labelKey: 'admin.nav.payments' },
 ]

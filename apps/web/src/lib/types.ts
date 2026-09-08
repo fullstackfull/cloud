@@ -339,6 +339,52 @@ export interface IpAssignment {
   reverse_dns: { hostname: string; status: string } | null
 }
 
+export type TicketStatus =
+  | 'open'
+  | 'waiting_for_support'
+  | 'waiting_for_customer'
+  | 'resolved'
+  | 'closed'
+
+export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent'
+
+export interface TicketAttachment {
+  id: string
+  name: string
+  mime_type: string
+  size_bytes: number
+}
+
+export interface TicketMessage {
+  id: string
+  author: string | null
+  author_kind: 'customer' | 'operator' | 'system'
+  body: string
+  is_internal_note: boolean
+  attachments: TicketAttachment[]
+  created_at: string
+}
+
+export interface Ticket {
+  id: string
+  reference: string
+  subject: string
+  category: string
+  status: TicketStatus
+  priority: TicketPriority
+  service_id: string | null
+  invoice_id: string | null
+  assigned_to: string | null
+  opened_by: string | null
+  last_reply_at: string | null
+  last_reply_by: 'customer' | 'operator' | 'system' | null
+  awaiting_customer: boolean
+  resolved_at: string | null
+  closed_at: string | null
+  created_at: string
+  messages: TicketMessage[]
+}
+
 /**
  * What paying one invoice from stored credit would do.
  *
