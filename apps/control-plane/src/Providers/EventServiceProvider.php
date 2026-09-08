@@ -20,6 +20,8 @@ use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\Provisioning\Application\Listeners\AlertOnCriticalDrift;
+use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
@@ -83,6 +85,15 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         RefundIssued::class => [
             RecordRefundAgainstTheInvoice::class,
+        ],
+
+        /*
+         * Drift was recorded to a table that only an operator opening the
+         * right page would see. The first sighting of a critical
+         * disagreement now says so where the platform's alerting can find it.
+         */
+        DriftRecorded::class => [
+            AlertOnCriticalDrift::class,
         ],
 
     ];
