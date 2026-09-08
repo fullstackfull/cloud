@@ -2,7 +2,7 @@
 
 What this phase set out to do: find every place where Lynomia Cloud describes a
 capability it cannot complete, and close it. Eight were named. All eight are
-closed, and closing them found four defects nobody had reported and forty-six
+closed, and closing them found five defects nobody had reported and forty-six
 states a customer had been reading as raw enum values, in both languages.
 
 Every number here was produced by running the gate named, on the commit named,
@@ -395,7 +395,56 @@ string behind.
 
 ## T. Clean room
 
-<!-- CLEANROOM -->
+Run in `/tmp/cleanroom30aplus/repo`, from `git clone --branch claude/hv-t6hq1p`
+of the repository at `5201a86` — no reuse of the working copy, no existing
+database, no existing Redis data, no untracked env file, no manual keys, no
+hidden fixtures. The two commits after that point are this document and the
+bootstrap fix the clean room itself found.
+
+| Step | Command | Result |
+| --- | --- | --- |
+| PHP dependencies | `composer install` | OK — every package cloned from source, because the proxy refuses codeload dist downloads |
+| Node dependencies | `npm ci` at the workspace root | OK |
+| Databases | `lynomia_cr30`, `_test`, `_e2e` | created by Laravel's own `--force` path; see the note below |
+| Environment | `.env` and `.env.testing` from the committed templates, `php artisan key:generate` | OK |
+| Migrations | `php artisan migrate --force` | 41 migrations, from an empty database |
+| Seed | `php artisan db:seed --force` | 3 products, 9 plans, 32 prices; 2 compute nodes, 61 allocatable addresses, 1 hosting node, 5 dedicated servers |
+| Backend suite | `php artisan test` | **2 302 passed, 65 124 assertions**, 269 s — the working copy's numbers exactly |
+| Typecheck | `npm run typecheck` | OK |
+| Lint | `npm run lint` | OK |
+| Frontend unit | `npm run test` | 54 passed |
+| Production build | `npm run build` | OK |
+| OpenAPI generation | `npm run openapi:generate -- --check` | up to date: 134 operations |
+| OpenAPI validation | `npm run openapi:lint` | valid, 2 warnings |
+| Scheduler | `php artisan schedule:list` | 17 commands registered, each with a next-due time |
+| Queue worker | `php artisan queue:work redis --queue=provisioning --stop-when-empty` | started, drained, exited 0 |
+| Browser suite | `npx playwright test` against a fresh `lynomia_cr30_e2e` | **94 passed** (3.6 min) |
+
+**The clean room found a real defect, which is what it is for.** The first
+backend run failed 748 of 2 302 tests with `MissingAppKeyException`.
+`scripts/bootstrap.sh` copies `.env.testing` from an example whose `APP_KEY=`
+is empty and generates a key for `.env` only, so a developer following the
+documented path gets hundreds of failures whose cause is one blank line in a
+file they have never opened. CI has always run
+`php artisan key:generate --env=testing`, which is exactly why nobody noticed:
+the gate that would have caught it was carrying the fix. Corrected in
+`9b1b0a6`; the suite then passed in full, and the numbers above are from that
+run.
+
+**Two failures in the run were the harness's, and are recorded rather than
+tidied away.** The script's `psql` step could not create the databases because
+it supplied no password — Laravel's `migrate --force` created them instead, so
+nothing downstream noticed. And a redundant second `npm ci` inside the
+`apps/web` workspace pruned `@redocly/cli` and `@playwright/test` from the root
+`node_modules`, which failed the OpenAPI lint with `redocly: not found` and
+broke eleven browser specs with a missing module. One root `npm ci` — what the
+documented path actually says — fixed both, and both then passed. Neither is a
+property of the repository.
+
+**PHPStan was not run in the clean room.** Installing `tools/phpstan` needs the
+same blocked host, as recorded in the previous phase's report. It passes with 0
+errors in the working copy and in CI run 69's Static analysis job on this
+branch, and the gap is in the network rather than in the repository.
 
 ## U. GitHub Actions
 
@@ -403,9 +452,14 @@ Pushed and observed, not assumed. Every red run on this branch during the phase
 is below with the jobs that failed and what fixed them. None was re-run into
 green without a code change, and none is omitted.
 
-**Run 67 — [`34235298388`](https://github.com/fullstackfull/cloud/actions/runs/34235298388)**
-· commit `5201a86` · event `push` · branch `claude/hv-t6hq1p` · started
-2026-09-08T13:58:28Z · **conclusion: `success`**.
+**Run 69 — [`34236854515`](https://github.com/fullstackfull/cloud/actions/runs/34236854515)**
+· commit `9b1b0a6`, the branch head this report describes · event `push` ·
+branch `claude/hv-t6hq1p` · started 2026-09-08T14:13:12Z · **conclusion:
+`success`** on all eight jobs.
+
+Run 67 (`5201a86`) was the same, green on all eight. Run 68 (`420b0fe`, the
+report itself) was **cancelled** — superseded by run 69's push before it
+finished, which is the runner's concurrency rule and not a failure.
 
 | Job | Conclusion | Covers |
 | --- | --- | --- |
@@ -470,9 +524,9 @@ operator alert under Playwright's strict mode. The gate did exactly what it
 exists for — the specs were asserting on a bug. Fixed in `5201a86`, which also
 changed the label itself, and **green in run 67**.
 
-Runs 52, 53, 55, 56, 57, 60, 61 and 63 were green on every job. Run 49
-(`57f24e9`, before this phase's baseline) was cancelled by the push that
-superseded it.
+Runs 52, 53, 55, 56, 57, 60, 61, 63 and 67 were green on every job. Runs 49
+(before this phase's baseline) and 68 were cancelled by the pushes that
+superseded them.
 
 ## V. Remaining product gaps
 
@@ -600,15 +654,19 @@ rather than done at the end of a phase about product closure.
 | Browser E2E | COMPLETE | COMPLETE |
 | Real Redis queue proof | COMPLETE | COMPLETE |
 | Scheduler proof | COMPLETE | COMPLETE |
-| Clean room | COMPLETE | see §T |
-| CI | GREEN | GREEN — run 67 |
+| Clean room | COMPLETE | COMPLETE — and it found the bootstrap defect (§T) |
+| CI | GREEN | GREEN — run 69, on this report's head |
 
 **Phase 30A+ is closed.** What it was for — finding the places where this
-platform described something it could not finish — is done, and the four
-defects it uncovered along the way (a platform-wide throttle collision, a sweep
-running on two clocks, a termination that repeated itself, and a portal
-rendering its own enum values at customers in two languages) were all found by
-building the proof rather than by reading the code.
+platform described something it could not finish — is done, and the five
+defects it uncovered along the way were every one of them found by building the
+proof rather than by reading the code: a platform-wide throttle collision,
+found by a DNS lifecycle test; a retention sweep running on two clocks, found
+by CI disagreeing with itself across two PostgreSQL majors; a termination that
+repeated itself, found by running the sweep in its own process; a portal
+rendering its own enum values at customers in two languages, found by writing a
+browser spec for an operator screen; and a documented install that fails 748
+tests on a fresh clone, found by taking one.
 
 What it is not: proof that any of this works against a real vendor. Nothing
 here is `REAL_INFRA_VERIFIED`, and the first thing Phase 30A++ should not do is
