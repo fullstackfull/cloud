@@ -37,6 +37,10 @@ use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
  * @property string $provider
  * @property ProvisioningJobStatus $status
  * @property ?string $remote_job_id
+ * @property ?string $remote_task_node
+ * @property ?string $remote_task_state
+ * @property ?CarbonImmutable $remote_task_polled_at
+ * @property int $remote_task_poll_count
  * @property int $attempts
  * @property int $max_attempts
  * @property int $timeout_seconds
@@ -69,6 +73,8 @@ class ProvisioningJob extends Model
             'attempts' => 'integer',
             'max_attempts' => 'integer',
             'timeout_seconds' => 'integer',
+            'remote_task_poll_count' => 'integer',
+            'remote_task_polled_at' => 'immutable_datetime',
             'started_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',
             'next_attempt_at' => 'immutable_datetime',
@@ -106,21 +112,39 @@ class ProvisioningJob extends Model
      * folding it into the settle transaction, would mean the one crash it
      * exists to protect against is the one crash during which it is lost.
      */
-    public function recordRemoteJobId(string $remoteJobId): void
+    /**
+     * @param  ?string  $nodeName  Which node the task is running on. Written with the
+     *                             handle, because a handle without a node is a handle
+     *                             nothing can ask about — Proxmox answers per node, and
+     *                             a later reader would have to guess.
+     */
+    public function recordRemoteJobId(string $remoteJobId, ?string $nodeName = null): void
     {
-        if ($remoteJobId === '' || $this->remote_job_id === $remoteJobId) {
+        if ($remoteJobId === '' || ($this->remote_job_id === $remoteJobId && $this->remote_task_node === $nodeName)) {
             return;
         }
 
         $this->remote_job_id = $remoteJobId;
 
-        static::query()
-            ->whereKey($this->getKey())
-            ->update(['remote_job_id' => $remoteJobId, 'updated_at' => now()]);
+        $columns = ['remote_job_id' => $remoteJobId, 'updated_at' => now()];
 
-        // The attribute is now clean: a later save() of unrelated changes must
-        // not rewrite a column another worker may since have corrected.
+        if ($nodeName !== null && $nodeName !== '') {
+            $this->remote_task_node = $nodeName;
+            $columns['remote_task_node'] = $nodeName;
+        }
+
+        static::query()->whereKey($this->getKey())->update($columns);
+
+        // The attributes are now clean: a later save() of unrelated changes
+        // must not rewrite columns another worker may since have corrected.
+        // The node is synced only when it was set, because an attribute this
+        // instance never loaded is not one that can be synced — a nullable
+        // column with no default is absent from a freshly created model.
         $this->syncOriginalAttribute('remote_job_id');
+
+        if (array_key_exists('remote_task_node', $columns)) {
+            $this->syncOriginalAttribute('remote_task_node');
+        }
     }
 
     /**

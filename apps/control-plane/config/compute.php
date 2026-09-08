@@ -119,4 +119,29 @@ return [
         // the ones running the most important workloads.
         'allow_memory_overcommit' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Provider tasks
+    |--------------------------------------------------------------------------
+    |
+    | A hypervisor accepts a create in milliseconds and builds the machine
+    | minutes later, so a job that succeeded means "the request was taken",
+    | which is not the same sentence as "the machine exists". These govern the
+    | sweep that closes that gap.
+    |
+    | The backoff is exponential from the poll count and clamped: a fleet of
+    | slow builds must not become a fleet of API calls. Giving up does not mean
+    | assuming failure — it means putting the job in front of a person, which
+    | is the only thing that can settle it.
+    |
+    */
+
+    'tasks' => [
+        'poll_base_minutes' => (int) env('COMPUTE_TASK_POLL_BASE_MINUTES', 1),
+        'poll_max_minutes' => (int) env('COMPUTE_TASK_POLL_MAX_MINUTES', 15),
+        'poll_batch' => (int) env('COMPUTE_TASK_POLL_BATCH', 100),
+        'give_up_after_minutes' => (int) env('COMPUTE_TASK_GIVE_UP_MINUTES', 60),
+    ],
+
 ];

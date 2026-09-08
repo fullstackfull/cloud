@@ -347,7 +347,7 @@ final readonly class ReinstallVpsHandler implements ProvisioningHandler
 
         // Written the moment it exists, not on return: a worker that dies
         // between here and the end must leave the task id behind.
-        $job->recordRemoteJobId($operationResult->taskId);
+        $job->recordRemoteJobId($operationResult->taskId, $node->provider_name);
 
         $operation->forceFill(['provider_task_id' => $operationResult->taskId])->save();
 

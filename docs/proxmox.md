@@ -135,3 +135,39 @@ machines it was not explicitly given.
 cluster from guessed information, is not recoverable without downtime for every node
 already in it. It happens only when explicitly configured for that host, and only after a
 preflight that shows what will happen.
+
+## Confirming that a task actually finished
+
+A create on Proxmox answers in milliseconds with a UPID and builds the machine
+minutes later. The handler writes its rows, the engine marks the job succeeded,
+and the customer is told their server is ready — none of which is evidence that
+the build finished. A clone that runs out of space on the target storage, a
+template that vanished between placement and copy, a node that rebooted
+mid-task: each leaves the platform holding a machine row, an assigned address
+and a billed service for something that does not exist.
+
+`getTask()` was implemented here in Phase 6 and had no caller until
+`compute:poll-tasks`, which runs every five minutes over jobs that succeeded
+with an unconfirmed handle.
+
+| Answer | What happens |
+| --- | --- |
+| Succeeded | Stamped on the job and never asked about again |
+| Failed | The job goes to `needs_review`, the event that puts it in front of a person is raised, and drift is recorded |
+| Still running | Asked again later, with a widening backoff |
+| Still running past `compute.tasks.give_up_after_minutes` | Review, classified as a timeout |
+| No answer at all | The attempt is recorded and the backoff widens — not knowing is the normal condition of a poller |
+
+**Nothing is destroyed, retried or released on the strength of a failed task.**
+A build whose task failed may have left a disk, a machine, or nothing at all
+behind, and cleaning up on that guess is how the next customer is handed an
+address that still answers for somebody else. The Timeout Rule applies in both
+directions: a task that has not finished is neither assumed done nor assumed
+lost.
+
+The handle is stored on the provisioning job — the row that already owns it,
+knows the service, carries the failure vocabulary and has an event for needing
+a person — together with the node it belongs to, because a UPID without a node
+is a handle nothing can ask about. The backoff is exponential from the poll
+count and clamped by `compute.tasks.poll_max_minutes`, so a fleet of slow
+builds does not become a fleet of API calls.

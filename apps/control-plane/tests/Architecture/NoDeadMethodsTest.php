@@ -149,7 +149,6 @@ final class NoDeadMethodsTest extends TestCase
          * polled. Asynchronous completion tracking — a job that returns to the
          * queue to check on a long-running provider task — is not built.
          */
-        'ProxmoxComputeProvider::getTask' => 'provider tasks are recorded for an operator, never polled',
 
         // A hard reset of a virtual machine. The customer API offers stop,
         // shutdown, reboot and start; a reset that discards whatever the guest

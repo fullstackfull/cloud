@@ -151,6 +151,22 @@ Schedule::command('backups:reconcile-inventory')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * Provider task confirmation, every five minutes.
+ *
+ * Frequent, because what it is closing is the window between the platform
+ * telling a customer their server is ready and the hypervisor finishing the
+ * build — and the failure it catches is the platform billing for a machine
+ * that does not exist. Cheap, too: one read per unconfirmed task, with an
+ * exponential backoff per task on top, so a fleet of slow builds does not
+ * become a fleet of API calls.
+ */
+Schedule::command('compute:poll-tasks')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Hosting reconciliation, every four hours at :50.
  *
  * Less often than the VPS reconciler and more often than the backup one. Each
