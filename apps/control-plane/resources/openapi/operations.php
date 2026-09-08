@@ -602,6 +602,14 @@ return [
         'body' => ['verdict', 'evidence'],
         'response' => $one('AdminReinstallVerdict'),
     ],
+    'api.admin.services.terminate' => [
+        'tag' => 'Operator',
+        'summary' => 'End a service and destroy its machine',
+        'description' => 'The one act on this surface that destroys data. The retention window on a suspended service is enforced by the action, not by the caller: most suspensions are billing disputes that end with the customer paying. `force` skips it for an abuse case or a right-to-erasure request, needs the terminate permission checked a second time, and is recorded as forced. Answers 202 — the machine is destroyed by a worker, and the service reaches `terminated` when that worker succeeds, releasing the address into quarantine and the capacity back to the node.',
+        'permission' => 'service.terminate',
+        'body' => ['reason', 'force'],
+        'response' => $one('AdminTerminatedService', 202),
+    ],
     'api.admin.drift.index' => [
         'tag' => 'Operator',
         'summary' => 'Disagreements with the providers',

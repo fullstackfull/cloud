@@ -44,6 +44,21 @@ return [
      */
     'reservation_ttl_seconds' => (int) env('PROVISIONING_RESERVATION_TTL', 3600),
 
+    /*
+     * How long a suspended service is kept before a termination may destroy
+     * what is on it.
+     *
+     * The same rule shared hosting has, and for the same reason: most
+     * suspensions are billing disputes that end with the customer paying, and
+     * a suspension that destroyed data would turn a late invoice into a lost
+     * customer and a liability. An operator acting on an explicit request — an
+     * abuse case, or somebody asking for their data to be deleted now — can
+     * override it, and that override is recorded.
+     */
+    'termination' => [
+        'suspended_retention_days' => (int) env('PROVISIONING_SUSPENDED_RETENTION_DAYS', 30),
+    ],
+
     'reconciliation' => [
         'interval_minutes' => (int) env('PROVISIONING_RECONCILE_MINUTES', 30),
         /*

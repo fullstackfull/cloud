@@ -11,6 +11,7 @@ use Lynomia\Modules\Admin\Http\Controllers\HostingController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
+use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 
 /*
@@ -183,6 +184,16 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::delete('hosting-accounts/{account}', [HostingController::class, 'terminate'])
         ->middleware('permission:'.Permission::HostingAccountManage->value)
         ->name('hosting_accounts.terminate');
+
+    /*
+     * Ending a service and destroying the machine behind it. The action
+     * enforces the retention window; `force` skips it and is checked again
+     * inside the controller, because "terminate what has expired" and "delete
+     * a live customer's data today" are different decisions.
+     */
+    Route::delete('services/{service}', [ServiceController::class, 'terminate'])
+        ->middleware('permission:'.Permission::ServiceTerminate->value)
+        ->name('services.terminate');
 
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)

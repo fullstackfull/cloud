@@ -27,6 +27,15 @@ enum AuditAction: string
     case CustomerUnsuspended = 'customer.unsuspended';
     case HostingAccountUnsuspended = 'hosting_account.unsuspended';
     case HostingAccountTerminated = 'hosting_account.terminated';
+
+    /**
+     * A service ended and its machine destroyed.
+     *
+     * The most irreversible act the platform performs on a customer's data,
+     * and the one whose "who authorised this, and did they skip the retention
+     * window" question has to stay answerable years later.
+     */
+    case ServiceTerminated = 'service.terminated';
     case SubscriptionCancelled = 'subscription.cancelled';
 
     // Data that cannot be recovered once it is gone.

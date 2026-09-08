@@ -32,9 +32,15 @@ enum ProvisioningJobKind: string
     case ReinstallVps = 'reinstall_vps';
     case ReinstallDedicated = 'reinstall_dedicated';
     case Resize = 'resize';
-    case Suspend = 'suspend';
-    case Unsuspend = 'unsuspend';
     case CreateHostingAccount = 'create_hosting_account';
+
+    /**
+     * A shared hosting account moved onto another panel package.
+     *
+     * The hosting half of a plan change: a resize makes a machine the size the
+     * customer pays for, and this makes an account the quota they pay for.
+     */
+    case ChangeHostingPackage = 'change_hosting_package';
     case ProvisionDedicated = 'provision_dedicated';
 
     /**
@@ -73,10 +79,9 @@ enum ProvisioningJobKind: string
     public function serviceStatusOnSuccess(): ?ServiceStatus
     {
         return match ($this) {
-            self::CreateVps, self::CreateHostingAccount, self::ProvisionDedicated, self::Unsuspend => ServiceStatus::Active,
-            self::Suspend => ServiceStatus::Suspended,
+            self::CreateVps, self::CreateHostingAccount, self::ProvisionDedicated => ServiceStatus::Active,
             self::DestroyVps => ServiceStatus::Terminated,
-            self::Start, self::Stop, self::Restart, self::Resize => null,
+            self::Start, self::Stop, self::Restart, self::Resize, self::ChangeHostingPackage => null,
             self::ReinstallVps, self::ReinstallDedicated => null,
         };
     }

@@ -16,6 +16,8 @@ use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeOutcome;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\PlanChangeRefusedException;
@@ -94,7 +96,7 @@ final readonly class ApplyPlanChange
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
 
         $resizeJob = $quote->changesInfrastructure
-            ? $this->queueResize($subscription, $service, $quote, $idempotencyKey)
+            ? $this->queueTheChangeAtTheProvider($subscription, $service, $quote, $idempotencyKey)
             : null;
 
         $this->audit->execute(
@@ -118,21 +120,34 @@ final readonly class ApplyPlanChange
     }
 
     /**
-     * Ask the engine to make the machine the size the customer now pays for.
+     * Ask the engine to make the product what the customer now pays for.
      *
-     * Only for compute. A hosting plan change is a quota on a control panel,
-     * which this platform applies through its own hosting adapter, and a
-     * dedicated one is a physical machine that cannot be resized at all — a
-     * customer moving between dedicated plans is moving between machines,
-     * which is a different operation with a different price.
+     * Two shapes, because the two products are changed in different places: a
+     * machine is resized at the hypervisor, and a hosting account is moved
+     * onto another package at the control panel. Both are queued for the same
+     * reason — each is a provider call that can fail, and a plan change whose
+     * provider half is not tracked is a customer charged for something they
+     * did not get.
+     *
+     * A dedicated server has neither. It cannot be resized at all: a customer
+     * moving between dedicated plans is moving between machines, which is a
+     * different operation with a different price.
      */
-    private function queueResize(
+    private function queueTheChangeAtTheProvider(
         Subscription $subscription,
         ?Service $service,
         PlanChangeQuote $quote,
         ?string $idempotencyKey,
     ): ?ProvisioningJob {
-        if ($service === null || $service->kind !== ProductKind::Vps->value) {
+        if ($service === null) {
+            return null;
+        }
+
+        if ($service->kind === ProductKind::SharedHosting->value) {
+            return $this->queuePackageChange($subscription, $service, $quote, $idempotencyKey);
+        }
+
+        if ($service->kind !== ProductKind::Vps->value) {
             return null;
         }
 
@@ -169,6 +184,58 @@ final readonly class ApplyPlanChange
                 'vcpu' => $quote->newResources->vcpu,
                 'memory_mib' => $quote->newResources->memoryMib,
                 'disk_gib' => $quote->newResources->diskGib,
+            ],
+        ));
+
+        if ($job->wasRecentlyCreated) {
+            RunProvisioningJob::dispatch((string) $job->getKey());
+        }
+
+        return $job;
+    }
+
+    /**
+     * The hosting half: the account moves onto the package the new plan names.
+     *
+     * A plan with no package behind it queues nothing rather than guessing.
+     * Choosing "some package on the right node" would put a customer on a
+     * quota nobody sold them, and the alternative — a plan change that says so
+     * — is a support ticket rather than a silent wrong answer.
+     */
+    private function queuePackageChange(
+        Subscription $subscription,
+        Service $service,
+        PlanChangeQuote $quote,
+        ?string $idempotencyKey,
+    ): ?ProvisioningJob {
+        $account = HostingAccount::query()->where('service_id', $service->getKey())->first();
+
+        if ($account === null) {
+            return null;
+        }
+
+        $package = HostingPackage::query()->where('plan_id', $quote->planId)->first();
+
+        if ($package === null) {
+            return null;
+        }
+
+        $job = $this->createJob->execute(new ProvisioningJobRequest(
+            kind: ProvisioningJobKind::ChangeHostingPackage,
+            idempotencyKey: sprintf(
+                'plan-change:%s:%s:%s',
+                $subscription->getKey(),
+                $quote->planId,
+                $idempotencyKey ?? 'default',
+            ),
+            provider: $account->node()->first()?->panel->value ?? 'unknown',
+            serviceId: (string) $service->getKey(),
+            customerId: $subscription->customer_id,
+            payload: [
+                'hosting_account_id' => (string) $account->getKey(),
+                'hosting_package_id' => (string) $package->getKey(),
+                'subscription_id' => (string) $subscription->getKey(),
+                'plan_id' => $quote->planId,
             ],
         ));
 

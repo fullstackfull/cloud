@@ -70,6 +70,16 @@ final class FakeComputeProvider implements ComputeProvider
      */
     public const string TIMEOUT_MARKER = 'timeout';
 
+    /**
+     * A machine carrying this cannot be destroyed conclusively.
+     *
+     * Its own word rather than a reuse of the timeout marker, because a
+     * hostname is checked for every marker it contains: a name that meant
+     * "time out on destroy" would also mean "time out on create", and the
+     * machine could never be built in the first place.
+     */
+    public const string UNDESTROYABLE_MARKER = 'undestroyable';
+
     /** Appended to a UPID's id segment to mark a task that will report failure. */
     private const string FAILED_TASK_SUFFIX = '-failed';
 
@@ -324,8 +334,25 @@ final class FakeComputeProvider implements ComputeProvider
 
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation
     {
-        if ($this->machine($nodeName, $providerId) === null) {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
             throw $this->noSuchMachine($nodeName, $providerId, 'destroy_vm');
+        }
+
+        /*
+         * A machine whose name carries the timeout marker cannot be destroyed
+         * conclusively: the call fails with the outcome unknown, which is the
+         * one state a termination must never resolve by releasing the
+         * machine's address. Keyed on the name the machine was created with,
+         * because a destroy takes no hostname of its own.
+         */
+        if (self::hostnameCarries($machine->name, self::UNDESTROYABLE_MARKER)) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'destroy_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider timed out on this destroy by design',
+            ], indeterminate: true);
         }
 
         unset($this->machines[$nodeName][$providerId]);

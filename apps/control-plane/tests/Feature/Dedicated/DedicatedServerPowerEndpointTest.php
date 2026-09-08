@@ -336,7 +336,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
          * chassis, and a job stuck in `running` must not cost them the button.
          */
         ProvisioningJob::factory()
-            ->kind(ProvisioningJobKind::Suspend)
+            ->kind(ProvisioningJobKind::Stop)
             ->status(ProvisioningJobStatus::Running)
             ->create([
                 'service_id' => $server->service_id,

@@ -76,10 +76,10 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
 
         $type = match (true) {
             $this->isAReinstall($event->kind) => NotificationType::ReinstallCompleted,
-            // A resize is only ever created by a plan change, so this is what
-            // "your upgrade is done" means: the money moved earlier, and the
-            // machine has now caught up.
-            $event->kind === ProvisioningJobKind::Resize => NotificationType::PlanChangeCompleted,
+            // A resize and a package change are only ever created by a plan
+            // change, so this is what "your upgrade is done" means: the money
+            // moved earlier, and the product has now caught up.
+            $this->isAPlanChange($event->kind) => NotificationType::PlanChangeCompleted,
             default => NotificationType::ServiceReady,
         };
 
@@ -109,7 +109,7 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
              * not optional — the alternative is a customer who paid for an
              * upgrade discovering months later that they never got it.
              */
-            $event->kind === ProvisioningJobKind::Resize => NotificationType::PlanChangeFailed,
+            $this->isAPlanChange($event->kind) => NotificationType::PlanChangeFailed,
             default => NotificationType::ServiceProvisioningFailed,
         };
 
@@ -166,8 +166,9 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             ProvisioningJobKind::ReinstallVps,
             ProvisioningJobKind::ReinstallDedicated,
             // A plan change is money the customer spent; they are told when
-            // the machine finally matches what they bought.
-            ProvisioningJobKind::Resize => true,
+            // the product finally matches what they bought.
+            ProvisioningJobKind::Resize,
+            ProvisioningJobKind::ChangeHostingPackage => true,
             // Power operations and destroys: either the customer is watching,
             // or a different message covers it.
             default => false,
@@ -181,6 +182,19 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
      * being rebuilt" — even though the work behind them shares nothing, so
      * this is the one place the two kinds are deliberately treated alike.
      */
+    /**
+     * Whether this kind is the provider half of a plan change.
+     *
+     * Two kinds, one message: a customer who upgraded does not care whether
+     * the thing that changed was a hypervisor's idea of their memory or a
+     * control panel's idea of their disk quota.
+     */
+    private function isAPlanChange(ProvisioningJobKind $kind): bool
+    {
+        return $kind === ProvisioningJobKind::Resize
+            || $kind === ProvisioningJobKind::ChangeHostingPackage;
+    }
+
     private function isAReinstall(ProvisioningJobKind $kind): bool
     {
         return $kind === ProvisioningJobKind::ReinstallVps

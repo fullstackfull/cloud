@@ -18,6 +18,7 @@ use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -173,11 +174,35 @@ final readonly class ProvisionOrderedService
         /** @var array<string, mixed> $constraints */
         $constraints = $plan->placement_constraints ?? [];
 
+        if ($plan->product?->kind === ProductKind::SharedHosting) {
+            /*
+             * The node is chosen by the hosting scheduler inside the handler,
+             * but the package is not: it is the catalogue's own mapping from a
+             * plan to the quota a panel enforces, and the handler refuses a
+             * job that does not name one.
+             *
+             * Until this was resolved here, every shared hosting order queued
+             * a job with no package in it: the customer paid, the worker
+             * answered "no hosting package exists with the id ''", and the
+             * account was never created. The refusal below is the same shape
+             * the compute path uses for a missing cluster — the service waits
+             * for an operator rather than failing at a worker.
+             */
+            $package = HostingPackage::query()->where('plan_id', $plan->getKey())->first();
+
+            if ($package === null) {
+                $this->cannotPlace($service, 'the plan names no hosting package, so no panel quota can be applied');
+
+                return null;
+            }
+
+            return array_merge($resources, ['hosting_package_id' => (string) $package->getKey()]);
+        }
+
         if ($plan->product?->kind !== ProductKind::Vps) {
-            // Dedicated and shared hosting resolve their own target inside
-            // their handlers — a chassis is reserved from inventory, and a
-            // hosting node is chosen by the hosting scheduler — so the line's
-            // resources are the whole payload.
+            // A dedicated server resolves its own target inside its handler: a
+            // chassis is reserved from inventory, so the line's resources are
+            // the whole payload.
             return $resources;
         }
 

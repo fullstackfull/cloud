@@ -1573,6 +1573,82 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/services/{service}":
+    delete:
+      operationId: "api_admin_services_terminate"
+      tags:
+        - "Operator"
+      summary: "End a service and destroy its machine"
+      description: |-
+        The one act on this surface that destroys data. The retention window on a suspended service is enforced by the action, not by the caller: most suspensions are billing disputes that end with the customer paying. `force` skips it for an abuse case or a right-to-erasure request, needs the terminate permission checked a second time, and is recorded as forced. Answers 202 — the machine is destroyed by a worker, and the service reaches `terminated` when that worker succeeds, releasing the address into quarantine and the capacity back to the node.
+
+        Requires the `service.terminate` permission.
+      parameters:
+        - name: "service"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+                force:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminTerminatedServiceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/transactions":
     get:
       operationId: "api_admin_transactions_index"
@@ -6702,6 +6778,29 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminRetriedJob"
+    AdminTerminatedService:
+      type: "object"
+      additionalProperties: false
+      properties:
+        service_id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+        provisioning_job_id:
+          type:
+            - "string"
+            - "null"
+        queued:
+          type: "boolean"
+    AdminTerminatedServiceResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminTerminatedService"
     AdminTransaction:
       type: "object"
       additionalProperties: false

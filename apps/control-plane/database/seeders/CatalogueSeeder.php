@@ -12,6 +12,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Catalog\Infrastructure\Models\TaxRule;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use RuntimeException;
 
 /**
@@ -187,6 +188,32 @@ final class CatalogueSeeder extends Seeder
             $this->price($plan, 'KWD', BillingPeriod::Yearly, $kwdMonthly * 10);
             $this->price($plan, 'USD', BillingPeriod::Monthly, $usdMonthly);
             $this->price($plan, 'USD', BillingPeriod::Yearly, $usdMonthly * 10);
+
+            /*
+             * The package is what the panel enforces, and without one this
+             * plan cannot be bought: the provisioning path resolves the
+             * package from the plan, and a plan with none leaves the service
+             * waiting for an operator. Seeded here, beside the plan whose
+             * quotas it mirrors, so the two cannot drift apart in the demo
+             * catalogue the way they did when packages were seeded nowhere at
+             * all.
+             */
+            HostingPackage::updateOrCreate(
+                ['slug' => 'hosting-'.$slug],
+                [
+                    'plan_id' => $plan->getKey(),
+                    // The name as it exists on the panel. Prefixed so an
+                    // operator reading a cPanel package list can tell which
+                    // ones this platform owns.
+                    'panel_package_name' => 'lyn_'.$slug,
+                    'disk_quota_mib' => $diskMib,
+                    'bandwidth_quota_mib' => $bandwidthMib,
+                    'max_addon_domains' => $addonDomains,
+                    'max_databases' => $databases,
+                    'max_email_accounts' => $databases * 5,
+                    'is_active' => true,
+                ],
+            );
         }
     }
 

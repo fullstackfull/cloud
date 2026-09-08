@@ -43,12 +43,8 @@ final class HandlerCoverageTest extends TestCase
     private static function documentedGaps(): array
     {
         return [
-            // Nothing creates these. The engine's vocabulary is wider than the
-            // work the platform currently offers, and a kind no code can
-            // produce needs no handler.
-            ProvisioningJobKind::DestroyVps->value => 'no code path creates it; termination is not automated',
-            ProvisioningJobKind::Suspend->value => 'no code path creates it; suspension runs through the hosting adapter',
-            ProvisioningJobKind::Unsuspend->value => 'no code path creates it; restoration runs through the hosting adapter',
+            // Empty, and it should stay that way. Every kind the engine can
+            // queue now has something that can do it.
         ];
     }
 

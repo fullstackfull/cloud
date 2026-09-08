@@ -17,8 +17,10 @@ use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
+use Lynomia\Modules\SharedHosting\Application\Handlers\ChangeHostingPackageHandler;
 use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\DestroyVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\ReinstallVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
@@ -138,8 +140,10 @@ final class InfrastructureServiceProvider extends ServiceProvider
         $handlers->register(StopVpsHandler::class, ProvisioningJobKind::Stop);
         $handlers->register(RestartVpsHandler::class, ProvisioningJobKind::Restart);
         $handlers->register(ReinstallVpsHandler::class, ProvisioningJobKind::ReinstallVps);
+        $handlers->register(DestroyVpsHandler::class, ProvisioningJobKind::DestroyVps);
         $handlers->register(ResizeVpsHandler::class, ProvisioningJobKind::Resize);
         $handlers->register(CreateHostingAccountHandler::class, ProvisioningJobKind::CreateHostingAccount);
+        $handlers->register(ChangeHostingPackageHandler::class, ProvisioningJobKind::ChangeHostingPackage);
         $handlers->register(ProvisionDedicatedHandler::class, ProvisioningJobKind::ProvisionDedicated);
         $handlers->register(ReinstallDedicatedHandler::class, ProvisioningJobKind::ReinstallDedicated);
     }

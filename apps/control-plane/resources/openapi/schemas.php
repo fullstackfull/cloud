@@ -879,6 +879,16 @@ return [
             'state' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminTerminatedService' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'service_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'provisioning_job_id' => ['type' => ['string', 'null']],
+            'queued' => ['type' => 'boolean'],
+        ],
+    ],
     'AdminReconciliationRequest' => [
         'type' => 'object',
         'additionalProperties' => false,
