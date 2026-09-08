@@ -55,7 +55,16 @@ it, and where nothing does, the row says so.
 | See and revoke sessions | `/security` | `GET`/`DELETE /me/sessions` | — | sync | — | — | `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Read sign-in history | `/security` | `GET /me/login-activity` | — | sync | — | — | `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Issue and revoke API tokens | `/api-tokens` | `POST`/`DELETE /me/api-tokens` | `IssueApiToken` | sync | — | — | `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
-| Invite a colleague | — | — | — | — | — | — | — | `NOT_IMPLEMENTED` | A customer is one login. Memberships exist in the schema and nothing creates one. |
+| Invite a colleague, and set what they may do | `/settings/team` | `POST /team/invitations` | `InviteMember` | `notifications` (the offer) | `DeliverNotification` | SMTP | `team.e2e.ts` | `RUNTIME_VERIFIED` | No — mail is not sent from here |
+| Read an offer, accept it, or decline it | `/invitations/:token` | `GET /invitations/{token}`, `POST /invitations/{token}/accept`, `POST /invitations/{token}/decline` | `AcceptInvitation`, `DeclineInvitation` | sync | — | — | — | `TESTED` | n/a — the browser suite drives the inviter's half; the invitee's is proven in `tests/Feature/Team` |
+| Withdraw an offer | `/settings/team` | `DELETE /team/invitations/{id}` | `RevokeInvitation` | sync | — | — | `team.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Send the offer again | `/settings/team` | `POST /team/invitations/{id}/resend` | `ResendInvitation` | `notifications` | `DeliverNotification` | SMTP | — | `TESTED` | No |
+| See who is on the account and what each may do | `/settings/team` | `GET /team/members`, `GET /team/invitations` | — | sync | — | — | `team.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Be shown the list without a way to change it, on a role that may not | `/settings/team` | as above | — | sync | — | — | `team.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Change a colleague's role | `/settings/team` | `PATCH /team/members/{member}` | `ChangeMemberRole` | sync | — | — | `team.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Remove a colleague | `/settings/team` | `DELETE /team/members/{member}` | `RemoveMember` | sync | — | — | — | `TESTED` | n/a |
+| Be refused the act that would leave the account ownerless | `/settings/team` | as above | `ChangeMemberRole`, `RemoveMember` | — | — | — | — | `TESTED` | n/a |
+| Hand the account to somebody else | `/settings/team` | `POST /team/transfer-ownership` | `TransferOwnership` | sync | — | — | — | `TESTED` | n/a |
 
 ## Buying
 
@@ -69,14 +78,19 @@ it, and where nothing does, the row says so.
 | Have a free order fulfil with no invoice | — | `POST /orders` | `PlaceOrder` | as above | as above | as above | — | `TESTED` | n/a |
 | See orders, invoices and payments | `/orders`, `/invoices` | `GET /orders`, `/invoices`, `/payments` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | See wallet balance and its history | `/wallet` | `GET /wallet`, `/wallet/transactions` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
-| Spend wallet credit | — | — | `WalletLedger::debit` | — | — | — | — | `NOT_IMPLEMENTED` | Credit can be received and cannot be spent. Listed in `NoDeadMethodsTest::RESERVED`. |
+| See what credit would cover before spending it | `/invoices` | `GET /invoices/{invoice}/wallet-credit` | `QuoteWalletPayment` | sync | — | — | `wallet-credit.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Pay an invoice from credit, in full or in part | `/invoices` | `POST /invoices/{invoice}/wallet-credit` | `PayInvoiceFromWallet` → `SettleInvoice` | sync | — | — | `wallet-credit.e2e.ts` | `RUNTIME_VERIFIED` | n/a — the money never leaves the platform |
+| Have a refund of a wallet payment go back to the wallet | — | `POST /api/admin/payments/{payment}/refund` (operator) | `IssueRefund` | sync | — | — | — | `TESTED` | n/a |
 
 ## Subscriptions, plan changes and cancellation
 
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | See subscriptions and renewal dates | `/subscriptions` | `GET /subscriptions` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
-| Cancel a subscription | `/subscriptions` | `POST /subscriptions/{id}/cancel` | `CancelCustomerSubscription` | sync | — | — | — | `TESTED` | n/a |
+| Cancel a subscription at the end of the paid period | `/subscriptions` | `POST /subscriptions/{id}/cancel` | `CancelCustomerSubscription` | `notifications` | `DeliverNotification` | SMTP | `leaving.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| End one today, behind its own reference typed back | `/subscriptions` | `POST /subscriptions/{id}/cancel` with `immediately` | `CancelCustomerSubscription` | `provisioning` (the service stops) | `EnforceServiceStateForSubscription` | `suspendVm` / `suspendAccount` | `leaving.e2e.ts` | `RUNTIME_VERIFIED` | No |
+| See when the data behind a stopped service is destroyed | `/services` | `GET /services` | — | sync | — | — | `leaving.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Have the service actually end when the window closes | — | — | `EndExpiredServices` → `EndOfService` | scheduler → `destroy_vps` | `DestroyVpsHandler` | `destroyVm`, `terminateAccount`, decommission | — | `RUNTIME_VERIFIED` | No — `TheNewSweepsRunOutsideThisProcessTest` runs the sweep in its own process and a worker destroys the machine |
 | Price every plan they could move to | `/subscriptions/:id/plan` | `GET /subscriptions/{id}/plan-options` | `QuotePlanChange` | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Change a VPS plan, and get the machine resized | `/subscriptions/:id/plan` | `POST /subscriptions/{id}/plan` | `ApplyPlanChange` | `resize` | `ResizeVpsHandler` | `resizeVm` | `portal.e2e.ts` | `RUNTIME_VERIFIED` | No — `TheWholeLifeOfAVpsTest` |
 | Change a hosting plan, and get the quota applied | `/subscriptions/:id/plan` | `POST /subscriptions/{id}/plan` | `ApplyPlanChange` | `change_hosting_package` | `ChangeHostingPackageHandler` | `changePackage` | — | `TESTED` | `BLOCKED_LICENSE` — `TheWholeLifeOfAHostingAccountTest` proves it against a fake panel |
@@ -96,7 +110,8 @@ it, and where nothing does, the row says so.
 | Be refused a rebuild while one is running, or the service is suspended | `/vps` | `POST /vps/{vm}/reinstall` | `VpsOperationGuard` | — | — | — | `operations.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Open a console | `/vps/:id/console` | `GET /vps/{vm}/console` | `IssueConsoleSession` → `AuthoriseConsoleConnection` | sync + the gateway process | `GatewayServer` | `consoleEndpoint` | `portal.e2e.ts` | `RUNTIME_VERIFIED` | No — `ConsoleGatewayRuntimeTest` drives real sockets against a controlled upstream |
 | Resize a machine | — | — | `ApplyPlanChange` | `resize` | `ResizeVpsHandler` | `resizeVm` | — | `RUNTIME_VERIFIED` | A resize is only ever a plan change; there is no bare resize endpoint, deliberately |
-| Have a terminated machine actually destroyed | — | `DELETE /api/admin/services/{service}` (operator) | `TerminateVpsService` | `destroy_vps` | `DestroyVpsHandler` | `destroyVm` | — | `TESTED` | No — the address goes to quarantine and the node's capacity comes back |
+| Have a terminated machine actually destroyed | `/subscriptions` (by cancelling) or `DELETE /api/admin/services/{service}` (operator) | as noted | `EndOfService` → `TerminateVpsService` | `destroy_vps` | `DestroyVpsHandler` | `destroyVm` | — | `RUNTIME_VERIFIED` | No — the address goes to quarantine, the node's capacity comes back, and a worker in another process does the destroying |
+| Have the platform confirm the machine was really built | — | — | `PollProviderTasks` | scheduler | — | `getTask` | — | `RUNTIME_VERIFIED` | No — a job that succeeded means the request was accepted; this is what turns that into evidence |
 
 ## Backups
 
@@ -106,7 +121,11 @@ it, and where nothing does, the row says so.
 | Take a backup | `/backups` | `POST /vps/{vm}/backups` | `RequestServiceBackup` | sync + `ReconcileRunningBackups` | — | `startBackup` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no Proxmox Backup Server |
 | Restore over the machine | `/backups` | `POST /vps/{vm}/backups/{backup}/restore` | `RestoreServiceBackup` | sync | — | `startRestore` | `portal.e2e.ts` (three specs, including Escape) | `TESTED` | No |
 | Be refused a restore from a backup nobody can vouch for | `/backups` | as above | `RestoreServiceBackup` | — | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
-| Delete a backup | — | — | — | — | — | `deleteBackup` | — | `NOT_IMPLEMENTED` | The adapter can; nothing calls it. Retention at the provider is not managed. |
+| Delete a backup, behind its own reference typed back | `/backups` | `DELETE /vps/{vm}/backups/{backup}` | `RequestBackupDeletion` | scheduler → `DeleteBackupAtProvider` | — | `deleteBackup`, `listBackups` | `backup-deletion.e2e.ts` | `TESTED` | `BLOCKED_CREDENTIALS` — the sweep confirms absence by listing the datastore |
+| Change their mind before the sweep acts | `/backups` | `POST /vps/{vm}/backups/{backup}/keep` | `RequestBackupDeletion::cancel` | sync | — | — | `backup-deletion.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Have expired archives removed on the plan's terms | — | — | `EnforceBackupRetention` | scheduler | — | `deleteBackup` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Have the platform notice an archive that has silently gone | — | — | `ReconcileBackupInventory` | scheduler | — | `listBackups` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Keep their backups through a cancellation's retention window | — | — | `HoldBackupsThroughRetention` | sync (on the cancellation) | — | — | — | `TESTED` | n/a |
 
 ## Dedicated servers
 
@@ -139,7 +158,14 @@ it, and where nothing does, the row says so.
 | Set reverse DNS | `/ips` | `PUT /ips/{assignment}/rdns` | `SetReverseDns` | `PublishReverseDnsRecord` | — | `DnsProvider::publish` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no Cloudflare token |
 | Have a released address quarantined before reuse | — | — | `IpAllocator::releaseAssignment` | `destroy_vps` | `DestroyVpsHandler` | — | — | `TESTED` | n/a |
 | Have a released address come back into circulation | — | — | `ReleaseQuarantinedAddresses` | scheduler | — | — | — | `TESTED` | n/a |
-| Buy or manage forward DNS zones | — | — | — | — | — | `createZone` | — | `NOT_IMPLEMENTED` | Not a product. The adapter can; nothing calls it. |
+| Hold a domain's DNS here | `/dns` | `POST /dns/zones` | `ClaimZone` → `PublishZone` | `default` | — | `createZone` | `dns.e2e.ts` | `TESTED` | `BLOCKED_CREDENTIALS` — no Cloudflare token |
+| See what to delegate the domain to | `/dns` | `GET /dns/zones` | — | sync | — | — | `dns.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Publish A, AAAA, CNAME, MX, TXT and CAA records | `/dns` | `POST /dns/zones/{zone}/records` | `AddRecord` → `PublishRecord` | `default` | — | `publish` | `dns.e2e.ts` | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Change what a record says | `/dns` | `PATCH /dns/zones/{zone}/records/{record}` | `ChangeRecord` | `default` | — | `publish` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Remove a record | `/dns` | `DELETE /dns/zones/{zone}/records/{record}` | `RemoveRecord` | `default` | — | `delete` | `dns.e2e.ts` | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Be refused a record that cannot mean what they meant | `/dns` | as above | `DnsRecordRules`, `AssertRecordFitsTheZone` | — | — | — | `dns.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Give the domain up, behind its own name typed back | `/dns` | `DELETE /dns/zones/{zone}` | `ReleaseZone` → `RemoveZone` | `default` | — | `deleteZone` | `dns.e2e.ts` | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Have the platform notice a zone edited behind its back | — | — | `ReconcileZones` | scheduler | — | `records`, `zones` | — | `TESTED` | `BLOCKED_CREDENTIALS` — reported, never repaired |
 
 ## Notifications and history
 
@@ -151,24 +177,58 @@ it, and where nothing does, the row says so.
 | Mark notifications read | `/notifications` | `POST /notifications/{id}/read`, `/read-all` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Switch off optional messages, and be refused for the rest | `/notifications` | `PUT /me/notification-preferences` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Read what has happened to a service | `/services` | `GET /services/{service}/events` | — | sync | — | — | — | `TESTED` | n/a |
-| Raise a support ticket | — | — | — | — | — | — | — | `NOT_IMPLEMENTED` | Permissions for tickets exist in the role model; no ticket exists anywhere else in the platform. |
+| Raise a support ticket, with files | `/support` | `POST /support/tickets` | `OpenTicket`, `StoreAttachments` | `notifications` | `DeliverNotification` | SMTP | `support.e2e.ts` | `RUNTIME_VERIFIED` | No |
+| Read the thread, and never an internal note | `/support` | `GET /support/tickets/{ticket}` | — | sync | — | — | `support.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Reply, which hands the ticket back to the team | `/support` | `POST /support/tickets/{ticket}/replies` | `ReplyToTicket` | `notifications` | `DeliverNotification` | SMTP | `support.e2e.ts` | `RUNTIME_VERIFIED` | No |
+| Close a ticket — and not resolve one | `/support` | `POST /support/tickets/{ticket}/close` | `ChangeTicketState` | sync | — | — | `support.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Download an attachment, streamed and never linked | `/support` | `GET /support/attachments/{id}` | — | sync | — | — | — | `TESTED` | n/a |
+
+## What an operator can do about the above
+
+Not customer capabilities, and here because several of the rows above depend on
+them: a reconciliation nobody reads is a log file, and a job stuck in review
+that no screen shows is a service quietly not working.
+
+| Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| See what disagrees with the provider, on any resource | `/admin/drift` | `GET /api/admin/drift` | — | sync | — | — | `reconciliation.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| See which resource a finding is about, not only which provider | `/admin/drift` | as above | — | sync | — | — | `reconciliation.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Acknowledge a finding, or close it with a written resolution | `/admin/drift` | `POST /api/admin/drift/{drift}/review` | `ReviewDrift` | sync | — | — | `reconciliation.e2e.ts` | `RUNTIME_VERIFIED` | n/a — the button says so: nothing here changes a provider |
+| Be told a hosting account exists here and not on the panel | `/admin/drift` | as above | `ReconcileHostingNodes` | scheduler (`hosting:reconcile`) | — | `listAccounts` | `reconciliation.e2e.ts` | `TESTED` | `BLOCKED_LICENSE` — five findings, and it repairs none of them |
+| Be told an account exists on the panel and not here, or a suspension the two disagree about | `/admin/drift` | as above | `ReconcileHostingNodes` | scheduler | — | `listAccounts` | `reconciliation.e2e.ts` (the orphan) | `TESTED` | `BLOCKED_LICENSE` |
+| Be told a job whose remote task never finished | `/admin/provisioning` | `GET /api/admin/provisioning/needs-review` | `PollProviderTasks` | scheduler (`compute:poll-tasks`) | — | `getTask` | `reconciliation.e2e.ts` | `RUNTIME_VERIFIED` | No — an indeterminate task goes to review and is never retried |
+| See a service the platform has stopped trusting | `/admin/operations` | `GET /api/admin/operations/reinstalls` | — | sync | — | — | — | `TESTED` | n/a |
+| Answer a ticket, and write a note the customer never sees | `/admin/support` | `POST /api/admin/support/tickets/{ticket}/replies` | `ReplyToTicket` | `notifications` | `DeliverNotification` | SMTP | `support.e2e.ts` | `RUNTIME_VERIFIED` | No |
+| Read every state above in Arabic, translated rather than as its enum value | both portals | — | — | — | — | — | `reconciliation.e2e.ts`, `appearance.e2e.ts` | `RUNTIME_VERIFIED` | n/a — guarded by `EveryStateAScreenShowsIsTranslatedTest` |
 
 ---
 
 ## What a customer still cannot do
 
 Stated plainly, because a matrix of mostly-green rows is easy to skim past.
+Every entry on the previous edition of this list — team membership, spending
+wallet credit, support tickets, deleting a backup, forward DNS, ending their
+own service — is now a row above. What replaces them is shorter, and none of
+it is an oversight:
 
-1. **Invite a colleague.** There is no team management. A customer is one login.
-2. **Spend wallet credit.** It can be received — an overpayment lands there —
-   and no path spends it.
-3. **Raise a support ticket.** The roles anticipate one; nothing else does.
-4. **Delete a backup**, or have expired archives pruned at the provider.
-5. **Buy DNS hosting.** The reverse-DNS half exists; forward zones are not a
-   product.
-6. **End their own service.** Termination is an operator action behind a
-   retention window; a customer cancels the subscription and the service is
-   suspended first.
+1. **Register a domain name.** DNS is hosted here; the domain itself is bought
+   somewhere else and delegated. Registration is Phase 30A++, planned in
+   `docs/phase-30a-plusplus-domains-wordpress-plan.md` and deliberately not
+   built yet.
+2. **Install WordPress, or anything else, on a hosting account.** The account
+   is opened and the panel is handed over; what goes in it is the customer's
+   own work. Also 30A++.
+3. **Move a zone's records in or out as a file.** No zone-file import or
+   export: records are added one at a time. A customer with fifty records
+   migrating in will feel it.
+4. **Restore one file from a backup.** A restore is the whole machine; there
+   is no file-level browse.
+5. **Undo a deletion once the sweep has run.** The hour between asking and
+   acting is the only window, and it is on purpose — after it, the archive is
+   gone at the provider and no row in this platform brings it back.
+6. **Change their own account's currency or country.** Both are set at
+   registration and pinned to the ledger; changing either is an operator act
+   through support, because it would reprice open subscriptions.
 
 ## What no test in this repository proves
 
@@ -176,10 +236,21 @@ Every provider in this table is a fake, a recorded HTTP exchange, or a
 controlled local socket. Specifically, and to be repeated in every report:
 
 - **No Proxmox cluster** has created, resized, rebuilt, suspended or destroyed
-  a machine for this platform.
+  a machine for this platform, and none has answered `getTask` about one.
 - **No physical server** has been reimaged. The dedicated reinstall reaches
   `TESTED` and `BLOCKED_HARDWARE`, and never `REAL_INFRA_VERIFIED`.
 - **No cPanel or DirectAdmin licence** is held, so no real panel has opened,
-  suspended or repackaged an account.
-- **No payment gateway account** exists; no real money has moved.
-- **No Cloudflare token** is held; no PTR record has been published.
+  suspended or repackaged an account — and the hosting reconciliation has
+  never compared this platform against a real one.
+- **No payment gateway account** exists; no real money has moved. Wallet
+  credit is the one payment path proven end to end, and only because the
+  money never leaves the platform.
+- **No Cloudflare token** is held. No PTR record, no zone and no record of any
+  type has been published to a real resolver, and no name this platform holds
+  has ever resolved on the public internet.
+- **No mail has been sent.** Every notification, invitation and ticket reply
+  proven above was written to a log by `MAIL_MAILER=log`.
+- **No provider has deleted a backup.** The deletion sweep and the retention
+  sweep are proven against a fake datastore that answers `listBackups`
+  honestly; a real Proxmox Backup Server has never been asked to prune
+  anything.

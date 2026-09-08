@@ -51,8 +51,14 @@ export function AdminDriftPage() {
           <p className="font-medium text-[var(--text-primary)]">
             {t(`admin.drift.kinds.${drift.kind}`, { defaultValue: drift.kind.replace(/_/g, ' ') })}
           </p>
+          {/*
+            What disagreed, not only who reported it. The kind above says
+            "missing at the provider" for a virtual machine and for a hosting
+            account alike, and an operator triaging a page of findings needs
+            to know which before they open anything.
+          */}
           <p className="technical text-xs text-[var(--text-muted)]" dir="ltr">
-            {drift.provider ?? '—'}
+            {drift.resource_type ?? '—'} · {drift.provider ?? '—'}
             {drift.provider_reference === null ? '' : ` · ${drift.provider_reference}`}
           </p>
         </div>

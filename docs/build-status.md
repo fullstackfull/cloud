@@ -340,6 +340,25 @@ one), provisioning a machine, and the backups screen, which does not exist.
 | Pest | PHPUnit 12 | Pest's install path needs the blocked archive host. Coverage is unaffected. |
 | Promtail | Grafana Alloy | Promtail is EOL, as the specification requires. |
 
+## The product roadmap
+
+Where the platform is, and what comes next. A phase is complete when its own
+closure report says so and its CI run is green — not when its code exists.
+
+| Phase | What it is | State |
+| --- | --- | --- |
+| 29 | Final software closure | Complete |
+| 30A | Final product closure | Complete |
+| 30A+ | Core product completeness — team, wallet, support, backup retention and deletion, forward DNS, customer termination, hosting reconciliation, provider task polling | Complete; see [phase-30a-plus-core-product-completeness.md](phase-30a-plus-core-product-completeness.md) |
+| **30A++** | **Lynomia Domains and Lynomia WordPress Hosting** | **Next.** Planned in [phase-30a-plusplus-domains-wordpress-plan.md](phase-30a-plusplus-domains-wordpress-plan.md); nothing implemented |
+| 30B | Real infrastructure validation | After 30A++. Product expansion stops; the adapters below start talking to real systems |
+| — | Production validation | |
+| — | Go live | |
+
+Phase 30A++ is a product phase and 30B is an infrastructure one. Nothing in
+30A++ may be described as verified against a real registry, registrar or
+control panel: that is precisely what 30B is for.
+
 ## What would have to happen next, and in what order
 
 1. A Stripe test key, to take payments and webhook verification from

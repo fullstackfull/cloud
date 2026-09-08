@@ -13,6 +13,7 @@ use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -167,6 +168,7 @@ class E2ESeeder extends Seeder
         $this->hostingAccount($customer);
         $this->servicesInTrouble($customer);
         $this->workNobodyCanSettle($customer);
+        $this->whatReconciliationFound($customer);
         $this->team($customer);
         $this->ticket($customer);
 
@@ -549,6 +551,88 @@ class E2ESeeder extends Seeder
             'occurrences' => 3,
             'first_seen_at' => now()->subHours(2),
             'last_seen_at' => now()->subMinutes(5),
+        ]);
+    }
+
+    /**
+     * The two findings this platform makes about itself, on the screen an
+     * operator would read them on.
+     *
+     * Both are sweeps, and a sweep whose output nobody looks at is a log file.
+     * Neither had a browser test, so neither had ever been seen rendered — and
+     * a drift row whose `expected`/`observed` pair renders as `{}` is worse
+     * than no row at all, because it reads as "checked, and fine".
+     *
+     * The hosting finding is `MissingAtProvider`: the account is active here
+     * and the panel has never heard of it. That is the one a customer notices
+     * first, because they are paying for a website that is not being served.
+     *
+     * The compute finding is a build whose hypervisor task never came back.
+     * The job is in review and *not* retried — the machine may exist, may be
+     * half-built, or may not exist at all, and the platform will not guess.
+     */
+    private function whatReconciliationFound(Customer $customer): void
+    {
+        $account = HostingAccount::query()->where('username', self::HOSTING_USERNAME)->firstOrFail();
+
+        if (! ResourceDrift::query()->where('resource_type', 'hosting_account')->exists()) {
+            /*
+             * Two findings about the same account, because the specs need one
+             * to read and one to close: resolving a finding takes it out of
+             * the default view, and a spec that consumed the only fixture
+             * would leave the next one asserting against an empty table.
+             */
+            ResourceDrift::query()->create([
+                'provider' => HostingPanel::Fake->value,
+                'resource_type' => 'hosting_account',
+                'service_id' => $account->service_id,
+                'provider_reference' => $account->username,
+                'kind' => DriftKind::MissingAtProvider,
+                'severity' => DriftSeverity::Critical,
+                'status' => DriftStatus::Open,
+                'expected' => ['status' => HostingAccountStatus::Active->value, 'node' => 'e2e-panel'],
+                'observed' => ['present' => false],
+                'occurrences' => 2,
+                'first_seen_at' => now()->subHours(6),
+                'last_seen_at' => now()->subMinutes(11),
+            ]);
+
+            ResourceDrift::query()->create([
+                'provider' => HostingPanel::Fake->value,
+                'resource_type' => 'hosting_account',
+                'service_id' => $account->service_id,
+                'provider_reference' => self::HOSTING_USERNAME.'-old',
+                'kind' => DriftKind::OrphanAtProvider,
+                'severity' => DriftSeverity::Warning,
+                'status' => DriftStatus::Open,
+                'expected' => ['status' => HostingAccountStatus::Terminated->value],
+                'observed' => ['present' => true, 'node' => 'e2e-panel'],
+                'occurrences' => 1,
+                'first_seen_at' => now()->subHours(3),
+                'last_seen_at' => now()->subMinutes(9),
+            ]);
+        }
+
+        $machine = VirtualMachine::query()->where('hostname', self::VPS_HOSTNAME)->firstOrFail();
+
+        if (ProvisioningJob::query()->whereNotNull('remote_task_state')->exists()) {
+            return;
+        }
+
+        ProvisioningJob::factory()->create([
+            'kind' => ProvisioningJobKind::CreateVps,
+            'customer_id' => $customer->getKey(),
+            'service_id' => $machine->service_id,
+            'status' => ProvisioningJobStatus::NeedsReview,
+            'failure_class' => FailureClass::Timeout,
+            'last_error' => 'The hypervisor task this job started has not finished, '
+                .'and the platform has stopped waiting for it.',
+            'provider' => 'fake',
+            'remote_job_id' => 'UPID:e2e-node:0000A1B2:0000C3D4:66000000:qmcreate:900:root@pam:',
+            'remote_task_node' => 'e2e-node',
+            'remote_task_state' => RemoteTaskStatus::Unknown->value,
+            'remote_task_polled_at' => now()->subMinutes(4),
+            'remote_task_poll_count' => 9,
         ]);
     }
 
