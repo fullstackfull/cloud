@@ -150,6 +150,44 @@ it, and where nothing does, the row says so.
 | Have the account deleted when the service ends | — | `DELETE /api/admin/hosting-accounts/{account}` (operator) | `TerminateHostingAccount` | sync | — | `terminateAccount` | — | `TESTED` | `BLOCKED_LICENSE` |
 | Have a panel that is unlicensed stop taking accounts | — | — | `SyncHostingNodeHealth` | scheduler | — | `licenceStatus`, `nodeHealth` | — | `TESTED` | `BLOCKED_LICENSE` |
 
+## Domains
+
+The one product on this platform that cannot be repossessed: a registry fee is
+spent the moment a registration succeeds, so every row below invoices first and
+asks the registrar only when the money has arrived.
+
+| Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Search for a name and be told all five answers | `/domains` | `GET /domains/search` | `SearchDomains` | sync | — | `checkAvailability`, `supports` | `domains.e2e.ts` | `RUNTIME_VERIFIED` | `BLOCKED_CREDENTIALS` — no registrar account |
+| Be quoted a price the platform will honour | `/domains` | `POST /domains/quotes` | `QuoteDomain` → `DomainPricing` | sync | — | `checkAvailability` | `domains.e2e.ts` | `RUNTIME_VERIFIED` | `BLOCKED_CREDENTIALS` |
+| Buy a name | `/domains` | `POST /domains` | `OrderDomainRegistration` | `payments` listener → job | `RegisterDomainAtRegistrar` | `register` | — | `TESTED` | `BLOCKED_CREDENTIALS` — `TheWholeLifeOfADomainRegistrationTest` |
+| Not be charged twice when a settlement webhook repeats | — | — | `RegisterDomainOnPayment` | `payments` | — | — | — | `TESTED` | n/a |
+| Have an unanswered registration left alone rather than retried | — | — | `RegisterDomainAtRegistrar` | `provisioning` | — | — | — | `TESTED` | n/a |
+| Have that uncertainty settled against the registry | — | — | `ReconcileDomains` | scheduler | — | `inspect`, `transferStatus` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Get the name back if nobody ever paid | — | — | `SweepDomainLifecycle` | scheduler | — | — | — | `TESTED` | n/a |
+| Change the delegation | `/domains` | `PUT /domains/{domain}/nameservers` | `SetDomainNameservers` | sync | — | `setNameservers` | `domains.e2e.ts` | `RUNTIME_VERIFIED` | `BLOCKED_CREDENTIALS` |
+| Change the registrant | `/domains` | `PUT /domains/{domain}/contacts` | `UpdateDomainContacts` | sync | — | `setContacts` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Lock and unlock the name | `/domains` | `PUT /domains/{domain}/transfer-lock` | `SetTransferLock` | sync | — | `setTransferLock` | `domains.e2e.ts` | `RUNTIME_VERIFIED` | `BLOCKED_CREDENTIALS` |
+| Take the transfer code and leave | `/domains` | `POST /domains/{domain}/authorisation-code` | `IssueAuthorisationCode` | sync | — | `authorisationCode` | `domains.e2e.ts` | `RUNTIME_VERIFIED` | `BLOCKED_CREDENTIALS` |
+| Renew a name | `/domains` | `POST /domains/{domain}/renewals` | `OrderDomainRenewal` | `payments` listener → job | `RenewDomainAtRegistrar` | `renew` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Have auto-renew actually renew | — | — | `SweepDomainLifecycle` | scheduler | — | — | — | `TESTED` | n/a |
+| Be warned before a name lapses | `/notifications` | — | `SweepDomainLifecycle` | scheduler | — | — | — | `TESTED` | n/a |
+| Transfer a name in | `/domains` | `POST /domains/transfers` | `OrderDomainTransfer` | `payments` listener → job | `StartDomainTransfer` | `startTransfer` | — | `TESTED` | `BLOCKED_CREDENTIALS` |
+| Buy a `.sy` name | — | — | — | — | — | — | — | `NOT_IMPLEMENTED` | `BLOCKED_LICENSE` — no registry licence or technical contract |
+| Recover a name from redemption | — | — | — | — | — | `redeem` | — | `NOT_IMPLEMENTED` | The catalogue refuses to quote one; see below |
+
+## WordPress hosting
+
+| Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Order a site, with any of the four domain options | `/wordpress` | `POST /wordpress/sites` | `OrderWordPressSite` → `PlaceOrder` | sync | — | — | `wordpress.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Have the hosting account built when it is paid for | — | — | `ProvisionOrderedService` | `create_hosting_account` | `CreateHostingAccountHandler` | `createAccount` | — | `TESTED` | `BLOCKED_LICENSE` |
+| Have WordPress installed into it | — | — | `InstallWordPressOnceTheAccountExists` | `install_wordpress` | `InstallWordPressHandler` | `installWordPress` | — | `TESTED` | `NOT_IMPLEMENTED` for cPanel and DirectAdmin — see below |
+| Have an unanswered install left alone rather than repeated | — | — | `InstallWordPressHandler` | `install_wordpress` | — | `wordPressInstallation` | — | `TESTED` | n/a |
+| Be told the site is live only once somebody looked | `/wordpress` | `GET /wordpress/sites` | `VerifyWordPressSites` | scheduler | — | `SiteProbe::probe` | `wordpress.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Be told which of the four steps is outstanding | `/wordpress` | `GET /wordpress/sites` | — | sync | — | — | `wordpress.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Pay for a domain and its hosting on one invoice | — | — | `IssueInvoice` | `payments` | — | — | — | `TESTED` | n/a |
+
 ## Networking
 
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
@@ -211,22 +249,31 @@ wallet credit, support tickets, deleting a backup, forward DNS, ending their
 own service — is now a row above. What replaces them is shorter, and none of
 it is an oversight:
 
-1. **Register a domain name.** DNS is hosted here; the domain itself is bought
-   somewhere else and delegated. Registration is Phase 30A++, planned in
-   `docs/phase-30a-plusplus-domains-wordpress-plan.md` and deliberately not
-   built yet.
-2. **Install WordPress, or anything else, on a hosting account.** The account
-   is opened and the panel is handed over; what goes in it is the customer's
-   own work. Also 30A++.
-3. **Move a zone's records in or out as a file.** No zone-file import or
+1. **Buy a `.sy` name.** The seat exists, every capability answers false, and
+   the search reports the namespace as not sold. What is missing is a registry
+   licence and a technical contract, neither of which can be written around:
+   an invented EPP client would produce tests that pass and a first real
+   registration that fails, with every design decision downstream of it made
+   from fiction.
+2. **Recover a name from redemption.** The state exists, the price column
+   exists, and the catalogue refuses to quote one unless an operator has been
+   told the registry's penalty. Every registry requires a manual step for
+   this, and none of them is built.
+3. **Have WordPress installed on a real cPanel or DirectAdmin node.** The
+   installer is an optional interface on the panel boundary, and neither real
+   adapter implements it. Writing one means guessing at WP Toolkit's or
+   Softaculous's API for the version each node runs. The fake implements it
+   fully, so the product chain is proven; the two real panels will refuse to
+   take a WordPress order until the toolkit clients exist.
+4. **Move a zone's records in or out as a file.** No zone-file import or
    export: records are added one at a time. A customer with fifty records
    migrating in will feel it.
-4. **Restore one file from a backup.** A restore is the whole machine; there
+5. **Restore one file from a backup.** A restore is the whole machine; there
    is no file-level browse.
-5. **Undo a deletion once the sweep has run.** The hour between asking and
+6. **Undo a deletion once the sweep has run.** The hour between asking and
    acting is the only window, and it is on purpose — after it, the archive is
    gone at the provider and no row in this platform brings it back.
-6. **Change their own account's currency or country.** Both are set at
+7. **Change their own account's currency or country.** Both are set at
    registration and pinned to the ledger; changing either is an operator act
    through support, because it would reprice open subscriptions.
 
@@ -245,6 +292,20 @@ controlled local socket. Specifically, and to be repeated in every report:
 - **No payment gateway account** exists; no real money has moved. Wallet
   credit is the one payment path proven end to end, and only because the
   money never leaves the platform.
+- **No registrar account** exists. No real registry has answered an
+  availability check, taken a registration, moved a term, released an
+  authorisation code or acknowledged a transfer. Every domain row above that
+  says `TESTED` was proven against a fake that models the two failures that
+  cost money — a registration that times out with the name registered, and a
+  refusal that leaves nothing behind — and against nothing else.
+- **No WordPress toolkit** has installed anything. The install path is proven
+  against a fake, and the two real panel adapters deliberately do not
+  implement the installer at all.
+- **No customer's site has been fetched over the public internet.** The
+  verification sweep is proven against a probe that answers from markers in a
+  name. What has been proven for real is the refusal: nine tests establish
+  that a name resolving anywhere private is declined before a request is
+  made.
 - **No Cloudflare token** is held. No PTR record, no zone and no record of any
   type has been published to a real resolver, and no name this platform holds
   has ever resolved on the public internet.

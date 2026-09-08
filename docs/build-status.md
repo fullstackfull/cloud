@@ -34,7 +34,7 @@ recorded responses. None of them has spoken to the real thing.
 |---|---|---|
 | Repository, CI workflow, developer bootstrap | `RUNTIME_VERIFIED` | Clean-room clone, install and test run |
 | Control plane (Laravel 13.30, PHP 8.4) | `RUNTIME_VERIFIED` | Full suite against PostgreSQL 16 and Redis |
-| Portal SPA (React 19, Vite 8) | `RUNTIME_VERIFIED` | 54 component tests plus 94 browser specs driving the real API |
+| Portal SPA (React 19, Vite 8) | `RUNTIME_VERIFIED` | 54 component tests plus 105 browser specs driving the real API |
 | Shared kernel — money, state machines, errors | `RUNTIME_VERIFIED` | Exercised by every module's tests |
 | Identity, RBAC, two-factor, sessions, tokens | `RUNTIME_VERIFIED` | 8 roles, 51 permissions seeded and asserted |
 | Multi-tenancy (`ResolveActingCustomer`) | `RUNTIME_VERIFIED` | One enforcement point, tested from both sides |
@@ -69,6 +69,9 @@ recorded responses. None of them has spoken to the real thing.
 | Team membership and invitations | `RUNTIME_VERIFIED` | Phase 30A+; an account can have more than one person in it |
 | Support tickets | `RUNTIME_VERIFIED` | Phase 30A+; customer and operator halves, with internal notes |
 | Forward DNS as a product | `BLOCKED_CREDENTIALS` | Phase 30A+; zones and records, no Cloudflare token here |
+| Domain registration, renewal and transfer | `BLOCKED_CREDENTIALS` | Phase 30A++; the whole customer chain, proven against a fake registrar. No registrar account exists |
+| `.sy` domains | `BLOCKED_LICENSE` | The seat exists and refuses every capability. No registry licence or technical contract; nothing invented |
+| WordPress hosting | `BLOCKED_LICENSE` | Phase 30A++; ordering, provisioning and verification proven end to end against a fake panel. No cPanel or DirectAdmin adapter implements the installer, because neither toolkit's API is documented to this project |
 | Customer-initiated termination | `RUNTIME_VERIFIED` | Phase 30A+; retention window, then the sweep that ends it |
 | Hosting reconciliation | `BLOCKED_LICENSE` | Phase 30A+; five findings, and it repairs none of them |
 | Provider task confirmation | `RUNTIME_VERIFIED` | Phase 30A+; a succeeded job is a request accepted until the poller says otherwise |
@@ -140,7 +143,7 @@ and these are its actual outputs.
 ### Backend
 
 ```text
-php artisan test                        2302 tests, 65124 assertions, 0 failures
+php artisan test                        2444 tests, 69575 assertions, 0 failures
 ./vendor/bin/pint --test                PASS
 composer validate --strict              PASS  (./composer.json is valid)
 ```
@@ -148,11 +151,11 @@ composer validate --strict              PASS  (./composer.json is valid)
 ### Migrations, from an empty database
 
 ```text
-CREATE DATABASE; php artisan migrate    41 migrations applied
-php artisan migrate:rollback --step=99  41 rolled back
-                                        left: migrations, migrations_id_seq
+CREATE DATABASE; php artisan migrate    45 migrations applied
+php artisan migrate:rollback --step=99  45 rolled back
+                                        left: migrations only
                                         no orphan tables, sequences or enum types
-php artisan migrate                     41 re-applied
+php artisan migrate                     45 re-applied
 ```
 
 The same two steps CI runs (`migrate:fresh --seed`, then rollback and migrate
@@ -370,7 +373,7 @@ closure report says so and its CI run is green — not when its code exists.
 | 29 | Final software closure | Complete |
 | 30A | Final product closure | Complete |
 | 30A+ | Core product completeness — team, wallet, support, backup retention and deletion, forward DNS, customer termination, hosting reconciliation, provider task polling | Complete; see [phase-30a-plus-core-product-completeness.md](phase-30a-plus-core-product-completeness.md) |
-| **30A++** | **Lynomia Domains and Lynomia WordPress Hosting** | **Next.** Planned in [phase-30a-plusplus-domains-wordpress-plan.md](phase-30a-plusplus-domains-wordpress-plan.md); nothing implemented |
+| 30A++ | Lynomia Domains and Lynomia WordPress Hosting | Complete; see [phase-30a-plusplus-domains-wordpress-final.md](phase-30a-plusplus-domains-wordpress-final.md) |
 | 30B | Real infrastructure validation | After 30A++. Product expansion stops; the adapters below start talking to real systems |
 | — | Production validation | |
 | — | Go live | |
