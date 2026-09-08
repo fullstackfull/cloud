@@ -319,7 +319,15 @@
       "needs_review": "توقفت إعادة البناء ويقوم فريقنا بمراجعتها",
       "indeterminate": "إعادة البناء غير مؤكدة ويقوم فريقنا بمراجعتها"
     },
-    "rebuild": "إعادة البناء"
+    "rebuild": "إعادة البناء",
+    "serviceState": {
+      "pending": "لم يبدأ",
+      "provisioning": "قيد الإنشاء",
+      "suspended": "معلّق",
+      "reactivating": "قيد الاستعادة",
+      "failed": "فشل الإنشاء",
+      "terminated": "منتهٍ"
+    }
   },
   "dedicated": {
     "subtitle": "أجهزتك الفيزيائية.",

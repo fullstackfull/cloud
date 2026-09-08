@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
+import { Badge } from '@/components/Badge'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
@@ -71,7 +72,30 @@ export function VpsPage() {
         </span>
       ),
     },
-    { key: 'power', header: t('vps.power'), cell: (vm) => <StatusBadge status={vm.power_state} /> },
+    {
+      key: 'power',
+      header: t('vps.power'),
+      cell: (vm) => (
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge status={vm.power_state} />
+          {/*
+            * The service's own state, shown only when it is not active.
+            *
+            * Every control on this row is disabled for a machine whose service
+            * is suspended or halfway through being reactivated — correctly,
+            * because the API refuses them — and until now the screen gave no
+            * reason for it. A customer whose subscription lapsed saw a row of
+            * dead buttons and nothing that said why, which reads as a broken
+            * portal rather than as a suspension they can fix by paying.
+            */}
+          {vm.service_status === 'active' ? null : (
+            <Badge tone={vm.service_status === 'reactivating' ? 'warning' : 'danger'}>
+              {t(`vps.serviceState.${vm.service_status}`, { defaultValue: vm.service_status })}
+            </Badge>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'rebuild',
       header: t('vps.rebuild'),

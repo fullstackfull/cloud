@@ -315,7 +315,15 @@
       "needs_review": "The rebuild stopped and our team is looking at it",
       "indeterminate": "The rebuild is unconfirmed and our team is looking at it"
     },
-    "rebuild": "Rebuild"
+    "rebuild": "Rebuild",
+    "serviceState": {
+      "pending": "Not started",
+      "provisioning": "Being built",
+      "suspended": "Suspended",
+      "reactivating": "Coming back",
+      "failed": "Build failed",
+      "terminated": "Terminated"
+    }
   },
   "dedicated": {
     "subtitle": "Your physical machines.",

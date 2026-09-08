@@ -110,7 +110,14 @@ test.describe('Arabic layout', () => {
     await page.keyboard.press('Escape')
 
     await page.goto('/vps')
-    await page.getByRole('button', { name: /إعادة التثبيت/ }).first().click()
+
+    // The machine by name: the seeder also creates a suspended one, whose
+    // every control is correctly disabled, and `.first()` would find it.
+    await page
+      .getByRole('row')
+      .filter({ hasText: fixtures.vpsHostname })
+      .getByRole('button', { name: /إعادة التثبيت/ })
+      .click()
 
     const vps = page.getByRole('dialog')
     await expect(vps).toBeVisible()

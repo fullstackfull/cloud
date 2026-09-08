@@ -22,6 +22,8 @@ export const fixtures = {
   dedicatedSerial: 'E2E-SN-000117',
   openInvoice: 'INV-E2E-0001',
   paidInvoice: 'INV-E2E-0002',
+  suspendedHostname: 'e2e-suspended-01',
+  reactivatingHostname: 'e2e-reactivating-01',
 } as const
 
 /**

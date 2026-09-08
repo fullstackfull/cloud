@@ -16,17 +16,30 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
+use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use RuntimeException;
 
@@ -60,6 +73,12 @@ class E2ESeeder extends Seeder
     /** One that is settled, so the two states can be told apart on screen. */
     public const string PAID_INVOICE_NUMBER = 'INV-E2E-0002';
 
+    /** A machine whose service is suspended: every action on it must refuse. */
+    public const string SUSPENDED_HOSTNAME = 'e2e-suspended-01';
+
+    /** One the platform is trying to bring back and cannot confirm. */
+    public const string REACTIVATING_HOSTNAME = 'e2e-reactivating-01';
+
     /**
      * A staff login holding billing authority and nothing else.
      *
@@ -90,6 +109,8 @@ class E2ESeeder extends Seeder
         $this->invoices($customer);
         $this->wallet($customer);
         $this->billingAdmin();
+        $this->servicesInTrouble($customer);
+        $this->workNobodyCanSettle($customer);
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -270,6 +291,131 @@ class E2ESeeder extends Seeder
         );
 
         $user->syncRoles([Role::BillingAdmin->value]);
+    }
+
+    /**
+     * The two states a customer notices and the happy fixtures cannot show.
+     *
+     * A suspended service is one the platform has deliberately cut off, and
+     * every action on it — power, resize, rebuild, console — must refuse. A
+     * reactivating one is worse and rarer: the customer has paid, the provider
+     * would not confirm the machine is unlocked, and the platform is honest
+     * about it rather than marking the service active because the money
+     * arrived. Neither had a browser test, so neither had ever been looked at
+     * on a real screen.
+     */
+    private function servicesInTrouble(Customer $customer): void
+    {
+        if (VirtualMachine::query()->where('hostname', self::SUSPENDED_HOSTNAME)->exists()) {
+            return;
+        }
+
+        $node = ComputeNode::query()->orderBy('created_at')->firstOrFail();
+
+        foreach ([
+            [self::SUSPENDED_HOSTNAME, ServiceStatus::Suspended, 'Suspended VPS'],
+            [self::REACTIVATING_HOSTNAME, ServiceStatus::Reactivating, 'Reactivating VPS'],
+        ] as [$hostname, $status, $label]) {
+            $service = Service::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'kind' => 'vps',
+                'status' => $status,
+                'label' => $label.' — '.$hostname,
+            ]);
+
+            VirtualMachine::factory()
+                ->onNode($node)
+                ->forService($service)
+                ->resources(1, 2048, 40)
+                ->create([
+                    'hostname' => $hostname,
+                    'os_family' => 'debian',
+                    'os_version' => '12',
+                ]);
+        }
+    }
+
+    /**
+     * The operator queues, with something in them.
+     *
+     * An empty screen proves the route renders and nothing else: every
+     * decision an operator can take is a control that only appears next to a
+     * row. These are the three rows worth having — a rebuild whose outcome
+     * nobody knows, a physical rebuild waiting for a person, and a machine the
+     * hypervisor disagrees with the platform about.
+     */
+    private function workNobodyCanSettle(Customer $customer): void
+    {
+        if (VmReinstall::query()->exists()) {
+            return;
+        }
+
+        $machine = VirtualMachine::query()->where('hostname', self::VPS_HOSTNAME)->firstOrFail();
+
+        $timedOut = ProvisioningJob::factory()->create([
+            'kind' => ProvisioningJobKind::ReinstallVps,
+            'customer_id' => $customer->getKey(),
+            'service_id' => $machine->service_id,
+            'status' => ProvisioningJobStatus::NeedsReview,
+            'failure_class' => FailureClass::Timeout,
+            'last_error' => 'the hypervisor stopped answering while the disk was being replaced',
+            'provider' => 'fake',
+        ]);
+
+        VmReinstall::query()->create([
+            'virtual_machine_id' => $machine->getKey(),
+            'service_id' => $machine->service_id,
+            'customer_id' => $customer->getKey(),
+            'provisioning_job_id' => $timedOut->getKey(),
+            'state' => ReinstallState::Indeterminate,
+            'state_changed_at' => now()->subMinutes(20),
+            // The fact the customer rings about: this disk is gone, or it is
+            // not, and the platform does not know which.
+            'destroyed_at' => now()->subMinutes(21),
+            'failure_code' => 'compute.request_timeout',
+            'failure_message' => 'the hypervisor stopped answering while the disk was being replaced',
+            'provider_resource_id' => (string) $machine->provider_id,
+            'provider_node' => 'e2e-node',
+        ]);
+
+        $server = DedicatedServer::query()->where('serial', self::DEDICATED_SERIAL)->firstOrFail();
+
+        $refused = ProvisioningJob::factory()->create([
+            'kind' => ProvisioningJobKind::ReinstallDedicated,
+            'customer_id' => $customer->getKey(),
+            'service_id' => $server->service_id,
+            'status' => ProvisioningJobStatus::NeedsReview,
+            'failure_class' => FailureClass::Permanent,
+            'last_error' => 'the installer reported that it could not partition the disks',
+            'provider' => 'fake',
+        ]);
+
+        DedicatedReinstall::query()->create([
+            'dedicated_server_id' => $server->getKey(),
+            'service_id' => $server->service_id,
+            'customer_id' => $customer->getKey(),
+            'provisioning_job_id' => $refused->getKey(),
+            'state' => DedicatedReinstallState::NeedsReview,
+            'state_changed_at' => now()->subMinutes(35),
+            'destructive_started_at' => now()->subMinutes(40),
+            'failure_code' => 'dedicated.install_failed',
+            'failure_message' => 'the installer reported that it could not partition the disks',
+        ]);
+
+        ResourceDrift::query()->create([
+            'provider' => 'fake',
+            'resource_type' => 'virtual_machine',
+            'service_id' => $machine->service_id,
+            'provider_reference' => (string) $machine->provider_id,
+            'kind' => DriftKind::SuspensionMismatch,
+            'severity' => DriftSeverity::Critical,
+            'status' => DriftStatus::Open,
+            'expected' => ['lock' => 'lynomia-suspended'],
+            'observed' => ['lock' => null],
+            'occurrences' => 3,
+            'first_seen_at' => now()->subHours(2),
+            'last_seen_at' => now()->subMinutes(5),
+        ]);
     }
 
     private function invoices(Customer $customer): void

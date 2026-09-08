@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import { fixtures, signIn } from './support/helpers'
 
@@ -15,6 +15,29 @@ import { fixtures, signIn } from './support/helpers'
 test.beforeEach(async ({ page }) => {
   await signIn(page)
 })
+
+/**
+ * The row for the machine these specs are about.
+ *
+ * Named rather than taken with `.first()`, because the seeder deliberately
+ * also creates a suspended machine and one halfway through being reactivated —
+ * and a spec that reached for whichever row came first would silently start
+ * asserting about one of those the moment such a fixture was added, which is
+ * exactly what happened when they were.
+ */
+function machineRow(page: Page): Locator {
+  return page.getByRole('row').filter({ hasText: fixtures.vpsHostname })
+}
+
+/**
+ * Picks the machine whose backups the seeder writes.
+ *
+ * The picker defaults to the customer's first machine, which is not
+ * necessarily the one with backups on it.
+ */
+async function chooseMachine(page: Page, hostname: string = fixtures.vpsHostname): Promise<void> {
+  await page.getByRole('combobox').selectOption({ label: hostname })
+}
 
 test('the dashboard names the signed-in customer', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible()
@@ -142,6 +165,7 @@ test('the VPS list shows the machine and its address', async ({ page }) => {
 
 test('the backups screen shows both states the seeder writes', async ({ page }) => {
   await page.goto('/backups')
+  await chooseMachine(page)
 
   // The seeder writes one finished backup the customer could restore from and
   // one that stopped being trackable and is waiting for a person. A screen
@@ -157,6 +181,7 @@ test('a backup waiting for a person cannot be restored from', async ({ page }) =
    * offer to overwrite a working machine with an unknown.
    */
   await page.goto('/backups')
+  await chooseMachine(page)
 
   await expect(page.getByRole('button', { name: /^restore$/i })).toHaveCount(2)
   await expect(page.locator('button:disabled', { hasText: /^restore$/i })).toHaveCount(1)
@@ -164,6 +189,7 @@ test('a backup waiting for a person cannot be restored from', async ({ page }) =
 
 test('a restore cannot be confirmed without typing the hostname', async ({ page }) => {
   await page.goto('/backups')
+  await chooseMachine(page)
 
   // The enabled one: the other row is the needs-review backup, whose restore
   // is deliberately refused.
@@ -194,6 +220,7 @@ test('escape closes the restore dialog without restoring', async ({ page }) => {
    * test could not check it.
    */
   await page.goto('/backups')
+  await chooseMachine(page)
 
   await page.locator('button:enabled', { hasText: /^restore$/i }).first().click()
   await expect(page.getByRole('dialog')).toBeVisible()
@@ -230,7 +257,7 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
    */
   await page.goto('/vps')
 
-  await page.getByRole('button', { name: /^reinstall$/i }).first().click()
+  await machineRow(page).getByRole('button', { name: /^reinstall$/i }).click()
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -252,7 +279,7 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
 test('escape closes the reinstall dialogue without rebuilding anything', async ({ page }) => {
   await page.goto('/vps')
 
-  await page.getByRole('button', { name: /^reinstall$/i }).first().click()
+  await machineRow(page).getByRole('button', { name: /^reinstall$/i }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
 
   await page.keyboard.press('Escape')
@@ -310,7 +337,7 @@ test('the console page asks for a permit and says honestly when consoles are una
    */
   await page.goto('/vps')
 
-  await page.getByRole('link', { name: /^console$/i }).first().click()
+  await machineRow(page).getByRole('link', { name: /^console$/i }).click()
 
   await expect(page.getByRole('heading', { name: /console/i })).toBeVisible()
 
