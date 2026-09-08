@@ -8,6 +8,7 @@ use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Monitoring\Application\Collectors\CapacityCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ConsoleCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\IpamCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\LifecycleCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\NotificationCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\OrdersCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\PaymentsCollector;
@@ -39,6 +40,7 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(OrdersCollector::class),
                 $app->make(ProvisioningCollector::class),
                 $app->make(ServicesCollector::class),
+                $app->make(LifecycleCollector::class),
                 $app->make(QueueCollector::class),
                 $app->make(IpamCollector::class),
                 $app->make(CapacityCollector::class),

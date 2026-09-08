@@ -49,7 +49,7 @@ final class MetricsQueryBudgetTest extends TestCase
      * acquiring a per-row query, not a target to optimise towards. The N+1
      * assertion below is the real test.
      */
-    private const int BUDGET = 20;
+    private const int BUDGET = 26;
 
     private MetricsRegistry $registry;
 

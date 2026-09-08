@@ -56,6 +56,57 @@ failure rate, churn.
 The business dashboard is not decoration. A provisioning failure rate that climbs from 1%
 to 8% is visible there hours before it is visible in support tickets.
 
+## The series the control plane exposes
+
+`GET /metrics` on the control plane, behind the metrics token. Every family below is
+produced by a collector wired in `MonitoringServiceProvider`; a collector that is written
+and not wired is a visibly missing line in that file rather than a metric that silently
+does not exist.
+
+| Family | Labels | The question it answers |
+|---|---|---|
+| `lynomia_orders_total` | status | Are orders getting through to payment |
+| `lynomia_provisioning_jobs_total` | status, kind | What the build queue is doing, and what it could not do |
+| `lynomia_provisioning_duration_seconds` | kind, le | How long a build takes, bucketed around the job timeout |
+| `lynomia_resource_drift_open` | kind, severity | Where the platform and a provider disagree, unresolved |
+| `lynomia_services_active` | kind | What is running for customers right now |
+| `lynomia_service_status_total` | kind, status | Everything else a service can be — including `reactivating`, which is a customer who has paid and cannot use their server |
+| `lynomia_plan_change_total` | status | Upgrades whose money moved and whose machine has not caught up |
+| `lynomia_reinstall_operation_total` | kind, state | Rebuilds by state; `indeterminate` and `needs_review` are disks nobody can vouch for |
+| `lynomia_console_connection_total` | outcome | Consoles opened, and consoles that got a socket and no hypervisor |
+| `lynomia_console_refusal_total` | reason | Permits refused; a rising `machine_mismatch` from one source is somebody trying permits that are not theirs |
+| `lynomia_notification_delivery_total` | channel, status | Whether customers are actually being told things |
+| `lynomia_queue_depth` | queue | Work arriving faster than it is done |
+| `lynomia_failed_jobs_total` | — | Jobs the queue gave up on |
+| `lynomia_ip_pool_available`, `lynomia_ip_pool_runway_days` | pool | Orders that will start failing after payment |
+| `lynomia_node_capacity_ratio` | cluster, node, dimension | Placement headroom as the scheduler computes it |
+| `lynomia_hosting_node_disk_ratio` | node | The node where every site breaks at once |
+| `lynomia_scheduled_command_*` | command | Whether the scheduler is running at all |
+| `lynomia_webhook_events_total` | provider, status | Money moving without being recorded |
+| `lynomia_mrr_minor`, `lynomia_failed_payments_total` | currency, — | The business numbers |
+| `lynomia_metrics_collector_up`, `lynomia_metrics_collect_duration_seconds` | collector | Whether the exposition itself is healthy |
+
+### What is never a label
+
+No `customer_id`, `service_id`, `subscription_id`, `user_id`, `email`, `hostname`,
+`ip`, `provider_resource_id`, `session_id` or any other per-row identifier — enforced by
+`MetricsCarryNoIdentifiersTest`, which checks label names *and* what the values look like,
+because a label called `node` holding a customer's hostname passes a name-only rule.
+
+Two reasons, and the second is the one people forget. A per-customer series grows without
+bound and is never released, and the moment it hurts most is the fleet-wide incident that
+creates thousands of them at once. And a label publishes its value into a system with
+weaker access control than the platform's own: a dashboard is not the database, and a
+screenshot of one is not either.
+
+`node`, `cluster`, `pool`, `queue` and `command` are labels because their value sets are
+bounded by the hardware and the code rather than by the customer list, and because
+"which node" is the first thing an operator needs.
+
+Every family emits its full label cross-product including zeros. A series that appears
+only once something has failed is a series nobody can write an alert rule against in
+advance — which is to say, before the outage.
+
 ## Alerts
 
 | Alert | Why it matters |
