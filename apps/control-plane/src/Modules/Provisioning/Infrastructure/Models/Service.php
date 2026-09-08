@@ -36,6 +36,9 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
  * @property array<string, mixed> $resources
  * @property ?CarbonImmutable $activated_at
  * @property ?CarbonImmutable $suspended_at
+ * @property ?CarbonImmutable $retention_ends_at
+ * @property ?CarbonImmutable $retention_warned_at
+ * @property ?string $ended_reason
  * @property ?CarbonImmutable $terminated_at
  */
 class Service extends Model
@@ -55,6 +58,8 @@ class Service extends Model
             'resources' => 'array',
             'activated_at' => 'immutable_datetime',
             'suspended_at' => 'immutable_datetime',
+            'retention_ends_at' => 'immutable_datetime',
+            'retention_warned_at' => 'immutable_datetime',
             'terminated_at' => 'immutable_datetime',
         ];
     }

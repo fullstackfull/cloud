@@ -76,6 +76,16 @@ final class ServiceResource extends JsonResource
 
             'activated_at' => $this->activated_at?->toIso8601String(),
             'suspended_at' => $this->suspended_at?->toIso8601String(),
+
+            /*
+             * The date the data behind this service is destroyed, and why it
+             * is going. Published because a customer who cancelled has one
+             * question left about the thing they cancelled, and "when do I
+             * lose it" is it — a portal that knows the date and does not show
+             * it is keeping a deadline to itself.
+             */
+            'retention_ends_at' => $this->retention_ends_at?->toIso8601String(),
+            'ended_reason' => $this->ended_reason,
             'terminated_at' => $this->terminated_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

@@ -81,7 +81,7 @@ return [
         ],
         'cancellation_scheduled' => [
             'title' => ':service is scheduled to end',
-            'body' => ':service will end on :date. You will keep full use of it until then.',
+            'body' => ':service will end on :date. You will keep full use of it until then. Your data is kept for :retention_days days after that, and destroyed once that time is up.',
         ],
     ],
     'service' => [
@@ -112,6 +112,14 @@ return [
         'reactivation_failed' => [
             'title' => 'Could not restore :service yet',
             'body' => 'Your payment went through, but we could not bring :service back online automatically. Our team is on it and will restore it shortly.',
+        ],
+        'ended' => [
+            'title' => ':service has ended',
+            'body' => ':service stopped serving on :date because the subscription ended. Your data is kept until :retention_ends and is destroyed after that.',
+        ],
+        'data_retention_ending' => [
+            'title' => 'The data behind :service is destroyed on :date',
+            'body' => 'Nothing has been deleted yet. If you still need anything from :service, take a copy before :date — after that it cannot be recovered.',
         ],
         'terminated' => [
             'title' => ':service has been terminated',

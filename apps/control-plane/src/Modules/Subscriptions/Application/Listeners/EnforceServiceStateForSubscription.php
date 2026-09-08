@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Backups\Application\Actions\HoldBackupsThroughRetention;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Compute\Application\Actions\EnforceComputeSuspension;
 use Lynomia\Modules\Compute\Application\Actions\LiftComputeSuspension;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Provisioning\Application\Actions\BeginRetentionWindow;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
@@ -64,14 +67,31 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  * and if it does not, it stays unusable and says so rather than pretending.
  *
  * ---------------------------------------------------------------------------
+ * Cancellation is the third edge, and it was missing
+ * ---------------------------------------------------------------------------
+ *
+ * A cancelled subscription is one nobody is paying for any more — the customer
+ * asked for it to end, and the period they paid for has run out. Until this
+ * edge existed, that meant nothing at all to the thing it paid for: the
+ * machine kept running, the hosting account kept serving, and the platform
+ * kept the disk. Free for the customer, and permanent.
+ *
+ * Arriving at cancelled therefore does everything arriving at suspended does —
+ * the row moves, the provider is told — and one thing more: the retention
+ * window is started and written down, so that both the customer and the sweep
+ * know the date the data goes. Suspension for non-payment starts the same
+ * window with a different reason, and the difference decides what may happen
+ * automatically at the end of it.
+ *
+ * ---------------------------------------------------------------------------
  * Why one listener and one edge at a time
  * ---------------------------------------------------------------------------
  *
- * Only two edges do anything: arriving at suspended, and leaving suspended for
- * active. Arriving at active from past_due means the customer paid before
- * anything was switched off, and there is nothing to restore. Acting on the
- * destination alone would send an unsuspend to a control panel for every
- * recovered past-due subscription in the fleet.
+ * Only three edges do anything: arriving at suspended, arriving at cancelled,
+ * and leaving suspended for active. Arriving at active from past_due means the
+ * customer paid before anything was switched off, and there is nothing to
+ * restore. Acting on the destination alone would send an unsuspend to a
+ * control panel for every recovered past-due subscription in the fleet.
  */
 final class EnforceServiceStateForSubscription implements ShouldQueue
 {
@@ -86,11 +106,14 @@ final class EnforceServiceStateForSubscription implements ShouldQueue
         private readonly EnforceComputeSuspension $suspendCompute,
         private readonly LiftComputeSuspension $liftCompute,
         private readonly NotifyCustomer $notify,
+        private readonly BeginRetentionWindow $retention,
+        private readonly HoldBackupsThroughRetention $holdBackups,
     ) {}
 
     public function handle(SubscriptionStatusChanged $event): void
     {
-        $suspending = $event->to === SubscriptionStatus::Suspended;
+        $ending = $event->to === SubscriptionStatus::Cancelled;
+        $suspending = $event->to === SubscriptionStatus::Suspended || $ending;
         $restoring = $event->to === SubscriptionStatus::Active
             && $event->from === SubscriptionStatus::Suspended;
 
@@ -101,7 +124,16 @@ final class EnforceServiceStateForSubscription implements ShouldQueue
         $services = Service::query()
             ->where('subscription_id', $event->subscriptionId)
             ->whereIn('status', $suspending
-                ? [ServiceStatus::Active->value]
+                /*
+                 * A cancellation may arrive at a service that is already
+                 * suspended — the customer stopped paying, was suspended, and
+                 * then cancelled. There is nothing to switch off, but the
+                 * window's reason changes from "has not paid" to "asked to
+                 * leave", and that is what decides whether the sweep may act.
+                 */
+                ? ($ending
+                    ? [ServiceStatus::Active->value, ServiceStatus::Suspended->value]
+                    : [ServiceStatus::Active->value])
                 // Reactivating is included so a reactivation that failed and
                 // was retried is picked up rather than skipped for being
                 // already halfway.
@@ -109,8 +141,83 @@ final class EnforceServiceStateForSubscription implements ShouldQueue
             ->get();
 
         foreach ($services as $service) {
-            $this->apply($service, $suspending, $event);
+            /*
+             * A cancellation that reaches a service already switched off has
+             * nothing to switch off — the customer stopped paying, was
+             * suspended, and has now decided to leave. Only the window's
+             * reason changes. Every other edge, including a restoration, goes
+             * through the enforcement below.
+             */
+            $alreadyStopped = $ending && $service->status === ServiceStatus::Suspended;
+
+            if (! $alreadyStopped) {
+                $this->apply($service, $suspending, $event);
+            }
+
+            if ($suspending) {
+                $this->startTheClock($service, $ending);
+            }
+
+            if ($restoring) {
+                // Paid, and staying. The date the data was going to be
+                // destroyed on stops existing rather than sitting in the row
+                // where the next sweep would read it.
+                $this->retention->cancel($service);
+            }
         }
+    }
+
+    /**
+     * Records when this service's data goes, and holds its backups until then.
+     *
+     * Both are written even for a suspension, because a suspension is where
+     * the window starts — but the reason differs, and the sweep will only ever
+     * act on its own for the one the customer chose.
+     */
+    private function startTheClock(Service $service, bool $ending): void
+    {
+        $stamped = $this->retention->execute(
+            $service,
+            $ending ? BeginRetentionWindow::BY_CUSTOMER : BeginRetentionWindow::BY_NON_PAYMENT,
+        );
+
+        if ($stamped->retention_ends_at === null) {
+            return;
+        }
+
+        /*
+         * The producer `protected_until` never had. Until now a departing
+         * customer's backups were subject to the ordinary retention sweep,
+         * which is the one thing the window is supposed to prevent: somebody
+         * who cancelled by mistake finding the copies gone before they noticed.
+         */
+        $this->holdBackups->execute((string) $service->getKey(), $stamped->retention_ends_at);
+
+        if (! $ending) {
+            // A suspension for non-payment already sends its own message, and
+            // it is a different one: that customer has not left, they owe.
+            return;
+        }
+
+        /*
+         * Sent from here rather than from the notifications listener, because
+         * the sentence has to quote the date the data goes and this is where
+         * that date is written. Two queued listeners on one event have no
+         * order between them, so a message sent from the other one would
+         * sometimes quote a date that did not exist yet.
+         */
+        $this->notify->execute(
+            customerId: (string) $stamped->customer_id,
+            type: NotificationType::ServiceEnded,
+            idempotencyKey: 'service-ended:'.$stamped->getKey(),
+            subject: $stamped,
+            data: [
+                'service' => $stamped->label ?? 'your service',
+                'date' => CarbonImmutable::now()->toDateString(),
+                'retention_ends' => $stamped->retention_ends_at->toDateString(),
+            ],
+            link: '/services',
+        );
     }
 
     private function apply(Service $service, bool $suspending, SubscriptionStatusChanged $event): void

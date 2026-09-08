@@ -171,14 +171,31 @@ export function useSubscriptions(pageNumber = 1) {
   })
 }
 
+export interface CancellationRequest {
+  id: string
+  /**
+   * True ends it now and does not refund the rest of the period. The server
+   * demands the subscription's own id typed back for this form, and the portal
+   * forwards what the customer typed rather than the id it already holds.
+   */
+  immediately?: boolean
+  confirmation?: string
+}
+
 export function useCancelSubscription() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (id: string) =>
-      api.post<unknown>(`/subscriptions/${encodeURIComponent(id)}/cancel`),
+    mutationFn: ({ id, immediately = false, confirmation }: CancellationRequest) =>
+      api.post<unknown>(`/subscriptions/${encodeURIComponent(id)}/cancel`, {
+        immediately,
+        ...(immediately && confirmation !== undefined ? { confirm_subscription_id: confirmation } : {}),
+      }),
     onSuccess: () => {
+      // Services as well: a cancellation is the moment a service acquires a
+      // date it will be destroyed on, and that date is on the service.
       void queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
+      void queryClient.invalidateQueries({ queryKey: ['services'] })
     },
   })
 }

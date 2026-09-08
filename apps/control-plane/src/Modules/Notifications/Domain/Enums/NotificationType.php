@@ -45,7 +45,27 @@ enum NotificationType: string
     case ServiceSuspended = 'service.suspended';
     case ServiceRestored = 'service.restored';
     case ServiceReactivationFailed = 'service.reactivation_failed';
+    /**
+     * The service stopped serving because the subscription ended.
+     *
+     * Distinct from `ServiceTerminated`, which is the data being destroyed, and
+     * from `ServiceSuspended`, which is what happens to somebody who has not
+     * paid. Three different sentences for three different days, and a customer
+     * who chose to leave should not be sent the one written for a debtor.
+     */
+    case ServiceEnded = 'service.ended';
+
     case ServiceTerminated = 'service.terminated';
+
+    /**
+     * The one message on this list whose whole value is that it arrives early.
+     *
+     * A retention window is a month, and a month is long enough to forget a
+     * cancellation made in a hurry. "Your data is destroyed on Friday" is a
+     * sentence somebody can act on; "your data has been destroyed" is one they
+     * can only regret.
+     */
+    case DataRetentionEnding = 'service.data_retention_ending';
     case PlanChangeCompleted = 'service.plan_change_completed';
     case PlanChangeFailed = 'service.plan_change_failed';
     case ReinstallStarted = 'service.reinstall_started';
@@ -111,7 +131,7 @@ enum NotificationType: string
             self::GracePeriodStarted, self::SuspensionWarning, self::CancellationScheduled,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,
-            self::ServiceTerminated,
+            self::ServiceEnded, self::ServiceTerminated, self::DataRetentionEnding,
             self::ReinstallCompleted, self::ReinstallFailed,
             self::RestoreCompleted, self::RestoreFailed,
             self::PlanChangeCompleted, self::PlanChangeFailed,

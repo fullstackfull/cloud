@@ -81,7 +81,7 @@ return [
         ],
         'cancellation_scheduled' => [
             'title' => 'من المقرر إنهاء :service',
-            'body' => 'سينتهي :service في :date. ستحتفظ باستخدامه الكامل حتى ذلك التاريخ.',
+            'body' => 'سينتهي :service في :date. ستحتفظ باستخدامه الكامل حتى ذلك التاريخ. وتُحفظ بياناتك :retention_days يومًا بعد ذلك ثم تُحذف بانقضائها.',
         ],
     ],
     'service' => [
@@ -112,6 +112,14 @@ return [
         'reactivation_failed' => [
             'title' => 'تعذّرت إعادة :service حتى الآن',
             'body' => 'تم استلام دفعتك، لكننا لم نتمكن من إعادة :service تلقائيًا. فريقنا يعمل على ذلك وسيعيده قريبًا.',
+        ],
+        'ended' => [
+            'title' => 'انتهى :service',
+            'body' => 'توقّف :service في :date لانتهاء الاشتراك. تُحفظ بياناتك حتى :retention_ends ثم تُحذف بعد ذلك.',
+        ],
+        'data_retention_ending' => [
+            'title' => 'ستُحذف بيانات :service في :date',
+            'body' => 'لم يُحذف شيء بعد. إن كنت لا تزال بحاجة إلى شيء من :service فخذ نسخة قبل :date — فبعده لا يمكن استرجاعها.',
         ],
         'terminated' => [
             'title' => 'تم إنهاء :service',

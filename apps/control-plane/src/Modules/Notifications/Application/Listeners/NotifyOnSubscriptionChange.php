@@ -89,7 +89,18 @@ final class NotifyOnSubscriptionChange implements ShouldQueue
 
             $event->to === SubscriptionStatus::Terminated => NotificationType::ServiceTerminated,
 
-            $event->to === SubscriptionStatus::Cancelled => NotificationType::CancellationScheduled,
+            /*
+             * Cancellation is deliberately absent, in both directions.
+             *
+             * Arranging one changes no status at all — only a date — so this
+             * listener would never see it, and the action that arranges it
+             * sends that message itself. And a cancellation taking effect is
+             * announced by the listener that ends the service, because the
+             * sentence has to quote the date the data goes and only that
+             * listener has written it down. Two queued listeners on one event
+             * have no order between them, and a message that raced the fact it
+             * describes would quote an empty date.
+             */
 
             default => null,
         };

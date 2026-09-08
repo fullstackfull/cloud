@@ -281,7 +281,15 @@
     "endsOn": "Ends {{date}}",
     "cancel": "Cancel",
     "empty": "No subscriptions.",
-    "changePlan": "Change plan"
+    "changePlan": "Change plan",
+    "cancelTitle": "End this subscription?",
+    "cancelWarning": "It will run until {{date}}, which you have already paid for, and will not renew after that.",
+    "cancelNowWarning": "It stops now. The rest of the period you have paid for is not refunded, and the servers it pays for stop serving immediately.",
+    "dataWarning": "Whatever is on the servers it pays for is kept for {{days}} days after it stops, and destroyed once that time is up. Take a copy of anything you still need before then.",
+    "cancelConfirmLabel": "Type the subscription reference below to confirm",
+    "confirmEnd": "End subscription",
+    "endNowOption": "End it now instead of at {{date}}",
+    "endNowConfirm": "End it now"
   },
   "services": {
     "subtitle": "Everything running on your account.",
@@ -290,7 +298,8 @@
     "state": "State",
     "activated": "Since",
     "unnamed": "Unnamed service",
-    "empty": "Nothing is running yet."
+    "empty": "Nothing is running yet.",
+    "dataUntil": "Data kept until"
   },
   "vps": {
     "subtitle": "Your virtual machines.",

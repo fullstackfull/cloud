@@ -35,6 +35,23 @@ export function ServicesPage() {
     },
     { key: 'state', header: t('services.state'), cell: (service) => <StatusBadge status={service.state} /> },
     {
+      key: 'retention',
+      header: t('services.dataUntil'),
+      cell: (service) => (
+        /*
+         * The deadline, in the list rather than one click in. A customer with
+         * six services and one ending needs to see which one from here — and a
+         * portal that knows the date and shows it only on a detail page is
+         * keeping a deadline to itself.
+         */
+        <span className="text-xs text-[var(--text-muted)]">
+          {service.retention_ends_at === null
+            ? '—'
+            : formatDate(service.retention_ends_at, locale)}
+        </span>
+      ),
+    },
+    {
       key: 'since',
       header: t('services.activated'),
       cell: (service) =>

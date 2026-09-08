@@ -57,6 +57,26 @@ return [
      */
     'termination' => [
         'suspended_retention_days' => (int) env('PROVISIONING_SUSPENDED_RETENTION_DAYS', 30),
+
+        /*
+         * How long before the data goes the customer is told it is going.
+         *
+         * A month is long enough to forget a cancellation made in a hurry, and
+         * "your data is destroyed on Friday" is the message that has saved
+         * somebody's business more than once. Sent once per service; the
+         * column that records it is what makes that true.
+         */
+        'warn_days_before' => (int) env('PROVISIONING_RETENTION_WARN_DAYS', 3),
+
+        /*
+         * Whether the sweep may end services on its own.
+         *
+         * True by default and only for services a customer cancelled: they
+         * chose the date and were told it twice. A service suspended for
+         * non-payment is never ended automatically whatever this says — that
+         * is a decision with a person's name on it.
+         */
+        'sweep_cancelled' => (bool) env('PROVISIONING_SWEEP_CANCELLED', true),
     ],
 
     'reconciliation' => [

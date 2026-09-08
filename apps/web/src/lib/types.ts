@@ -119,6 +119,8 @@ export interface Subscription {
   auto_renew: boolean
   is_scheduled_to_cancel: boolean
   service_is_running: boolean
+  /** How long the data behind this subscription's services is kept once it ends. */
+  data_retention_days: number | null
 }
 
 /**
@@ -171,6 +173,12 @@ export interface Service {
   is_usable: boolean
   resources: Record<string, unknown>
   activated_at: string | null
+  /**
+   * When the data behind a stopped service is destroyed, and why it stopped.
+   * Both null while it is running.
+   */
+  retention_ends_at: string | null
+  ended_reason: string | null
 }
 
 export interface VirtualMachine {

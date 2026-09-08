@@ -6,6 +6,7 @@ namespace Tests\Feature\Subscriptions;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Lynomia\Modules\Backups\Application\Actions\HoldBackupsThroughRetention;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Compute\Application\Actions\EnforceComputeSuspension;
 use Lynomia\Modules\Compute\Application\Actions\LiftComputeSuspension;
@@ -23,6 +24,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Provisioning\Application\Actions\BeginRetentionWindow;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
@@ -301,6 +303,8 @@ final class SubscriptionSuspensionLifecycleTest extends TestCase
             new EnforceComputeSuspension($this->providers),
             new LiftComputeSuspension($this->providers),
             app(NotifyCustomer::class),
+            app(BeginRetentionWindow::class),
+            app(HoldBackupsThroughRetention::class),
         );
 
         $listener->handle(new SubscriptionStatusChanged(

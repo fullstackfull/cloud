@@ -151,6 +151,24 @@ Schedule::command('backups:reconcile-inventory')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * The end of a service's life, daily at 03:20.
+ *
+ * Daily rather than hourly because the unit it works in is days: a retention
+ * window is measured in them, and running this twenty-four times a day would
+ * be twenty-three passes finding nothing. Early morning because what it does
+ * is irreversible, and a mistake found at nine is better than one found at
+ * five past nine.
+ *
+ * It ends only services a customer cancelled. Non-payment keeps a person's
+ * name on it — see EndExpiredServices.
+ */
+Schedule::command('services:end-expired')
+    ->dailyAt('03:20')
+    ->withoutOverlapping(60)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * DNS reconciliation, every two hours.
  *
  * More often than the backup sweep and for the opposite reason: this read is

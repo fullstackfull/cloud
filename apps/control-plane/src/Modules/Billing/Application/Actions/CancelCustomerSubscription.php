@@ -6,6 +6,9 @@ namespace Lynomia\Modules\Billing\Application\Actions;
 
 use Lynomia\Modules\Billing\Domain\Exceptions\ImmediateCancellationNotConfirmedException;
 use Lynomia\Modules\Billing\Domain\Exceptions\SubscriptionAlreadyEndedException;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Application\Actions\CancelSubscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
@@ -43,6 +46,7 @@ final readonly class CancelCustomerSubscription
 {
     public function __construct(
         private CancelSubscription $cancelSubscription,
+        private NotifyCustomer $notify,
     ) {}
 
     /**
@@ -77,6 +81,52 @@ final readonly class CancelCustomerSubscription
             );
         }
 
-        return $this->cancelSubscription->execute($subscription, immediately: $immediately);
+        $cancelled = $this->cancelSubscription->execute($subscription, immediately: $immediately);
+
+        /*
+         * Confirmed in writing, and this is the one message a cancellation had
+         * no way of producing.
+         *
+         * A scheduled cancellation changes no status — only a date — so the
+         * listener that watches status changes never sees it, and the customer
+         * heard nothing at all until the day their service stopped. The
+         * immediate form is not announced here: it moves the status, the
+         * service ends within the second, and the message about a service
+         * ending is sent by the thing that ends it.
+         */
+        if (! $immediately && $cancelled->cancel_at !== null) {
+            $this->notify->execute(
+                customerId: (string) $cancelled->customer_id,
+                type: NotificationType::CancellationScheduled,
+                // The date, not the moment: a customer who clicks cancel twice
+                // has arranged one cancellation and should be told once.
+                idempotencyKey: sprintf(
+                    'cancellation-scheduled:%s:%s',
+                    $cancelled->getKey(),
+                    $cancelled->cancel_at->toDateString(),
+                ),
+                subject: $cancelled,
+                data: [
+                    'service' => $this->label($cancelled),
+                    'date' => $cancelled->cancel_at->toDateString(),
+                    'retention_days' => max(0, (int) config('provisioning.termination.suspended_retention_days', 30)),
+                ],
+                link: '/subscriptions',
+            );
+        }
+
+        return $cancelled;
+    }
+
+    /**
+     * The customer's own name for the thing, not a subscription id.
+     */
+    private function label(Subscription $subscription): string
+    {
+        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+
+        $label = $service?->label;
+
+        return is_string($label) && $label !== '' ? $label : 'your service';
     }
 }
