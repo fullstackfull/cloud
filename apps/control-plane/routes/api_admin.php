@@ -9,6 +9,7 @@ use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
 use Lynomia\Modules\Admin\Http\Controllers\HostingController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
+use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 
@@ -67,6 +68,16 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('provisioning.needs_review');
 
     /*
+     * Putting a stopped job back into the pool. The action refuses anything
+     * that would build a second resource or destroy data a second time, so
+     * what this permission grants is the safe half of recovery and not a
+     * general "run it again".
+     */
+    Route::post('provisioning/jobs/{job}/retry', [ProvisioningController::class, 'retry'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.retry');
+
+    /*
      * Adoption: an operator telling the platform that a machine the provider
      * already built belongs to a job that timed out. Behind provisioning.retry
      * rather than provisioning.view, because it changes what the platform
@@ -75,6 +86,24 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('provisioning/jobs/{job}/adopt', [ProvisioningController::class, 'adopt'])
         ->middleware('permission:'.Permission::ProvisioningRetry->value)
         ->name('provisioning.adopt');
+
+    /*
+     * The destructive operations queue. Reading it is provisioning.view like
+     * the job list; deciding the outcome of one is provisioning.retry, which
+     * is the permission that already means "change what the platform believes
+     * on the strength of a person's word".
+     */
+    Route::get('operations/reinstalls', [OperationsController::class, 'reinstalls'])
+        ->middleware('permission:'.Permission::ProvisioningView->value)
+        ->name('operations.reinstalls');
+
+    Route::get('operations/reinstalls/{type}/{operation}', [OperationsController::class, 'reinstall'])
+        ->middleware('permission:'.Permission::ProvisioningView->value)
+        ->name('operations.reinstall');
+
+    Route::post('operations/reinstalls/{type}/{operation}/resolve', [OperationsController::class, 'resolveReinstall'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('operations.reinstall_resolve');
 
     Route::get('infrastructure/nodes', [InfrastructureController::class, 'nodes'])
         ->middleware('permission:'.Permission::InfrastructureView->value)

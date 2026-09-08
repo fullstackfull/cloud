@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
+import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
@@ -14,6 +16,7 @@ import { formatDateTime } from '@/lib/format'
 import {
   useAdminProvisioningJobs,
   useJobsNeedingReview,
+  useRetryProvisioningJob,
   type AdminProvisioningJob,
 } from '@/lib/adminQueries'
 
@@ -30,9 +33,11 @@ export function AdminProvisioningPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const [page, setPage] = useState(1)
+  const [retrying, setRetrying] = useState<AdminProvisioningJob | null>(null)
 
   const { data, isPending, error: jobsError } = useAdminProvisioningJobs(page)
   const { data: review, error: reviewError } = useJobsNeedingReview()
+  const retry = useRetryProvisioningJob()
 
   const columns: Array<Column<AdminProvisioningJob>> = [
     {
@@ -102,11 +107,23 @@ export function AdminProvisioningPage() {
         <div className="mb-4">
           <Alert tone="warning" title={t('admin.provisioning.needsReviewTitle', { count: needsReview.length })}>
             <p className="mb-2">{t('admin.provisioning.needsReviewBody')}</p>
-            <ul className="flex flex-col gap-1 text-xs">
+            <ul className="flex flex-col gap-2 text-xs">
               {needsReview.slice(0, 5).map((job) => (
-                <li key={job.id} dir="ltr" className="technical">
-                  {job.id} · {job.kind} · {job.failure_class ?? '—'}
-                  {job.last_error !== null ? ` · ${job.last_error.slice(0, 120)}` : ''}
+                <li key={job.id} className="flex flex-wrap items-center justify-between gap-2">
+                  <span dir="ltr" className="technical">
+                    {job.id} · {job.kind} · {job.failure_class ?? '—'}
+                    {job.last_error !== null ? ` · ${job.last_error.slice(0, 120)}` : ''}
+                  </span>
+                  {/*
+                    Offered on every job here, and refused by the API for the
+                    ones where a second run would build a second machine or
+                    destroy a disk again. The refusal is shown rather than
+                    pre-empted: the reason is the useful part, and only the
+                    server knows it.
+                  */}
+                  <Button size="sm" variant="secondary" onClick={() => { setRetrying(job); }}>
+                    {t('admin.provisioning.retry')}
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -135,6 +152,35 @@ export function AdminProvisioningPage() {
           </>
         )}
       </Card>
+
+      <ConfirmDialog
+        open={retrying !== null}
+        title={t('admin.provisioning.retryTitle')}
+        body={
+          <div className="flex flex-col gap-2">
+            <p>{t('admin.provisioning.retryBody')}</p>
+            {retrying?.last_error === null || retrying?.last_error === undefined ? null : (
+              <p className="technical text-xs text-[var(--text-muted)]" dir="ltr">
+                {retrying.last_error}
+              </p>
+            )}
+          </div>
+        }
+        evidenceLabel={t('admin.provisioning.retryEvidence')}
+        evidenceHint={t('admin.provisioning.retryEvidenceHint')}
+        confirmLabel={t('admin.provisioning.retry')}
+        loading={retry.isPending}
+        error={retry.error === null ? undefined : retry.error.message}
+        onCancel={() => { setRetrying(null); retry.reset(); }}
+        onConfirm={(_phrase, evidence) => {
+          if (retrying === null) return
+
+          retry.mutate(
+            { id: retrying.id, evidence },
+            { onSuccess: () => { setRetrying(null); } },
+          )
+        }}
+      />
     </>
   )
 }

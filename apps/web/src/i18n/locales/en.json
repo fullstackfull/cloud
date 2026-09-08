@@ -403,7 +403,8 @@
       "customers": "Customers",
       "provisioning": "Provisioning",
       "infrastructure": "Infrastructure",
-      "payments": "Payments"
+      "payments": "Payments",
+      "operations": "Rebuilds"
     },
     "customers": {
       "title": "Customers",
@@ -444,7 +445,12 @@
         "create_hosting_account": "Create hosting account",
         "provision_dedicated": "Provision dedicated"
       },
-      "needsReviewTitle_one": "{{count}} job needs a human"
+      "needsReviewTitle_one": "{{count}} job needs a human",
+      "retry": "Run it again",
+      "retryTitle": "Run this job again",
+      "retryBody": "Only for a failure whose cause is gone — a cluster that now has room, a control panel that is back. The platform refuses a job that already built something, and any rebuild that has already destroyed data.",
+      "retryEvidence": "What changed?",
+      "retryEvidenceHint": "Recorded in the audit trail. “pve-kw-04 was added this morning and has 96 free cores”, not “trying again”."
     },
     "infrastructure": {
       "title": "Infrastructure",
@@ -480,6 +486,32 @@
       "reason": "Reason",
       "issueRefund": "Issue refund",
       "refundIsRecorded": "The refund records who issued it. The platform refuses to refund more than was captured, however many operators press this at once."
+    },
+    "operations": {
+      "title": "Rebuilds",
+      "subtitle": "Every reinstall the platform has run, and the ones nobody can settle.",
+      "machine": "Machine",
+      "state": "State",
+      "data": "Customer data",
+      "dataGone": "Destroyed",
+      "dataIntact": "Intact",
+      "failure": "Failure",
+      "requested": "Requested",
+      "decide": "Decision",
+      "empty": "No rebuilds recorded.",
+      "onlyWaiting": "Only the ones waiting for a person",
+      "confirm": "Confirm it finished",
+      "abandon": "Record it as failed",
+      "confirmTitle": "Confirm this rebuild finished",
+      "abandonTitle": "Record this rebuild as failed",
+      "confirmBody": "The platform could not verify this rebuild for itself. Confirm it only from what you saw at the hypervisor or the console — the customer is told, and this becomes the record.",
+      "abandonBody": "This says the rebuild did not finish. The machine is left as it is; nothing here touches a hypervisor or a controller.",
+      "evidence": "What did you see?",
+      "evidenceHint": "Recorded in the audit trail. “VM 910 on pve-kw-03 is running Rocky 10 and answering on port 22”, not “looks fine”.",
+      "types": {
+        "vps_reinstall": "VPS rebuild",
+        "dedicated_reinstall": "Dedicated rebuild"
+      }
     }
   },
   "backups": {

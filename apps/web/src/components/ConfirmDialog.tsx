@@ -15,10 +15,18 @@ interface ConfirmDialogProps {
    */
   requiredPhrase?: string
   requiredPhraseLabel?: string
+  /**
+   * When set, a free-text box appears and the confirm button stays disabled
+   * until something has been written in it. Used where the person acting is
+   * asserting something the platform could not check for itself, and the
+   * assertion is worthless without its basis.
+   */
+  evidenceLabel?: string
+  evidenceHint?: string
   confirmLabel: string
   loading?: boolean
   error?: ReactNode
-  onConfirm: (phrase: string) => void
+  onConfirm: (phrase: string, evidence: string) => void
   onCancel: () => void
 }
 
@@ -43,6 +51,8 @@ export function ConfirmDialog({
   body,
   requiredPhrase,
   requiredPhraseLabel,
+  evidenceLabel,
+  evidenceHint,
   confirmLabel,
   loading = false,
   error,
@@ -52,6 +62,7 @@ export function ConfirmDialog({
   const { t } = useTranslation()
   const ref = useRef<HTMLDialogElement>(null)
   const [typed, setTyped] = useState('')
+  const [evidence, setEvidence] = useState('')
   const inputId = useId()
 
   useEffect(() => {
@@ -71,10 +82,17 @@ export function ConfirmDialog({
   useEffect(() => {
     // Cleared on every open, so a phrase typed for one machine can never be
     // sitting in the box when the dialog is reopened for a different one.
-    if (open) setTyped('')
+    if (open) {
+      setTyped('')
+      setEvidence('')
+    }
   }, [open])
 
-  const satisfied = requiredPhrase === undefined || typed === requiredPhrase
+  const phraseSatisfied = requiredPhrase === undefined || typed === requiredPhrase
+  // Three characters, the same floor the API enforces. "ok" is not a record of
+  // what somebody looked at.
+  const evidenceSatisfied = evidenceLabel === undefined || evidence.trim().length >= 3
+  const satisfied = phraseSatisfied && evidenceSatisfied
 
   return (
     <dialog
@@ -91,7 +109,7 @@ export function ConfirmDialog({
         className="flex flex-col gap-4 p-6"
         onSubmit={(event) => {
           event.preventDefault()
-          if (satisfied && ! loading) onConfirm(typed)
+          if (satisfied && ! loading) onConfirm(typed, evidence.trim())
         }}
       >
         <h2 id={`${inputId}-title`} className="text-lg font-semibold">
@@ -120,6 +138,24 @@ export function ConfirmDialog({
           </div>
         )}
 
+        {evidenceLabel === undefined ? null : (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`${inputId}-evidence`} className="text-sm font-medium">
+              {evidenceLabel}
+            </label>
+            {evidenceHint === undefined ? null : (
+              <p className="text-xs text-[var(--text-muted)]">{evidenceHint}</p>
+            )}
+            <textarea
+              id={`${inputId}-evidence`}
+              rows={3}
+              value={evidence}
+              onChange={(event) => { setEvidence(event.target.value); }}
+              className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] p-3 text-sm"
+            />
+          </div>
+        )}
+
         {error === undefined || error === null ? null : (
           <p role="alert" className="text-sm text-red-500">
             {error}
@@ -144,7 +180,7 @@ export function ConfirmDialog({
             variant="danger"
             disabled={! satisfied}
             loading={loading}
-            onClick={() => { if (satisfied && ! loading) onConfirm(typed); }}
+            onClick={() => { if (satisfied && ! loading) onConfirm(typed, evidence.trim()); }}
           >
             {confirmLabel}
           </Button>

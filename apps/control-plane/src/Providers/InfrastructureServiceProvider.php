@@ -10,7 +10,9 @@ use Lynomia\Modules\Console\Infrastructure\Upstream\ProviderConsoleUpstreamResol
 use Lynomia\Modules\Dedicated\Application\Handlers\ProvisionDedicatedHandler;
 use Lynomia\Modules\Dedicated\Application\Handlers\ReinstallDedicatedHandler;
 use Lynomia\Modules\Dedicated\Domain\Contracts\HostReachability;
+use Lynomia\Modules\Dedicated\Infrastructure\DedicatedReinstallLedger;
 use Lynomia\Modules\Dedicated\Infrastructure\Reachability\TcpHostReachability;
+use Lynomia\Modules\Provisioning\Domain\Contracts\DestructiveOperationLedger;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -24,6 +26,8 @@ use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
 use Lynomia\Modules\Vps\Infrastructure\IpamReservationReleaser;
 use Lynomia\Modules\Vps\Infrastructure\NodeCapacityReleaser;
+use Lynomia\Modules\Vps\Infrastructure\VpsReinstallLedger;
+use Lynomia\Support\Provisioning\EveryDestructiveOperationLedger;
 use Lynomia\Support\Provisioning\EveryReservationReleaser;
 
 /**
@@ -86,6 +90,17 @@ final class InfrastructureServiceProvider extends ServiceProvider
         $this->app->bind(ResourceReservationReleaser::class, static fn ($app) => new EveryReservationReleaser([
             $app->make(IpamReservationReleaser::class),
             $app->make(NodeCapacityReleaser::class),
+        ]));
+
+        /*
+         * The same composition, for the question an operator retry has to ask
+         * before it does anything: has this job already destroyed something?
+         * Both rebuildable things answer for themselves, and the engine keeps
+         * knowing about neither.
+         */
+        $this->app->bind(DestructiveOperationLedger::class, static fn ($app) => new EveryDestructiveOperationLedger([
+            $app->make(VpsReinstallLedger::class),
+            $app->make(DedicatedReinstallLedger::class),
         ]));
 
         /*

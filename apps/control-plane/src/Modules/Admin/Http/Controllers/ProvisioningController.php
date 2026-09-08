@@ -11,6 +11,7 @@ use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Application\Actions\AdoptOrphanResource;
+use Lynomia\Modules\Provisioning\Application\Actions\RetryProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 
 /**
@@ -86,6 +87,59 @@ final class ProvisioningController
             'last_error' => $job->last_error,
             'attempts' => $job->attempts,
             'created_at' => $job->created_at?->toIso8601String(),
+        ]);
+    }
+
+    /**
+     * Put a stopped job back into the pool.
+     *
+     * The safe half of operator recovery, and the one an NOC shift reaches for
+     * most: a build that failed on a full cluster or a control panel that was
+     * briefly down will succeed on a second run, and until now the only way to
+     * ask for one was an UPDATE statement.
+     *
+     * What makes it safe is that the action refuses every case where running
+     * the job again would cause a second event rather than repeat an attempt —
+     * a resource already built, a disk already replaced — and there is no flag
+     * here that can override it. The evidence the operator checked is required
+     * and audited, because "I looked at the cluster and it has room now" is the
+     * whole justification for the retry.
+     */
+    public function retry(Request $request, string $job): JsonResponse
+    {
+        $found = ProvisioningJob::query()->findOrFail($job);
+
+        $validated = $request->validate([
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $requeued = app(RetryProvisioningJob::class)->execute($found);
+
+        $user = $request->user();
+
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::ProvisioningRetried,
+            subject: $requeued,
+            customerId: $requeued->customer_id,
+            context: [
+                'evidence' => $validated['evidence'],
+                'kind' => $requeued->kind->value,
+                'attempts' => $requeued->attempts,
+                'service_id' => $requeued->service_id,
+                'retried_by' => $user instanceof User
+                    ? sprintf('%s <%s>', $user->name, $user->email)
+                    : 'system',
+            ],
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $requeued->id,
+                'status' => $requeued->status->value,
+                'attempts' => $requeued->attempts,
+                'max_attempts' => $requeued->max_attempts,
+                'service_id' => $requeued->service_id,
+            ],
         ]);
     }
 

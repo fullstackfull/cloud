@@ -97,6 +97,88 @@ export function useJobsNeedingReview() {
   })
 }
 
+export function useRetryProvisioningJob() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, evidence }: { id: string; evidence: string }) =>
+      admin.post<Envelope<AdminProvisioningJob>>(
+        `/provisioning/jobs/${encodeURIComponent(id)}/retry`,
+        { evidence },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provisioning'] })
+    },
+  })
+}
+
+/**
+ * One rebuild of one machine, of either kind.
+ *
+ * `data_destroyed` is the field an operator answers the phone with, and it is
+ * read from the moment the operation entered its destructive phase rather than
+ * inferred from the state: a rebuild that failed afterwards still destroyed
+ * the disk.
+ */
+export interface AdminReinstallOperation {
+  id: string
+  type: 'vps_reinstall' | 'dedicated_reinstall'
+  state: string
+  needs_attention: boolean
+  in_flight: boolean
+  data_destroyed: boolean
+  customer_id: string | null
+  service_id: string | null
+  subject_type: string
+  subject_id: string | null
+  provider_resource_id: string | null
+  provider_node: string | null
+  provisioning_job_id: string | null
+  failure_code: string | null
+  failure_message: string | null
+  requested_at: string | null
+  state_changed_at: string | null
+  completed_at: string | null
+}
+
+export function useReinstallOperations(page: number, onlyWaiting: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'operations', 'reinstalls', page, onlyWaiting],
+    queryFn: () =>
+      admin.get<Paginated<AdminReinstallOperation>>('/operations/reinstalls', {
+        page,
+        needs_attention: onlyWaiting ? 1 : undefined,
+      }),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useResolveReinstall() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      type,
+      id,
+      verdict,
+      evidence,
+    }: {
+      type: string
+      id: string
+      verdict: 'completed' | 'failed'
+      evidence: string
+    }) =>
+      admin.post<Envelope<{ id: string; type: string; state: string }>>(
+        `/operations/reinstalls/${encodeURIComponent(type)}/${encodeURIComponent(id)}/resolve`,
+        { verdict, evidence },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'operations'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provisioning'] })
+    },
+  })
+}
+
 export interface AdminNode {
   id: string
   name: string

@@ -1078,6 +1078,228 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/operations/reinstalls":
+    get:
+      operationId: "api_admin_operations_reinstalls"
+      tags:
+        - "Operator"
+      summary: "Rebuilds, running and stopped"
+      description: |-
+        Both reinstall lifecycles in one queue, separated by `type`. `data_destroyed` answers the question a customer rings about, from the timestamp rather than from the state. Filter with `needs_attention=1` for the ones nobody can settle. The two tables are read to `meta.merge_limit` rows each and merged; `meta.truncated` says when that bound was reached.
+
+        Requires the `provisioning.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "type"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "customer_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "needs_attention"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminReinstallOperationPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/operations/reinstalls/{type}/{operation}":
+    get:
+      operationId: "api_admin_operations_reinstall"
+      tags:
+        - "Operator"
+      summary: "One rebuild, and everything that happened to it"
+      description: |-
+        The operation, the provisioning job with its attempt log, and the audit entries for the machine — who asked for the rebuild, what the worker tried, what the provider said, and what a person decided afterwards.
+
+        Requires the `provisioning.view` permission.
+      parameters:
+        - name: "type"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "operation"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminReinstallHistoryResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/operations/reinstalls/{type}/{operation}/resolve":
+    post:
+      operationId: "api_admin_operations_reinstall_resolve"
+      tags:
+        - "Operator"
+      summary: "Record a verdict on a rebuild"
+      description: |-
+        For an operation waiting for one — `needs_review`, `indeterminate` or a provisioning timeout — and no other. `completed` or `failed`, with what the operator saw; both are edges the state machine already has, both settle the job the operation belonged to, and both tell the customer. There is no verdict for an operation still in flight and nothing here touches a hypervisor or a controller.
+
+        Requires the `provisioning.retry` permission.
+      parameters:
+        - name: "type"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "operation"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                verdict:
+                  description: "See the endpoint description; validated server-side."
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminReinstallVerdictResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/provisioning/jobs":
     get:
       operationId: "api_admin_provisioning_jobs"
@@ -1182,6 +1404,81 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/AdminAdoptedJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/provisioning/jobs/{job}/retry":
+    post:
+      operationId: "api_admin_provisioning_retry"
+      tags:
+        - "Operator"
+      summary: "Run a stopped job again"
+      description: |-
+        The safe half of recovery: a build that failed on a full cluster or a control panel that was briefly down will succeed on a second run. Refuses (409) a job that has not stopped, one that already has a resource at the provider — adopt that instead — and any operation that has already destroyed data. The evidence the operator checked is required and audited.
+
+        Requires the `provisioning.retry` permission.
+      parameters:
+        - name: "job"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRetriedJobResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -6250,6 +6547,157 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminRefund"
+    AdminReinstallHistory:
+      type: "object"
+      additionalProperties: false
+      properties:
+        operation:
+          "$ref": "#/components/schemas/AdminReinstallOperation"
+        job:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        audit:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+    AdminReinstallHistoryResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminReinstallHistory"
+    AdminReinstallOperation:
+      type: "object"
+      additionalProperties: false
+      description: "One rebuild of one machine. `data_destroyed` is read from the moment the operation entered its destructive phase, so a rebuild that failed afterwards still answers true."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        type:
+          type: "string"
+          enum:
+            - "vps_reinstall"
+            - "dedicated_reinstall"
+        state:
+          type:
+            - "string"
+            - "null"
+        needs_attention:
+          type: "boolean"
+        in_flight:
+          type: "boolean"
+        data_destroyed:
+          type: "boolean"
+        customer_id:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+        subject_type:
+          type: "string"
+          enum:
+            - "virtual_machine"
+            - "dedicated_server"
+        subject_id:
+          type:
+            - "string"
+            - "null"
+        provider_resource_id:
+          type:
+            - "string"
+            - "null"
+        provider_node:
+          type:
+            - "string"
+            - "null"
+        provisioning_job_id:
+          type:
+            - "string"
+            - "null"
+        failure_code:
+          type:
+            - "string"
+            - "null"
+        failure_message:
+          type:
+            - "string"
+            - "null"
+        requested_at:
+          "$ref": "#/components/schemas/Timestamp"
+        state_changed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        completed_at:
+          "$ref": "#/components/schemas/Timestamp"
+    AdminReinstallOperationPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminReinstallOperation"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    AdminReinstallVerdict:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        type:
+          type: "string"
+          enum:
+            - "vps_reinstall"
+            - "dedicated_reinstall"
+        state:
+          type:
+            - "string"
+            - "null"
+    AdminReinstallVerdictResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminReinstallVerdict"
+    AdminRetriedJob:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+        attempts:
+          type:
+            - "integer"
+            - "null"
+        max_attempts:
+          type:
+            - "integer"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+    AdminRetriedJobResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminRetriedJob"
     AdminTransaction:
       type: "object"
       additionalProperties: false

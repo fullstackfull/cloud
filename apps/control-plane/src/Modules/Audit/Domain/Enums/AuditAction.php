@@ -66,6 +66,19 @@ enum AuditAction: string
     case DedicatedReinstallRequested = 'dedicated.reinstall_requested';
 
     /**
+     * An operator's verdict on a rebuild the platform could not settle for
+     * itself.
+     *
+     * Both are assertions about the world, and they are the two most
+     * consequential ones the platform accepts: `confirmed` says a machine
+     * whose outcome was unknown came back, and `abandoned` says it did not.
+     * Neither is inferred from anything — a person looked at a hypervisor or a
+     * console and said so.
+     */
+    case ReinstallConfirmed = 'reinstall.confirmed';
+    case ReinstallAbandoned = 'reinstall.abandoned';
+
+    /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.
      *
@@ -76,7 +89,8 @@ enum AuditAction: string
     public function isAnAssertionAboutTheWorld(): bool
     {
         return match ($this) {
-            self::OrphanAdopted, self::DriftResolved, self::DriftAcknowledged => true,
+            self::OrphanAdopted, self::DriftResolved, self::DriftAcknowledged,
+            self::ReinstallConfirmed, self::ReinstallAbandoned => true,
             default => false,
         };
     }

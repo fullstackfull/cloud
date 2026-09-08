@@ -6,6 +6,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { DashboardPage } from '@/features/account/DashboardPage'
 import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
 import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePage'
+import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
 import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
 import { AdminProvisioningPage } from '@/features/admin/AdminProvisioningPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
@@ -115,6 +116,7 @@ export function App() {
                 <Route element={<RequireOperator />}>
                   <Route path="/admin/customers" element={<AdminCustomersPage />} />
                   <Route path="/admin/provisioning" element={<AdminProvisioningPage />} />
+                  <Route path="/admin/operations" element={<AdminOperationsPage />} />
                   <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
                   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
                 </Route>
