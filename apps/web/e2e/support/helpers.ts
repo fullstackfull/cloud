@@ -26,6 +26,8 @@ export const fixtures = {
   reactivatingHostname: 'e2e-reactivating-01',
   vpsAddress: '198.51.100.24',
   hostingUsername: 'e2ehost',
+  teammateEmail: 'teammate@lynomia.local',
+  pendingInvitationEmail: 'invited@lynomia.local',
 } as const
 
 /**

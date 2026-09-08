@@ -21,7 +21,9 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
@@ -91,6 +93,12 @@ class E2ESeeder extends Seeder
     public const string HOSTING_USERNAME = 'e2ehost';
 
     /** A machine whose service is suspended: every action on it must refuse. */
+    /** A colleague on the seeded account, so the team screen has two rows. */
+    public const string TEAMMATE_EMAIL = 'teammate@lynomia.local';
+
+    /** An offer nobody has answered, so the invitation list is not empty. */
+    public const string PENDING_INVITATION_EMAIL = 'invited@lynomia.local';
+
     public const string SUSPENDED_HOSTNAME = 'e2e-suspended-01';
 
     /** One the platform is trying to bring back and cannot confirm. */
@@ -130,6 +138,7 @@ class E2ESeeder extends Seeder
         $this->hostingAccount($customer);
         $this->servicesInTrouble($customer);
         $this->workNobodyCanSettle($customer);
+        $this->team($customer);
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -511,6 +520,48 @@ class E2ESeeder extends Seeder
             'first_seen_at' => now()->subHours(2),
             'last_seen_at' => now()->subMinutes(5),
         ]);
+    }
+
+    /**
+     * A second person on the account, and an offer nobody has answered.
+     *
+     * Both are needed for the team screen to be worth driving: a list with one
+     * row cannot show a role being changed or somebody being removed, and an
+     * empty invitation table cannot show one being withdrawn.
+     *
+     * The teammate is `technical` rather than `administrator` because that is
+     * the row the specs act on — a role the seeded owner may change and a
+     * person the seeded owner may remove.
+     */
+    private function team(Customer $customer): void
+    {
+        $teammate = User::firstOrCreate(
+            ['email' => self::TEAMMATE_EMAIL],
+            [
+                'name' => 'Sara Teammate',
+                'password' => 'password',
+                'email_verified_at' => now(),
+                'password_changed_at' => now(),
+            ],
+        );
+
+        $customer->members()->firstOrCreate(
+            ['user_id' => $teammate->id],
+            ['role' => CustomerRole::Technical, 'accepted_at' => now()],
+        );
+
+        CustomerInvitation::query()->firstOrCreate(
+            ['customer_id' => $customer->getKey(), 'email' => self::PENDING_INVITATION_EMAIL],
+            [
+                'role' => CustomerRole::Member,
+                // A token nothing will redeem: the specs drive the account's
+                // side of an invitation, and a live token in a seeder is a
+                // working key checked into the repository.
+                'token_hash' => CustomerInvitation::hashOf('e2e-not-a-real-token'),
+                'expires_at' => now()->addDays(14),
+                'last_sent_at' => now(),
+            ],
+        );
     }
 
     private function invoices(Customer $customer): void

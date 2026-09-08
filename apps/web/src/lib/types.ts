@@ -339,6 +339,49 @@ export interface IpAssignment {
   reverse_dns: { hostname: string; status: string } | null
 }
 
+/**
+ * A role inside one customer account. Distinct from the platform roles an
+ * operator holds: this says what a person may do inside one customer.
+ */
+export type TeamRole = 'owner' | 'administrator' | 'billing' | 'technical' | 'member'
+
+export interface TeamMember {
+  id: string
+  name: string | null
+  email: string | null
+  role: TeamRole
+  invited_by: string | null
+  invited_at: string | null
+  joined_at: string | null
+}
+
+export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'revoked' | 'expired'
+
+/**
+ * An outstanding offer. There is no token field here and there must never be
+ * one: the server stores a hash and the only copy of a token is in the mail.
+ */
+export interface TeamInvitation {
+  id: string
+  email: string
+  role: TeamRole
+  status: InvitationStatus
+  invited_by: string | null
+  invited_at: string
+  expires_at: string
+  sent_count: number
+  last_sent_at: string | null
+}
+
+/** What the invitee is shown about an offer they hold the token for. */
+export interface InvitationOffer {
+  account: string | null
+  role: TeamRole
+  invited_by: string | null
+  expires_at: string
+  is_for_you: boolean
+}
+
 export interface ApiToken {
   id: string
   name: string

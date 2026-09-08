@@ -532,6 +532,87 @@ return [
         'summary' => 'Mark every notification read',
         'response' => $one('NotificationsMarkedRead'),
     ],
+    /* ---------------------------------------------------------------------
+     | Team
+     |
+     | Who belongs to the acting customer's account. No customer id appears in
+     | any path: the account is the one the caller is already acting for.
+     |
+     | The three invitation endpoints under /invitations are the invitee's
+     | side, and are the only customer endpoints that do not require an acting
+     | account - the person accepting their first invitation belongs to none.
+     */
+
+    'api.v1.team.members' => [
+        'tag' => 'Team',
+        'summary' => 'List the people in this account',
+        'description' => 'Any member may read it. Somebody who cannot see who has access to their servers is worse off than somebody who can.',
+        'response' => ['envelope' => 'list', 'schema' => 'TeamMember'],
+    ],
+    'api.v1.team.members.role' => [
+        'tag' => 'Team',
+        'summary' => "Change a member's role",
+        'description' => 'Takes effect on the next request: the role is read from the membership row every time and nothing caches it. `owner` is refused - ownership is transferred, not granted.',
+        'body' => ['role'],
+        'response' => $one('TeamMember'),
+    ],
+    'api.v1.team.members.remove' => [
+        'tag' => 'Team',
+        'summary' => 'Remove somebody from this account',
+        'description' => 'Also deletes any API token they hold that was scoped to this account. Tokens they hold for other accounts are untouched. The owner cannot be removed.',
+        'response' => $empty(),
+    ],
+    'api.v1.team.invitations' => [
+        'tag' => 'Team',
+        'summary' => 'List invitations',
+        'description' => 'Including spent ones, so that "I invited them and nothing happened" is answered by seeing the offer was declined rather than by an empty list. No token is ever returned.',
+        'response' => ['envelope' => 'list', 'schema' => 'TeamInvitation'],
+    ],
+    'api.v1.team.invitations.create' => [
+        'tag' => 'Team',
+        'summary' => 'Invite somebody to this account',
+        'description' => 'The response is identical whether or not the address already has a Lynomia login: the difference is exactly what an attacker would be fishing for. The token goes only to the address, never into this response.',
+        'body' => ['email', 'role'],
+        'response' => $one('TeamInvitation', 201),
+    ],
+    'api.v1.team.invitations.resend' => [
+        'tag' => 'Team',
+        'summary' => 'Send an invitation again',
+        'description' => 'Mints a new token and pushes the expiry out; the previous link stops working. The platform stores a hash rather than the token, so it cannot repeat a link it never kept.',
+        'response' => $one('TeamInvitation'),
+    ],
+    'api.v1.team.invitations.revoke' => [
+        'tag' => 'Team',
+        'summary' => 'Withdraw an invitation',
+        'description' => 'Taken under a row lock, so an acceptance already in flight cannot commit a membership after the offer was withdrawn.',
+        'response' => $one('TeamInvitation'),
+    ],
+    'api.v1.team.transfer_ownership' => [
+        'tag' => 'Team',
+        'summary' => 'Hand this account to another member',
+        'description' => "One act, both sides: the outgoing owner becomes an administrator and the incoming one becomes owner, in one transaction, so the account is never ownerless and never owned twice. Only the current owner may ask, the successor must already be an accepted member, and the account's own id must be typed back.",
+        'body' => ['member_id', 'confirm_account_id'],
+        'response' => $one('TeamMember'),
+    ],
+    'api.v1.invitations.show' => [
+        'tag' => 'Team',
+        'summary' => 'Look at an invitation you were sent',
+        'description' => 'Selected by the token from the mail, which is the only selector: there is no endpoint that lists invitations by address, because that would answer "is this person being invited anywhere" about somebody else. A token that names nothing and one that names a spent offer answer identically.',
+        'response' => $one('InvitationOffer'),
+    ],
+    'api.v1.invitations.accept' => [
+        'tag' => 'Team',
+        'summary' => 'Accept an invitation',
+        'description' => 'Requires that the signed-in address is the one invited and that it has been verified. A forwarded invitation admits nobody: the mail is a notification, the address is the credential.',
+        'response' => $one('AcceptedInvitation', 201),
+    ],
+    'api.v1.invitations.decline' => [
+        'tag' => 'Team',
+        'summary' => 'Decline an invitation',
+        'description' => 'Held to the same address check as acceptance: declining closes the offer, so a stranger who could decline could keep a colleague out for ever.',
+        'response' => $empty(),
+    ],
+
     'api.v1.subscriptions.plan' => [
         'tag' => 'Billing',
         'summary' => 'Change a subscription\'s plan',

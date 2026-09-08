@@ -8,6 +8,7 @@ import type {
   DedicatedServer,
   Envelope,
   HostingAccount,
+  InvitationOffer,
   Invoice,
   IpAssignment,
   NotificationPreference,
@@ -19,6 +20,9 @@ import type {
   Product,
   Service,
   Subscription,
+  TeamInvitation,
+  TeamMember,
+  TeamRole,
   VirtualMachine,
   WalletBalances,
 } from '@/lib/types'
@@ -578,6 +582,111 @@ export function useSetReverseDns() {
 }
 
 /* ----------------------------------------------------------- api tokens */
+
+/* --------------------------------------------------------------------------
+ | Team
+ |
+ | Both lists come back unpaged - an account has at most a couple of dozen
+ | members, and a page control over five rows is noise. Every mutation
+ | invalidates both queries rather than only the one it changed: accepting an
+ | invitation adds a member, removing a member frees a seat the invitation
+ | limit counts, and a screen showing one of those refreshed and the other
+ | stale is a screen that contradicts itself.
+ */
+
+export function useTeamMembers() {
+  return useQuery({
+    queryKey: ['team', 'members'],
+    queryFn: () => api.get<{ data: TeamMember[]; meta: { total: number; limit: number; assignable_roles: TeamRole[] } }>('/team/members'),
+  })
+}
+
+export function useTeamInvitations(enabled = true) {
+  return useQuery({
+    queryKey: ['team', 'invitations'],
+    queryFn: () => api.get<{ data: TeamInvitation[]; meta: { total: number } }>('/team/invitations'),
+    enabled,
+  })
+}
+
+function useTeamMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['team'] })
+    },
+  })
+}
+
+export function useInviteMember() {
+  return useTeamMutation((payload: { email: string; role: TeamRole }) =>
+    api.post<Envelope<TeamInvitation>>('/team/invitations', payload),
+  )
+}
+
+export function useResendInvitation() {
+  return useTeamMutation((id: string) =>
+    api.post<Envelope<TeamInvitation>>(`/team/invitations/${encodeURIComponent(id)}/resend`, {}),
+  )
+}
+
+export function useRevokeInvitation() {
+  return useTeamMutation((id: string) =>
+    api.delete<Envelope<TeamInvitation>>(`/team/invitations/${encodeURIComponent(id)}`),
+  )
+}
+
+export function useChangeMemberRole() {
+  return useTeamMutation((payload: { id: string; role: TeamRole }) =>
+    api.patch<Envelope<TeamMember>>(`/team/members/${encodeURIComponent(payload.id)}`, { role: payload.role }),
+  )
+}
+
+export function useRemoveMember() {
+  return useTeamMutation((id: string) => api.delete<unknown>(`/team/members/${encodeURIComponent(id)}`))
+}
+
+export function useTransferOwnership() {
+  return useTeamMutation((payload: { member_id: string; confirm_account_id: string }) =>
+    api.post<Envelope<TeamMember>>('/team/transfer-ownership', payload),
+  )
+}
+
+/* The invitee's own side. Outside the team queries because the person calling
+ * these may belong to no account at all, so nothing about them should be
+ * invalidated alongside a team screen they cannot see. */
+
+export function useInvitationOffer(token: string) {
+  return useQuery({
+    queryKey: ['invitation', token],
+    queryFn: () => api.get<Envelope<InvitationOffer>>(`/invitations/${encodeURIComponent(token)}`),
+    retry: false,
+  })
+}
+
+export function useAcceptInvitation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (token: string) =>
+      api.post<Envelope<{ customer_id: string; role: TeamRole }>>(`/invitations/${encodeURIComponent(token)}/accept`, {}),
+    onSuccess: () => {
+      // Joining an account changes what every other query may return.
+      void queryClient.invalidateQueries()
+    },
+  })
+}
+
+export function useDeclineInvitation() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      api.post<unknown>(`/invitations/${encodeURIComponent(token)}/decline`, {}),
+  })
+}
 
 export function useApiTokens() {
   return useQuery({

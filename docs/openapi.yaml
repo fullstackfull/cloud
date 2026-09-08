@@ -88,6 +88,7 @@ tags:
     description: "What the account owns, whatever kind it is, and what the platform has done to it."
   - name: "Shared hosting"
     description: "Panel accounts, their usage, and single-use sign-in links to the panel."
+  - name: "Team"
   - name: "Webhooks"
     description: "Called by providers, not by clients. Signature-verified before the body is parsed."
 security:
@@ -2557,6 +2558,172 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/HostingAccountUsageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/invitations/{token}":
+    get:
+      operationId: "api_v1_invitations_show"
+      tags:
+        - "Team"
+      summary: "Look at an invitation you were sent"
+      description: "Selected by the token from the mail, which is the only selector: there is no endpoint that lists invitations by address, because that would answer \"is this person being invited anywhere\" about somebody else. A token that names nothing and one that names a spent offer answer identically."
+      parameters:
+        - name: "token"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/InvitationOfferResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/invitations/{token}/accept":
+    post:
+      operationId: "api_v1_invitations_accept"
+      tags:
+        - "Team"
+      summary: "Accept an invitation"
+      description: "Requires that the signed-in address is the one invited and that it has been verified. A forwarded invitation admits nobody: the mail is a notification, the address is the credential."
+      parameters:
+        - name: "token"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AcceptedInvitationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/invitations/{token}/decline":
+    post:
+      operationId: "api_v1_invitations_decline"
+      tags:
+        - "Team"
+      summary: "Decline an invitation"
+      description: "Held to the same address check as acceptance: declining closes the offer, so a stranger who could decline could keep a colleague out for ever."
+      parameters:
+        - name: "token"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        204:
+          description: "No content."
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -5282,6 +5449,494 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/team/invitations":
+    get:
+      operationId: "api_v1_team_invitations"
+      tags:
+        - "Team"
+      summary: "List invitations"
+      description: "Including spent ones, so that \"I invited them and nothing happened\" is answered by seeing the offer was declined rather than by an empty list. No token is ever returned."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TeamInvitation"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_v1_team_invitations_create"
+      tags:
+        - "Team"
+      summary: "Invite somebody to this account"
+      description: "The response is identical whether or not the address already has a Lynomia login: the difference is exactly what an attacker would be fishing for. The token goes only to the address, never into this response."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                email:
+                  description: "See the endpoint description; validated server-side."
+                role:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TeamInvitationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/team/invitations/{invitation}":
+    delete:
+      operationId: "api_v1_team_invitations_revoke"
+      tags:
+        - "Team"
+      summary: "Withdraw an invitation"
+      description: "Taken under a row lock, so an acceptance already in flight cannot commit a membership after the offer was withdrawn."
+      parameters:
+        - name: "invitation"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TeamInvitationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/team/invitations/{invitation}/resend":
+    post:
+      operationId: "api_v1_team_invitations_resend"
+      tags:
+        - "Team"
+      summary: "Send an invitation again"
+      description: "Mints a new token and pushes the expiry out; the previous link stops working. The platform stores a hash rather than the token, so it cannot repeat a link it never kept."
+      parameters:
+        - name: "invitation"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TeamInvitationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/team/members":
+    get:
+      operationId: "api_v1_team_members"
+      tags:
+        - "Team"
+      summary: "List the people in this account"
+      description: "Any member may read it. Somebody who cannot see who has access to their servers is worse off than somebody who can."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TeamMember"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/team/members/{member}":
+    delete:
+      operationId: "api_v1_team_members_remove"
+      tags:
+        - "Team"
+      summary: "Remove somebody from this account"
+      description: "Also deletes any API token they hold that was scoped to this account. Tokens they hold for other accounts are untouched. The owner cannot be removed."
+      parameters:
+        - name: "member"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        204:
+          description: "No content."
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    patch:
+      operationId: "api_v1_team_members_role"
+      tags:
+        - "Team"
+      summary: "Change a member's role"
+      description: "Takes effect on the next request: the role is read from the membership row every time and nothing caches it. `owner` is refused - ownership is transferred, not granted."
+      parameters:
+        - name: "member"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                role:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TeamMemberResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/team/transfer-ownership":
+    post:
+      operationId: "api_v1_team_transfer_ownership"
+      tags:
+        - "Team"
+      summary: "Hand this account to another member"
+      description: "One act, both sides: the outgoing owner becomes an administrator and the incoming one becomes owner, in one transaction, so the account is never ownerless and never owned twice. Only the current owner may ask, the successor must already be an accepted member, and the account's own id must be typed back."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                member_id:
+                  description: "See the endpoint description; validated server-side."
+                confirm_account_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/TeamMemberResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/vps":
     get:
       operationId: "api_v1_vps_index"
@@ -6137,6 +6792,22 @@ components:
       schema:
         type: "string"
   schemas:
+    AcceptedInvitation:
+      type: "object"
+      additionalProperties: false
+      description: "The membership that acceptance produced."
+      properties:
+        customer_id:
+          "$ref": "#/components/schemas/Ulid"
+        role:
+          type: "string"
+    AcceptedInvitationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AcceptedInvitation"
     AdminAdoptedJob:
       type: "object"
       additionalProperties: false
@@ -7498,6 +8169,33 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/HostingPanelSession"
+    InvitationOffer:
+      type: "object"
+      additionalProperties: false
+      description: "What the invitee is told about an offer they hold the token for - which is only what the mail already told them. The invited address is not returned: somebody holding a forwarded token would otherwise learn who it was meant for."
+      properties:
+        account:
+          type:
+            - "string"
+            - "null"
+        role:
+          type: "string"
+        invited_by:
+          type:
+            - "string"
+            - "null"
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+        is_for_you:
+          type: "boolean"
+          description: "Whether the signed-in address is the invited one. A person who signed in with the wrong one of their two addresses should be told that rather than shown a 403 they cannot interpret."
+    InvitationOfferResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/InvitationOffer"
     Invoice:
       type: "object"
       additionalProperties: false
@@ -8651,6 +9349,73 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Subscription"
+    TeamInvitation:
+      type: "object"
+      additionalProperties: false
+      description: "An outstanding offer of membership. There is deliberately no token field and no field that could carry one: the row stores a hash, and the only copy of a token is in the mail."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        email:
+          type: "string"
+        role:
+          type: "string"
+        status:
+          type: "string"
+          description: "pending, accepted, declined, revoked or expired. Derived from the timestamps rather than stored, so there is no second copy to disagree with them."
+        invited_by:
+          type:
+            - "string"
+            - "null"
+        invited_at:
+          "$ref": "#/components/schemas/Timestamp"
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+        sent_count:
+          type: "integer"
+        last_sent_at:
+          "$ref": "#/components/schemas/Timestamp"
+    TeamInvitationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/TeamInvitation"
+    TeamMember:
+      type: "object"
+      additionalProperties: false
+      description: "One colleague, as their colleagues may see them. Name and address are here because a team screen without them names nobody; nothing else of the user row is, because whether somebody has two-factor on is their own security question and not a field on a list every member can read."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type:
+            - "string"
+            - "null"
+        email:
+          type:
+            - "string"
+            - "null"
+        role:
+          type: "string"
+          description: "owner, administrator, billing, technical or member. `member` is the read-only tier."
+        invited_by:
+          type:
+            - "string"
+            - "null"
+          description: "A name rather than a user id: the question is who let them in, not which row."
+        invited_at:
+          "$ref": "#/components/schemas/Timestamp"
+        joined_at:
+          "$ref": "#/components/schemas/Timestamp"
+    TeamMemberResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/TeamMember"
     Timestamp:
       type:
         - "string"

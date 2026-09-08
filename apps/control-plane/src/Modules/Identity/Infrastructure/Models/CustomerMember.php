@@ -55,6 +55,18 @@ class CustomerMember extends Pivot
         return $this->belongsTo(User::class);
     }
 
+    /**
+     * Who invited this person. Named `inviter` rather than `invitedBy` because
+     * the column is `invited_by` and a relation with the column's name would
+     * shadow the attribute.
+     *
+     * @return BelongsTo<User, $this>
+     */
+    public function inviter(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'invited_by');
+    }
+
     public function isAccepted(): bool
     {
         return $this->accepted_at !== null;

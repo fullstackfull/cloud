@@ -52,5 +52,13 @@ return [
 
         // Provisioning actions are expensive and irreversible; throttle harder.
         'provisioning' => ['attempts' => 20, 'decay_minutes' => 1],
+
+        // Per account per hour. The resource being spent is somebody else's
+        // inbox, so this is a limit on the platform's own reputation as much
+        // as on the account.
+        'team_invitations' => ['attempts' => 30, 'decay_minutes' => 60],
+
+        // Per caller per minute, on the endpoints that redeem an invitation.
+        'invitations' => ['attempts' => 10, 'decay_minutes' => 1],
     ],
 ];

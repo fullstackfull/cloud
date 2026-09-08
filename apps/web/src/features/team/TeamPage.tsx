@@ -1,0 +1,349 @@
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import { Alert } from '@/components/Alert'
+import { Badge } from '@/components/Badge'
+import { Button } from '@/components/Button'
+import { Card } from '@/components/Card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { DataTable, type Column } from '@/components/DataTable'
+import { Field } from '@/components/Field'
+import { PageHeader } from '@/components/PageHeader'
+import { useCurrentUser } from '@/features/auth/useAuth'
+import { useActiveLocale } from '@/i18n/useActiveLocale'
+import { formatDateTime } from '@/lib/format'
+import {
+  useChangeMemberRole,
+  useInviteMember,
+  useRemoveMember,
+  useResendInvitation,
+  useRevokeInvitation,
+  useTeamInvitations,
+  useTeamMembers,
+  useTransferOwnership,
+} from '@/lib/queries'
+import type { InvitationStatus, TeamInvitation, TeamMember, TeamRole } from '@/lib/types'
+import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+
+/**
+ * An offer nobody has answered is not a problem; one that was withdrawn or ran
+ * out is a thing somebody may need to do again. The tones say which is which
+ * without the reader parsing the words.
+ */
+const INVITATION_TONES: Record<InvitationStatus, 'neutral' | 'success' | 'warning' | 'danger' | 'info'> = {
+  pending: 'info',
+  accepted: 'success',
+  declined: 'neutral',
+  revoked: 'warning',
+  expired: 'warning',
+}
+
+/**
+ * Who belongs to this account.
+ *
+ * The screen is deliberately readable by every member and writable by few. A
+ * read-only member who cannot see who has access to their servers is worse off
+ * than one who can, so the member list is always shown; the invitation panel
+ * and every control that changes something appear only when the server would
+ * accept them.
+ *
+ * "Would accept them" is decided from the caller's own role, which the server
+ * returns on their profile. It is a display decision and never a security one
+ * — every one of these endpoints refuses on its own — so a stale role here
+ * costs a 403, not an unauthorised change.
+ */
+export function TeamPage() {
+  const { t } = useTranslation()
+  const locale = useActiveLocale()
+  const describeError = useApiErrorMessage()
+
+  /*
+   * The account this screen is about, and this person's role in it. Taken
+   * from the signed-in user rather than from the team response, because the
+   * team response deliberately does not say which of its rows is the caller.
+   *
+   * A single membership is the only case the portal handles today — there is
+   * no account switcher — so the first is the acting one, which is exactly
+   * what the server resolves to when no header names an account.
+   */
+  const { data: user } = useCurrentUser()
+  const account = user?.customers[0] ?? null
+  const myRole = (account?.role ?? null) as TeamRole | null
+  const canManage = myRole === 'owner' || myRole === 'administrator'
+
+  const { data: members, isPending, error: membersError } = useTeamMembers()
+  const { data: invitations, error: invitationsError } = useTeamInvitations(canManage)
+
+  const invite = useInviteMember()
+  const resend = useResendInvitation()
+  const revoke = useRevokeInvitation()
+  const changeRole = useChangeMemberRole()
+  const remove = useRemoveMember()
+  const transfer = useTransferOwnership()
+
+  const [email, setEmail] = useState('')
+  const [role, setRole] = useState<TeamRole>('member')
+  const [removing, setRemoving] = useState<TeamMember | null>(null)
+  const [handingOver, setHandingOver] = useState<TeamMember | null>(null)
+
+  const displayed = describeError(
+    membersError ?? invitationsError ?? invite.error ?? resend.error ?? revoke.error ?? changeRole.error ?? remove.error,
+  )
+  const transferError = describeError(transfer.error)
+
+  const assignable = members?.meta.assignable_roles ?? ['administrator', 'billing', 'technical', 'member']
+
+  const memberColumns: Array<Column<TeamMember>> = [
+    {
+      key: 'person',
+      header: t('team.person'),
+      cell: (member) => (
+        <div>
+          <div>{member.name ?? '—'}</div>
+          <div dir="ltr" className="technical text-xs text-[var(--text-muted)]">
+            {member.email ?? '—'}
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'role',
+      header: t('team.role'),
+      cell: (member) =>
+        canManage && member.role !== 'owner' ? (
+          <select
+            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm"
+            aria-label={t('team.role')}
+            value={member.role}
+            disabled={changeRole.isPending}
+            onChange={(event) => {
+              changeRole.mutate({ id: member.id, role: event.target.value as TeamRole })
+            }}
+          >
+            {assignable.map((option) => (
+              <option key={option} value={option}>
+                {t(`team.roles.${option}`)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <Badge tone={member.role === 'owner' ? 'info' : 'neutral'}>{t(`team.roles.${member.role}`)}</Badge>
+        ),
+    },
+    {
+      key: 'invitedBy',
+      header: t('team.invitedBy'),
+      cell: (member) => member.invited_by ?? <span className="text-[var(--text-muted)]">—</span>,
+    },
+    {
+      key: 'joined',
+      header: t('team.joined'),
+      ltr: true,
+      cell: (member) =>
+        member.joined_at === null ? (
+          <span className="text-[var(--text-muted)]">{t('team.notYetJoined')}</span>
+        ) : (
+          formatDateTime(member.joined_at, locale)
+        ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      cell: (member) =>
+        !canManage || member.role === 'owner' ? null : (
+          <div className="flex gap-2">
+            {myRole === 'owner' ? (
+              <Button size="sm" variant="ghost" onClick={() => { setHandingOver(member); }}>
+                {t('team.makeOwner')}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="ghost" onClick={() => { setRemoving(member); }}>
+              {t('team.remove')}
+            </Button>
+          </div>
+        ),
+    },
+  ]
+
+  const invitationColumns: Array<Column<TeamInvitation>> = [
+    {
+      key: 'email',
+      header: t('team.invitedAddress'),
+      cell: (invitation) => (
+        <span dir="ltr" className="technical">
+          {invitation.email}
+        </span>
+      ),
+    },
+    {
+      key: 'role',
+      header: t('team.role'),
+      cell: (invitation) => t(`team.roles.${invitation.role}`),
+    },
+    {
+      key: 'status',
+      header: t('team.status'),
+      cell: (invitation) => (
+        <Badge tone={INVITATION_TONES[invitation.status]}>{t(`team.statuses.${invitation.status}`)}</Badge>
+      ),
+    },
+    {
+      key: 'expires',
+      header: t('team.expires'),
+      ltr: true,
+      cell: (invitation) => formatDateTime(invitation.expires_at, locale),
+    },
+    {
+      key: 'actions',
+      header: '',
+      cell: (invitation) =>
+        invitation.status !== 'pending' ? null : (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              loading={resend.isPending && resend.variables === invitation.id}
+              onClick={() => { resend.mutate(invitation.id); }}
+            >
+              {t('team.resend')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              loading={revoke.isPending && revoke.variables === invitation.id}
+              onClick={() => { revoke.mutate(invitation.id); }}
+            >
+              {t('team.revoke')}
+            </Button>
+          </div>
+        ),
+    },
+  ]
+
+  return (
+    <>
+      <PageHeader title={t('nav.team')} description={t('team.subtitle')} />
+
+      {displayed !== null ? (
+        <div className="mb-4">
+          <Alert tone="error" requestId={displayed.requestId}>
+            {displayed.message}
+          </Alert>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-4">
+        <Card title={t('team.membersTitle')} description={t('team.membersSubtitle')}>
+          <DataTable
+            columns={memberColumns}
+            rows={members?.data ?? []}
+            rowKey={(member) => member.id}
+            empty={isPending ? t('common.loading') : t('team.noMembers')}
+          />
+        </Card>
+
+        {canManage ? (
+          <>
+            <Card title={t('team.inviteTitle')} description={t('team.inviteSubtitle')}>
+              <form
+                className="flex max-w-md flex-col gap-3"
+                noValidate
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  invite.mutate(
+                    { email, role },
+                    {
+                      onSuccess: () => {
+                        setEmail('')
+                        setRole('member')
+                      },
+                    },
+                  )
+                }}
+              >
+                <Field
+                  label={t('team.invitedAddress')}
+                  type="email"
+                  value={email}
+                  onChange={(event) => { setEmail(event.target.value); }}
+                  required
+                  error={displayed?.fields?.['email']?.[0]}
+                />
+
+                <label className="flex flex-col gap-1 text-sm">
+                  <span>{t('team.role')}</span>
+                  <select
+                    className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+                    value={role}
+                    onChange={(event) => { setRole(event.target.value as TeamRole); }}
+                  >
+                    {assignable.map((option) => (
+                      <option key={option} value={option}>
+                        {t(`team.roles.${option}`)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-[var(--text-muted)]">{t(`team.roleHints.${role}`)}</span>
+                </label>
+
+                <div>
+                  <Button type="submit" loading={invite.isPending}>
+                    {t('team.sendInvitation')}
+                  </Button>
+                </div>
+              </form>
+            </Card>
+
+            <Card title={t('team.invitationsTitle')} description={t('team.invitationsSubtitle')}>
+              <DataTable
+                columns={invitationColumns}
+                rows={invitations?.data ?? []}
+                rowKey={(invitation) => invitation.id}
+                empty={t('team.noInvitations')}
+              />
+            </Card>
+          </>
+        ) : null}
+      </div>
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={t('team.removeTitle')}
+        body={t('team.removeBody', { name: removing?.name ?? removing?.email ?? '' })}
+        confirmLabel={t('team.remove')}
+        loading={remove.isPending}
+        onCancel={() => { setRemoving(null); }}
+        onConfirm={() => {
+          if (removing !== null) {
+            remove.mutate(removing.id, { onSuccess: () => { setRemoving(null); } })
+          }
+        }}
+      />
+
+      {/*
+        Handing the account over takes the account's own id typed back, the
+        same device the irreversible cancellation and the reinstall use. There
+        is no undo that does not depend on the goodwill of whoever now owns it.
+      */}
+      <ConfirmDialog
+        open={handingOver !== null}
+        title={t('team.transferTitle')}
+        body={t('team.transferBody', { name: handingOver?.name ?? handingOver?.email ?? '' })}
+        requiredPhrase={account?.id ?? ''}
+        requiredPhraseLabel={t('team.transferConfirmLabel')}
+        confirmLabel={t('team.makeOwner')}
+        loading={transfer.isPending}
+        error={transferError?.message}
+        onCancel={() => { setHandingOver(null); }}
+        onConfirm={(phrase) => {
+          if (handingOver !== null) {
+            transfer.mutate(
+              { member_id: handingOver.id, confirm_account_id: phrase },
+              { onSuccess: () => { setHandingOver(null); } },
+            )
+          }
+        }}
+      />
+    </>
+  )
+}

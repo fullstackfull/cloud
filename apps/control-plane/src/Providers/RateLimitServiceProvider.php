@@ -75,6 +75,44 @@ final class RateLimitServiceProvider extends ServiceProvider
          */
         RateLimiter::for('webhooks', static fn (Request $request): Limit => Limit::perMinute(300)
             ->by($request->ip() ?? 'unknown'));
+
+        /*
+         * Sending invitations is bounded per account, not per user.
+         *
+         * The thing being spent is somebody else's inbox: an account that can
+         * invite as fast as it can POST is a mailing list with Lynomia's
+         * reputation attached, and two administrators of the same account
+         * sharing one bucket is the correct arrangement — the limit protects
+         * the recipients, and the recipients do not care which colleague sent
+         * it. Falling back to the user, and then to the address, keeps the
+         * limiter defined for a request that somehow arrives without an
+         * account resolved.
+         */
+        RateLimiter::for('team-invitations', function (Request $request): Limit {
+            $user = $request->user();
+            $account = $request->header('X-Lynomia-Customer')
+                ?? ($user instanceof User ? 'user:'.$user->id : null);
+
+            return Limit::perHour((int) config('security.rate_limits.team_invitations.attempts', 30))
+                ->by('invite:'.($account ?? $request->ip() ?? 'unknown'));
+        });
+
+        /*
+         * Redeeming one is bounded per caller, and tightly.
+         *
+         * A token is 64 hex characters, so guessing is not the threat model —
+         * but an authenticated caller trying tokens in a loop is cheap to
+         * write and would otherwise be free, and the endpoint answers
+         * differently for a token that names a live offer than for one that
+         * names nothing. The limit is what turns that difference into
+         * something nobody can measure at scale.
+         */
+        RateLimiter::for('invitations', function (Request $request): Limit {
+            $user = $request->user();
+
+            return Limit::perMinute((int) config('security.rate_limits.invitations.attempts', 10))
+                ->by($user instanceof User ? 'invitation:'.$user->id : ($request->ip() ?? 'unknown'));
+        });
     }
 
     private function defineAuthLimiter(string $name, string $configKey): void

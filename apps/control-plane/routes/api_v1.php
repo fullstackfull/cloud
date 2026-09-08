@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Identity\Http\Controllers\EmailVerificationController;
+use Lynomia\Modules\Identity\Http\Controllers\InvitationController;
 use Lynomia\Modules\Identity\Http\Controllers\LoginController;
 use Lynomia\Modules\Identity\Http\Controllers\PasswordResetController;
 use Lynomia\Modules\Identity\Http\Controllers\ProfileController;
@@ -93,6 +94,35 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
         ->name('me.notification_preferences.index');
     Route::put('me/notification-preferences', [NotificationPreferenceController::class, 'update'])
         ->name('me.notification_preferences.update');
+
+    /*
+     * The invitee's side of a team invitation.
+     *
+     * Here rather than in the business group on purpose: the person accepting
+     * their first invitation belongs to no account yet, and the middleware
+     * that resolves an acting customer would refuse exactly the people these
+     * routes exist for. `verified` is likewise absent from the group — the
+     * acceptance itself checks that the address is verified, and refusing
+     * before that would tell an unverified caller nothing about why.
+     *
+     * The token is the selector and it is not a ULID: it is 64 hex characters
+     * from the CSPRNG, constrained here so that a malformed one is a 404 from
+     * the router rather than a database lookup.
+     */
+    Route::get('invitations/{token}', [InvitationController::class, 'show'])
+        ->where('token', '[0-9a-f]{64}')
+        ->middleware('throttle:invitations')
+        ->name('invitations.show');
+
+    Route::post('invitations/{token}/accept', [InvitationController::class, 'accept'])
+        ->where('token', '[0-9a-f]{64}')
+        ->middleware('throttle:invitations')
+        ->name('invitations.accept');
+
+    Route::post('invitations/{token}/decline', [InvitationController::class, 'decline'])
+        ->where('token', '[0-9a-f]{64}')
+        ->middleware('throttle:invitations')
+        ->name('invitations.decline');
 });
 
 // Challenge endpoint for a login that has passed the password stage and is
@@ -141,6 +171,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->gro
         'ipam',
         'api-tokens',
         'notifications',
+        'team',
     ] as $module) {
         $file = __DIR__.'/v1/'.$module.'.php';
 

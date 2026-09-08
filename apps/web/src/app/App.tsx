@@ -25,6 +25,8 @@ import { VpsPage } from '@/features/infrastructure/VpsPage'
 import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
 import { OrdersPage } from '@/features/orders/OrdersPage'
 import { ServicesPage } from '@/features/services/ServicesPage'
+import { InvitationPage } from '@/features/team/InvitationPage'
+import { TeamPage } from '@/features/team/TeamPage'
 import { ApiTokensPage } from '@/features/tokens/ApiTokensPage'
 import { WalletPage } from '@/features/wallet/WalletPage'
 import { ProfilePage } from '@/features/account/ProfilePage'
@@ -107,6 +109,14 @@ export function App() {
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />
                 <Route path="/api-tokens" element={<ApiTokensPage />} />
+                <Route path="/settings/team" element={<TeamPage />} />
+                {/*
+                  The invitee's landing page. Authenticated like everything
+                  else here, but deliberately not scoped to an account: the
+                  person arriving may belong to none yet, which is the whole
+                  point of the page.
+                */}
+                <Route path="/invitations/:token" element={<InvitationPage />} />
 
                 {/*
                   The operator area. Gated for presentation by RequireOperator

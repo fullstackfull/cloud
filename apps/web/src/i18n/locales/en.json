@@ -45,7 +45,8 @@
     "more": "More",
     "catalogue": "Catalogue",
     "orders": "Orders",
-    "subscriptions": "Subscriptions"
+    "subscriptions": "Subscriptions",
+    "team": "Team"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -664,5 +665,64 @@
       "fewer_vcpu": "This plan has fewer processors than your server has now.",
       "less_memory": "This plan has less memory than your server has now. Check that what you run fits."
     }
+  },
+  "team": {
+    "subtitle": "Who has access to this account, and what each of them may do.",
+    "membersTitle": "Members",
+    "membersSubtitle": "Everyone who can sign in to this account.",
+    "person": "Person",
+    "role": "Role",
+    "status": "Status",
+    "invitedBy": "Invited by",
+    "invitedAddress": "Email address",
+    "joined": "Joined",
+    "expires": "Expires",
+    "notYetJoined": "Has not joined yet",
+    "noMembers": "Nobody else has access to this account.",
+    "remove": "Remove",
+    "removeTitle": "Remove this person?",
+    "removeBody": "{{name}} loses access to this account immediately, and any API key they hold for it is deleted. Their keys for other accounts are untouched.",
+    "makeOwner": "Make owner",
+    "transferTitle": "Hand this account over?",
+    "transferBody": "{{name}} becomes the owner and you become an administrator. Only the new owner can hand it back.",
+    "transferConfirmLabel": "Type the account id to confirm",
+    "inviteTitle": "Invite somebody",
+    "inviteSubtitle": "They receive a link that works once, only for the address you enter, and only for two weeks.",
+    "sendInvitation": "Send invitation",
+    "invitationsTitle": "Invitations",
+    "invitationsSubtitle": "Offers that are still open, and the recent ones that are not.",
+    "noInvitations": "No invitations have been sent.",
+    "resend": "Send again",
+    "revoke": "Withdraw",
+    "roles": {
+      "owner": "Owner",
+      "administrator": "Administrator",
+      "billing": "Billing",
+      "technical": "Technical",
+      "member": "Read-only"
+    },
+    "roleHints": {
+      "owner": "Everything, including closing the account and handing it to somebody else.",
+      "administrator": "Everything except paying invoices and handing the account over.",
+      "billing": "Invoices, payments and payment methods. Can see the services but not change them.",
+      "technical": "The machines: power, rebuilds, plan changes. No access to money.",
+      "member": "Can see the account and ask for help. Changes nothing."
+    },
+    "statuses": {
+      "pending": "Waiting",
+      "accepted": "Accepted",
+      "declined": "Declined",
+      "revoked": "Withdrawn",
+      "expired": "Expired"
+    }
+  },
+  "invitation": {
+    "title": "An invitation",
+    "subtitle": "Somebody has invited you to work on their Lynomia Cloud account.",
+    "anAccount": "An account",
+    "accept": "Accept and join",
+    "decline": "Decline",
+    "signedInAsSomebodyElseTitle": "This invitation was sent to a different address",
+    "signedInAsSomebodyElse": "You are signed in with an address this invitation was not sent to. Sign in with the address that received it, and then open this link again."
   }
 }

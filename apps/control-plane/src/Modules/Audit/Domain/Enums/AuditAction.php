@@ -106,6 +106,12 @@ enum AuditAction: string
      * apart either.
      */
     case NotificationPreferenceChanged = 'notification.preference_changed';
+    case MemberInvited = 'membership.invited';
+    case MemberInvitationRevoked = 'membership.invitation_revoked';
+    case MemberJoined = 'membership.joined';
+    case MemberRoleChanged = 'membership.role_changed';
+    case MemberRemoved = 'membership.removed';
+    case OwnershipTransferred = 'membership.ownership_transferred';
 
     /**
      * Whether the act was a person asserting something the platform could not

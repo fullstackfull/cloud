@@ -46,6 +46,7 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/hosting', labelKey: 'nav.hosting' },
   { to: '/ips', labelKey: 'nav.ips' },
   { to: '/api-tokens', labelKey: 'nav.apiKeys' },
+  { to: '/settings/team', labelKey: 'nav.team' },
   { to: '/profile', labelKey: 'nav.profile' },
   { to: '/security', labelKey: 'nav.security' },
 ]
