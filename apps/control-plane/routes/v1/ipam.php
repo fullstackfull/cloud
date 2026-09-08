@@ -67,6 +67,6 @@ Route::prefix('ips')->as('ips.')->group(function (): void {
      * one address would spend the budget every other customer's records need.
      */
     Route::put('{assignment}/rdns', [IpAddressController::class, 'setReverseDns'])
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:10,1,rdns-update:')
         ->name('rdns.update');
 });

@@ -48,7 +48,7 @@ Route::middleware('guest')->group(function (): void {
  * different browser from the one they registered in.
  */
 Route::get('email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
-    ->middleware(['signed', 'throttle:6,1'])
+    ->middleware(['signed', 'throttle:6,1,email-verify:'])
     ->name('verification.verify');
 
 /*
@@ -63,7 +63,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
     Route::post('logout', [LoginController::class, 'destroy'])->name('logout');
 
     Route::post('email/verify/resend', [EmailVerificationController::class, 'resend'])
-        ->middleware('throttle:6,1')
+        ->middleware('throttle:6,1,email-verify-resend:')
         ->name('verification.resend');
 
     Route::get('me', [ProfileController::class, 'show'])->name('me');

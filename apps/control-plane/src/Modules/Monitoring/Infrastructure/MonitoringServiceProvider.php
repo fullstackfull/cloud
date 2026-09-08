@@ -13,6 +13,7 @@ use Lynomia\Modules\Monitoring\Application\Collectors\LifecycleCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\NotificationCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\OrdersCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\PaymentsCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\ProductCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ProvisioningCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\QueueCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\RevenueCollector;
@@ -51,6 +52,7 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(NotificationCollector::class),
                 $app->make(ConsoleCollector::class),
                 $app->make(DnsCollector::class),
+                $app->make(ProductCollector::class),
             );
         });
     }

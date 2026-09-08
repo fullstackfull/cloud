@@ -48,8 +48,12 @@ final class MetricsQueryBudgetTest extends TestCase
      * Generous on purpose: this is a guard against a collector quietly
      * acquiring a per-row query, not a target to optimise towards. The N+1
      * assertion below is the real test.
+     *
+     * Raised from 26 when the DNS and product collectors were added — nine
+     * more GROUP BYs, each of them one query whatever the fleet does. The
+     * number moves when collectors are added and must not move when data is.
      */
-    private const int BUDGET = 26;
+    private const int BUDGET = 32;
 
     private MetricsRegistry $registry;
 

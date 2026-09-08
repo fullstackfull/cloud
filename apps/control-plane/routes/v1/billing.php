@@ -90,7 +90,7 @@ Route::prefix('invoices')->as('invoices.')->group(function (): void {
 
     Route::post('{invoice}/wallet-credit', [InvoiceController::class, 'payFromWalletCredit'])
         ->whereUlid('invoice')
-        ->middleware('throttle:30,1')
+        ->middleware('throttle:30,1,subscription-cancel:')
         ->name('wallet_credit.pay');
 });
 
@@ -106,7 +106,7 @@ Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {
      * should be expensive.
      */
     Route::post('{subscription}/cancel', [SubscriptionController::class, 'cancel'])
-        ->middleware('throttle:30,1')
+        ->middleware('throttle:30,1,plan-quote:')
         ->name('cancel');
 
     /*

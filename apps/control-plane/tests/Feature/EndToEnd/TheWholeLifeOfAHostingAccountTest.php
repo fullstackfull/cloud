@@ -22,8 +22,11 @@ use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Application\Actions\ReconcileHostingNodes;
 use Lynomia\Modules\SharedHosting\Application\Actions\SyncAccountUsage;
 use Lynomia\Modules\SharedHosting\Application\Actions\TerminateHostingAccount;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\RemoteAccount;
@@ -185,6 +188,42 @@ final class TheWholeLifeOfAHostingAccountTest extends TestCase
         $this->assertSame(ServiceStatus::Active, $service->refresh()->status);
         $this->assertSame(HostingAccountStatus::Active, $account->refresh()->status);
         $this->assertFalse($this->atThePanel($account->username)?->suspended);
+
+        // ---------------------------------------------------------------
+        // Somebody changes the account at the panel, and the sweep notices
+        // ---------------------------------------------------------------
+        /*
+         * Real drift, injected the way it really happens: a person suspends
+         * an account directly at the panel during an incident and nobody
+         * tells the platform. The row goes on saying "active" and the
+         * customer's site goes on being off, and until this sweep existed
+         * nothing anywhere would ever have compared the two.
+         */
+        app(HostingProviderFactory::class)
+            ->for($this->node)
+            ->suspendAccount($this->node, $account->username, 'suspended at the panel by hand');
+
+        $outcome = app(ReconcileHostingNodes::class)->execute();
+
+        $this->assertSame(1, $outcome['nodes']);
+
+        $drift = ResourceDrift::query()
+            ->where('kind', DriftKind::SuspensionMismatch->value)
+            ->where('provider_reference', $account->username)
+            ->firstOrFail();
+
+        $this->assertSame('critical', $drift->severity->value);
+
+        // Reported and not repaired. Whichever way the sweep guessed, half the
+        // time it would be switching off a customer who has paid.
+        $this->assertTrue($this->atThePanel($account->username)?->suspended);
+        $this->assertSame(HostingAccountStatus::Active, $account->refresh()->status);
+
+        // Put back by hand, as an operator would, so the rest of the story is
+        // about what the customer does rather than about the drift.
+        app(HostingProviderFactory::class)
+            ->for($this->node)
+            ->unsuspendAccount($this->node, $account->username);
 
         // ---------------------------------------------------------------
         // They leave

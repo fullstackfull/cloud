@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
 use Lynomia\Modules\Backups\Application\Actions\RestoreServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -44,6 +45,7 @@ use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Provisioning\Application\Actions\BeginRetentionWindow;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
@@ -133,6 +135,18 @@ final class TheWholeLifeOfAVpsTest extends TestCase
         ]);
 
         app(SeedSubnetAddresses::class)->execute($subnet);
+
+        /*
+         * One backup provider for the whole test.
+         *
+         * The fake numbers its task ids from an instance counter, and the
+         * factory is deliberately not a singleton — so a second backup taken
+         * through a second instance reuses the first one's task id and
+         * collides with the unique index on (provider, provider_task_id). The
+         * collision is a fixture artefact, and binding the factory once is
+         * what makes "this machine has two backups" expressible at all.
+         */
+        $this->app->singleton(BackupProviderFactory::class);
 
         $this->customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
         $this->user = User::factory()->create();
@@ -311,26 +325,62 @@ final class TheWholeLifeOfAVpsTest extends TestCase
             ->assertStatus(201)
             ->assertJsonPath('data.single_use', true);
 
-        // ---------------------------------------------------------------
-        // Given back
-        // ---------------------------------------------------------------
-        app(TransitionSubscription::class)->execute($subscription->refresh(), SubscriptionStatus::Suspended);
+        // The restore finished, as the poller would have found it. A row left
+        // mid-restore is not one the retention hold covers, and the point of
+        // the next step is what the hold does to a finished backup.
+        $backup->refresh()->forceFill(['state' => BackupState::Restored])->save();
 
-        $this->assertSame(ServiceStatus::Suspended, $service->refresh()->status);
+        // ---------------------------------------------------------------
+        // A backup the customer removes themselves
+        // ---------------------------------------------------------------
+        $second = app(RequestServiceBackup::class)->execute($machine->refresh());
+
+        $second->forceFill([
+            'state' => BackupState::Succeeded,
+            'finished_at' => now(),
+            'size_bytes' => 2048,
+            'archive_id' => 'vm/'.$machine->provider_id.'/second',
+        ])->save();
+
+        $this->actingAs($this->user)
+            ->deleteJson(
+                '/api/v1/vps/'.$machine->getKey().'/backups/'.$second->getKey(),
+                ['confirm_backup_id' => (string) $second->getKey()],
+            )
+            ->assertOk()
+            // Asked for, not gone: nothing has been said to the datastore yet,
+            // and the row must not claim otherwise.
+            ->assertJsonPath('data.is_being_deleted', true);
+
+        // ---------------------------------------------------------------
+        // Given back, by the customer rather than by an operator
+        // ---------------------------------------------------------------
+        $this->actingAs($this->user)
+            ->postJson('/api/v1/subscriptions/'.$subscription->getKey().'/cancel', [
+                'immediately' => true,
+                'confirm_subscription_id' => (string) $subscription->getKey(),
+            ])
+            ->assertOk();
+
+        $service->refresh();
+
+        $this->assertSame(ServiceStatus::Suspended, $service->status);
+
+        // The date the data goes, written down where the customer can see it.
+        $this->assertNotNull($service->retention_ends_at);
+        $this->assertSame(BeginRetentionWindow::BY_CUSTOMER, $service->ended_reason);
+
+        // And the backups they did not delete are held past the ordinary
+        // sweep, which is the entire purpose of the window.
+        $this->assertNotNull($backup->refresh()->protected_until);
 
         // The retention window is a month, and it is the only thing standing
-        // between a late invoice and a destroyed dataset — so the test waits
-        // it out rather than reaching past it.
+        // between a cancellation made in a hurry and a destroyed dataset — so
+        // the test waits it out rather than reaching past it.
         $this->travel(31)->days();
 
-        $operator = User::factory()->create();
-        $operator->syncRoles([Role::SuperAdmin->value]);
-
-        $this->actingAs($operator)
-            ->deleteJson('/api/admin/services/'.$service->getKey(), [
-                'reason' => 'Cancelled and unpaid since March, ticket 8891.',
-            ])
-            ->assertStatus(202);
+        // Nobody presses anything. The scheduler's own sweep is what ends it.
+        $this->artisan('services:end-expired')->assertSuccessful();
 
         $this->assertSame(ServiceStatus::Terminated, $service->refresh()->status);
         $this->assertNull(VirtualMachine::query()->find($machine->getKey()));

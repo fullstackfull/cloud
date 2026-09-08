@@ -60,12 +60,12 @@ Route::prefix('orders')->as('orders.')->group(function (): void {
      * shape of a stolen session being cashed out — expensive.
      */
     Route::post('/', [OrderController::class, 'store'])
-        ->middleware('throttle:20,1')
+        ->middleware('throttle:20,1,order-place:')
         ->name('store');
 
     Route::get('{order}', [OrderController::class, 'show'])->name('show');
 
     Route::post('{order}/cancel', [OrderController::class, 'cancel'])
-        ->middleware('throttle:30,1')
+        ->middleware('throttle:30,1,order-cancel:')
         ->name('cancel');
 });

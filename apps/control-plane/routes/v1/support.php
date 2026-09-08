@@ -25,7 +25,7 @@ Route::prefix('support')->as('support.')->group(function (): void {
         // Tighter than the shared ceiling: every ticket is a notification
         // somebody has to read, and the resource being spent is a support
         // team's attention.
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:10,1,ticket-open:')
         ->name('store');
 
     Route::get('tickets/{ticket}', [TicketController::class, 'show'])
@@ -34,7 +34,7 @@ Route::prefix('support')->as('support.')->group(function (): void {
 
     Route::post('tickets/{ticket}/replies', [TicketController::class, 'reply'])
         ->whereUlid('ticket')
-        ->middleware('throttle:30,1')
+        ->middleware('throttle:30,1,ticket-reply:')
         ->name('reply');
 
     Route::post('tickets/{ticket}/close', [TicketController::class, 'close'])

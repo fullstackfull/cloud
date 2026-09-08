@@ -22,6 +22,15 @@ use Lynomia\Modules\Dns\Http\Controllers\DnsZoneController;
  * typed confirmation is what stands between a click and an outage.
  */
 
+/*
+ * The third argument on every numeric limiter below is not decoration. A bare
+ * `throttle:N,1` keys on the caller and nothing else — ThrottleRequests builds
+ * its key as `$prefix . resolveRequestSignature($request)`, and the signature
+ * of an authenticated request is the user id — so every unprefixed numeric
+ * limiter in the application shares one counter per user. Without the
+ * prefixes, editing six records spends the whole zone-deletion allowance, and
+ * the customer's next request is a 429 for a reason no client can see.
+ */
 Route::prefix('dns')->as('dns.')->group(function (): void {
     Route::get('zones', [DnsZoneController::class, 'index'])->name('zones.index');
 
@@ -29,7 +38,7 @@ Route::prefix('dns')->as('dns.')->group(function (): void {
         // Tighter than the shared ceiling. Each one of these creates a zone at
         // a third party whose API has its own rate limit, and a loop here
         // would spend the whole platform's allowance.
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:10,1,dns-zone-create:')
         ->name('zones.store');
 
     Route::get('zones/{zone}', [DnsZoneController::class, 'show'])
@@ -38,7 +47,7 @@ Route::prefix('dns')->as('dns.')->group(function (): void {
 
     Route::delete('zones/{zone}', [DnsZoneController::class, 'destroy'])
         ->whereUlid('zone')
-        ->middleware('throttle:5,1')
+        ->middleware('throttle:5,1,dns-zone-delete:')
         ->name('zones.destroy');
 
     Route::get('zones/{zone}/records', [DnsRecordController::class, 'index'])
@@ -47,18 +56,18 @@ Route::prefix('dns')->as('dns.')->group(function (): void {
 
     Route::post('zones/{zone}/records', [DnsRecordController::class, 'store'])
         ->whereUlid('zone')
-        ->middleware('throttle:60,1')
+        ->middleware('throttle:60,1,dns-record-write:')
         ->name('records.store');
 
     Route::patch('zones/{zone}/records/{record}', [DnsRecordController::class, 'update'])
         ->whereUlid('zone')
         ->whereUlid('record')
-        ->middleware('throttle:60,1')
+        ->middleware('throttle:60,1,dns-record-write:')
         ->name('records.update');
 
     Route::delete('zones/{zone}/records/{record}', [DnsRecordController::class, 'destroy'])
         ->whereUlid('zone')
         ->whereUlid('record')
-        ->middleware('throttle:60,1')
+        ->middleware('throttle:60,1,dns-record-write:')
         ->name('records.destroy');
 });
