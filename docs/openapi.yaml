@@ -74,6 +74,7 @@ tags:
     description: "What is for sale, priced in the account's currency."
   - name: "Cloud VPS"
     description: "Virtual machines: their state, their power, their console and their reinstalls."
+  - name: "DNS"
   - name: "Dedicated servers"
     description: "Physical machines, controlled through a BMC the API never exposes."
   - name: "IP addresses"
@@ -2821,6 +2822,544 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/ProvisioningOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones":
+    get:
+      operationId: "api_v1_dns_zones_index"
+      tags:
+        - "DNS"
+      summary: "List this account's zones"
+      description: "Alphabetical, with a live record count. The provider holding the zone is not named: which third party this platform buys DNS from is its own arrangement."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/DnsZone"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_v1_dns_zones_store"
+      tags:
+        - "DNS"
+      summary: "Claim a domain"
+      description: "Creates the zone and answers with the nameservers to delegate to. **This is not verification.** Nothing here checks that the account owns the domain, and no field on the response should be read as saying so — the zone serves nothing until the registrar points the domain at those nameservers, which only whoever controls the registration can do. Refused for a domain another account already holds here, for the platform's own names and their parents, and for reverse zones, which follow the address block rather than the domain."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                service_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DnsZoneResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}":
+    delete:
+      operationId: "api_v1_dns_zones_destroy"
+      tags:
+        - "DNS"
+      summary: "Give a domain up"
+      description: "Takes the domain name typed back, compared with `hash_equals`. The most destructive call on the customer surface: a zone that is gone answers NXDOMAIN for every name under it at once, including names this platform never wrote. There is no grace period — a backup sits on a datastore while somebody thinks, but a zone is being served, and a delayed removal would be an outage scheduled for a time the customer cannot see."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                confirm_zone_name:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DnsZoneResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    get:
+      operationId: "api_v1_dns_zones_show"
+      tags:
+        - "DNS"
+      summary: "Read one zone"
+      description: "A zone belonging to another account answers 404 rather than 403: a 403 would confirm which account holds which domain."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DnsZoneResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/records":
+    get:
+      operationId: "api_v1_dns_records_index"
+      tags:
+        - "DNS"
+      summary: "List the records in a zone"
+      description: "What this platform has published, which is not the same as what the zone serves. Records added through the provider's own console are not here; reconciliation reports them and never removes them."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/DnsRecord"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_v1_dns_records_store"
+      tags:
+        - "DNS"
+      summary: "Add a record"
+      description: "A, AAAA, CNAME, MX, TXT and CAA. CAA carries `data.flags`, `data.tag` and `data.value` instead of `content`. Refused for a name outside the zone, an address of the wrong family, an address no visitor could reach, an address this platform allocates to another account, a CNAME at the apex or beside another record, an MX without a priority or pointing at an address, and a value already published under that name."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                type:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                content:
+                  description: "See the endpoint description; validated server-side."
+                ttl:
+                  description: "See the endpoint description; validated server-side."
+                priority:
+                  description: "See the endpoint description; validated server-side."
+                data:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DnsRecordResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/records/{record}":
+    delete:
+      operationId: "api_v1_dns_records_destroy"
+      tags:
+        - "DNS"
+      summary: "Remove a record"
+      description: "A record that never reached the provider is simply gone. One that did is marked `deleting` and a worker asks; if the provider does not answer, the row is left `indeterminate` rather than `deleted` and reconciliation settles it by looking — asking again is how a name the customer has since re-created gets removed a second time."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "record"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DnsRecordResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    patch:
+      operationId: "api_v1_dns_records_update"
+      tags:
+        - "DNS"
+      summary: "Change what a record says"
+      description: "The name and type are fixed; a record with a different name is a different record. The row returns to `pending` while the change is published rather than being written over, because a screen showing the new value as live before the provider has taken it would tell a customer their site had moved when it had not. Every rule the create path applies is applied again — an edit is the obvious way round a check that only guards creation."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "record"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                content:
+                  description: "See the endpoint description; validated server-side."
+                ttl:
+                  description: "See the endpoint description; validated server-side."
+                priority:
+                  description: "See the endpoint description; validated server-side."
+                data:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DnsRecordResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -9190,6 +9729,124 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DedicatedServer"
+    DnsRecord:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        zone_id:
+          "$ref": "#/components/schemas/Ulid"
+        type:
+          type:
+            - "string"
+            - "null"
+          description: "A, AAAA, CNAME, MX, TXT or CAA."
+        name:
+          type:
+            - "string"
+            - "null"
+          description: "Fully qualified, always. A relative name would mean every reader had to know the zone to make sense of the row."
+        content:
+          type:
+            - "string"
+            - "null"
+        ttl:
+          type:
+            - "integer"
+            - "null"
+          description: "60 to 86400 seconds, or 1 to let the zone decide."
+        priority:
+          type:
+            - "integer"
+            - "null"
+        caa_flags:
+          type:
+            - "integer"
+            - "null"
+        caa_tag:
+          type:
+            - "string"
+            - "null"
+        caa_value:
+          type:
+            - "string"
+            - "null"
+        state:
+          type:
+            - "string"
+            - "null"
+        is_live:
+          type: "boolean"
+        is_being_deleted:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+        last_published_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DnsRecordResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DnsRecord"
+    DnsZone:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "pending, active, failed, indeterminate, deleting, deleted or needs_review. `failed` means the provider said no and there is something to fix; `indeterminate` means nobody knows yet, and acting on it is how one domain gets claimed twice."
+        is_live:
+          type: "boolean"
+        is_being_deleted:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        nameservers:
+          type: "array"
+          items:
+            type: "string"
+          description: "What the domain must be delegated to at the registrar. Until it is, this zone serves nobody — no state on this object means the domain is working."
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+          description: "The provider's own words, with anything credential-shaped removed before it was stored."
+        record_count:
+          type:
+            - "integer"
+            - "null"
+        last_synced_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DnsZoneResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DnsZone"
     Error:
       type: "object"
       description: |-

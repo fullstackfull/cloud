@@ -169,6 +169,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->gro
         'dedicated',
         'hosting',
         'ipam',
+        'dns',
         'api-tokens',
         'notifications',
         'support',

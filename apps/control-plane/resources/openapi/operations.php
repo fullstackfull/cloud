@@ -560,6 +560,73 @@ return [
     ],
 
     /* ---------------------------------------------------------------------
+     | DNS
+     |
+     | Claiming a zone is not verifying a domain, and nothing on this surface
+     | says otherwise. The platform cannot establish that an account owns a
+     | name — what settles it is the delegation the customer makes at their
+     | registrar, and until they make it the zone serves nobody.
+     |
+     | Validation is the platform's own rather than the provider's. A provider
+     | will accept an AAAA holding an IPv4 address, a CNAME beside an MX, or an
+     | MX pointing at an address; each of those is then discovered by the
+     | customer as an outage rather than by the platform as an error.
+     */
+
+    'api.v1.dns.zones.index' => [
+        'tag' => 'DNS',
+        'summary' => "List this account's zones",
+        'description' => 'Alphabetical, with a live record count. The provider holding the zone is not named: which third party this platform buys DNS from is its own arrangement.',
+        'response' => ['envelope' => 'list', 'schema' => 'DnsZone'],
+    ],
+    'api.v1.dns.zones.store' => [
+        'tag' => 'DNS',
+        'summary' => 'Claim a domain',
+        'description' => "Creates the zone and answers with the nameservers to delegate to. **This is not verification.** Nothing here checks that the account owns the domain, and no field on the response should be read as saying so — the zone serves nothing until the registrar points the domain at those nameservers, which only whoever controls the registration can do. Refused for a domain another account already holds here, for the platform's own names and their parents, and for reverse zones, which follow the address block rather than the domain.",
+        'body' => ['name', 'service_id'],
+        'response' => $one('DnsZone', 201),
+    ],
+    'api.v1.dns.zones.show' => [
+        'tag' => 'DNS',
+        'summary' => 'Read one zone',
+        'description' => 'A zone belonging to another account answers 404 rather than 403: a 403 would confirm which account holds which domain.',
+        'response' => $one('DnsZone'),
+    ],
+    'api.v1.dns.zones.destroy' => [
+        'tag' => 'DNS',
+        'summary' => 'Give a domain up',
+        'description' => 'Takes the domain name typed back, compared with `hash_equals`. The most destructive call on the customer surface: a zone that is gone answers NXDOMAIN for every name under it at once, including names this platform never wrote. There is no grace period — a backup sits on a datastore while somebody thinks, but a zone is being served, and a delayed removal would be an outage scheduled for a time the customer cannot see.',
+        'body' => ['confirm_zone_name'],
+        'response' => $one('DnsZone'),
+    ],
+    'api.v1.dns.records.index' => [
+        'tag' => 'DNS',
+        'summary' => 'List the records in a zone',
+        'description' => 'What this platform has published, which is not the same as what the zone serves. Records added through the provider\'s own console are not here; reconciliation reports them and never removes them.',
+        'response' => ['envelope' => 'list', 'schema' => 'DnsRecord'],
+    ],
+    'api.v1.dns.records.store' => [
+        'tag' => 'DNS',
+        'summary' => 'Add a record',
+        'description' => 'A, AAAA, CNAME, MX, TXT and CAA. CAA carries `data.flags`, `data.tag` and `data.value` instead of `content`. Refused for a name outside the zone, an address of the wrong family, an address no visitor could reach, an address this platform allocates to another account, a CNAME at the apex or beside another record, an MX without a priority or pointing at an address, and a value already published under that name.',
+        'body' => ['type', 'name', 'content', 'ttl', 'priority', 'data'],
+        'response' => $one('DnsRecord', 201),
+    ],
+    'api.v1.dns.records.update' => [
+        'tag' => 'DNS',
+        'summary' => 'Change what a record says',
+        'description' => 'The name and type are fixed; a record with a different name is a different record. The row returns to `pending` while the change is published rather than being written over, because a screen showing the new value as live before the provider has taken it would tell a customer their site had moved when it had not. Every rule the create path applies is applied again — an edit is the obvious way round a check that only guards creation.',
+        'body' => ['content', 'ttl', 'priority', 'data'],
+        'response' => $one('DnsRecord'),
+    ],
+    'api.v1.dns.records.destroy' => [
+        'tag' => 'DNS',
+        'summary' => 'Remove a record',
+        'description' => 'A record that never reached the provider is simply gone. One that did is marked `deleting` and a worker asks; if the provider does not answer, the row is left `indeterminate` rather than `deleted` and reconciliation settles it by looking — asking again is how a name the customer has since re-created gets removed a second time.',
+        'response' => $one('DnsRecord'),
+    ],
+
+    /* ---------------------------------------------------------------------
      | Support
      |
      | A customer may open, read, reply and close. They may not resolve:

@@ -86,6 +86,22 @@ interface DnsProvider
     public function createZone(string $name): DnsZone;
 
     /**
+     * Give up the zone itself.
+     *
+     * Far more serious than removing every record in it: a zone that no longer
+     * exists answers NXDOMAIN for every name under it, including names this
+     * platform never wrote. Nothing calls this except an account deliberately
+     * giving the domain up.
+     *
+     * Removing a zone that is not there is not an error, for the same reason
+     * {@see self::delete()} says so: the caller asked for it to be absent.
+     *
+     * @throws DnsProviderException
+     * @throws DnsNotConfiguredException
+     */
+    public function deleteZone(DnsZone $zone): void;
+
+    /**
      * Records in a zone, optionally narrowed.
      *
      * @return list<DnsRecord>

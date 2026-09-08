@@ -16,15 +16,27 @@ use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsZoneException;
  */
 final readonly class DnsZone
 {
+    /**
+     * @param  list<string>  $nameservers
+     */
     private function __construct(
         private string $id,
         private string $name,
+        private array $nameservers,
     ) {}
 
     /**
+     * @param  list<string>  $nameservers  What the provider says this zone must
+     *                                     be delegated to. Empty when the
+     *                                     provider was not asked or does not
+     *                                     say; never invented, because a
+     *                                     customer typing these into their
+     *                                     registrar needs the provider's answer
+     *                                     and not the platform's idea of it.
+     *
      * @throws InvalidDnsZoneException
      */
-    public static function of(string $id, string $name): self
+    public static function of(string $id, string $name, array $nameservers = []): self
     {
         $id = trim($id);
         $name = strtolower(trim($name, " \t\n\r\0\x0B."));
@@ -37,7 +49,10 @@ final readonly class DnsZone
             throw InvalidDnsZoneException::missingName($id);
         }
 
-        return new self($id, $name);
+        return new self($id, $name, array_values(array_filter(array_map(
+            static fn (string $host): string => strtolower(trim($host, " \t\n\r\0\x0B.")),
+            $nameservers,
+        ), static fn (string $host): bool => $host !== '')));
     }
 
     public function id(): string
@@ -48,6 +63,14 @@ final readonly class DnsZone
     public function name(): string
     {
         return $this->name;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function nameservers(): array
+    {
+        return $this->nameservers;
     }
 
     /**

@@ -462,3 +462,48 @@ export interface ApiToken {
   revoked_at: string | null
   created_at: string | null
 }
+
+/* --------------------------------------------------------------------------
+ | DNS
+ |
+ | `nameservers` is the whole product on a zone: until the domain is delegated
+ | to them at the registrar, the zone serves nobody. Nothing here is called
+ | "verified", because nothing verifies anything — see docs/dns.md.
+ */
+
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'CAA'
+
+export interface DnsZone {
+  id: string
+  name: string
+  service_id: string | null
+  state: string
+  is_live: boolean
+  is_being_deleted: boolean
+  needs_attention: boolean
+  nameservers: string[]
+  failure_reason: string | null
+  record_count?: number
+  last_synced_at: string | null
+  created_at: string
+}
+
+export interface DnsRecord {
+  id: string
+  zone_id: string
+  type: DnsRecordType
+  name: string
+  content: string
+  ttl: number
+  priority: number | null
+  caa_flags: number | null
+  caa_tag: string | null
+  caa_value: string | null
+  state: string
+  is_live: boolean
+  is_being_deleted: boolean
+  needs_attention: boolean
+  failure_reason: string | null
+  last_published_at: string | null
+  created_at: string
+}

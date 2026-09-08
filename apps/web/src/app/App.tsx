@@ -20,6 +20,7 @@ import { HostingPage } from '@/features/infrastructure/HostingPage'
 import { IpAddressesPage } from '@/features/infrastructure/IpAddressesPage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { BackupsPage } from '@/features/backups/BackupsPage'
+import { DnsPage } from '@/features/dns/DnsPage'
 import { PlanChangePage } from '@/features/billing/PlanChangePage'
 import { ConsolePage } from '@/features/console/ConsolePage'
 import { VpsPage } from '@/features/infrastructure/VpsPage'
@@ -107,6 +108,7 @@ export function App() {
                 <Route path="/dedicated" element={<DedicatedPage />} />
                 <Route path="/hosting" element={<HostingPage />} />
                 <Route path="/ips" element={<IpAddressesPage />} />
+                <Route path="/dns" element={<DnsPage />} />
 
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />

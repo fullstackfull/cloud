@@ -20,7 +20,8 @@
     "previous": "Previous",
     "next": "Next",
     "pagination": "Pagination",
-    "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total"
+    "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total",
+    "remove": "Remove"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -28,7 +29,7 @@
     "vps": "Cloud VPS",
     "dedicated": "Dedicated Servers",
     "hosting": "Shared Hosting",
-    "dns": "Domains & DNS",
+    "dns": "DNS",
     "ips": "IP Addresses",
     "backups": "Backups",
     "monitoring": "Monitoring",
@@ -810,5 +811,33 @@
       "abuse": "Abuse or security",
       "other": "Something else"
     }
+  },
+  "dns": {
+    "subtitle": "Your domains, and what they point at.",
+    "domain": "Domain",
+    "domainHint": "The domain itself, without www. Internationalised names must be given in punycode (xn--…).",
+    "claim": "Add domain",
+    "zone": "Domain",
+    "noZones": "No domains here yet. Add one above and this platform will start serving it — once you point the domain at the nameservers it gives you.",
+    "delegationExplainer": "Point your domain at these nameservers at your registrar. Until you do, nothing here is being served: this platform does not check who owns a domain, and delegating it is what makes these records take effect.",
+    "noNameservers": "The nameservers will appear here once the zone has been created.",
+    "needsAttention": "The provider did not answer the last request for this zone, so the platform cannot say whether it took effect. It is being checked; nothing needs doing, and repeating the request could duplicate it.",
+    "records": "Records",
+    "noRecords": "No records yet.",
+    "type": "Type",
+    "name": "Name",
+    "subdomain": "Name (blank for {{zone}} itself)",
+    "value": "Value",
+    "ttl": "TTL",
+    "automatic": "Automatic",
+    "priority": "Priority",
+    "caaTag": "Tag",
+    "state": "State",
+    "addRecord": "Add record",
+    "releaseTitle": "Give up this domain?",
+    "releaseExplainer": "Removes the zone and every record in it. Your registration is untouched — this only stops this platform answering for the domain.",
+    "releaseWarning": "Every name under {{zone}} stops resolving: the website, the mail, and anything else set up under it. This cannot be undone, and there is no delay — it takes effect as soon as you confirm.",
+    "releaseConfirmLabel": "Type {{zone}} to confirm",
+    "release": "Give up domain"
   }
 }

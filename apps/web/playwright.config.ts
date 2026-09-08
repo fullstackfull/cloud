@@ -34,6 +34,27 @@ const WEB_ORIGIN = `http://localhost:${WEB_PORT}`
  */
 const apiEnvironment = {
   APP_ENV: 'local',
+
+  /*
+   * The queue runs inline for this suite, and nothing else about the API
+   * changes.
+   *
+   * The alternative is a worker beside the two servers, and it would prove
+   * less than it costs: what these specs are about is whether a screen tells
+   * the truth about an outcome, and with a queue and no worker every outcome
+   * is "pending" for ever — which is a fact about the harness, not about the
+   * platform. That the queue itself works, retries, and fails safely is proven
+   * against a real Redis and a real worker in tests/Feature/Queue.
+   */
+  QUEUE_CONNECTION: 'sync',
+
+  /*
+   * And mail goes to the log, because running the queue inline means the mail
+   * a request queues is now sent inside that request. There is no SMTP server
+   * beside this suite, and standing one up would only prove that Symfony can
+   * talk to it. What the specs are about is what the portal shows.
+   */
+  MAIL_MAILER: 'log',
   APP_URL: API_ORIGIN,
   DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e',
   FRONTEND_URL: WEB_ORIGIN,

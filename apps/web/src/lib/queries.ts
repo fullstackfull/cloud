@@ -6,6 +6,8 @@ import type {
   AppNotification,
   Backup,
   DedicatedServer,
+  DnsRecord as DnsRecordRow,
+  DnsZone,
   Envelope,
   HostingAccount,
   InvitationOffer,
@@ -913,6 +915,100 @@ export function useRevokeApiToken() {
     mutationFn: (id: string) => api.delete<unknown>(`/me/api-tokens/${encodeURIComponent(id)}`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['api-tokens'] })
+    },
+  })
+}
+
+/* --------------------------------------------------------------------------
+ | DNS
+ |
+ | Records are keyed by their zone, so switching zones cannot show one zone's
+ | records under another's name while the new ones load — the same reason the
+ | backups key carries the machine.
+ */
+
+export function useDnsZones() {
+  return useQuery({
+    queryKey: ['dns', 'zones'],
+    queryFn: () => api.get<{ data: DnsZone[]; meta: { total: number } }>('/dns/zones'),
+  })
+}
+
+export function useDnsRecords(zoneId: string | null) {
+  return useQuery({
+    queryKey: ['dns', 'records', zoneId],
+    enabled: zoneId !== null,
+    queryFn: () =>
+      api.get<{ data: DnsRecordRow[]; meta: { total: number } }>(
+        `/dns/zones/${encodeURIComponent(zoneId ?? '')}/records`,
+      ),
+  })
+}
+
+export function useClaimDnsZone() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { name: string }) =>
+      api.post<Envelope<DnsZone>>('/dns/zones', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    },
+  })
+}
+
+export function useReleaseDnsZone() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The typed name is forwarded rather than filled in from the zone the
+     * caller already holds: a confirmation the client completes for you is a
+     * confirmation in name only. */
+    mutationFn: (payload: { zoneId: string; confirmation: string }) =>
+      api.delete<Envelope<DnsZone>>(`/dns/zones/${encodeURIComponent(payload.zoneId)}`, {
+        confirm_zone_name: payload.confirmation,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    },
+  })
+}
+
+export interface NewDnsRecord {
+  zoneId: string
+  type: string
+  name: string
+  content?: string
+  ttl?: number
+  priority?: number | null
+  data?: { flags: number; tag: string; value: string }
+}
+
+export function useAddDnsRecord() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ zoneId, ...body }: NewDnsRecord) =>
+      api.post<Envelope<DnsRecordRow>>(
+        `/dns/zones/${encodeURIComponent(zoneId)}/records`,
+        body,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    },
+  })
+}
+
+export function useRemoveDnsRecord() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { zoneId: string; recordId: string }) =>
+      api.delete<Envelope<DnsRecordRow>>(
+        `/dns/zones/${encodeURIComponent(payload.zoneId)}/records/${encodeURIComponent(payload.recordId)}`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
     },
   })
 }

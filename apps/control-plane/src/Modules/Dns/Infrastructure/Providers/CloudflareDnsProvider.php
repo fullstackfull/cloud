@@ -64,7 +64,11 @@ final class CloudflareDnsProvider implements DnsProvider
             $result = is_array($body['result'] ?? null) ? array_values($body['result']) : [];
 
             foreach ($result as $row) {
-                $zones[] = DnsZone::of((string) ($row['id'] ?? ''), (string) ($row['name'] ?? ''));
+                $zones[] = DnsZone::of(
+                    (string) ($row['id'] ?? ''),
+                    (string) ($row['name'] ?? ''),
+                    $this->nameserversIn($row),
+                );
             }
 
             $totalPages = (int) ($body['result_info']['total_pages'] ?? 1);
@@ -91,7 +95,11 @@ final class CloudflareDnsProvider implements DnsProvider
             return null;
         }
 
-        return DnsZone::of((string) ($row['id'] ?? ''), (string) ($row['name'] ?? ''));
+        return DnsZone::of(
+            (string) ($row['id'] ?? ''),
+            (string) ($row['name'] ?? ''),
+            $this->nameserversIn($row),
+        );
     }
 
     public function zoneFor(string $fqdn): ?DnsZone
@@ -144,7 +152,39 @@ final class CloudflareDnsProvider implements DnsProvider
         /** @var array<string, mixed> $row */
         $row = is_array($body['result'] ?? null) ? $body['result'] : [];
 
-        return DnsZone::of((string) ($row['id'] ?? ''), (string) ($row['name'] ?? ''));
+        return DnsZone::of(
+            (string) ($row['id'] ?? ''),
+            (string) ($row['name'] ?? ''),
+            $this->nameserversIn($row),
+        );
+    }
+
+    /**
+     * Remove the zone itself.
+     *
+     * Separate from removing its records and far more serious: a zone that is
+     * gone answers NXDOMAIN for every name under it, including the ones this
+     * platform never wrote. Nothing calls this except an account giving the
+     * zone up deliberately.
+     */
+    public function deleteZone(DnsZone $zone): void
+    {
+        $this->call('DELETE', '/zones/'.$zone->id(), [], 'delete zone '.$zone->name());
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return list<string>
+     */
+    private function nameserversIn(array $row): array
+    {
+        $hosts = $row['name_servers'] ?? [];
+
+        if (! is_array($hosts)) {
+            return [];
+        }
+
+        return array_values(array_map(static fn (mixed $host): string => (string) $host, $hosts));
     }
 
     public function records(DnsZone $zone, ?DnsRecordType $type = null, ?string $name = null): array

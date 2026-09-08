@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Monitoring\Infrastructure;
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Monitoring\Application\Collectors\CapacityCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ConsoleCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\DnsCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\IpamCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\LifecycleCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\NotificationCollector;
@@ -49,6 +50,7 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(SchedulerCollector::class),
                 $app->make(NotificationCollector::class),
                 $app->make(ConsoleCollector::class),
+                $app->make(DnsCollector::class),
             );
         });
     }

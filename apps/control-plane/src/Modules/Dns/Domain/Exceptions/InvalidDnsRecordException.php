@@ -45,6 +45,20 @@ final class InvalidDnsRecordException extends DomainException
         return $exception->withContext(['name' => $name, 'priority' => $priority]);
     }
 
+    /**
+     * The value is not the kind of thing this type holds.
+     *
+     * Phrased as what was expected rather than what was wrong, because the
+     * customer is about to retype it and "an IPv4 address" tells them how; the
+     * value is echoed so they can see which of four boxes they were in.
+     */
+    public static function contentIsNot(DnsRecordType $type, string $content, string $expected): self
+    {
+        $exception = new self(sprintf('A %s record needs %s.', $type->value, $expected));
+
+        return $exception->withContext(['type' => $type->value, 'value' => $content, 'expected' => $expected]);
+    }
+
     public static function ttlOutOfRange(string $name, int $ttl, int $min, int $max): self
     {
         $exception = new self(sprintf(

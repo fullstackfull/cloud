@@ -119,6 +119,18 @@ enum AuditAction: string
     case MemberRemoved = 'membership.removed';
     case OwnershipTransferred = 'membership.ownership_transferred';
 
+    /*
+     * DNS. Zone-level acts are audited and record-level acts are audited, and
+     * that is not duplication: giving a domain up takes every name under it
+     * with it, and an operator asked "when did mail stop working" needs to see
+     * which of the two happened.
+     */
+    case DnsZoneCreated = 'dns.zone.created';
+    case DnsZoneDeleted = 'dns.zone.deleted';
+    case DnsRecordCreated = 'dns.record.created';
+    case DnsRecordUpdated = 'dns.record.updated';
+    case DnsRecordDeleted = 'dns.record.deleted';
+
     /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.

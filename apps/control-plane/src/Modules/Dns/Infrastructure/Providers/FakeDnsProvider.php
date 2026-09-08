@@ -76,7 +76,15 @@ final class FakeDnsProvider implements DnsProvider
      */
     public function withZone(string $name): DnsZone
     {
-        $zone = DnsZone::of('zone-'.$this->nextId++, $name);
+        $id = 'zone-'.$this->nextId++;
+
+        /*
+         * Nameservers that look like a provider's, because the surface that
+         * shows them to a customer has to be exercised by something. They are
+         * derived from the zone id rather than fixed, so a test asserting on
+         * them cannot pass by accident against a different zone.
+         */
+        $zone = DnsZone::of($id, $name, [$id.'-a.ns.fake.test', $id.'-b.ns.fake.test']);
         $this->zones[$zone->name()] = $zone;
         $this->records[$zone->id()] = [];
 
@@ -90,6 +98,12 @@ final class FakeDnsProvider implements DnsProvider
 
     public function findZone(string $name): ?DnsZone
     {
+        // A marked name misbehaves on *every* operation, not only the ones
+        // that write. A provider that has stopped answering has stopped
+        // answering questions too, and the platform's most dangerous moment is
+        // when it asks "is this zone still there" and believes a silence.
+        $this->refuseMarkedZone($name, 'find zone '.$name);
+
         return $this->zones[strtolower(trim($name, " \t\n\r\0\x0B."))] ?? null;
     }
 
@@ -115,11 +129,28 @@ final class FakeDnsProvider implements DnsProvider
 
     public function createZone(string $name): DnsZone
     {
+        $this->refuseMarkedZone($name, 'create zone '.$name);
+
         return $this->findZone($name) ?? $this->withZone($name);
+    }
+
+    /**
+     * Give the zone up.
+     *
+     * Absent is absent: a zone the fake never held is not an error, because
+     * the caller asked for it to be gone and it is.
+     */
+    public function deleteZone(DnsZone $zone): void
+    {
+        $this->refuseMarkedZone($zone->name(), 'delete zone '.$zone->name());
+
+        unset($this->zones[$zone->name()], $this->records[$zone->id()]);
     }
 
     public function records(DnsZone $zone, ?DnsRecordType $type = null, ?string $name = null): array
     {
+        $this->refuseMarkedZone($zone->name(), 'list records in '.$zone->name());
+
         $held = array_values($this->records[$zone->id()] ?? []);
 
         return array_values(array_filter($held, static function (DnsRecord $record) use ($type, $name): bool {
@@ -161,11 +192,26 @@ final class FakeDnsProvider implements DnsProvider
      */
     private function refuseMarkedNames(DnsRecord $record, string $operation): void
     {
-        if (str_contains($record->name(), self::TIMEOUT_MARKER)) {
+        $this->refuseMarkedZone($record->name(), $operation);
+    }
+
+    /**
+     * The same two markers, read from a zone name rather than a record's.
+     *
+     * Creating and giving up a zone are the operations with no record to carry
+     * a marker, and they are exactly the ones where a timeout matters most: a
+     * zone whose deletion did not answer may be gone, and asking again is how
+     * a zone somebody recreated in the meantime gets deleted a second time.
+     *
+     * @throws DnsProviderException
+     */
+    private function refuseMarkedZone(string $name, string $operation): void
+    {
+        if (str_contains($name, self::TIMEOUT_MARKER)) {
             throw DnsProviderException::timedOut(self::NAME, $operation);
         }
 
-        if (str_contains($record->name(), self::REFUSAL_MARKER)) {
+        if (str_contains($name, self::REFUSAL_MARKER)) {
             throw DnsProviderException::refused(
                 self::NAME,
                 $operation,

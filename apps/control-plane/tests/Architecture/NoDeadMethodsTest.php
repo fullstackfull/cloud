@@ -120,13 +120,13 @@ final class NoDeadMethodsTest extends TestCase
          * below.
          */
 
-        // Forward DNS. The platform manages reverse records for the addresses
-        // it hands out and does not sell DNS hosting, so nothing creates,
-        // lists or looks up a zone.
-        'CloudflareDnsProvider::canCreateZones' => 'forward DNS zones are not a product the platform sells',
-        'CloudflareDnsProvider::createZone' => 'forward DNS zones are not a product the platform sells',
-        'CloudflareDnsProvider::zoneFor' => 'forward DNS zones are not a product the platform sells',
-        'CloudflareDnsProvider::zones' => 'forward DNS zones are not a product the platform sells',
+        // Finding which of an account's zones would serve a given name. The
+        // platform holds its own zones in its own table and matches names
+        // against them there, so there is nothing to ask a provider: the
+        // question "who serves this name" is one this platform can already
+        // answer about itself, and asking would be a round trip to be told
+        // what it just looked up.
+        'CloudflareDnsProvider::zoneFor' => 'the platform matches names against the zones it holds, in its own table',
 
         // Resetting a hosting account's password. There is no customer path
         // and no operator path: a customer reaches their panel through

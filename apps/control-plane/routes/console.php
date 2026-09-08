@@ -151,6 +151,23 @@ Schedule::command('backups:reconcile-inventory')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * DNS reconciliation, every two hours.
+ *
+ * More often than the backup sweep and for the opposite reason: this read is
+ * cheap — one listing per stale zone, bounded by `dns.reconcile_batch` — and
+ * what it looks for is a name that has stopped resolving while the portal says
+ * it is live. Six hours of that is six hours of a customer's site being down
+ * while their control panel says everything is fine.
+ *
+ * Nothing it does writes to a zone. See ReconcileZones.
+ */
+Schedule::command('dns:reconcile')
+    ->cron('20 */2 * * *')
+    ->withoutOverlapping(30)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Address reclamation, every ten minutes.
  *
  * Both directions out of a pool were one-way: a reservation whose build never
