@@ -461,9 +461,12 @@ Run 67 (`5201a86`) was the same, green on all eight. Run 68 (`420b0fe`, the
 first draft of this document) was **cancelled** — superseded by run 69's push
 before it finished, which is the runner's concurrency rule and not a failure.
 
-Everything after `9b1b0a6` on this branch is this document. Their runs are
-recorded here as they land, and none of them can change what the gates said
-about the code, which is what run 69 measured.
+Everything after `9b1b0a6` on this branch is this document. Run 70 (`1026caf`)
+was **cancelled** by the push that superseded it, and run 71 (`7f23c97`) was
+**green on all eight jobs**. The record stops there on purpose: a document that
+names the run of its own last commit cannot exist, because naming it is a new
+commit with a new run. What the gates said about the code is what run 69
+measured, and no run of a documentation commit changes it.
 
 | Job | Conclusion | Covers |
 | --- | --- | --- |
