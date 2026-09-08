@@ -156,3 +156,51 @@ silently correcting it — a cache that quietly repairs itself hides the bug tha
 it.
 
 Balances are per (customer, currency). They are never mixed and never converted.
+
+### Spending it
+
+Credit is spent **against an invoice**, through `POST /invoices/{invoice}/wallet-credit`.
+There is no bare debit endpoint: the floor that stops a balance going negative is enforced
+inside `WalletLedger` under a row lock, and a second way in would be a second place for
+that check to be missing.
+
+A wallet payment is a payment like any other. It writes the same `transactions` row every
+other payment writes — provider `wallet`, kind charge, status succeeded — and hands it to
+the same `SettleInvoice`. Nothing about invoices, dunning, overpayment or refunds needed a
+second code path, and there is no arithmetic in the wallet module that could disagree with
+the arithmetic in the billing one.
+
+**There is no `amount` in the request.** How much is applied is `min(balance, amount due)`,
+computed under a lock; a figure from the client would be a second opinion about something
+with one right answer. Partial payment is the ordinary case: 30 KWD of credit against a
+100 KWD invoice pays 30 and leaves 70 payable by card.
+
+**Order of locks:** invoice → wallet → charge. The external payments path takes charge →
+invoice → wallet. The charge in the wallet path is a row that transaction has just
+created, which no other transaction can hold, so the two orders cannot form a cycle.
+
+**Repeating the request.** The `Idempotency-Key` header is required, and it is recorded on
+the *ledger entry* rather than in a table of its own. The replay is checked before
+anything else — before the payability check — because a repeat of a successful request
+arrives at an invoice the first one settled, and answering it `invoice.not_payable` would
+tell a client its payment failed when it had worked.
+
+### Refunds of mixed payments
+
+**Money goes back the way it came.** An invoice can be paid partly from credit and partly
+by card, and each half is its own transaction row. A refund names one of those rows, so
+the channel follows from which payment is being reversed: the card half to the card, the
+wallet half to the wallet.
+
+The alternatives were considered and rejected:
+
+| Policy | Why not |
+| --- | --- |
+| Everything to the card | Pays out real money for credit the customer was given rather than paid — the platform converting promotional credit into cash. |
+| Everything to the wallet | Takes back money the customer actually paid and hands them a voucher. That is not a refund. |
+| Split by ratio | Gives a different answer depending on the order the payments happened to arrive in, and no way to explain the number on a statement. |
+
+A wallet refund makes no network call, because the money never left. It is a credit
+through `WalletLedger`, succeeded at once — there is no pending state for a transfer that
+cannot fail halfway. Its idempotency key is the refund row's own id, so a retried refund
+credits once.

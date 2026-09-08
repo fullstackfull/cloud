@@ -335,6 +335,7 @@ final class GenerateOpenApiSpec extends Command
             'Orders' => 'Placing and cancelling orders. Nothing is provisioned until a payment has been verified server-side.',
             'Services' => 'What the account owns, whatever kind it is, and what the platform has done to it.',
             'Shared hosting' => 'Panel accounts, their usage, and single-use sign-in links to the panel.',
+            'Team' => 'Who belongs to this account and what each of them may do. The three /invitations routes are the invitee\'s side, and are the only customer routes that work for somebody who belongs to no account yet.',
             'Webhooks' => 'Called by providers, not by clients. Signature-verified before the body is parsed.',
         ];
 

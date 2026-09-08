@@ -31,7 +31,10 @@ use Lynomia\Modules\Wallet\Infrastructure\Queries\CustomerWalletTransactions;
  * Nor is there a debit route. A wallet is spent by settling an invoice, and
  * the floor check that keeps a balance from going negative lives inside
  * WalletLedger under a row lock; a second entry point into that would be a
- * second place for the check to be forgotten.
+ * second place for the check to be forgotten. Spending it is
+ * `POST /invoices/{invoice}/wallet-credit`, which lives on the invoice
+ * controller because what it answers with is an invoice — and because a
+ * module's HTTP layer is not another module's to reach into.
  *
  * Two rules hold across both methods.
  *

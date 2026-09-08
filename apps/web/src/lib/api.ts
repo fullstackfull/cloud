@@ -90,6 +90,14 @@ export interface RequestOptions {
   signal?: AbortSignal
   locale?: string
   /**
+   * Extra headers for the few endpoints that take one.
+   *
+   * Merged *under* the headers this function sets, not over them: a caller
+   * must not be able to replace the CSRF token or the Accept type by passing a
+   * header of the same name.
+   */
+  headers?: Record<string, string>
+  /**
    * Treat `path` as a full path from the origin rather than relative to
    * `/api/v1`.
    *
@@ -109,6 +117,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   const headers: Record<string, string> = {
+    ...(options.headers ?? {}),
     Accept: 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
   }

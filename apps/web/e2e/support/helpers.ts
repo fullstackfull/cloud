@@ -22,6 +22,7 @@ export const fixtures = {
   dedicatedSerial: 'E2E-SN-000117',
   openInvoice: 'INV-E2E-0001',
   paidInvoice: 'INV-E2E-0002',
+  largeInvoice: 'INV-E2E-0003',
   suspendedHostname: 'e2e-suspended-01',
   reactivatingHostname: 'e2e-reactivating-01',
   vpsAddress: '198.51.100.24',

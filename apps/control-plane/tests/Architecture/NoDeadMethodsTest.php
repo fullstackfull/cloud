@@ -194,7 +194,6 @@ final class NoDeadMethodsTest extends TestCase
          * leave the platform able only to take money in, which is a worse
          * shape, so it stays and the gap is stated.
          */
-        'WalletLedger::debit' => 'wallet credit cannot be spent by anyone yet',
 
         /*
          * Issuing an invoice from a priced result rather than from line

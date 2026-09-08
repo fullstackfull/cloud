@@ -21,6 +21,7 @@ import type {
   Service,
   Subscription,
   TeamInvitation,
+  WalletCreditQuote,
   TeamMember,
   TeamRole,
   VirtualMachine,
@@ -582,6 +583,48 @@ export function useSetReverseDns() {
 }
 
 /* ----------------------------------------------------------- api tokens */
+
+/* --------------------------------------------------------------------------
+ | Paying from stored credit
+ |
+ | The quote is enabled only when a dialogue is open: it is a per-invoice read
+ | and fetching one for every row of the invoice list would make a page of
+ | twenty invoices twenty-one requests, for numbers nobody has asked to see.
+ */
+
+export function useWalletCreditQuote(invoiceId: string | null) {
+  return useQuery({
+    queryKey: ['invoices', invoiceId, 'wallet-credit'],
+    queryFn: () =>
+      api.get<Envelope<WalletCreditQuote>>(`/invoices/${encodeURIComponent(invoiceId ?? '')}/wallet-credit`),
+    enabled: invoiceId !== null,
+    // A balance the customer may have spent on another tab. Refetched each
+    // time the dialogue opens rather than served from a cache that could show
+    // credit that is already gone.
+    staleTime: 0,
+  })
+}
+
+export function usePayFromWalletCredit() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { invoiceId: string; idempotencyKey: string }) =>
+      api.post<Envelope<Invoice>>(
+        `/invoices/${encodeURIComponent(payload.invoiceId)}/wallet-credit`,
+        {},
+        // The header, not the body: the server reads it from there and from
+        // nowhere else, so a body field of the same name cannot win.
+        { headers: { 'Idempotency-Key': payload.idempotencyKey } },
+      ),
+    onSuccess: () => {
+      // Both moved: the invoice is paid or partly paid, and the balance that
+      // paid it is smaller.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      void queryClient.invalidateQueries({ queryKey: ['wallet'] })
+    },
+  })
+}
 
 /* --------------------------------------------------------------------------
  | Team

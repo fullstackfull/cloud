@@ -12,6 +12,7 @@ use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -35,7 +36,7 @@ final class ARefundReachesTheInvoiceTest extends TestCase
     {
         parent::setUp();
 
-        $this->issue = new IssueRefund(new PaymentProviderRegistry($this->app));
+        $this->issue = new IssueRefund(new PaymentProviderRegistry($this->app), app(WalletLedger::class));
     }
 
     /**

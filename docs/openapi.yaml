@@ -89,6 +89,7 @@ tags:
   - name: "Shared hosting"
     description: "Panel accounts, their usage, and single-use sign-in links to the panel."
   - name: "Team"
+    description: "Who belongs to this account and what each of them may do. The three /invitations routes are the invitee's side, and are the only customer routes that work for somebody who belongs to no account yet."
   - name: "Webhooks"
     description: "Called by providers, not by clients. Signature-verified before the body is parsed."
 security:
@@ -2931,6 +2932,118 @@ paths:
                 "$ref": "#/components/schemas/Error"
         422:
           description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/invoices/{invoice}/wallet-credit":
+    post:
+      operationId: "api_v1_invoices_wallet_credit_pay"
+      tags:
+        - "Billing"
+      summary: "Pay an invoice from stored credit"
+      description: "Requires an Idempotency-Key: a repeated submission that debited twice would spend a balance the customer only has once. There is no amount field — how much is applied is decided from the balance and the amount due, both read under a lock. Partial payment is ordinary: the remainder stays payable by card. Credit is never converted between currencies."
+      parameters:
+        - name: "invoice"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/InvoiceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    get:
+      operationId: "api_v1_invoices_wallet_credit_quote"
+      tags:
+        - "Billing"
+      summary: "What stored credit would cover on this invoice"
+      description: "Three figures: what the customer holds in the invoice's currency, what this invoice would take of it, and what would still be owed. A quote rather than a promise — a renewal can spend the balance in between, so the payment recomputes everything under a lock."
+      parameters:
+        - name: "invoice"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/WalletCreditQuoteResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
           content:
             "application/json":
               schema:
@@ -9609,6 +9722,27 @@ components:
           "$ref": "#/components/schemas/Money"
         updated_at:
           "$ref": "#/components/schemas/Timestamp"
+    WalletCreditQuote:
+      type: "object"
+      additionalProperties: false
+      description: "What paying one invoice from stored credit would do, before it is done. Three figures rather than one, because a client that subtracted them itself would be re-implementing the rule that a wallet cannot overpay an invoice."
+      properties:
+        available:
+          "$ref": "#/components/schemas/Money"
+        applicable:
+          "$ref": "#/components/schemas/Money"
+        remaining:
+          "$ref": "#/components/schemas/Money"
+        is_payable:
+          type: "boolean"
+          description: "False when applying nothing is the only possible outcome — no credit, or nothing owed."
+    WalletCreditQuoteResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/WalletCreditQuote"
     WalletTransaction:
       type: "object"
       additionalProperties: false

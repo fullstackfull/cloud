@@ -86,6 +86,16 @@ class E2ESeeder extends Seeder
     /** One that is settled, so the two states can be told apart on screen. */
     public const string PAID_INVOICE_NUMBER = 'INV-E2E-0002';
 
+    /**
+     * An open invoice worth more than the seeded wallet holds.
+     *
+     * Both halves of the credit dialogue need driving in a browser, and they
+     * are different screens: one says the invoice is covered, the other says
+     * what is left to pay by card. A fixture that only ever covered the whole
+     * amount would leave the second untested.
+     */
+    public const string LARGE_INVOICE_NUMBER = 'INV-E2E-0003';
+
     /** The address the machine answers on, asserted by name on two screens. */
     public const string VPS_ADDRESS = '198.51.100.24';
 
@@ -576,6 +586,14 @@ class E2ESeeder extends Seeder
             'amount_paid_minor' => 0,
             'issued_at' => now()->subDays(2),
             'due_at' => now()->addDays(12),
+        ]);
+
+        Invoice::factory()->for($customer)->totalling(Money::of('40.000', 'KWD'))->create([
+            'number' => self::LARGE_INVOICE_NUMBER,
+            'status' => InvoiceStatus::Open,
+            'amount_paid_minor' => 0,
+            'issued_at' => now()->subDay(),
+            'due_at' => now()->addDays(20),
         ]);
 
         Invoice::factory()->for($customer)->totalling(Money::of('25.500', 'KWD'))->create([

@@ -532,6 +532,19 @@ return [
         'summary' => 'Mark every notification read',
         'response' => $one('NotificationsMarkedRead'),
     ],
+    'api.v1.invoices.wallet_credit.quote' => [
+        'tag' => 'Billing',
+        'summary' => 'What stored credit would cover on this invoice',
+        'description' => 'Three figures: what the customer holds in the invoice\'s currency, what this invoice would take of it, and what would still be owed. A quote rather than a promise — a renewal can spend the balance in between, so the payment recomputes everything under a lock.',
+        'response' => $one('WalletCreditQuote'),
+    ],
+    'api.v1.invoices.wallet_credit.pay' => [
+        'tag' => 'Billing',
+        'summary' => 'Pay an invoice from stored credit',
+        'description' => 'Requires an Idempotency-Key: a repeated submission that debited twice would spend a balance the customer only has once. There is no amount field — how much is applied is decided from the balance and the amount due, both read under a lock. Partial payment is ordinary: the remainder stays payable by card. Credit is never converted between currencies.',
+        'response' => $one('Invoice'),
+    ],
+
     /* ---------------------------------------------------------------------
      | Team
      |

@@ -260,7 +260,14 @@
     "amountDue": "Due",
     "dueAt": "Due by",
     "pay": "Pay",
-    "empty": "No invoices yet."
+    "empty": "No invoices yet.",
+    "useCredit": "Use credit",
+    "useCreditTitle": "Pay from your credit balance",
+    "creditAvailable": "Credit available",
+    "creditApplied": "Applied to this invoice",
+    "creditRemaining": "Still to pay",
+    "noCreditToApply": "There is no credit in this invoice's currency to apply. Credit is never converted between currencies.",
+    "creditWillNotCoverAll": "Your credit does not cover the whole invoice. The rest stays payable by card."
   },
   "subscriptions": {
     "subtitle": "What renews, and when.",

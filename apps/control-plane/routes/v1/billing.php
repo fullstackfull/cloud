@@ -70,6 +70,28 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
 Route::prefix('invoices')->as('invoices.')->group(function (): void {
     Route::get('/', [InvoiceController::class, 'index'])->name('index');
     Route::get('{invoice}', [InvoiceController::class, 'show'])->name('show');
+
+    /*
+     * Paying from stored credit.
+     *
+     * Here rather than on the wallet surface for two reasons that agree: what
+     * the POST answers with is an invoice, and a module's HTTP layer is not
+     * another module's to reach into — a rule the architecture test enforces.
+     *
+     * The GET is a quote and takes nothing. The POST requires an
+     * Idempotency-Key, because a repeated submission that debited twice would
+     * spend a balance the customer only has once, and carries a tighter
+     * limiter than the shared ceiling: it is the one route on this surface
+     * that moves money without a provider in the way.
+     */
+    Route::get('{invoice}/wallet-credit', [InvoiceController::class, 'walletCreditQuote'])
+        ->whereUlid('invoice')
+        ->name('wallet_credit.quote');
+
+    Route::post('{invoice}/wallet-credit', [InvoiceController::class, 'payFromWalletCredit'])
+        ->whereUlid('invoice')
+        ->middleware('throttle:30,1')
+        ->name('wallet_credit.pay');
 });
 
 Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {

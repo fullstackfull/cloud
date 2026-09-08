@@ -25,15 +25,20 @@ use Lynomia\Modules\Wallet\Http\Controllers\WalletController;
  * POST /invoices/{invoice}/payments — the surplus reaches the wallet through
  * SettleInvoice, after the money has actually arrived.
  *
- * Nor is there a debit route: a wallet is spent by settling an invoice, and
+ * Nor is there a bare debit route: a wallet is spent *against an invoice*, and
  * the balance floor is enforced inside WalletLedger under a row lock. A second
- * way in would be a second place for that check to be missing.
+ * way in would be a second place for that check to be missing. The two
+ * invoice-scoped routes below are that one way in — they name an invoice, and
+ * how much of the balance it takes is the platform's decision, computed under
+ * a lock from the amount due and the balance. There is no `amount` field.
  *
- * **No id is accepted anywhere.** No {wallet}, no {transaction}, and no wallet
- * id in a query string. Which wallets are read follows from the acting
- * customer, so there is no id on this surface to enumerate and no cross-tenant
- * lookup to get wrong. `?currency=` selects among the caller's own wallets and
- * can name nothing outside the account.
+ * **No wallet id is accepted anywhere.** No {wallet}, no {transaction}, and no
+ * wallet id in a query string. Which wallets are read follows from the acting
+ * customer, so there is no wallet id on this surface to enumerate and no
+ * cross-tenant lookup to get wrong. `?currency=` selects among the caller's
+ * own wallets and can name nothing outside the account. The invoice id in the
+ * two routes below is scoped the same way: an invoice belonging to another
+ * account is not in the result set, so it answers 404.
  *
  * **No reconciliation route.** WalletLedger::reconcile() compares the cached
  * balance against the ledger and reports drift. That is an operator's alarm —

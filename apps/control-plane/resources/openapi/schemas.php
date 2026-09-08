@@ -760,6 +760,17 @@ return [
             'resolved_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'WalletCreditQuote' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'What paying one invoice from stored credit would do, before it is done. Three figures rather than one, because a client that subtracted them itself would be re-implementing the rule that a wallet cannot overpay an invoice.',
+        'properties' => [
+            'available' => ['$ref' => '#/components/schemas/Money'],
+            'applicable' => ['$ref' => '#/components/schemas/Money'],
+            'remaining' => ['$ref' => '#/components/schemas/Money'],
+            'is_payable' => ['type' => 'boolean', 'description' => 'False when applying nothing is the only possible outcome — no credit, or nothing owed.'],
+        ],
+    ],
     'TeamMember' => [
         'type' => 'object',
         'additionalProperties' => false,

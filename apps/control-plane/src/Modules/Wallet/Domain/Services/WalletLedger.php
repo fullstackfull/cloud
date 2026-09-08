@@ -310,6 +310,25 @@ final class WalletLedger
         });
     }
 
+    /**
+     * The entry a key already posted, if any.
+     *
+     * Public because a caller that writes something *else* alongside a ledger
+     * entry — a wallet-funded invoice payment writes a charge row too — has to
+     * be able to tell a first attempt from a repeat before it writes that
+     * other thing. Without it, a repeated request would find the debit already
+     * posted (correctly, once) and still leave a second charge row behind
+     * attached to nothing, which reads to the rest of billing as money that
+     * arrived and was never applied.
+     *
+     * The caller must already hold whatever lock makes the answer stable; this
+     * takes none of its own.
+     */
+    public function entryPostedUnder(Wallet $wallet, string $key): ?WalletTransaction
+    {
+        return $this->findByIdempotencyKey($wallet, $key);
+    }
+
     private function findByIdempotencyKey(Wallet $wallet, string $key): ?WalletTransaction
     {
         /** @var WalletTransaction|null $entry */

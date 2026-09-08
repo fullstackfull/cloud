@@ -340,6 +340,19 @@ export interface IpAssignment {
 }
 
 /**
+ * What paying one invoice from stored credit would do.
+ *
+ * Three figures rather than one: a client that subtracted them itself would be
+ * re-implementing the server's rule that a wallet cannot overpay an invoice.
+ */
+export interface WalletCreditQuote {
+  available: Money
+  applicable: Money
+  remaining: Money
+  is_payable: boolean
+}
+
+/**
  * A role inside one customer account. Distinct from the platform roles an
  * operator holds: this says what a person may do inside one customer.
  */
