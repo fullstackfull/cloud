@@ -54,4 +54,21 @@ return [
     ],
 
     'timeout_seconds' => (int) env('HOSTING_TIMEOUT_SECONDS', 60),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reconciliation
+    |--------------------------------------------------------------------------
+    |
+    | How many nodes one run compares with its panel. Bounded because each is
+    | a full account listing over an API with its own rate limit, and a sweep
+    | that exhausts it reconciles nothing at all.
+    |
+    | Nothing it finds is ever repaired automatically. See
+    | ReconcileHostingNodes for why that is a decision rather than an omission.
+    |
+    */
+
+    'reconcile_batch' => (int) env('HOSTING_RECONCILE_BATCH', 25),
+
 ];

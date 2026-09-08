@@ -140,8 +140,6 @@ final class NoDeadMethodsTest extends TestCase
          * pass — which does not exist: an account created outside the
          * platform, or deleted at the panel, is invisible to it.
          */
-        'CpanelHostingProvider::listAccounts' => 'there is no hosting reconciler; panel-side drift is not detected',
-        'DirectAdminHostingProvider::listAccounts' => 'there is no hosting reconciler; panel-side drift is not detected',
 
         /*
          * Asking a hypervisor how a task it accepted is getting on.

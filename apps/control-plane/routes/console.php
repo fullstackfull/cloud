@@ -151,6 +151,23 @@ Schedule::command('backups:reconcile-inventory')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * Hosting reconciliation, every four hours at :50.
+ *
+ * Less often than the VPS reconciler and more often than the backup one. Each
+ * pass is a full account listing per node over a panel API with its own rate
+ * limit — expensive — but what it looks for is a customer's website not being
+ * served under a row that says it is, and a day of that is a day of a customer
+ * ringing support about something the platform could have told them.
+ *
+ * Nothing it finds is repaired automatically. See ReconcileHostingNodes.
+ */
+Schedule::command('hosting:reconcile')
+    ->cron('50 */4 * * *')
+    ->withoutOverlapping(60)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * The end of a service's life, daily at 03:20.
  *
  * Daily rather than hourly because the unit it works in is days: a retention
