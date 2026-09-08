@@ -58,8 +58,18 @@ test.describe('in English', () => {
       .last()
       .click()
 
-    // The invoice leaves the payable state, which is the outcome the customer
-    // came for — not a toast saying the request was accepted.
+    /*
+     * The invoice reaches the paid state, which is the outcome the customer
+     * came for — not a toast saying the request was accepted.
+     *
+     * Asserted on the badge first and the control second, deliberately. A run
+     * that failed in CI on the absent button alone said only "the button is
+     * still there", which is true of a settlement that failed and of a list
+     * that had not refreshed, and those need opposite investigations. The
+     * badge distinguishes them, and it is also the thing the customer reads.
+     */
+    await expect(invoiceRow(page, fixtures.openInvoice).getByText(/^paid$/i)).toBeVisible()
+
     await expect(
       invoiceRow(page, fixtures.openInvoice).getByRole('button', {
         name: /use credit/i,

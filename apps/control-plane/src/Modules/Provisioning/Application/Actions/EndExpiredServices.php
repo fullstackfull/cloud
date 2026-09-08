@@ -90,6 +90,16 @@ final readonly class EndExpiredServices
             $ended++;
 
             /*
+             * Stamped before anything is announced, and read back by the query
+             * that finds work. Terminating is not instant — the VPS path
+             * queues a job that a worker may not reach for minutes — and
+             * without this the next daily pass would find the same service,
+             * write a second audit entry and tell the customer a second time
+             * that their data had been destroyed.
+             */
+            $service->forceFill(['termination_requested_at' => $now])->save();
+
+            /*
              * Audited as the platform acting rather than a person, and the
              * entry says which decision it was carrying out. "Who terminated
              * this service" must never answer "nobody knows".
@@ -174,6 +184,8 @@ final readonly class EndExpiredServices
             ->where('retention_ends_at', '<=', $now)
             // The whole of the automation boundary, in one clause.
             ->where('ended_reason', BeginRetentionWindow::BY_CUSTOMER)
+            // Not already on its way out. See the stamp's own comment above.
+            ->whereNull('termination_requested_at')
             ->limit(200)
             ->get()
             ->all();

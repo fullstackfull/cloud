@@ -68,6 +68,8 @@ final readonly class BeginRetentionWindow
                 'retention_ends_at' => null,
                 'retention_warned_at' => null,
                 'ended_reason' => null,
+                // A service that is coming back has not been asked to end.
+                'termination_requested_at' => null,
             ])->save();
 
             return $locked->refresh();

@@ -72,7 +72,15 @@ final readonly class EnforceBackupRetention
 
             foreach ($doomed as $backup) {
                 try {
-                    $this->request->execute($backup, RequestBackupDeletion::BY_RETENTION);
+                    /*
+                     * One clock for one pass. Marking with `now()` while
+                     * deciding what is due against `$now` — captured at the
+                     * top of this method — makes a zero-hour grace period
+                     * depend on which side of a second boundary the two calls
+                     * land, which is exactly the kind of failure that appears
+                     * on one CI runner and not the other.
+                     */
+                    $this->request->execute($backup, RequestBackupDeletion::BY_RETENTION, at: $now);
                     $marked++;
                 } catch (BackupDeletionRefusedException) {
                     // Being restored from, or held. Correct behaviour, not a

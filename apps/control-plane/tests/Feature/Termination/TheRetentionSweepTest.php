@@ -230,6 +230,41 @@ final class TheRetentionSweepTest extends TestCase
     }
 
     #[Test]
+    public function a_service_already_on_its_way_out_is_not_ended_a_second_time(): void
+    {
+        $service = $this->vps(BeginRetentionWindow::BY_CUSTOMER, CarbonImmutable::now()->subDay());
+
+        $this->assertSame(1, app(EndExpiredServices::class)->execute()['ended']);
+
+        /*
+         * Terminating is not instant: the VPS path queues a job a worker may
+         * not reach for minutes, and the service stays suspended until it
+         * does. A daily sweep that found it again would write a second audit
+         * entry and tell the customer a second time that their data had been
+         * destroyed.
+         */
+        $this->assertSame(0, app(EndExpiredServices::class)->execute()['ended']);
+
+        $this->assertNotNull($service->refresh()->termination_requested_at);
+
+        /*
+         * Scoped to this service rather than counting every termination in the
+         * database. The queue proofs run the same sweep in a separate process
+         * against committed rows, and the audit entries that leaves behind are
+         * outside any test's transaction — a global count here passes alone
+         * and fails in the full suite, which is a test about the suite rather
+         * than about the sweep.
+         */
+        $this->assertSame(
+            1,
+            AuditEntry::query()
+                ->where('action', AuditAction::ServiceTerminated->value)
+                ->where('subject_id', (string) $service->getKey())
+                ->count(),
+        );
+    }
+
+    #[Test]
     public function the_command_reports_what_it_did(): void
     {
         $this->vps(BeginRetentionWindow::BY_CUSTOMER, CarbonImmutable::now()->subDay());

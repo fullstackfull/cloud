@@ -66,6 +66,18 @@ abstract class WorkerHarness extends TestCase
     /** Where the fake hypervisor keeps its fleet for this test. */
     private string $fleetPath = '';
 
+    /**
+     * The fleet file, for a subclass that starts a process of its own.
+     *
+     * A command run without it gets a hypervisor that has never heard of the
+     * machines this test built, and every assertion after that would be about
+     * an empty fake.
+     */
+    protected function fleetPath(): string
+    {
+        return $this->fleetPath;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

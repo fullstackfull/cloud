@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Carbon\CarbonImmutable;
+use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupDeletionRefusedException;
@@ -37,16 +39,27 @@ final readonly class RequestBackupDeletion
         private ResolveBackupPolicy $policy,
     ) {}
 
-    public function execute(Backup $backup, string $reason, ?User $actor = null): Backup
+    /**
+     * @param  ?DateTimeImmutable  $at  The moment to record as the request. Passed by the
+     *                                  sweep so that one pass runs on one clock: marking
+     *                                  with `now()` while deciding what is due against a
+     *                                  timestamp captured microseconds earlier makes a
+     *                                  zero-hour grace period behave differently either
+     *                                  side of a second boundary, which is a test that
+     *                                  passes on one machine and fails on another.
+     */
+    public function execute(Backup $backup, string $reason, ?User $actor = null, ?DateTimeImmutable $at = null): Backup
     {
-        return DB::transaction(function () use ($backup, $reason, $actor): Backup {
+        $requestedAt = $at !== null ? CarbonImmutable::instance($at) : CarbonImmutable::now();
+
+        return DB::transaction(function () use ($backup, $reason, $actor, $requestedAt): Backup {
             /** @var Backup $locked */
             $locked = Backup::query()->whereKey($backup->getKey())->lockForUpdate()->firstOrFail();
 
             $this->assertDeletable($locked, $reason);
 
             $locked->transitionTo(BackupState::DeleteRequested, [
-                'deletion_requested_at' => now(),
+                'deletion_requested_at' => $requestedAt,
                 'deletion_requested_by_user_id' => $actor?->getKey(),
                 'deletion_reason' => $reason,
             ]);
