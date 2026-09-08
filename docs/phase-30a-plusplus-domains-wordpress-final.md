@@ -353,6 +353,24 @@ capability being reserved with an excuse.
 
 ---
 
+## S.1 One red gate that was not the code's
+
+CI's security job failed on `npm audit --audit-level=high`: a path-traversal
+advisory against js-yaml 4.3.1, reached through `openapi-typescript` →
+`@redocly/openapi-core`, which pins that version exactly.
+
+`openapi-typescript` was declared in `apps/web` and used by nothing. Removing
+it fixed the advisory by deleting the reason it was there. An npm override was
+tried first and does not take against an exact pin; regenerating the lockfile
+to force it dropped ninety unrelated entries, which is not a change worth
+shipping to silence an audit.
+
+Two moderate advisories remain, both against vitest, both fixable only by a
+major version bump. The gate allows moderate. They are recorded here rather
+than hidden.
+
+---
+
 ## T. What is `TESTED` and what is `RUNTIME_VERIFIED`
 
 `RUNTIME_VERIFIED` in this phase means a browser drove it against a running API
