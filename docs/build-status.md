@@ -34,17 +34,17 @@ recorded responses. None of them has spoken to the real thing.
 |---|---|---|
 | Repository, CI workflow, developer bootstrap | `RUNTIME_VERIFIED` | Clean-room clone, install and test run |
 | Control plane (Laravel 13.30, PHP 8.4) | `RUNTIME_VERIFIED` | Full suite against PostgreSQL 16 and Redis |
-| Portal SPA (React 19, Vite 8) | `RUNTIME_VERIFIED` | 42 component tests plus 35 browser specs driving the real API |
+| Portal SPA (React 19, Vite 8) | `RUNTIME_VERIFIED` | 54 component tests plus 94 browser specs driving the real API |
 | Shared kernel — money, state machines, errors | `RUNTIME_VERIFIED` | Exercised by every module's tests |
 | Identity, RBAC, two-factor, sessions, tokens | `RUNTIME_VERIFIED` | 8 roles, 51 permissions seeded and asserted |
 | Multi-tenancy (`ResolveActingCustomer`) | `RUNTIME_VERIFIED` | One enforcement point, tested from both sides |
 | Catalogue, pricing, coupons, tax | `RUNTIME_VERIFIED` | Seeded catalogue, integer minor units throughout |
 | Orders and checkout | `RUNTIME_VERIFIED` | Including idempotency by request fingerprint |
 | Billing, invoicing, subscriptions, dunning | `RUNTIME_VERIFIED` | Proration and renewal arithmetic under test |
-| Wallet and credit | `RUNTIME_VERIFIED` | |
+| Wallet and credit | `RUNTIME_VERIFIED` | Credit is received and spent; six OS processes against one balance |
 | Provisioning engine, compensation, drift | `RUNTIME_VERIFIED` | Timeouts quarantine rather than retry |
 | IPAM — pools, subnets, allocation, quarantine | `RUNTIME_VERIFIED` | `FOR UPDATE SKIP LOCKED` under concurrency tests |
-| Admin / NOC surface | `RUNTIME_VERIFIED` | 12 routes, each gated on its own permission |
+| Admin / NOC surface | `RUNTIME_VERIFIED` | 35 routes, each gated on its own permission |
 | Monitoring exposition (Prometheus text) | `RUNTIME_VERIFIED` | Parsed by the test, not eyeballed |
 | Structured logging and secret redaction | `RUNTIME_VERIFIED` | A Monolog processor, not a call-site convention |
 | Arabic / RTL, six plural forms | `TESTED` | Translation-parity and plural-form suites |
@@ -60,12 +60,19 @@ recorded responses. None of them has spoken to the real thing.
 | OpenTofu / Ansible execution | `BLOCKED_HARDWARE` | 15 roles, 11 playbooks, never run against a host |
 | PHPStan in CI | `RUNTIME_VERIFIED` | Passes in GitHub Actions; still `BLOCKED_NETWORK` for its install path *here* |
 | Scheduled work (renewals, dunning, backups) | `RUNTIME_VERIFIED` | Three sweeps, three commands, a schedule and a test that it is not empty |
-| GitHub Actions | `RUNTIME_VERIFIED` | Observed, diagnosed and fixed: six failed runs, then green (see below) |
-| DNS and reverse DNS — Cloudflare | `BLOCKED_CREDENTIALS` | Adapter, zone discovery and PTR capability detection written and tested against recorded responses |
+| GitHub Actions | `RUNTIME_VERIFIED` | Observed, diagnosed and fixed on every red run; green at `5201a86` (run 67) |
+| DNS and reverse DNS — Cloudflare | `BLOCKED_CREDENTIALS` | Adapter, zone discovery and PTR capability detection written and tested against recorded responses; forward DNS is now a customer product |
 | Backups — Proxmox Backup Server | `BLOCKED_CREDENTIALS` | Adapter, state machine, API and reconciliation written and tested; no restore has been performed |
 | OpenAPI 3.1 description | `RUNTIME_VERIFIED` | Generated from the route table, validated by redocly, three gates that fail the build on drift |
-| Browser end-to-end suite | `RUNTIME_VERIFIED` | 35 Playwright specs, real portal, real API, real PostgreSQL and Redis |
-| **Customer-facing backups screen** | `NOT_IMPLEMENTED` | The API exists and is tested; no portal screen reads it |
+| Browser end-to-end suite | `RUNTIME_VERIFIED` | 94 Playwright specs, real portal, real API, real PostgreSQL and Redis |
+| Customer-facing backups screen | `RUNTIME_VERIFIED` | Built in Phase 29; deletion and retention added in 30A+ |
+| Team membership and invitations | `RUNTIME_VERIFIED` | Phase 30A+; an account can have more than one person in it |
+| Support tickets | `RUNTIME_VERIFIED` | Phase 30A+; customer and operator halves, with internal notes |
+| Forward DNS as a product | `BLOCKED_CREDENTIALS` | Phase 30A+; zones and records, no Cloudflare token here |
+| Customer-initiated termination | `RUNTIME_VERIFIED` | Phase 30A+; retention window, then the sweep that ends it |
+| Hosting reconciliation | `BLOCKED_LICENSE` | Phase 30A+; five findings, and it repairs none of them |
+| Provider task confirmation | `RUNTIME_VERIFIED` | Phase 30A+; a succeeded job is a request accepted until the poller says otherwise |
+| Portal translation coverage | `RUNTIME_VERIFIED` | Every enum a screen renders has a string in both languages, gated by a test |
 
 ### The two gaps that were absences are now code, and one new absence
 
@@ -95,7 +102,10 @@ not to exist:
   any of it. A customer cannot see their backups. This is recorded rather than
   papered over with a spec that asserts around it.
 
-### What a browser found that 1,753 backend tests and 42 component tests did not
+### History: what a browser found that 1,753 backend tests and 42 component tests did not
+
+*Recorded when it happened, at the commit that had those counts. Kept because
+the lesson outlived the numbers.*
 
 Five defects, each customer-visible, each invisible to the suites that existed
 because those suites supply the shape they expect:
@@ -130,7 +140,7 @@ and these are its actual outputs.
 ### Backend
 
 ```text
-php artisan test                        1797 tests, 41371 assertions, 0 failures
+php artisan test                        2302 tests, 65124 assertions, 0 failures
 ./vendor/bin/pint --test                PASS
 composer validate --strict              PASS  (./composer.json is valid)
 ```
@@ -138,11 +148,11 @@ composer validate --strict              PASS  (./composer.json is valid)
 ### Migrations, from an empty database
 
 ```text
-CREATE DATABASE; php artisan migrate    22 migrations applied, 68 tables
-php artisan migrate:rollback --step=99  22 rolled back
+CREATE DATABASE; php artisan migrate    41 migrations applied
+php artisan migrate:rollback --step=99  41 rolled back
                                         left: migrations, migrations_id_seq
                                         no orphan tables, sequences or enum types
-php artisan migrate                     22 re-applied, 68 tables
+php artisan migrate                     41 re-applied
 ```
 
 The same two steps CI runs (`migrate:fresh --seed`, then rollback and migrate
@@ -170,12 +180,12 @@ first.
 ### Frontend
 
 ```text
-npm run test --workspace=apps/web -- --run   42 tests in 6 files, all passing
+npm run test --workspace=apps/web -- --run   54 tests in 9 files, all passing
 npm run typecheck                             PASS  (now including the e2e suite)
 npm run lint                                  PASS  (now including the e2e suite)
 npm run build                                 428.45 kB JS / 126.58 kB gzipped
                                               23.61 kB CSS / 5.71 kB gzipped
-npm run test:e2e --workspace=apps/web         35 specs in 5 files, all passing
+npm run test:e2e --workspace=apps/web         94 specs in 13 files, all passing
 ```
 
 ### Static analysis
@@ -263,7 +273,7 @@ composer install                      85 packages, no failures
 cp .env.testing.example .env.testing  + database credentials
 APP_ENV=testing php artisan test      1793 passed, 41363 assertions, 3m00s
 npm ci && npm run typecheck           PASS
-npm run test --workspace=apps/web     42 passed
+npm run test --workspace=apps/web     54 passed
 npm run build                         PASS
 ```
 
@@ -274,20 +284,29 @@ says so. `make test-backend` now sets it; the clean-room run is what found that.
 
 ### What has been verified in a browser
 
-A Playwright suite of **35 specs across five files**, run in real Chromium
+A Playwright suite of **94 specs across thirteen files**, run in real Chromium
 against the portal, the control plane, PostgreSQL and Redis. Nothing in it stubs
 a network call: it signs in through the form, so the CSRF cookie, the origin
 match and the session cookie are all under test, and every assertion is on a
 value a seeder wrote.
 
 ```text
-npm run test:e2e --workspace=apps/web        35 passed
-  auth.e2e.ts        10  sign-in, failure, rate limit, language and direction
-  portal.e2e.ts       9  dashboard, catalogue, product, invoices, wallet,
-                         services, VPS, power controls, not-found
-  appearance.e2e.ts   5  dark and light palettes, Arabic layout, Western numerals
-  account.e2e.ts      5  devices, sign-in history, two-factor, API token, sign-out
-  admin.e2e.ts        6  operator screens and the permission boundary
+npm run test:e2e --workspace=apps/web        94 passed
+  portal.e2e.ts        24  dashboard, catalogue, invoices, wallet, services, VPS,
+                           power, console, backups, restore, plan change
+  auth.e2e.ts          10  sign-in, failure, rate limit, language and direction
+  operations.e2e.ts    10  suspension, reactivation, rebuild refusals, the
+                           provisioning queue an operator has to work
+  team.e2e.ts           7  the list, roles, invitations, and a member who may not
+  admin.e2e.ts          6  operator screens and the permission boundary
+  appearance.e2e.ts     6  dark and light palettes, Arabic layout, Western numerals
+  support.e2e.ts        6  a ticket from both sides, and the note one side never sees
+  account.e2e.ts        5  devices, sign-in history, two-factor, API token, sign-out
+  dns.e2e.ts            5  claiming a domain, publishing records, giving it up
+  leaving.e2e.ts        5  cancelling, ending today, and the date the data goes
+  backup-deletion.e2e.ts 4  the typed reference, and changing your mind
+  reconciliation.e2e.ts  4  what the sweeps found, on the screen that shows it
+  wallet-credit.e2e.ts   2  spending credit, in both languages
 ```
 
 The suite starts both servers itself, refuses any database whose name does not
@@ -296,9 +315,10 @@ browser test that passes on the second attempt has said nothing.
 
 It runs in CI as its own job, with the report uploaded when it fails.
 
-What it does **not** yet cover: ordering and paying (no payment provider
+What it does **not** yet cover: ordering and paying by card (no payment provider
 credentials, and a fake capture in a browser would prove nothing about the real
-one), provisioning a machine, and the backups screen, which does not exist.
+one), and provisioning a machine end to end, which is proven instead by a real
+worker in `tests/Feature/Queue`.
 
 ## This environment
 
