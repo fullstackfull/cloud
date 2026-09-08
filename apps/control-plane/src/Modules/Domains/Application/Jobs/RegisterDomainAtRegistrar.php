@@ -19,6 +19,8 @@ use Lynomia\Modules\Domains\Infrastructure\DomainRegistrarFactory;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainContact;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -62,8 +64,11 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
         private readonly string $operationId,
     ) {}
 
-    public function handle(DomainRegistrarFactory $registrars, SecretRedactor $redactor): void
-    {
+    public function handle(
+        DomainRegistrarFactory $registrars,
+        SecretRedactor $redactor,
+        NotifyCustomer $notify,
+    ): void {
         $operation = DomainOperation::query()->find($this->operationId);
 
         if ($operation === null || ! $operation->state->mayBeStarted()) {
@@ -95,7 +100,7 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
              * indeterminate one — but the customer has paid, and the refund is
              * owed.
              */
-            $this->fail($operation, $domain, 'domain.registrar_not_available', $redactor->redactString($e->getMessage()));
+            $this->fail($notify, $operation, $domain, 'domain.registrar_not_available', $redactor->redactString($e->getMessage()));
 
             return;
         }
@@ -123,7 +128,7 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
              * here would leave the operation in `running` for ever, which is
              * the one outcome worse than a refund.
              */
-            $this->fail($operation, $domain, 'domain.registrar_not_available', $redactor->redactString($e->getMessage()));
+            $this->fail($notify, $operation, $domain, 'domain.registrar_not_available', $redactor->redactString($e->getMessage()));
 
             return;
         } catch (DomainRegistrarException $e) {
@@ -148,10 +153,25 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
                         .'The name may or may not be held; check the registry before acting.',
                 ])->save();
 
+                /*
+                 * Told, and told plainly not to try again. A customer who sees
+                 * a failed-looking screen and no message will order the name a
+                 * second time, which is the one thing that turns an
+                 * uncertainty into a double charge.
+                 */
+                $notify->execute(
+                    customerId: (string) $operation->customer_id,
+                    type: NotificationType::DomainNeedsReview,
+                    idempotencyKey: 'domain-needs-review:'.$operation->getKey(),
+                    subject: $domain,
+                    data: ['domain' => $domain->name],
+                    link: '/domains',
+                );
+
                 return;
             }
 
-            $this->fail($operation, $domain, $e->errorCode(), $message);
+            $this->fail($notify, $operation, $domain, $e->errorCode(), $message);
 
             return;
         }
@@ -173,6 +193,18 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
             'transfer_locked' => $registered->transferLocked,
             'review_reason' => null,
         ])->save();
+
+        $notify->execute(
+            customerId: (string) $operation->customer_id,
+            type: NotificationType::DomainRegistered,
+            idempotencyKey: 'domain-registered:'.$operation->getKey(),
+            subject: $domain,
+            data: [
+                'domain' => $domain->name,
+                'date' => $registered->expiresAt->toDateString(),
+            ],
+            link: '/domains',
+        );
     }
 
     /**
@@ -183,8 +215,13 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
      * explanation with it. What it must not do is stay in a state that holds
      * the name — somebody else may want it.
      */
-    private function fail(DomainOperation $operation, Domain $domain, string $code, string $message): void
-    {
+    private function fail(
+        NotifyCustomer $notify,
+        DomainOperation $operation,
+        Domain $domain,
+        string $code,
+        string $message,
+    ): void {
         $operation->forceFill([
             'state' => DomainOperationState::Failed,
             'failure_code' => $code,
@@ -195,6 +232,17 @@ final class RegisterDomainAtRegistrar implements ShouldQueue
             'state' => DomainState::Failed,
             'review_reason' => 'The registrar refused this registration. The customer has paid and is owed a refund.',
         ])->save();
+
+        // The customer paid for something they did not get. They hear it from
+        // the platform, not from noticing the name is still for sale.
+        $notify->execute(
+            customerId: (string) $operation->customer_id,
+            type: NotificationType::DomainRegistrationFailed,
+            idempotencyKey: 'domain-registration-failed:'.$operation->getKey(),
+            subject: $domain,
+            data: ['domain' => $domain->name],
+            link: '/domains',
+        );
     }
 
     /**

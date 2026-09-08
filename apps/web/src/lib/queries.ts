@@ -8,6 +8,10 @@ import type {
   DedicatedServer,
   DnsRecord as DnsRecordRow,
   DnsZone,
+  Domain,
+  DomainOperation,
+  DomainQuote,
+  DomainSearchResult,
   Envelope,
   HostingAccount,
   InvitationOffer,
@@ -943,6 +947,117 @@ export function useRevokeApiToken() {
  | records under another's name while the new ones load — the same reason the
  | backups key carries the machine.
  */
+
+export function useDomains() {
+  return useQuery({
+    queryKey: ['domains'],
+    queryFn: () => api.get<{ data: Domain[]; meta: { total: number } }>('/domains'),
+  })
+}
+
+/**
+ * A search, run only when there is something to search for.
+ *
+ * Not debounced here and not fired per keystroke: the caller submits. Every
+ * uncached name is a call against a registrar allowance the whole platform
+ * shares, and a search-as-you-type box would spend it on prefixes nobody
+ * meant to look up.
+ */
+export function useDomainSearch(name: string) {
+  return useQuery({
+    queryKey: ['domains', 'search', name],
+    enabled: name.trim() !== '',
+    queryFn: () =>
+      api.get<{ data: DomainSearchResult[]; meta: { total: number } }>(
+        `/domains/search?name=${encodeURIComponent(name.trim())}`,
+      ),
+  })
+}
+
+export function useQuoteDomain() {
+  return useMutation({
+    mutationFn: (payload: { name: string; operation: string; term_years?: number }) =>
+      api.post<Envelope<DomainQuote>>('/domains/quotes', payload),
+  })
+}
+
+export function useOrderDomain() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { quote_id: string; registrant: Record<string, string> }) =>
+      api.post<Envelope<DomainOperation>>('/domains', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+      // The order issues an invoice, and the customer is about to be asked to
+      // pay it. A stale billing list here is a customer who cannot find it.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
+
+export function useRenewDomain(domainId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { quote_id: string }) =>
+      api.post<Envelope<DomainOperation>>(
+        `/domains/${encodeURIComponent(domainId)}/renewals`,
+        payload,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
+
+export function useSetDomainNameservers(domainId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { nameservers: string[] }) =>
+      api.put<Envelope<Domain>>(
+        `/domains/${encodeURIComponent(domainId)}/nameservers`,
+        payload,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+  })
+}
+
+export function useSetDomainTransferLock(domainId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { locked: boolean }) =>
+      api.put<Envelope<Domain>>(
+        `/domains/${encodeURIComponent(domainId)}/transfer-lock`,
+        payload,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+  })
+}
+
+/**
+ * The code that lets the customer take the name elsewhere.
+ *
+ * A mutation rather than a query, and deliberately not cached: it is a bearer
+ * credential for the whole domain, and a cached copy would sit in the client's
+ * memory long after the tab that asked for it moved on.
+ */
+export function useDomainAuthorisationCode(domainId: string) {
+  return useMutation({
+    mutationFn: () =>
+      api.post<Envelope<{ authorisation_code: string }>>(
+        `/domains/${encodeURIComponent(domainId)}/authorisation-code`,
+        {},
+      ),
+  })
+}
 
 export function useDnsZones() {
   return useQuery({

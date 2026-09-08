@@ -77,6 +77,20 @@ enum NotificationType: string
     case RestoreFailed = 'service.restore_failed';
 
     // ------------------------------------------------------------- operational
+    /*
+     * Domains.
+     *
+     * Four moments, and the last two are the ones that matter most. A domain
+     * cannot be repossessed and cannot be un-lost: a customer who is not told
+     * their name is about to lapse loses it, and a customer whose registration
+     * the platform could not confirm needs to hear that from the platform
+     * rather than from a WHOIS lookup.
+     */
+    case DomainRegistered = 'service.domain_registered';
+    case DomainRegistrationFailed = 'service.domain_registration_failed';
+    case DomainExpiring = 'service.domain_expiring';
+    case DomainNeedsReview = 'service.domain_needs_review';
+
     case TicketOpened = 'service.ticket_opened';
     case TicketReplied = 'service.ticket_replied';
     case TicketResolved = 'service.ticket_resolved';

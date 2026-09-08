@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
+use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Monitoring\Domain\Contracts\MetricsCollector;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\Metric;
@@ -62,6 +63,8 @@ final readonly class ProductCollector implements MetricsCollector
             $this->ticketAge(),
             $this->backupDeletion(),
             $this->backupRetention(),
+            $this->domains(),
+            $this->domainOperations(),
             $this->termination(),
             $this->drift(),
             $this->providerTasks(),
@@ -283,6 +286,82 @@ final readonly class ProductCollector implements MetricsCollector
                 MetricSample::of(['disposition' => 'due'], (float) $row->due),
                 MetricSample::of(['disposition' => 'held'], (float) $row->held),
                 MetricSample::of(['disposition' => 'within_policy'], (float) $row->within),
+            ],
+        );
+    }
+
+    /**
+     * Names held, and the two numbers that decide whether somebody has to act.
+     *
+     * `expiring` is a countdown, not a queue depth: a domain that lapses is
+     * gone, so this is one of the few gauges on the platform where the right
+     * response to a rising number is to look at it today rather than at the
+     * end of the week.
+     *
+     * `unsure` counts the names the Timeout Rule left behind that
+     * reconciliation could not settle. It should sit at zero. A number that
+     * stays above zero across several sweeps means the reconciler is asking a
+     * registrar that cannot answer, and a customer is waiting.
+     */
+    private function domains(): Metric
+    {
+        $unsure = [
+            DomainState::Indeterminate->value,
+            DomainState::NeedsReview->value,
+        ];
+
+        /** @var object{held: int|string, expiring: int|string, unsure: int|string, lapsing: int|string} $row */
+        $row = DB::table('domains')
+            ->selectRaw(<<<'SQL'
+                count(*) filter (where state = 'active') as held,
+                count(*) filter (
+                    where state = 'active' and expires_at is not null
+                      and expires_at <= now() + interval '45 days'
+                ) as expiring,
+                count(*) filter (where state in (?, ?)) as unsure,
+                count(*) filter (where state in ('expired', 'grace', 'redemption')) as lapsing
+            SQL, $unsure)
+            ->first();
+
+        return Metric::gauge(
+            'lynomia_domains_total',
+            'Names this platform holds. `expiring` is inside the warning window; `unsure` is what the Timeout Rule left and reconciliation could not settle, and should sit at zero.',
+            [
+                MetricSample::of(['disposition' => 'held'], (float) $row->held),
+                MetricSample::of(['disposition' => 'expiring'], (float) $row->expiring),
+                MetricSample::of(['disposition' => 'unsure'], (float) $row->unsure),
+                MetricSample::of(['disposition' => 'lapsing'], (float) $row->lapsing),
+            ],
+        );
+    }
+
+    /**
+     * Attempts that spend money, by whether they finished.
+     *
+     * `in_flight` includes a transfer waiting on a losing registrar, which can
+     * sit for five days quite legitimately — so this gauge is read beside the
+     * domain one rather than alerted on by itself.
+     */
+    private function domainOperations(): Metric
+    {
+        /** @var object{in_flight: int|string, needs_attention: int|string, failed: int|string} $row */
+        $row = DB::table('domain_operations')
+            ->selectRaw(<<<'SQL'
+                count(*) filter (
+                    where state in ('requested', 'queued', 'running', 'awaiting_registry')
+                ) as in_flight,
+                count(*) filter (where state in ('indeterminate', 'needs_review')) as needs_attention,
+                count(*) filter (where state = 'failed') as failed
+            SQL)
+            ->first();
+
+        return Metric::gauge(
+            'lynomia_domain_operations_total',
+            'Registrations, renewals and transfers by disposition. `needs_attention` is money spent on an outcome nobody has established.',
+            [
+                MetricSample::of(['disposition' => 'in_flight'], (float) $row->in_flight),
+                MetricSample::of(['disposition' => 'needs_attention'], (float) $row->needs_attention),
+                MetricSample::of(['disposition' => 'failed'], (float) $row->failed),
             ],
         );
     }

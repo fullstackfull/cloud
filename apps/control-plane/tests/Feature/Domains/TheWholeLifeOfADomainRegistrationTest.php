@@ -18,7 +18,6 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Domains\Application\Jobs\RegisterDomainAtRegistrar;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
-use Lynomia\Modules\Domains\Infrastructure\DomainRegistrarFactory;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainContact;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
@@ -26,11 +25,12 @@ use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Notifications\Infrastructure\Models\Notification as AppNotification;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
-use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -181,6 +181,10 @@ final class TheWholeLifeOfADomainRegistrationTest extends TestCase
         // Auto-renew on, because a lapsed domain is not recoverable at the
         // ordinary price and takes the customer's mail with it.
         $this->assertTrue($held->auto_renew);
+
+        $this->assertSame(1, AppNotification::query()
+            ->where('type', NotificationType::DomainRegistered->value)
+            ->count());
     }
 
     #[Test]
@@ -265,6 +269,15 @@ final class TheWholeLifeOfADomainRegistrationTest extends TestCase
         $this->assertSame(DomainState::Indeterminate, $domain->state);
         $this->assertNotNull($domain->review_reason);
 
+        /*
+         * And the customer is told, in words that say not to try again. A
+         * screen that merely looks failed invites a second order, which is the
+         * one action that turns an uncertainty into a double charge.
+         */
+        $this->assertSame(1, AppNotification::query()
+            ->where('type', NotificationType::DomainNeedsReview->value)
+            ->count());
+
         // And the platform will not spend again on its own.
         $this->assertFalse($operation->state->permitsAnotherAttempt());
         $this->assertFalse($operation->state->mayBeStarted());
@@ -292,6 +305,12 @@ final class TheWholeLifeOfADomainRegistrationTest extends TestCase
         // on holding the name.
         $this->assertFalse($domain->state->holdsTheName());
         $this->assertStringContainsString('refund', (string) $domain->review_reason);
+
+        // Paid for something they did not get, and told so by the platform
+        // rather than by noticing the name is still for sale.
+        $this->assertSame(1, AppNotification::query()
+            ->where('type', NotificationType::DomainRegistrationFailed->value)
+            ->count());
     }
 
     #[Test]
@@ -342,11 +361,16 @@ final class TheWholeLifeOfADomainRegistrationTest extends TestCase
         $this->assertSame(0, Domain::query()->where('name', 'nocontact.test')->count());
     }
 
+    /**
+     * Run the job the way the queue would.
+     *
+     * Through the container rather than by handing `handle()` its arguments,
+     * so that a dependency added to the job tomorrow does not break every test
+     * that runs it — and so the test exercises the same resolution the worker
+     * does.
+     */
     private function runTheWorker(DomainOperation $operation): void
     {
-        (new RegisterDomainAtRegistrar((string) $operation->getKey()))->handle(
-            app(DomainRegistrarFactory::class),
-            app(SecretRedactor::class),
-        );
+        app()->call([new RegisterDomainAtRegistrar((string) $operation->getKey()), 'handle']);
     }
 }

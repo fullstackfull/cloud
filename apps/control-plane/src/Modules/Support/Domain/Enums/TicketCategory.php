@@ -17,6 +17,18 @@ enum TicketCategory: string
     case Technical = 'technical';
     case Billing = 'billing';
     case Provisioning = 'provisioning';
+
+    /**
+     * A name, rather than a machine.
+     *
+     * Its own category because domain problems are answered by different
+     * people with different tools — a stuck transfer is a conversation with a
+     * losing registrar, not a look at a server — and because the deadlines are
+     * real: a ticket about a name in its redemption window has days, and one
+     * about a slow VPS does not.
+     */
+    case Domains = 'domains';
+
     case Abuse = 'abuse';
     case Other = 'other';
 

@@ -52,10 +52,12 @@ final class MetricsQueryBudgetTest extends TestCase
      * Raised from 26 when the DNS and product collectors were added — nine
      * more GROUP BYs, each of them one query whatever the fleet does — and to
      * 33 for the backup retention gauge, whose three dispositions come back
-     * from one query with three FILTERs rather than three queries. The number
-     * moves when collectors are added and must not move when data is.
+     * from one query with three FILTERs rather than three queries, and to 35
+     * for the two domain gauges, which follow the same shape: one query each,
+     * four and three dispositions. The number moves when collectors are added
+     * and must not move when data is.
      */
-    private const int BUDGET = 33;
+    private const int BUDGET = 35;
 
     private MetricsRegistry $registry;
 

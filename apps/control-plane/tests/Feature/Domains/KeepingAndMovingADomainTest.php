@@ -21,6 +21,8 @@ use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Notifications\Infrastructure\Models\Notification as AppNotification;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
@@ -219,6 +221,40 @@ final class KeepingAndMovingADomainTest extends TestCase
         // A sweep that ordered again every night would invoice a customer once
         // a day for thirty days.
         $this->assertSame(0, app(SweepDomainLifecycle::class)->execute()['renewals_ordered']);
+    }
+
+    #[Test]
+    public function a_customer_is_warned_before_a_name_lapses_whether_or_not_it_auto_renews(): void
+    {
+        $manual = $this->heldName('warnme.test', now()->addDays(20)->toIso8601String());
+        $manual->forceFill(['auto_renew' => false])->save();
+
+        app(SweepDomainLifecycle::class)->execute();
+
+        /*
+         * The warning goes out for names with auto-renew off as well as on. A
+         * customer who turned it off asked to decide for themselves, not to
+         * lose the domain in silence.
+         */
+        $this->assertSame(1, AppNotification::query()
+            ->where('type', NotificationType::DomainExpiring->value)
+            ->count());
+    }
+
+    #[Test]
+    public function the_expiry_warning_goes_out_once_per_term_and_not_once_a_night(): void
+    {
+        $this->heldName('nagme.test', now()->addDays(20)->toIso8601String());
+
+        app(SweepDomainLifecycle::class)->execute();
+        app(SweepDomainLifecycle::class)->execute();
+        app(SweepDomainLifecycle::class)->execute();
+
+        // Keyed on the expiry date, so a renewal that moves the date earns the
+        // next term its own warning and nothing else does.
+        $this->assertSame(1, AppNotification::query()
+            ->where('type', NotificationType::DomainExpiring->value)
+            ->count());
     }
 
     #[Test]

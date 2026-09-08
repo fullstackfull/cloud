@@ -19,6 +19,10 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState as ChassisPowerState;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Domains\Domain\Enums\DomainAvailability;
+use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
+use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
+use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
@@ -97,7 +101,27 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             TransactionStatus::class,
             ReinstallState::class,
             DedicatedReinstallState::class,
+
+            /*
+             * Domains render three enums through the same badge: what the
+             * platform holds, what a registrar answered about a name, and what
+             * an attempt to buy one is doing. All three reach a customer, and
+             * two of them carry the states that must not be mistaken for
+             * anything else — `unknown` on a search and `indeterminate` on a
+             * name.
+             */
+            DomainState::class,
+            DomainOperationState::class,
+            DomainOperationKind::class,
         ],
+
+        /*
+         * Availability has its own vocabulary rather than sharing the status
+         * one. "Unknown" is accurate and useless on a search result: what the
+         * customer needs to read is that the registry did not answer and that
+         * trying again may work.
+         */
+        'domains.availabilityStates' => [DomainAvailability::class],
         'billingPeriod' => [BillingPeriod::class],
         'support.statuses' => [TicketStatus::class],
         'notifications.category' => [NotificationCategory::class],

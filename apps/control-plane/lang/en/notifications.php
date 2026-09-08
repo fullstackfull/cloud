@@ -161,6 +161,22 @@ return [
             'title' => 'Restore of :service did not complete',
             'body' => 'The restore of :service did not finish. Our team has been alerted.',
         ],
+        'domain_registered' => [
+            'title' => ':domain is yours',
+            'body' => ':domain is registered until :date. It will renew automatically unless you turn that off.',
+        ],
+        'domain_registration_failed' => [
+            'title' => 'We could not register :domain',
+            'body' => 'The registry refused the registration of :domain. You have been charged for it and are owed a refund; our team is arranging it.',
+        ],
+        'domain_expiring' => [
+            'title' => ':domain expires on :date',
+            'body' => ':domain expires on :date. A domain that lapses is not recoverable at the ordinary price, and any email addresses on it stop working.',
+        ],
+        'domain_needs_review' => [
+            'title' => 'We are checking on :domain',
+            'body' => 'The registry did not confirm the last action on :domain, so we are checking what actually happened. Please do not try again — we will tell you where it stands.',
+        ],
         'ticket_opened' => [
             'title' => 'We have your request :reference',
             'body' => 'Your support request ":subject" has reached us. Somebody will reply on the ticket; you do not need to send it again.',

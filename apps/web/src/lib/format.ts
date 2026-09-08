@@ -28,6 +28,35 @@ export function formatMoney(money: Money, locale: Locale): string {
   }).format(Number(money.amount))
 }
 
+/**
+ * Formats an amount the API sent as bare minor units.
+ *
+ * Some payloads carry a Money object and some carry `price_minor` beside a
+ * currency code — a domain quote is one of the latter, because the price is a
+ * column rather than a computed total. The conversion to a decimal happens
+ * here and nowhere else, and the divisor comes from the currency itself rather
+ * than a constant: KWD has three decimal places, USD has two, and JPY has
+ * none. A hardcoded 100 would show a Kuwaiti customer ten times the price.
+ */
+export function formatMinorUnits(minorUnits: number, currency: string, locale: Locale): string {
+  const format = new Intl.NumberFormat(`${locale}-u-nu-latn`, {
+    style: 'currency',
+    currency,
+    currencyDisplay: 'code',
+  })
+
+  /*
+     * Every currency Intl knows reports this, but the type says it may be
+     * absent. Two is the right fallback for the overwhelming majority of
+     * currencies and is only ever reached for one Intl cannot resolve — at
+     * which point the amount is approximate rather than absent, which is the
+     * better of the two failures on a price beside a buy button.
+     */
+  const digits = format.resolvedOptions().maximumFractionDigits ?? 2
+
+  return format.format(minorUnits / 10 ** digits)
+}
+
 export function formatDateTime(iso: string, locale: Locale): string {
   return new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {
     dateStyle: 'medium',

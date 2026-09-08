@@ -990,6 +990,29 @@ return [
         'body' => ['evidence'],
         'response' => $one('AdminReturnedServer'),
     ],
+    /*
+     * The domain queues, from the operator's side. Read-only: an operator who
+     * needs to renew or re-point a customer's name does it through the
+     * customer paths, so one set of rules about money and the Timeout Rule
+     * applies to everybody.
+     */
+    'api.admin.domains.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Names the platform holds',
+        'description' => 'Soonest expiry first. `needs_attention` narrows it to the names the Timeout Rule left behind that reconciliation could not settle — the queue a person has to work, because nothing else will clear it. Unlike the customer surface, this publishes which registrar holds the name and its reference there.',
+        'permission' => 'service.view_any',
+        'query' => ['state', 'customer_id', 'needs_attention', 'expiring_within_days'],
+        'response' => $many('AdminDomain'),
+    ],
+    'api.admin.domains.operations' => [
+        'tag' => 'Operator',
+        'summary' => 'Registrations, renewals and transfers',
+        'description' => 'Newest first. `needs_attention` narrows it to money spent on an outcome nobody has established, plus transfers still sitting with a losing registrar. Both the price and the cost are published here, because the question being answered is usually what a name cost the platform against what it charged.',
+        'permission' => 'service.view_any',
+        'query' => ['state', 'kind', 'needs_attention'],
+        'response' => $many('AdminDomainOperation'),
+    ],
+
     'api.admin.drift.index' => [
         'tag' => 'Operator',
         'summary' => 'Disagreements with the providers',

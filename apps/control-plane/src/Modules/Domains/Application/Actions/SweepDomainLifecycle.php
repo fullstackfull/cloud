@@ -12,6 +12,8 @@ use Lynomia\Modules\Domains\Domain\ValueObjects\RegistrableDomain;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 
 /**
  * The clock a domain lives by.
@@ -58,10 +60,11 @@ final readonly class SweepDomainLifecycle
     public function __construct(
         private QuoteDomain $quotes,
         private OrderDomainRenewal $renewals,
+        private NotifyCustomer $notify,
     ) {}
 
     /**
-     * @return array{renewals_ordered: int, expired: int, redemption: int, deleted: int, skipped: int}
+     * @return array{renewals_ordered: int, warned: int, expired: int, redemption: int, deleted: int, skipped: int}
      */
     public function execute(?CarbonImmutable $now = null): array
     {
@@ -69,8 +72,59 @@ final readonly class SweepDomainLifecycle
 
         return [
             'renewals_ordered' => $this->orderAutomaticRenewals($now),
+            'warned' => $this->warnAboutExpiry($now),
             ...$this->advanceStates($now),
         ];
+    }
+
+    /**
+     * Tell people their name is about to lapse.
+     *
+     * Separate from the renewal ordering, and it runs for names with
+     * auto-renew **off** as well as on. A customer who turned it off did not
+     * ask to lose the domain silently — they asked to decide for themselves,
+     * and deciding needs knowing.
+     *
+     * The idempotency key carries the expiry date, so one warning goes out per
+     * term rather than one a night for a month. A renewal moves the date and
+     * the next term earns its own warning.
+     */
+    private function warnAboutExpiry(CarbonImmutable $now): int
+    {
+        $warn = max(1, (int) config('domains.renewal.warn_days', 45));
+
+        $approaching = Domain::query()
+            ->whereIn('state', [DomainState::Active->value, DomainState::Expired->value, DomainState::Grace->value])
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<=', $now->addDays($warn))
+            ->orderBy('expires_at')
+            ->limit(500)
+            ->get();
+
+        $warned = 0;
+
+        foreach ($approaching as $domain) {
+            $expiry = $domain->expires_at;
+
+            if ($expiry === null) {
+                continue;
+            }
+
+            $sent = $this->notify->execute(
+                customerId: (string) $domain->customer_id,
+                type: NotificationType::DomainExpiring,
+                idempotencyKey: 'domain-expiring:'.$domain->getKey().':'.CarbonImmutable::instance($expiry)->toDateString(),
+                subject: $domain,
+                data: ['domain' => $domain->name, 'date' => CarbonImmutable::instance($expiry)->toDateString()],
+                link: '/domains',
+            );
+
+            if ($sent !== null) {
+                $warned++;
+            }
+        }
+
+        return $warned;
     }
 
     /**

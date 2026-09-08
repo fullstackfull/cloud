@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Admin\Http\Controllers\AuditController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
+use Lynomia\Modules\Admin\Http\Controllers\DomainsController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
 use Lynomia\Modules\Admin\Http\Controllers\HostingController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
@@ -106,6 +107,24 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('operations/reinstalls/{type}/{operation}/resolve', [OperationsController::class, 'resolveReinstall'])
         ->middleware('permission:'.Permission::ProvisioningRetry->value)
         ->name('operations.reinstall_resolve');
+
+    /*
+     * The domain queues. Read-only, and under `service.view_any` because a
+     * name is a service somebody bought: an operator who may list a customer's
+     * machines may list their domains.
+     *
+     * There is no write here on purpose. An operator who needs to renew or
+     * re-point a customer's name does it through the customer paths, so that
+     * one set of rules about money, idempotency and the Timeout Rule applies
+     * to everybody rather than two.
+     */
+    Route::get('domains', [DomainsController::class, 'index'])
+        ->middleware('permission:'.Permission::ServiceViewAny->value)
+        ->name('domains.index');
+
+    Route::get('domains/operations', [DomainsController::class, 'operations'])
+        ->middleware('permission:'.Permission::ServiceViewAny->value)
+        ->name('domains.operations');
 
     Route::get('infrastructure/nodes', [InfrastructureController::class, 'nodes'])
         ->middleware('permission:'.Permission::InfrastructureView->value)

@@ -481,6 +481,75 @@ export interface ApiToken {
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'CAA'
 
+/**
+ * One namespace's answer for one name.
+ *
+ * `availability` has five values and the screen must render all five. Folding
+ * `unknown` into available sells a name that is taken; folding it into
+ * unavailable turns away a customer who could have had it.
+ */
+export interface DomainSearchResult {
+  name: string
+  tld: string
+  availability: 'available' | 'unavailable' | 'premium' | 'unknown' | 'unsupported'
+  is_orderable: boolean
+  premium: boolean
+  currency: string | null
+  /** Null whenever the platform will not commit to a number. A zero would read as free. */
+  price_minor: number | null
+  term_years: number
+}
+
+/** A price the platform will honour, referred to afterwards by id alone. */
+export interface DomainQuote {
+  id: string
+  name: string
+  tld: string
+  operation: string
+  term_years: number
+  premium: boolean
+  currency: string
+  price_minor: number
+  expires_at: string
+}
+
+export interface Domain {
+  id: string
+  name: string
+  tld: string
+  state: string
+  is_held: boolean
+  is_manageable: boolean
+  is_renewable: boolean
+  needs_attention: boolean
+  term_years: number
+  auto_renew: boolean
+  transfer_locked: boolean | null
+  nameservers: string[]
+  dns_zone_id: string | null
+  registered_at: string | null
+  expires_at: string | null
+  is_expiring: boolean
+  created_at: string
+}
+
+export interface DomainOperation {
+  id: string
+  domain_id: string | null
+  name: string
+  kind: string
+  state: string
+  term_years: number
+  currency: string
+  price_minor: number
+  invoice_id: string | null
+  is_in_flight: boolean
+  needs_attention: boolean
+  failure_message: string | null
+  completed_at: string | null
+  created_at: string
+}
+
 export interface DnsZone {
   id: string
   name: string

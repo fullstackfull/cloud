@@ -22,6 +22,9 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Domains\Domain\Enums\DomainState;
+use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
@@ -147,6 +150,11 @@ class E2ESeeder extends Seeder
     /** 9.000 KWD — three minor digits, as the currency requires. */
     public const int SUBSCRIPTION_AMOUNT_MINOR = 9_000;
 
+    /** A name that works, and one the platform cannot vouch for. */
+    private const string HELD_DOMAIN = 'e2e-held.test';
+
+    private const string UNSURE_DOMAIN = 'e2e-unsure.test';
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -169,6 +177,7 @@ class E2ESeeder extends Seeder
         $this->servicesInTrouble($customer);
         $this->workNobodyCanSettle($customer);
         $this->whatReconciliationFound($customer);
+        $this->domains($customer);
         $this->team($customer);
         $this->ticket($customer);
 
@@ -571,6 +580,74 @@ class E2ESeeder extends Seeder
      * The job is in review and *not* retried — the machine may exist, may be
      * half-built, or may not exist at all, and the platform will not guess.
      */
+    /**
+     * Two names: one working, one the platform cannot vouch for.
+     *
+     * The second is the point. A registration that timed out leaves a row
+     * nobody can act on, and the screen has to say so in words that stop the
+     * customer ordering it again — which is the one action that turns an
+     * uncertainty into a double charge. A fixture for it means the browser
+     * suite can check those words are actually on the page, in both languages.
+     */
+    private function domains(Customer $customer): void
+    {
+        DomainTld::query()->updateOrCreate(
+            ['tld' => 'test'],
+            [
+                'enabled' => true,
+                'provider' => 'fake',
+                'allows_registration' => true,
+                'allows_transfer' => true,
+                'allows_renewal' => true,
+                'supports_premium' => true,
+                'minimum_term_years' => 1,
+                'maximum_term_years' => 10,
+                'currency' => 'KWD',
+                'registration_price_minor' => 3_500,
+                'renewal_price_minor' => 4_000,
+                'transfer_price_minor' => 3_500,
+                'redemption_price_minor' => 25_000,
+                'registration_cost_minor' => 2_800,
+                'renewal_cost_minor' => 3_200,
+                'transfer_cost_minor' => 2_800,
+                'redemption_cost_minor' => 20_000,
+                'grace_days' => 30,
+                'redemption_days' => 30,
+            ],
+        );
+
+        Domain::query()->updateOrCreate(
+            ['name' => self::HELD_DOMAIN],
+            [
+                'customer_id' => $customer->getKey(),
+                'tld' => 'test',
+                'state' => DomainState::Active,
+                'provider' => 'fake',
+                'provider_reference' => 'fake-e2e-held',
+                'term_years' => 1,
+                'auto_renew' => true,
+                'transfer_locked' => true,
+                'nameservers' => ['ns1.lynomia.test', 'ns2.lynomia.test'],
+                'registered_at' => now()->subMonths(6),
+                'expires_at' => now()->addMonths(6),
+            ],
+        );
+
+        Domain::query()->updateOrCreate(
+            ['name' => self::UNSURE_DOMAIN],
+            [
+                'customer_id' => $customer->getKey(),
+                'tld' => 'test',
+                'state' => DomainState::Indeterminate,
+                'provider' => 'fake',
+                'term_years' => 1,
+                'auto_renew' => true,
+                'review_reason' => 'The registrar did not answer the registration. '
+                    .'The name may or may not be held; check the registry before acting.',
+            ],
+        );
+    }
+
     private function whatReconciliationFound(Customer $customer): void
     {
         $account = HostingAccount::query()->where('username', self::HOSTING_USERNAME)->firstOrFail();
