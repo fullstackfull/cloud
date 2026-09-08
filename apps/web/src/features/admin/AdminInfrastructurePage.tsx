@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/Badge'
+import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
@@ -11,6 +12,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import {
   useAdminHostingNodes,
   useAdminNodes,
+  useReconcileCluster,
   type AdminHostingNode,
   type AdminNode,
 } from '@/lib/adminQueries'
@@ -30,6 +32,8 @@ export function AdminInfrastructurePage() {
 
   const { data: nodes, isPending, error: nodesError } = useAdminNodes(page)
   const { data: hosting, error: hostingError } = useAdminHostingNodes(1)
+  const reconcile = useReconcileCluster()
+  const [reconciled, setReconciled] = useState<string | null>(null)
 
   const nodeColumns: Array<Column<AdminNode>> = [
     {
@@ -54,6 +58,40 @@ export function AdminInfrastructurePage() {
           {node.is_healthy ? null : <Badge tone="danger">{t('admin.infrastructure.unhealthy')}</Badge>}
         </span>
       ),
+    },
+    {
+      key: 'recheck',
+      /*
+       * The reconciler runs every half hour, which is the wrong cadence for
+       * somebody on a call with a customer. This queues the same job the
+       * scheduler queues — not a faster, less careful path — so what an
+       * operator triggers is exactly what runs unattended.
+       */
+      header: t('admin.infrastructure.recheck'),
+      cell: (node) =>
+        node.cluster_id === null ? (
+          '—'
+        ) : (
+          <Button
+            size="sm"
+            variant="ghost"
+            loading={reconcile.isPending}
+            onClick={() => {
+              const clusterId = node.cluster_id
+
+              if (clusterId === null) return
+
+              reconcile.mutate(
+                { clusterId },
+                { onSuccess: () => { setReconciled(node.cluster ?? clusterId); } },
+              )
+            }}
+          >
+            {reconciled === (node.cluster ?? node.cluster_id)
+              ? t('admin.infrastructure.recheckQueued')
+              : t('admin.infrastructure.recheck')}
+          </Button>
+        ),
     },
     {
       key: 'cpu',

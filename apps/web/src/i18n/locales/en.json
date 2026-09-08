@@ -404,7 +404,8 @@
       "provisioning": "Provisioning",
       "infrastructure": "Infrastructure",
       "payments": "Payments",
-      "operations": "Rebuilds"
+      "operations": "Rebuilds",
+      "drift": "Drift"
     },
     "customers": {
       "title": "Customers",
@@ -467,7 +468,9 @@
       "computeNodes": "Compute nodes",
       "hostingNodes": "Hosting nodes",
       "noNodes": "No compute nodes declared.",
-      "noHostingNodes": "No hosting nodes declared."
+      "noHostingNodes": "No hosting nodes declared.",
+      "recheck": "Re-check",
+      "recheckQueued": "Queued"
     },
     "payments": {
       "title": "Payments",
@@ -511,6 +514,43 @@
       "types": {
         "vps_reinstall": "VPS rebuild",
         "dedicated_reinstall": "Dedicated rebuild"
+      }
+    },
+    "drift": {
+      "title": "Drift",
+      "subtitle": "Where the platform's records and a provider's reality disagree.",
+      "what": "Finding",
+      "severity": "Severity",
+      "status": "Status",
+      "seen": "Seen",
+      "sides": "Both sides",
+      "expected": "Platform",
+      "observed": "Provider",
+      "verdict": "Verdict",
+      "empty": "Nothing disagrees.",
+      "openOnly": "Open findings only",
+      "acknowledge": "Seen",
+      "resolve": "No longer true",
+      "resolveTitle": "Record this as resolved",
+      "resolveBody": "This says the disagreement is gone. Nothing here changes a provider — if the machine is still missing, it is still missing after you press this.",
+      "resolution": "What did you find?",
+      "resolutionHint": "Recorded in the audit trail, and read by the next person who opens this row.",
+      "severities": {
+        "critical": "Critical",
+        "warning": "Warning",
+        "info": "Info"
+      },
+      "statuses": {
+        "open": "Open",
+        "acknowledged": "Acknowledged",
+        "resolved": "Resolved"
+      },
+      "kinds": {
+        "missing_at_provider": "Missing at the provider",
+        "unknown_at_platform": "Unknown to the platform",
+        "power_state_mismatch": "Power state differs",
+        "resource_mismatch": "Shape differs",
+        "suspension_mismatch": "Suspension not enforced"
       }
     }
   },

@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { DashboardPage } from '@/features/account/DashboardPage'
 import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
+import { AdminDriftPage } from '@/features/admin/AdminDriftPage'
 import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePage'
 import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
 import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
@@ -117,6 +118,7 @@ export function App() {
                   <Route path="/admin/customers" element={<AdminCustomersPage />} />
                   <Route path="/admin/provisioning" element={<AdminProvisioningPage />} />
                   <Route path="/admin/operations" element={<AdminOperationsPage />} />
+                  <Route path="/admin/drift" element={<AdminDriftPage />} />
                   <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
                   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
                 </Route>

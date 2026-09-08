@@ -179,10 +179,76 @@ export function useResolveReinstall() {
   })
 }
 
+/**
+ * One disagreement between the platform and a provider.
+ *
+ * `expected` and `observed` are published deliberately: an operator deciding
+ * whether a machine is really missing needs to see what the two sides said,
+ * and both were redacted on the way into the table rather than here.
+ */
+export interface AdminDrift {
+  id: string
+  provider: string | null
+  resource_type: string | null
+  service_id: string | null
+  provider_reference: string | null
+  kind: string
+  severity: string
+  status: string
+  expected: Record<string, unknown> | null
+  observed: Record<string, unknown> | null
+  occurrences: number
+  first_seen_at: string | null
+  last_seen_at: string | null
+  resolution: string | null
+  resolved_at: string | null
+}
+
+export function useDrift(page: number, status: string) {
+  return useQuery({
+    queryKey: ['admin', 'drift', page, status],
+    queryFn: () => admin.get<Paginated<AdminDrift>>('/drift', { page, status }),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useReviewDrift() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      verdict,
+      resolution,
+    }: {
+      id: string
+      verdict: 'acknowledged' | 'resolved'
+      resolution?: string
+    }) =>
+      admin.post<Envelope<AdminDrift>>(`/drift/${encodeURIComponent(id)}/review`, {
+        verdict,
+        resolution,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'drift'] })
+    },
+  })
+}
+
+export function useReconcileCluster() {
+  return useMutation({
+    mutationFn: ({ clusterId }: { clusterId: string }) =>
+      admin.post<Envelope<{ cluster_id: string; queued: boolean }>>(
+        `/infrastructure/clusters/${encodeURIComponent(clusterId)}/reconcile`,
+      ),
+  })
+}
+
 export interface AdminNode {
   id: string
   name: string
   cluster: string | null
+  cluster_id: string | null
   datacenter: string | null
   status: string
   is_healthy: boolean

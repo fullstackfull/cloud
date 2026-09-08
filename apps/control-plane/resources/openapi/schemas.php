@@ -673,6 +673,7 @@ return [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'name' => ['type' => ['string', 'null']],
             'cluster' => ['type' => ['string', 'null']],
+            'cluster_id' => ['type' => ['string', 'null']],
             'datacenter' => ['type' => ['string', 'null']],
             'status' => ['type' => ['string', 'null']],
             'is_healthy' => ['type' => 'boolean'],

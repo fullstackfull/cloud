@@ -408,7 +408,8 @@
       "provisioning": "التجهيز",
       "infrastructure": "البنية التحتية",
       "payments": "المدفوعات",
-      "operations": "إعادة التثبيت"
+      "operations": "إعادة التثبيت",
+      "drift": "الانحراف"
     },
     "customers": {
       "title": "العملاء",
@@ -475,7 +476,9 @@
       "computeNodes": "عقد الحوسبة",
       "hostingNodes": "عقد الاستضافة",
       "noNodes": "لا عقد حوسبة مُعلَنة.",
-      "noHostingNodes": "لا عقد استضافة مُعلَنة."
+      "noHostingNodes": "لا عقد استضافة مُعلَنة.",
+      "recheck": "إعادة الفحص",
+      "recheckQueued": "في الطابور"
     },
     "payments": {
       "title": "المدفوعات",
@@ -519,6 +522,43 @@
       "types": {
         "vps_reinstall": "إعادة تثبيت خادم افتراضي",
         "dedicated_reinstall": "إعادة تثبيت خادم مخصص"
+      }
+    },
+    "drift": {
+      "title": "الانحراف",
+      "subtitle": "حيث تختلف سجلات المنصة عن واقع المزوّد.",
+      "what": "الملاحظة",
+      "severity": "الخطورة",
+      "status": "الحالة",
+      "seen": "التكرار",
+      "sides": "الطرفان",
+      "expected": "المنصة",
+      "observed": "المزوّد",
+      "verdict": "القرار",
+      "empty": "لا يوجد أي اختلاف.",
+      "openOnly": "المفتوحة فقط",
+      "acknowledge": "اطّلعت",
+      "resolve": "لم يعد قائماً",
+      "resolveTitle": "تسجيل الانحراف كمُعالَج",
+      "resolveBody": "هذا يعني أن الاختلاف لم يعد قائماً. لا شيء هنا يغيّر شيئاً عند المزوّد — إن كان الجهاز مفقوداً فسيظل مفقوداً بعد الضغط.",
+      "resolution": "ماذا وجدت؟",
+      "resolutionHint": "يُسجَّل في سجل التدقيق، ويقرؤه من يفتح هذا السطر بعدك.",
+      "severities": {
+        "critical": "حرجة",
+        "warning": "تحذير",
+        "info": "معلومة"
+      },
+      "statuses": {
+        "open": "مفتوح",
+        "acknowledged": "مُطّلع عليه",
+        "resolved": "مُعالَج"
+      },
+      "kinds": {
+        "missing_at_provider": "غير موجود لدى المزوّد",
+        "unknown_at_platform": "غير معروف للمنصة",
+        "power_state_mismatch": "حالة التشغيل مختلفة",
+        "resource_mismatch": "المواصفات مختلفة",
+        "suspension_mismatch": "التعليق غير مُطبَّق"
       }
     }
   },

@@ -6400,6 +6400,10 @@ components:
           type:
             - "string"
             - "null"
+        cluster_id:
+          type:
+            - "string"
+            - "null"
         datacenter:
           type:
             - "string"

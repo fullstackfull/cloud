@@ -61,6 +61,7 @@ const OPERATOR_NAV: NavItem[] = [
   { to: '/admin/customers', labelKey: 'admin.nav.customers' },
   { to: '/admin/provisioning', labelKey: 'admin.nav.provisioning' },
   { to: '/admin/operations', labelKey: 'admin.nav.operations' },
+  { to: '/admin/drift', labelKey: 'admin.nav.drift' },
   { to: '/admin/infrastructure', labelKey: 'admin.nav.infrastructure' },
   { to: '/admin/payments', labelKey: 'admin.nav.payments' },
 ]

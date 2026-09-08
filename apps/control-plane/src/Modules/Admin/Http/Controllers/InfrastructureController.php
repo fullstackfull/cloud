@@ -46,6 +46,11 @@ final class InfrastructureController
                 'id' => $node->id,
                 'name' => $node->provider_name,
                 'cluster' => $node->cluster?->slug,
+                // The id as well as the name, because an operator who can see
+                // that a cluster disagrees with the platform needs to be able
+                // to ask for a fresh comparison of it, and the reconcile
+                // endpoint is addressed by id.
+                'cluster_id' => $node->cluster_id,
                 'datacenter' => $node->cluster?->datacenter?->slug,
                 'status' => $node->status->value,
                 'is_healthy' => $node->is_healthy,
