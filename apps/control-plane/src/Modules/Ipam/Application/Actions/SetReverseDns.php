@@ -83,7 +83,31 @@ final class SetReverseDns
 
         $validated = Hostname::fromString($hostname);
 
-        $record = DB::transaction(function () use ($address, $validated): ReverseDnsRecord {
+        $record = DB::transaction(function () use ($assignment, $address, $validated): ReverseDnsRecord {
+            /*
+             * The liveness check above ran before the transaction opened, and
+             * a release can land in that gap. It is one HTTP request wide, but
+             * what fits through it is the worst outcome this action has: the
+             * release stamps the PTR row `removing` on its way out, this
+             * transaction writes it back to `pending` with the departing
+             * customer's hostname, and the name is then published onto an
+             * address that has already been handed to somebody else.
+             *
+             * Re-read under a row lock, so a release either finished before
+             * this (and is seen) or waits until after it (and removes what was
+             * just written). The assignment is locked before the PTR row, the
+             * same order the release path takes, so the two serialise rather
+             * than deadlock.
+             */
+            $current = IpAssignment::query()
+                ->whereKey($assignment->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($current === null || ! $current->isLive()) {
+                throw ReverseDnsUnavailableException::assignmentReleased((string) $assignment->getKey());
+            }
+
             /*
              * Locked rather than upserted blind. `reverse_dns_records` is unique
              * on ip_address_id, so two requests racing on one address would have

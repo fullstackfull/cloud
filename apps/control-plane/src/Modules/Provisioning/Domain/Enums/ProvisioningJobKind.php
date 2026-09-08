@@ -18,11 +18,29 @@ enum ProvisioningJobKind: string
     case Start = 'start';
     case Stop = 'stop';
     case Restart = 'restart';
-    case Reinstall = 'reinstall';
+    /*
+     * Two reinstalls, not one, because they are two different pieces of work
+     * that happen to share a word. Rebuilding a virtual machine is a config
+     * edit and a disk import against a hypervisor API; rebuilding a physical
+     * one is a one-time boot override, a PXE handshake and an unattended
+     * installer that nothing can watch directly. They fail differently, they
+     * are guarded differently, and — since the engine keys handlers by kind —
+     * one name would mean one handler receiving both and deciding from the
+     * payload which machine it had been given. That decision is exactly the
+     * kind that is wrong once and destroys the wrong thing.
+     */
+    case ReinstallVps = 'reinstall_vps';
+    case ReinstallDedicated = 'reinstall_dedicated';
     case Resize = 'resize';
-    case Suspend = 'suspend';
-    case Unsuspend = 'unsuspend';
     case CreateHostingAccount = 'create_hosting_account';
+
+    /**
+     * A shared hosting account moved onto another panel package.
+     *
+     * The hosting half of a plan change: a resize makes a machine the size the
+     * customer pays for, and this makes an account the quota they pay for.
+     */
+    case ChangeHostingPackage = 'change_hosting_package';
     case ProvisionDedicated = 'provision_dedicated';
 
     /**
@@ -61,10 +79,10 @@ enum ProvisioningJobKind: string
     public function serviceStatusOnSuccess(): ?ServiceStatus
     {
         return match ($this) {
-            self::CreateVps, self::CreateHostingAccount, self::ProvisionDedicated, self::Unsuspend => ServiceStatus::Active,
-            self::Suspend => ServiceStatus::Suspended,
+            self::CreateVps, self::CreateHostingAccount, self::ProvisionDedicated => ServiceStatus::Active,
             self::DestroyVps => ServiceStatus::Terminated,
-            self::Start, self::Stop, self::Restart, self::Reinstall, self::Resize => null,
+            self::Start, self::Stop, self::Restart, self::Resize, self::ChangeHostingPackage => null,
+            self::ReinstallVps, self::ReinstallDedicated => null,
         };
     }
 

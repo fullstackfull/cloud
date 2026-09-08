@@ -62,7 +62,7 @@ final class VpsOperationGuard
         // customer's services, so reaching here at all means something else
         // deleted it mid-request. Refused as inactive rather than dereferenced.
         if ($service === null || $service->status !== ServiceStatus::Active) {
-            throw VpsNotActiveException::forStatus($service?->status ?? ServiceStatus::Terminated);
+            throw VpsNotActiveException::forStatus($service->status ?? ServiceStatus::Terminated);
         }
     }
 

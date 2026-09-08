@@ -107,8 +107,29 @@ final class CataloguePricingScopeTest extends TestCase
             $body = $this->actingAs($kuwaiti)->getJson($url)->assertOk()->getContent();
 
             $this->assertStringNotContainsString('USD', $body);
-            $this->assertStringNotContainsString('3000', $body);
+            $this->assertNotContains(3000, $this->minorUnitsIn($body));
         }
+    }
+
+    /*
+     * Asserted against the numbers in the document rather than as a
+     * substring of it. The body carries ULIDs, and a ULID is base32 over a
+     * character set that includes the digits — "3000" turning up inside a
+     * generated id failed this test at random, roughly once in a few
+     * hundred runs, with a message that pointed at a price leak that had
+     * not happened. Currency codes stay a substring check: they are
+     * uppercase and the ids are not, so no id can contain one.
+     */
+    /**
+     * Every recurring price the document quotes, at any depth.
+     *
+     * @return list<int>
+     */
+    private function minorUnitsIn(string $body): array
+    {
+        preg_match_all('/"minor_units":\s*(\d+)/', $body, $matches);
+
+        return array_map(intval(...), $matches[1]);
     }
 
     #[Test]

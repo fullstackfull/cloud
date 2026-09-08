@@ -120,7 +120,7 @@ final class GetCustomerWalletBalances
             return strcmp($a->currency(), $b->currency());
         });
 
-        return array_values($balances);
+        return $balances;
     }
 
     /**

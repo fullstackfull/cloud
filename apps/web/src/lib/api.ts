@@ -89,6 +89,23 @@ export interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   locale?: string
+  /**
+   * Extra headers for the few endpoints that take one.
+   *
+   * Merged *under* the headers this function sets, not over them: a caller
+   * must not be able to replace the CSRF token or the Accept type by passing a
+   * header of the same name.
+   */
+  headers?: Record<string, string>
+  /**
+   * Treat `path` as a full path from the origin rather than relative to
+   * `/api/v1`.
+   *
+   * The administrative surface sits under a different prefix, and giving it its
+   * own base rather than letting callers write `../admin/...` means a mistyped
+   * path cannot land an operator call on a customer endpoint or the reverse.
+   */
+  absolute?: boolean
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -100,6 +117,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   const headers: Record<string, string> = {
+    ...(options.headers ?? {}),
     Accept: 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
   }
@@ -108,7 +126,16 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     headers['Accept-Language'] = options.locale
   }
 
-  if (options.body !== undefined) {
+  /*
+   * FormData sets its own Content-Type, and it has to: the header carries a
+   * multipart boundary the browser generates. Setting application/json over
+   * it produces a request the server parses as JSON, finds unreadable, and
+   * rejects as an empty body — which reads as a validation bug rather than as
+   * a header mistake.
+   */
+  const isMultipart = options.body instanceof FormData
+
+  if (options.body !== undefined && !isMultipart) {
     headers['Content-Type'] = 'application/json'
   }
 
@@ -119,11 +146,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   let response: Response
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
+    response = await fetch(options.absolute === true ? path : `${BASE_URL}${path}`, {
       method,
       headers,
       credentials: 'include',
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      ...(options.body !== undefined
+        ? { body: isMultipart ? (options.body as FormData) : JSON.stringify(options.body) }
+        : {}),
       ...(options.signal !== undefined ? { signal: options.signal } : {}),
     })
   } catch (cause) {

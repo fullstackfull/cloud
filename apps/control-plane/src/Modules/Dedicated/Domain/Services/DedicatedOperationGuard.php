@@ -124,7 +124,7 @@ final class DedicatedOperationGuard
         $serviceId = $server->service_id;
 
         $live = ProvisioningJob::query()
-            ->where('kind', ProvisioningJobKind::Reinstall->value)
+            ->where('kind', ProvisioningJobKind::ReinstallDedicated->value)
             ->whereIn('status', [
                 ProvisioningJobStatus::Queued->value,
                 ProvisioningJobStatus::Running->value,

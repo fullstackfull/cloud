@@ -1,0 +1,18 @@
+{
+    "name": "lynomia/static-analysis",
+    "description": "Static analysis toolchain, kept in its own composer root.",
+    "type": "project",
+    "license": "proprietary",
+    "require-dev": {
+        "larastan/larastan": "^3.0",
+        "phpstan/phpstan-deprecation-rules": "^2.0"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "phpstan/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

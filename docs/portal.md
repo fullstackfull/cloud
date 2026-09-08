@@ -11,8 +11,13 @@ The customer-facing single-page application in `apps/web`.
 | Dashboard: billing accounts, security posture | built |
 | Profile: name, language, time zone, phone | built |
 | Security: second factor, password, signed-in devices, sign-in history | built |
-| Catalogue, checkout, orders, invoices, services, VPS, dedicated, hosting | **not built** — the API does not serve them yet, see `docs/api.md` |
-| Administrative interface | **not built** |
+| Catalogue and checkout | built |
+| Orders, invoices, subscriptions, wallet | built |
+| Services, VPS with power control, dedicated servers, hosting accounts, IP addresses with reverse DNS | built |
+| API tokens | built |
+| VPS reinstall and console, hosting usage detail, invoice documents | **not built** — the endpoints exist for some of these; the screens do not |
+| Operator area: customers with suspend, provisioning queue, infrastructure capacity, payments with refund | built |
+| Operator: catalogue editing, IPAM management, audit log | **not built** — inventory and pricing are declared in the repository and applied by Ansible, not typed into a form; there is no audit table yet |
 
 The navigation lists only what is reachable. A link to a page that does not
 exist tells a customer the platform can do something it cannot, and they will
@@ -28,6 +33,13 @@ src/
   i18n/         catalogues, locale detection, direction
   lib/          the API client, formatting, error translation
 ```
+
+The operator area is under `features/admin/` and calls `/api/admin` through its
+own client in `lib/adminQueries.ts` rather than the customer one. Separate bases
+mean a mistyped path cannot land an operator call on a customer endpoint or the
+reverse. Hiding the navigation is a courtesy, not a control: every
+administrative endpoint checks its own permission server-side, and a customer
+who types the URL is redirected and would have been refused by the API anyway.
 
 A feature owns its data access. `features/account/useProfile.ts` is where the
 profile and session endpoints live, and nothing outside that directory calls
@@ -120,6 +132,11 @@ not throw:
 - **Routing** — that the guards actually gate. Both directions: a signed-out
   visitor cannot reach the security page, and a signed-in one is not shown the
   sign-in form.
+
+- **Plural forms** — English needs two and Arabic needs six, and i18next picks
+  between them by key suffix. A pluralised key carrying only `_other` in Arabic
+  renders "2 خطة" where the language wants "خطتان": grammatically wrong, and
+  invisible to anyone reading the English side. The test requires all six.
 
 There is no browser end-to-end suite. When one is added it will be reported
 here; until then, no part of this repository claims to have run one.

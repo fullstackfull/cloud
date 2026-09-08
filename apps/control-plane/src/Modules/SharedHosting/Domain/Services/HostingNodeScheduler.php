@@ -72,8 +72,6 @@ final readonly class HostingNodeScheduler
 
     private const float FALLBACK_MAX_LOAD = 8.0;
 
-    private const int FALLBACK_MAX_ACCOUNTS = 250;
-
     /**
      * @throws NoHostingCapacityException
      */
@@ -437,15 +435,5 @@ final readonly class HostingNodeScheduler
         }
 
         return $tally;
-    }
-
-    /**
-     * The fleet-wide ceiling, exposed so callers reporting capacity do not
-     * have to re-read config with a different fallback than the scheduler
-     * used.
-     */
-    public function fleetAccountCeiling(): int
-    {
-        return max(1, (int) config('hosting.scheduler.max_accounts_per_node', self::FALLBACK_MAX_ACCOUNTS));
     }
 }

@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Compute\Infrastructure;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\Enums\ComputeDriver;
 use Lynomia\Modules\Compute\Domain\Exceptions\ClusterNotConfiguredException;
-use Lynomia\Modules\Compute\Domain\Exceptions\UnknownComputeDriverException;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Compute\Infrastructure\Providers\ProxmoxComputeProvider;
@@ -40,7 +39,6 @@ final class ComputeProviderFactory
     ) {}
 
     /**
-     * @throws UnknownComputeDriverException
      * @throws ClusterNotConfiguredException
      */
     public function for(ComputeCluster $cluster): ComputeProvider
@@ -54,13 +52,6 @@ final class ComputeProviderFactory
         return $this->resolved[$key] = match ($cluster->driver) {
             ComputeDriver::Fake => new FakeComputeProvider,
             ComputeDriver::Proxmox => $this->proxmox($cluster),
-            // Reached when the driver enum gains a case ahead of its adapter,
-            // which is how a cluster row comes to name a driver the running
-            // code cannot build.
-            default => throw UnknownComputeDriverException::named(
-                $cluster->driver->value,
-                [ComputeDriver::Proxmox->value, ComputeDriver::Fake->value],
-            ),
         };
     }
 

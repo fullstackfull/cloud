@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 use Lynomia\Modules\Identity\Application\Actions\AttemptLogin;
 use Lynomia\Modules\Identity\Application\Actions\ManageTwoFactor;
 use Lynomia\Modules\Identity\Application\Actions\RecordLoginActivity;
@@ -111,7 +112,7 @@ final class LoginController
         // token they presented instead, so "log out" means the same thing for
         // both kinds of client.
         $token = $user?->currentAccessToken();
-        if ($token !== null && method_exists($token, 'delete')) {
+        if ($token instanceof PersonalAccessToken) {
             $token->delete();
         }
 

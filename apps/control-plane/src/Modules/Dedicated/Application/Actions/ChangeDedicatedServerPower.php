@@ -12,7 +12,6 @@ use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedControlUnavailableExcep
 use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedOperationRefusedException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedProviderException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\PowerOperationIndeterminateException;
-use Lynomia\Modules\Dedicated\Domain\Exceptions\UnknownBmcProtocolException;
 use Lynomia\Modules\Dedicated\Domain\Services\DedicatedOperationGuard;
 use Lynomia\Modules\Dedicated\Infrastructure\DedicatedProviderFactory;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
@@ -120,7 +119,7 @@ final readonly class ChangeDedicatedServerPower
 
         try {
             $provider = $this->providers->for($endpoint);
-        } catch (BmcNotConfiguredException|UnknownBmcProtocolException $e) {
+        } catch (BmcNotConfiguredException $e) {
             /*
              * A row with no address, no configured credential, or a protocol
              * this build has no adapter for. All three are the platform's

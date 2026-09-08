@@ -8,11 +8,19 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
 use Lynomia\Modules\Billing\Http\Requests\ListInvoicesRequest;
+use Lynomia\Modules\Billing\Http\Requests\PayInvoiceFromCreditRequest;
 use Lynomia\Modules\Billing\Http\Resources\InvoiceResource;
+use Lynomia\Modules\Billing\Http\Resources\WalletCreditQuoteResource;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Queries\CustomerInvoices;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
+use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
+use Lynomia\Modules\Wallet\Application\Actions\QuoteWalletCredit;
 
 /**
  * The customer-facing invoice surface. Read-only, and deliberately so.
@@ -40,6 +48,8 @@ final class InvoiceController
 
     public function __construct(
         private readonly ActingCustomer $actingCustomer,
+        private readonly QuoteWalletCredit $quote,
+        private readonly PayInvoiceFromWallet $payFromWallet,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -101,5 +111,79 @@ final class InvoiceController
             ->firstOrFail();
 
         return (new InvoiceResource($found))->response();
+    }
+
+    /**
+     * What paying this invoice from stored credit would do.
+     *
+     * A quote, not a promise: between reading this and paying, a renewal can
+     * spend the balance, so the payment recomputes everything under a lock.
+     * This exists so a screen can show three honest numbers — what the
+     * customer has, what this invoice would take, what would still be owed.
+     */
+    public function walletCreditQuote(Request $request, string $invoice): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'billing.view');
+
+        return (new WalletCreditQuoteResource(
+            $this->quote->execute($this->actingCustomer->get(), $this->scopedInvoice($invoice)),
+        ))->response();
+    }
+
+    /**
+     * Spend stored credit against this invoice.
+     *
+     * `billing.pay` rather than `billing.view`: this moves money the account
+     * holds. A technical contact who may rebuild a server may not spend the
+     * balance, and a read-only member may not either.
+     *
+     * There is no `amount` in the request. How much is applied is decided from
+     * the balance and the amount due, both read under a lock; a figure from the
+     * client would be a second opinion about something with one right answer.
+     */
+    public function payFromWalletCredit(PayInvoiceFromCreditRequest $request, string $invoice): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'billing.pay');
+
+        $settlement = app(RecordActAtomically::class)->execute(
+            fn (): InvoiceSettlement => $this->payFromWallet->execute(
+                $this->actingCustomer->get(),
+                $this->scopedInvoice($invoice),
+                $request->idempotencyKey(),
+            ),
+            /*
+             * Nothing is recorded when nothing moved, which here means one
+             * thing only: the replay of a request that already succeeded. The
+             * first copy wrote this row; a second saying credit was spent
+             * again would misstate the balance's history for anybody reading
+             * it afterwards.
+             */
+            fn (InvoiceSettlement $result): ?AuditedAct => $result->movedNothing() ? null : new AuditedAct(
+                action: AuditAction::WalletCreditSpent,
+                subject: $result->invoice,
+                customerId: (string) $result->invoice->customer_id,
+                context: [
+                    'applied_minor' => $result->applied->minorUnits(),
+                    'currency' => $result->applied->currency(),
+                    'invoice_number' => $result->invoice->number,
+                    'settled' => $result->invoice->status->value,
+                ],
+            ),
+        );
+
+        return (new InvoiceResource($settlement->invoice->fresh(['items'])))->response();
+    }
+
+    /**
+     * Scoped, not checked: an invoice belonging to another account is not in
+     * the result set to be authorised against, so it answers 404 — and a draft,
+     * which this surface never shows, answers the same.
+     */
+    private function scopedInvoice(string $id): Invoice
+    {
+        /** @var Invoice $invoice */
+        $invoice = CustomerInvoices::of($this->actingCustomer->get())->whereKey($id)->firstOrFail();
+
+        return $invoice;
     }
 }

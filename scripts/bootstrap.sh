@@ -41,11 +41,31 @@ log "Preparing environment files"
 [[ -f "$CP/.env" ]]    || cp "$CP/.env.example" "$CP/.env"
 [[ -f "$WEB/.env" ]]   || cp "$WEB/.env.example" "$WEB/.env"
 
+# The test environment, and not an optional nicety. `make test-backend` runs
+# with APP_ENV=testing; without a .env.testing Laravel falls back to .env, and
+# RefreshDatabase truncates every table in whatever database that names — which
+# on a fresh clone is the developer's own. A first `make test` that destroys
+# your development data is a first impression nobody recovers from.
+#
+# The example points at lynomia_test rather than lynomia for the same reason,
+# so the two are separate even before anybody edits either file. Found by
+# running this script into an empty clone and reading what it left behind.
+[[ -f "$CP/.env.testing" ]] || cp "$CP/.env.testing.example" "$CP/.env.testing"
+
 log "Installing PHP dependencies"
 (cd "$CP" && composer install --no-interaction --prefer-dist)
 
-log "Generating application key"
+log "Generating application keys"
 (cd "$CP" && grep -q '^APP_KEY=base64:' .env || php artisan key:generate)
+
+# And one for the test environment, which is a separate file with a separate
+# empty key. Without it `make test` on a fresh clone dies part-way through with
+# MissingAppKeyException on every test that touches an encrypted value or a
+# session — hundreds of failures whose cause is one blank line in a file the
+# developer has never opened. Found by running a clean-room clone through the
+# documented path and reading what it left behind; CI has always generated this
+# key, which is exactly why nobody noticed the bootstrap did not.
+(cd "$CP" && grep -q '^APP_KEY=base64:' .env.testing || php artisan key:generate --env=testing)
 
 log "Installing JavaScript dependencies"
 (cd "$ROOT" && npm install)

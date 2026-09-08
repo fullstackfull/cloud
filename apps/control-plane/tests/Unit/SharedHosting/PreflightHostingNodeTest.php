@@ -216,25 +216,30 @@ final class PreflightHostingNodeTest extends TestCase
         // It is the only refusal an operator cannot fix by editing the
         // machine, and reporting it behind "port 80 is in use" sends somebody
         // to debug the wrong thing.
+        $report = $this->preflight()->execute(HostingPanel::Cpanel, $this->facts(
+            boundPorts: [80],
+            licence: new LicenceStatus(valid: false, product: 'cpanel'),
+        ));
+
+        $this->assertTrue($report->refused());
+        $this->assertCount(2, $report->refusals);
+
+        /*
+         * The precedence lives on the report's own throwing form rather than
+         * on a wrapper in the action — which is where it was being tested
+         * from, through a method the application never called. The rule is
+         * unchanged: the licence refusal is the one the exception names, even
+         * though the bound port was found first, because it is the only
+         * refusal an operator cannot fix by editing the machine.
+         */
         try {
-            $this->preflight()->assertReady(HostingPanel::Cpanel, $this->facts(
-                boundPorts: [80],
-                licence: new LicenceStatus(valid: false, product: 'cpanel'),
-            ));
+            $report->throwIfRefused();
 
             $this->fail('A refused preflight did not stop the caller.');
         } catch (HostingPreflightFailedException $e) {
             $this->assertSame('hosting.license_required', $e->errorCode());
             $this->assertSame(2, $e->context()['refusal_count']);
         }
-    }
-
-    #[Test]
-    public function assert_ready_throws_so_an_installer_cannot_proceed_by_forgetting_to_look(): void
-    {
-        $this->expectException(HostingPreflightFailedException::class);
-
-        $this->preflight()->assertReady(HostingPanel::Cpanel, $this->facts(hostname: 'node1'));
     }
 
     #[Test]

@@ -59,6 +59,6 @@ final class RequestLocale
 
         return $values[$locale]
             ?? $values[(string) config('app.fallback_locale')]
-            ?? (string) (array_values($values)[0] ?? '');
+            ?? (string) array_values($values)[0];
     }
 }

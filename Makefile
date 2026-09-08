@@ -49,7 +49,18 @@ test: test-backend test-frontend ## Run the full test suite
 
 .PHONY: test-backend
 test-backend: ## Run PHP tests (PHPUnit, against real PostgreSQL)
-	cd $(CP) && php artisan test
+	@# APP_ENV is set here because `artisan test` boots the application before
+	@# handing over to PHPUnit, and Laravel does not read .env.testing unless
+	@# APP_ENV already says testing — so without it the boot defaults to
+	@# production, the provider guard correctly refuses a production deployment
+	@# configured with fakes, and the suite dies in a fifth of a second having
+	@# run nothing.
+	@#
+	@# The other half is that .env.testing has to exist. It is not tracked, so
+	@# scripts/bootstrap.sh copies it from the example — without that, this
+	@# target falls back to .env and RefreshDatabase truncates the developer's
+	@# own database. Both halves were found by running a clean-room clone.
+	cd $(CP) && APP_ENV=testing php artisan test
 
 .PHONY: test-frontend
 test-frontend: ## Run frontend unit tests
@@ -65,7 +76,7 @@ lint-backend: ## Laravel Pint, plus PHPStan when its toolchain is installed
 	@# never move an application dependency. It is not part of `make bootstrap`
 	@# because it is only needed by CI and by whoever is about to change types.
 	@if [ -x "$(CP)/tools/phpstan/vendor/bin/phpstan" ]; then \
-		cd $(CP) && tools/phpstan/vendor/bin/phpstan analyse --no-progress --memory-limit=1G; \
+		cd $(CP) && tools/phpstan/vendor/bin/phpstan analyse -c tools/phpstan/phpstan.neon --no-progress --memory-limit=1G; \
 	else \
 		echo "phpstan: not installed - run 'composer install --working-dir=$(CP)/tools/phpstan' to enable it"; \
 	fi
@@ -85,7 +96,7 @@ build: ## Production build of the frontend
 
 .PHONY: deploy-staging
 deploy-staging: ## Deploy to staging via Ansible
-	cd infrastructure/ansible && ansible-playbook -i inventories/staging playbooks/deploy-control-plane.yml
+	cd infrastructure/ansible && ansible-playbook -i inventories/staging playbooks/control-plane.yml
 
 # ------------------------------------------------------------- infrastructure
 

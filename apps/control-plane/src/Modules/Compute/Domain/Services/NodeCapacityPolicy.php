@@ -53,11 +53,6 @@ final readonly class NodeCapacityPolicy
         $this->capacityThresholdPercent = max(1, min(100, $percent));
     }
 
-    public function capacityThresholdPercent(): int
-    {
-        return $this->capacityThresholdPercent;
-    }
-
     /**
      * Memory this node may commit before the evacuation reserve is eaten into.
      */

@@ -68,7 +68,7 @@ Route::prefix('hosting')->as('hosting.')->group(function (): void {
      * minute it is a person clicking a button.
      */
     Route::post('{account}/sso', [HostingController::class, 'sso'])
-        ->middleware('throttle:10,1')
+        ->middleware('throttle:10,1,hosting-sso:')
         ->name('sso');
 
     Route::get('{account}/usage', [HostingController::class, 'usage'])->name('usage');

@@ -31,6 +31,17 @@ enum DedicatedServerStatus: string
     /** Delivered and running a customer's workload. */
     case Active = 'active';
 
+    /**
+     * A customer's own machine is being rebuilt at their request.
+     *
+     * Distinct from `provisioning`, which means "being installed for an order
+     * nobody has taken delivery of yet". The difference is who is attached: a
+     * machine here already belongs to somebody, has their address on it and is
+     * on their invoice, and none of that changes because its disks are being
+     * replaced.
+     */
+    case Reinstalling = 'reinstalling';
+
     /** Out of service by an operator's decision: a repair, a firmware run, a wipe. */
     case Maintenance = 'maintenance';
 
@@ -59,20 +70,25 @@ enum DedicatedServerStatus: string
      * Whether the platform may authorise a network install for a machine in
      * this state.
      *
-     * Only during `provisioning`. PXE on an active machine is a customer's
-     * entire server erased, and PXE on an available one is a machine that
-     * reinstalls itself while nobody is watching.
+     * Only during `provisioning` and `reinstalling`. PXE on an active machine
+     * is a customer's entire server erased, and PXE on an available one is a
+     * machine that reinstalls itself while nobody is watching.
+     *
+     * `reinstalling` is the second case where a network install is legitimate,
+     * and a machine only reaches it by way of a customer typing its serial
+     * back — which is to say, this is not a widening of when PXE is allowed,
+     * it is the same rule with the second door named.
      */
     public function permitsNetworkInstall(): bool
     {
-        return $this === self::Provisioning;
+        return $this === self::Provisioning || $this === self::Reinstalling;
     }
 
     /** Whether a customer is attached to this machine right now. */
     public function isCustomerHeld(): bool
     {
         return match ($this) {
-            self::Reserved, self::Provisioning, self::Active => true,
+            self::Reserved, self::Provisioning, self::Active, self::Reinstalling => true,
             default => false,
         };
     }

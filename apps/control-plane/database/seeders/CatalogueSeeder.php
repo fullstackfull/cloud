@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
@@ -11,6 +12,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Catalog\Infrastructure\Models\TaxRule;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use RuntimeException;
 
 /**
@@ -27,6 +29,8 @@ use RuntimeException;
  */
 final class CatalogueSeeder extends Seeder
 {
+    use AnnouncesProgress;
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -40,7 +44,7 @@ final class CatalogueSeeder extends Seeder
         $this->sharedHosting();
         $this->taxRules();
 
-        $this->command?->info(sprintf(
+        $this->announce(sprintf(
             'Catalogue seeded: %d products, %d plans, %d prices.',
             Product::count(),
             Plan::count(),
@@ -83,6 +87,17 @@ final class CatalogueSeeder extends Seeder
                     'bandwidth_tib' => $bandwidthTib,
                     'ipv4_count' => 1,
                     'ipv6_count' => 1,
+
+                    /*
+                     * Backups are part of what the customer bought, so the
+                     * policy is a plan entitlement rather than a deployment
+                     * setting. Bigger tiers keep more and keep it longer,
+                     * which is the ordinary shape of the thing being sold.
+                     */
+                    'backup_retention_days' => 7 + ($i * 7),
+                    'backup_max_retained' => 3 + $i,
+                    'backup_manual_allowance' => 2 + $i,
+                    'backup_scheduled_allowance' => 30,
                 ],
                 placementConstraints: ['storage_class' => 'nvme'],
             );
@@ -184,6 +199,32 @@ final class CatalogueSeeder extends Seeder
             $this->price($plan, 'KWD', BillingPeriod::Yearly, $kwdMonthly * 10);
             $this->price($plan, 'USD', BillingPeriod::Monthly, $usdMonthly);
             $this->price($plan, 'USD', BillingPeriod::Yearly, $usdMonthly * 10);
+
+            /*
+             * The package is what the panel enforces, and without one this
+             * plan cannot be bought: the provisioning path resolves the
+             * package from the plan, and a plan with none leaves the service
+             * waiting for an operator. Seeded here, beside the plan whose
+             * quotas it mirrors, so the two cannot drift apart in the demo
+             * catalogue the way they did when packages were seeded nowhere at
+             * all.
+             */
+            HostingPackage::updateOrCreate(
+                ['slug' => 'hosting-'.$slug],
+                [
+                    'plan_id' => $plan->getKey(),
+                    // The name as it exists on the panel. Prefixed so an
+                    // operator reading a cPanel package list can tell which
+                    // ones this platform owns.
+                    'panel_package_name' => 'lyn_'.$slug,
+                    'disk_quota_mib' => $diskMib,
+                    'bandwidth_quota_mib' => $bandwidthMib,
+                    'max_addon_domains' => $addonDomains,
+                    'max_databases' => $databases,
+                    'max_email_accounts' => $databases * 5,
+                    'is_active' => true,
+                ],
+            );
         }
     }
 

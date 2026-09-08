@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Compute\Infrastructure\Providers;
 
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use SensitiveParameter;
 
 /**
@@ -107,5 +110,54 @@ final readonly class ProxmoxConnection
     public function authorizationHeader(): string
     {
         return sprintf('PVEAPIToken=%s=%s', $this->tokenId, $this->tokenSecret);
+    }
+
+    /**
+     * A request already carrying the credential, on the terms this connection
+     * was built with.
+     *
+     * Lives here rather than in each adapter because what it sets is
+     * security-critical and shared: certificate verification, refusal to
+     * follow redirects, the timeout, and the Authorization header. Two
+     * adapters talk to Proxmox — compute and backups — and a copy of these
+     * rules in each is a copy that drifts. The one that would drift silently
+     * is `verify`, and an unverified connection hands the API token, and with
+     * it every customer's machine on the cluster, to whoever answers the TCP
+     * connection.
+     *
+     * Redirects are refused for the same reason in both: a Location header is
+     * chosen by the cluster, and following one would let a compromised node
+     * point any request at a host of its choosing — re-posting the body on a
+     * 307 or 308, with the token attached.
+     */
+    public function request(): PendingRequest
+    {
+        return Http::baseUrl($this->baseUrl())
+            ->withHeaders(['Authorization' => $this->authorizationHeader()])
+            ->withOptions(['verify' => $this->verifyTls, 'allow_redirects' => false])
+            ->timeout($this->timeoutSeconds)
+            ->acceptJson()
+            // Proxmox takes form-encoded parameters, not JSON, on every write
+            // endpoint.
+            ->asForm();
+    }
+
+    /**
+     * This connection's own credentials removed from a message, then the
+     * general redaction applied.
+     *
+     * Both halves are needed. The redactor catches credential shapes it
+     * recognises; this catches the exact token in play, which a cluster may
+     * quote back in a form the redactor has no pattern for.
+     */
+    public function scrub(string $message, SecretRedactor $redactor): string
+    {
+        $withoutToken = str_replace(
+            [$this->tokenSecret, $this->authorizationHeader(), $this->tokenId],
+            SecretRedactor::PLACEHOLDER,
+            $message,
+        );
+
+        return $redactor->redactString($withoutToken);
     }
 }

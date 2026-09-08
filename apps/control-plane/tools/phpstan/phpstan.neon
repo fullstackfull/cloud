@@ -1,0 +1,36 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - vendor/phpstan/phpstan-deprecation-rules/rules.neon
+
+parameters:
+    # Relative to this file, which sits two levels below the application root.
+    paths:
+        - ../../src
+        - ../../app
+        - ../../database
+        - ../../routes
+
+    # Level 6 rather than max, and that is a considered floor rather than a
+    # resting place. The codebase is fully typed and annotated, so most of the
+    # gap to max is generics on Eloquent builders and collections - real
+    # findings whose fixes are annotations rather than behaviour. Raising this
+    # is worth doing; shipping it red is not.
+    level: 6
+
+    # This codebase declares casts in the `casts()` method, which is where
+    # Laravel has wanted them since 11. Larastan reads the `$casts` property by
+    # default and only parses the method when told to; left off, it sees no
+    # casts at all and reports every cast attribute as the raw column type —
+    # around eighty findings that say more about the configuration than the
+    # code. This is not a suppression: it tells the analyser where the casts
+    # are, and turning it off does not make any real finding disappear.
+    parseModelCastsMethod: true
+
+    excludePaths:
+        - ../../vendor/*
+        - ../../storage/*
+        - ../../bootstrap/cache/*
+
+    # No ignoreErrors block. Whatever this reports on its first CI run is a real
+    # list to work through, and pre-emptively silencing categories nobody has
+    # seen yet is how a static analyser becomes decoration.

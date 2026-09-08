@@ -7,6 +7,7 @@ load-bearing for security, and the automation refuses to collapse them.
 
 ```text
 control_plane   Laravel API, Horizon workers, scheduler, Nginx
+console_gateway Lynomia Console Gateway — customer VNC/serial WebSockets
 database        PostgreSQL 18 primary (+ replica)
 redis           Redis: queues, cache, sessions
 monitoring      Prometheus, Alertmanager, Grafana, Loki
@@ -21,6 +22,42 @@ firewall        OPNsense, only where explicitly declared re-imageable
 Never install the control plane on a hypervisor, a hosting node or the firewall. A
 control plane that lives on a hypervisor cannot be used to recover that hypervisor, and a
 control plane on a hosting node shares a blast radius with customer PHP.
+
+## The console gateway
+
+Its own process, and it may be its own host.
+
+```bash
+php artisan console-gateway:serve
+```
+
+A console lives for as long as somebody is looking at a screen and holds two
+sockets the whole time. Running that inside the API's PHP-FPM pool would tie up
+a worker per console; running it under Horizon would tie up a queue worker. So
+it is a long-running process of its own, deployed in whatever count the fleet
+needs and restarted without touching the API.
+
+It needs exactly two things from the platform:
+
+- **the same Redis as the API.** Permits are issued by the API and spent by the
+  gateway, and the store is what makes "single use" true — on a per-node file
+  cache the gateway would never see a permit the API issued.
+- **the database**, to re-check at redemption that the machine still exists and
+  its service is still active. A permit lives sixty seconds and a suspension
+  can land inside that window.
+
+It needs no queue, no scheduler and no HTTP server.
+
+Bind it to loopback and put it behind the same TLS terminator as the API.
+`VPS_CONSOLE_GATEWAY_URL` is the public `wss://` address handed to browsers; it
+is deliberately not derived from the bind address, because only the deployment
+knows the public name. Leaving it empty means consoles are not offered, and the
+portal says so rather than showing a button that fails.
+
+What never reaches a browser: the hypervisor's console ticket, the node's
+address, and the cluster's API credentials. The gateway obtains all three on
+its own connection after the permit has been spent — which is the whole reason
+it exists rather than the portal talking to Proxmox directly.
 
 ## What a deployment does, in order
 

@@ -7,7 +7,6 @@ namespace Lynomia\Modules\SharedHosting\Infrastructure;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
-use Lynomia\Modules\SharedHosting\Domain\Exceptions\UnknownHostingPanelException;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\CpanelHostingProvider;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\DirectAdminHostingProvider;
@@ -42,9 +41,6 @@ final class HostingProviderFactory
         private readonly SecretRedactor $redactor,
     ) {}
 
-    /**
-     * @throws UnknownHostingPanelException
-     */
     public function for(HostingNode $node): HostingProvider
     {
         $override = $this->overrides[(string) $node->getKey()] ?? null;
@@ -56,9 +52,6 @@ final class HostingProviderFactory
         return $this->forPanel($node->panel);
     }
 
-    /**
-     * @throws UnknownHostingPanelException
-     */
     public function forPanel(HostingPanel $panel): HostingProvider
     {
         if (isset($this->resolved[$panel->value])) {
@@ -69,14 +62,6 @@ final class HostingProviderFactory
             HostingPanel::Cpanel => new CpanelHostingProvider($this->redactor),
             HostingPanel::DirectAdmin => new DirectAdminHostingProvider($this->redactor),
             HostingPanel::Fake => new FakeHostingProvider,
-            // Reached when the panel enum gains a case ahead of its adapter,
-            // which is how a node row comes to name a panel the running code
-            // cannot drive.
-            default => throw UnknownHostingPanelException::named($panel->value, [
-                HostingPanel::Cpanel->value,
-                HostingPanel::DirectAdmin->value,
-                HostingPanel::Fake->value,
-            ]),
         };
     }
 

@@ -15,9 +15,12 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\"",
+    "openapi:lint": "redocly lint docs/openapi.yaml",
+    "openapi:generate": "php apps/control-plane/artisan openapi:generate"
   },
   "devDependencies": {
+    "@redocly/cli": "^2.51.2",
     "prettier": "^3.6.2"
   }
 }

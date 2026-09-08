@@ -13,7 +13,7 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
       parserOptions: {
-        project: ['./tsconfig.app.json', './tsconfig.node.json'],
+        project: ['./tsconfig.app.json', './tsconfig.node.json', './tsconfig.e2e.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -54,6 +54,12 @@ export default tseslint.config(
   },
   {
     files: ['vite.config.ts', 'vitest.config.ts', 'eslint.config.js'],
+    languageOptions: { globals: globals.node },
+  },
+  {
+    // The browser suite runs in Node and drives a browser; it is neither a
+    // browser bundle nor a unit test.
+    files: ['e2e/**/*.ts', 'playwright.config.ts'],
     languageOptions: { globals: globals.node },
   },
 )

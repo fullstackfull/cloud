@@ -245,7 +245,9 @@ final class CpanelHostingProvider implements HostingProvider
     {
         $data = $this->call($node, 'listaccts', [], 'list_accounts');
 
-        /** @var list<array<string, mixed>> $rows */
+        // Typed as what the panel can actually send rather than as what it
+        // should: the per-row check below is the only thing that makes each
+        // element an array.
         $rows = $this->asArray($this->asArray($data)['acct'] ?? []);
 
         $accounts = [];

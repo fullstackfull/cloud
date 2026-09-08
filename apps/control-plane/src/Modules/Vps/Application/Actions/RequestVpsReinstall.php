@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Actions;
 
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
@@ -11,8 +13,10 @@ use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use Lynomia\Modules\Vps\Domain\Exceptions\ReinstallConfirmationMismatchException;
 use Lynomia\Modules\Vps\Domain\Services\VpsOperationGuard;
+use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
 
 /**
  * Ask the platform to wipe a machine and lay it down again.
@@ -43,6 +47,7 @@ final readonly class RequestVpsReinstall
     public function __construct(
         private CreateProvisioningJob $createJob,
         private VpsOperationGuard $guard,
+        private RecordAuditEntry $audit,
     ) {}
 
     /**
@@ -78,7 +83,7 @@ final readonly class RequestVpsReinstall
         $this->guard->assertNothingInFlight($machine);
 
         $job = $this->createJob->execute(new ProvisioningJobRequest(
-            kind: ProvisioningJobKind::Reinstall,
+            kind: ProvisioningJobKind::ReinstallVps,
             idempotencyKey: $key,
             provider: (string) ($machine->cluster()->first()?->driver->value ?? 'unknown'),
             serviceId: (string) $machine->service_id,
@@ -88,8 +93,8 @@ final readonly class RequestVpsReinstall
                 'hostname' => $machine->hostname,
                 'template_id' => $template?->getKey(),
                 'template_reference' => $template?->provider_reference,
-                'os_family' => $template?->os_family?->value ?? $machine->os_family,
-                'ssh_keys' => array_values($sshKeys),
+                'os_family' => $template !== null ? $template->os_family->value : $machine->os_family,
+                'ssh_keys' => $sshKeys,
             ],
             /*
              * One attempt, deliberately, against the engine's default of
@@ -103,7 +108,53 @@ final readonly class RequestVpsReinstall
             maxAttempts: 1,
         ));
 
+        /*
+         * The operation record is written before the job is dispatched, and
+         * that order matters. A customer who has just typed their hostname to
+         * confirm a destructive act must see something happening; a record
+         * created by the worker would appear only once a worker picked the job
+         * up, which on a busy queue is a screen that says nothing for a minute
+         * after the most frightening button on the platform.
+         *
+         * It also means a job that never reaches a worker leaves evidence that
+         * a reinstall was asked for, rather than nothing at all.
+         */
+        $operation = VmReinstall::query()->create([
+            'virtual_machine_id' => $machine->getKey(),
+            'service_id' => $machine->service_id,
+            'customer_id' => $machine->service()->first()?->customer_id,
+            'provisioning_job_id' => $job->getKey(),
+            'state' => ReinstallState::Requested,
+            'state_changed_at' => now(),
+            'template_id' => $template?->getKey(),
+            'template_reference' => $template?->provider_reference,
+            'provider_resource_id' => $machine->provider_id,
+            'provider_node' => $machine->node()->first()?->provider_name,
+        ]);
+
+        /*
+         * Recorded before the work is queued, and recorded on the request
+         * rather than on the outcome. "Who asked for this machine to be
+         * wiped, and when" is the question after a customer says they did not
+         * — and it has to be answerable whether or not the rebuild then
+         * succeeded.
+         */
+        $this->audit->execute(
+            action: AuditAction::VpsReinstallRequested,
+            subject: $machine,
+            customerId: $machine->service()->first()?->customer_id,
+            context: [
+                'virtual_machine_id' => (string) $machine->getKey(),
+                'hostname' => $machine->hostname,
+                'provisioning_job_id' => (string) $job->getKey(),
+                'reinstall_id' => (string) $operation->getKey(),
+                'template_id' => $template?->getKey(),
+            ],
+        );
+
         if ($job->wasRecentlyCreated) {
+            $operation->advanceTo(ReinstallState::Queued);
+
             RunProvisioningJob::dispatch((string) $job->getKey());
         }
 

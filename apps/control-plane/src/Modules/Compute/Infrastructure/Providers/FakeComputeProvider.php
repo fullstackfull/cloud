@@ -6,6 +6,8 @@ namespace Lynomia\Modules\Compute\Infrastructure\Providers;
 
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
@@ -15,6 +17,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Services\FakeComputeProviderGuard;
 
@@ -50,6 +53,9 @@ final class FakeComputeProvider implements ComputeProvider
     public const string NAME = 'fake';
 
     /** A hostname carrying this is refused outright, as a cluster with no capacity would. */
+    /** The same lock value the real adapter writes, so tests assert on one string. */
+    public const string SUSPENSION_LOCK = ProxmoxComputeProvider::SUSPENSION_LOCK;
+
     public const string PROVIDER_FAILURE_MARKER = 'provider-fail';
 
     /** A hostname carrying this is accepted, and the task fails later. */
@@ -63,6 +69,16 @@ final class FakeComputeProvider implements ComputeProvider
      * correctly anyway.
      */
     public const string TIMEOUT_MARKER = 'timeout';
+
+    /**
+     * A machine carrying this cannot be destroyed conclusively.
+     *
+     * Its own word rather than a reuse of the timeout marker, because a
+     * hostname is checked for every marker it contains: a name that meant
+     * "time out on destroy" would also mean "time out on create", and the
+     * machine could never be built in the first place.
+     */
+    public const string UNDESTROYABLE_MARKER = 'undestroyable';
 
     /** Appended to a UPID's id segment to mark a task that will report failure. */
     private const string FAILED_TASK_SUFFIX = '-failed';
@@ -85,6 +101,13 @@ final class FakeComputeProvider implements ComputeProvider
 
     private int $taskDelaySeconds;
 
+    /**
+     * A file the fleet is kept in, or null to keep it in memory.
+     *
+     * @see config('compute.fake.state_path')
+     */
+    private ?string $statePath;
+
     public function __construct()
     {
         // Constructed, not resolved, is the moment worth guarding: a container
@@ -97,6 +120,10 @@ final class FakeComputeProvider implements ComputeProvider
         // task's completion in the past and make the "still running" state
         // unreachable, quietly disabling the behaviour this exists to model.
         $this->taskDelaySeconds = max(0, (int) config('compute.fake.task_delay_seconds', 0));
+
+        $path = config('compute.fake.state_path');
+
+        $this->statePath = is_string($path) && $path !== '' ? $path : null;
     }
 
     public function name(): string
@@ -106,6 +133,8 @@ final class FakeComputeProvider implements ComputeProvider
 
     public function createVirtualMachine(CreateVmRequest $request): VmOperation
     {
+        $this->readSharedFleet();
+
         if (self::hostnameCarries($request->hostname, self::PROVIDER_FAILURE_MARKER)) {
             throw ComputeProviderException::requestFailed(self::NAME, 'create_vm', [
                 'node' => $request->nodeName,
@@ -139,6 +168,8 @@ final class FakeComputeProvider implements ComputeProvider
         );
 
         unset($this->destroyed[$this->tombstoneKey($request->nodeName, $providerId)]);
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid(
@@ -195,19 +226,15 @@ final class FakeComputeProvider implements ComputeProvider
             throw $this->noSuchMachine($nodeName, $providerId, 'resize_vm');
         }
 
-        $this->machines[$nodeName][$providerId] = new RemoteVmState(
-            providerId: $machine->providerId,
-            nodeName: $machine->nodeName,
-            name: $machine->name,
-            powerState: $machine->powerState,
+        $this->machines[$nodeName][$providerId] = $machine->withShape(
             vcpu: $request->vcpu ?? $machine->vcpu,
             memoryMib: $request->memoryMib ?? $machine->memoryMib,
             // A disk request is a growth, never an absolute size, which is the
             // same rule the real adapter enforces.
             diskGib: $request->diskGib === null ? $machine->diskGib : ($machine->diskGib ?? 0) + $request->diskGib,
-            uptimeSeconds: $machine->uptimeSeconds,
-            raw: $machine->raw,
         );
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmconfig', $providerId, false),
@@ -217,10 +244,115 @@ final class FakeComputeProvider implements ComputeProvider
         );
     }
 
+    /**
+     * Replaces the machine's image while keeping the machine.
+     *
+     * The fake models the two properties the real sequence has to have and
+     * that a test could otherwise not observe: the machine keeps its provider
+     * id — no new entry appears and the old one is not removed — and a locked
+     * machine refuses, exactly as Proxmox does. Without the second, a
+     * suspended customer could rebuild their way out of a suspension and the
+     * suite would prove they could not.
+     *
+     * The image is recorded in `raw` so a test can assert that the disk was
+     * actually replaced rather than that a call was made.
+     */
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation
+    {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'reinstall_vm');
+        }
+
+        if ($machine->isLockedAtProvider()) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => sprintf('VM is locked (%s)', $machine->lock),
+            ]);
+        }
+
+        if (self::hostnameCarries($request->hostname, self::PROVIDER_FAILURE_MARKER)) {
+            /*
+             * Refused after the machine was found, which is what makes this
+             * marker useful: the caller has to decide what to do about a
+             * machine whose disk may be half replaced.
+             */
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider refused this reinstall by design',
+            ]);
+        }
+
+        if (self::hostnameCarries($request->hostname, self::TIMEOUT_MARKER)) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider timed out on this reinstall by design',
+            ], indeterminate: true);
+        }
+
+        $this->machines[$nodeName][$providerId] = new RemoteVmState(
+            providerId: $machine->providerId,
+            nodeName: $machine->nodeName,
+            // The hostname is rewritten because cloud-init writes it into the
+            // new guest; everything else about the machine's identity is the
+            // machine's, not the reinstall's.
+            name: $request->hostname,
+            powerState: $request->startAfterInstall ? PowerState::Running : PowerState::Stopped,
+            vcpu: $machine->vcpu,
+            memoryMib: $machine->memoryMib,
+            diskGib: $machine->diskGib,
+            uptimeSeconds: $request->startAfterInstall ? 0 : null,
+            lock: $machine->lock,
+            startsOnBoot: true,
+            raw: [
+                ...$machine->raw,
+                'fake' => true,
+                'installed_template' => $request->templateReference,
+                'storage' => $request->storageName,
+            ],
+        );
+
+        $this->writeSharedFleet();
+
+        return new VmOperation(
+            taskId: $this->upid(
+                $nodeName,
+                'qmreinstall',
+                $providerId,
+                self::hostnameCarries($request->hostname, self::TASK_FAILURE_MARKER),
+            ),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'reinstall_vm',
+            metadata: ['fake' => true, 'template_reference' => $request->templateReference],
+        );
+    }
+
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation
     {
-        if ($this->machine($nodeName, $providerId) === null) {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
             throw $this->noSuchMachine($nodeName, $providerId, 'destroy_vm');
+        }
+
+        /*
+         * A machine whose name carries the timeout marker cannot be destroyed
+         * conclusively: the call fails with the outcome unknown, which is the
+         * one state a termination must never resolve by releasing the
+         * machine's address. Keyed on the name the machine was created with,
+         * because a destroy takes no hostname of its own.
+         */
+        if (self::hostnameCarries($machine->name, self::UNDESTROYABLE_MARKER)) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'destroy_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider timed out on this destroy by design',
+            ], indeterminate: true);
         }
 
         unset($this->machines[$nodeName][$providerId]);
@@ -233,6 +365,8 @@ final class FakeComputeProvider implements ComputeProvider
          * is already covered by the task id.
          */
         $this->destroyed[$this->tombstoneKey($nodeName, $providerId)] = true;
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmdestroy', $providerId, false),
@@ -248,8 +382,121 @@ final class FakeComputeProvider implements ComputeProvider
         return $this->machine($nodeName, $providerId);
     }
 
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation
+    {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'suspend_vm');
+        }
+
+        if ($policy === SuspensionPolicy::RecordOnly) {
+            // Nothing at the provider, which is the whole meaning of the value.
+            return new VmOperation(
+                taskId: $this->upid($nodeName, 'qmsuspend', $providerId, false),
+                nodeName: $nodeName,
+                providerId: $providerId,
+                operation: 'suspend_vm',
+                status: RemoteTaskStatus::Succeeded,
+            );
+        }
+
+        $this->machines[$nodeName][$providerId] = $machine
+            ->withPowerState($policy->powersOff() ? PowerState::Stopped : $machine->powerState)
+            ->withSuspension(
+                lock: $policy->locksAtProvider() ? self::SUSPENSION_LOCK : $machine->lock,
+                // Cleared whatever the policy: a suspended machine that came
+                // back on the next node reboot would be suspended only until
+                // the next maintenance window.
+                startsOnBoot: false,
+            );
+
+        $this->writeSharedFleet();
+
+        return new VmOperation(
+            taskId: $this->upid($nodeName, 'qmsuspend', $providerId, false),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'suspend_vm',
+            status: RemoteTaskStatus::Succeeded,
+            metadata: ['policy' => $policy->value],
+        );
+    }
+
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation
+    {
+        $machine = $this->machine($nodeName, $providerId);
+
+        if ($machine === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'lift_suspension');
+        }
+
+        /*
+         * Only the platform's own lock is cleared. A machine locked by a
+         * backup is left alone, because clearing that would have the platform
+         * quietly interfering with an operation it did not start.
+         */
+        $lock = $machine->lock === self::SUSPENSION_LOCK ? null : $machine->lock;
+
+        /*
+         * Deliberately not started. Returning a customer's server to a running
+         * state is the platform's decision, made in the reactivation flow
+         * where it can be verified.
+         */
+        $this->machines[$nodeName][$providerId] = $machine->withSuspension($lock, startsOnBoot: true);
+
+        $this->writeSharedFleet();
+
+        return new VmOperation(
+            taskId: $this->upid($nodeName, 'qmunsuspend', $providerId, false),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'lift_suspension',
+            status: RemoteTaskStatus::Succeeded,
+        );
+    }
+
+    /**
+     * A console endpoint pointing at whatever the deployment has told it to.
+     *
+     * The address comes from configuration rather than being invented, because
+     * the point of the fake here is to let the console gateway be proved
+     * end to end against an upstream a test controls — a real socket, a real
+     * handshake, real frames — without a hypervisor. A fake that returned a
+     * plausible-looking Proxmox URL would make the gateway's tests pass
+     * against something that does not exist.
+     */
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint
+    {
+        if ($this->machine($nodeName, $providerId) === null) {
+            throw $this->noSuchMachine($nodeName, $providerId, 'console_endpoint');
+        }
+
+        $host = config('compute.fake.console_host');
+        $port = config('compute.fake.console_port');
+
+        if (! is_string($host) || $host === '' || ! is_numeric($port)) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'console_endpoint', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'no fake console upstream is configured',
+            ]);
+        }
+
+        return new RemoteConsoleEndpoint(
+            host: $host,
+            port: (int) $port,
+            path: sprintf('/console/%s/%s', rawurlencode($nodeName), rawurlencode($providerId)),
+            tls: false,
+            headers: ['X-Fake-Console' => $providerId],
+            verifyTls: false,
+        );
+    }
+
     public function listVms(string $nodeName): array
     {
+        $this->readSharedFleet();
+
         $machines = $this->machines[$nodeName] ?? [];
 
         // Sorted so that a test asserting on the second machine is asserting
@@ -342,17 +589,24 @@ final class FakeComputeProvider implements ComputeProvider
             throw $this->noSuchMachine($nodeName, $providerId, $action.'_vm');
         }
 
-        $this->machines[$nodeName][$providerId] = new RemoteVmState(
-            providerId: $machine->providerId,
-            nodeName: $machine->nodeName,
-            name: $machine->name,
-            powerState: $resulting,
-            vcpu: $machine->vcpu,
-            memoryMib: $machine->memoryMib,
-            diskGib: $machine->diskGib,
-            uptimeSeconds: $resulting->isOn() ? 0 : null,
-            raw: $machine->raw,
-        );
+        /*
+         * A locked machine refuses every power operation, exactly as Proxmox
+         * does. This is the behaviour that makes suspension enforcement rather
+         * than bookkeeping, so the fake has to model it — a fake that let a
+         * suspended machine start would let the test suite prove a property
+         * the real hypervisor does not have.
+         */
+        if ($machine->isLockedAtProvider()) {
+            throw ComputeProviderException::requestFailed(self::NAME, $action.'_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => sprintf('VM is locked (%s)', $machine->lock),
+            ]);
+        }
+
+        $this->machines[$nodeName][$providerId] = $machine->withPowerState($resulting);
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qm'.$action, $providerId, false),
@@ -364,7 +618,72 @@ final class FakeComputeProvider implements ComputeProvider
 
     private function machine(string $nodeName, string $providerId): ?RemoteVmState
     {
+        $this->readSharedFleet();
+
         return $this->machines[$nodeName][$providerId] ?? null;
+    }
+
+    /**
+     * Reads the fleet another process may have changed.
+     *
+     * Does nothing at all unless a state path is configured, which is the
+     * normal case: a fake that went to disk on every call in every test would
+     * be slower and would let one test see another's machines. When a path is
+     * set, the file is the truth and this instance's memory is a cache of it
+     * that lives for exactly one call.
+     */
+    private function readSharedFleet(): void
+    {
+        if ($this->statePath === null || ! is_file($this->statePath)) {
+            return;
+        }
+
+        $contents = @file_get_contents($this->statePath);
+
+        if ($contents === false || $contents === '') {
+            return;
+        }
+
+        /** @var array{machines?: array<string, array<string, RemoteVmState>>, destroyed?: array<string, true>}|false $state */
+        $state = @unserialize($contents, ['allowed_classes' => true]);
+
+        if (! is_array($state)) {
+            return;
+        }
+
+        $this->machines = $state['machines'] ?? [];
+        $this->destroyed = $state['destroyed'] ?? [];
+    }
+
+    /**
+     * Publishes the fleet for other processes.
+     *
+     * Written to a neighbouring file and renamed, so a worker reading while
+     * this writes sees either the old fleet or the new one and never half of
+     * either.
+     */
+    private function writeSharedFleet(): void
+    {
+        if ($this->statePath === null) {
+            return;
+        }
+
+        $directory = dirname($this->statePath);
+
+        if (! is_dir($directory)) {
+            @mkdir($directory, 0o755, recursive: true);
+        }
+
+        $temporary = $this->statePath.'.'.getmypid().'.tmp';
+
+        if (@file_put_contents($temporary, serialize([
+            'machines' => $this->machines,
+            'destroyed' => $this->destroyed,
+        ])) === false) {
+            return;
+        }
+
+        @rename($temporary, $this->statePath);
     }
 
     private function noSuchMachine(string $nodeName, string $providerId, string $operation): ComputeProviderException

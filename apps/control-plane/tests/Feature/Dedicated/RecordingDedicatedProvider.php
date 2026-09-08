@@ -36,9 +36,24 @@ final class RecordingDedicatedProvider implements DedicatedProvider
 
     public int $mutationsAttempted = 0;
 
+    /**
+     * @param  list<string>  $failFrom  Operations this controller refuses out loud, by name.
+     * @param  list<string>  $goQuietFrom  Operations after which it stops answering.
+     */
     public function __construct(
         private readonly PowerState $reportedState = PowerState::On,
         private readonly bool $timeOut = false,
+        /*
+         * A controller that works for one operation and not the next.
+         *
+         * The reinstall path needs exactly this: arming a one-time boot
+         * override succeeds and the power cycle that would consume it does
+         * not, which is the case that decides whether a machine is left primed
+         * to erase itself at its next reboot. `$timeOut` cannot express it,
+         * because it fails everything from the first call.
+         */
+        private readonly array $failFrom = [],
+        private readonly array $goQuietFrom = [],
     ) {}
 
     public function protocol(): BmcProtocol
@@ -113,7 +128,17 @@ final class RecordingDedicatedProvider implements DedicatedProvider
         $this->calls[] = $operation;
         $this->mutationsAttempted++;
 
-        if ($this->timeOut) {
+        if (in_array($operation, $this->failFrom, strict: true)) {
+            // Answered and declined. Nothing physical happened, and the caller
+            // is expected to undo whatever it had already armed.
+            throw DedicatedProviderException::requestFailed(
+                'recording',
+                $operation,
+                ['provider_message' => 'the recording controller refused this operation by design'],
+            );
+        }
+
+        if ($this->timeOut || in_array($operation, $this->goQuietFrom, strict: true)) {
             /*
              * Indeterminate, which is the case the module is arranged around:
              * the platform stopped waiting, and the chassis may be acting on

@@ -70,6 +70,28 @@ use Lynomia\Modules\Billing\Http\Controllers\SubscriptionController;
 Route::prefix('invoices')->as('invoices.')->group(function (): void {
     Route::get('/', [InvoiceController::class, 'index'])->name('index');
     Route::get('{invoice}', [InvoiceController::class, 'show'])->name('show');
+
+    /*
+     * Paying from stored credit.
+     *
+     * Here rather than on the wallet surface for two reasons that agree: what
+     * the POST answers with is an invoice, and a module's HTTP layer is not
+     * another module's to reach into — a rule the architecture test enforces.
+     *
+     * The GET is a quote and takes nothing. The POST requires an
+     * Idempotency-Key, because a repeated submission that debited twice would
+     * spend a balance the customer only has once, and carries a tighter
+     * limiter than the shared ceiling: it is the one route on this surface
+     * that moves money without a provider in the way.
+     */
+    Route::get('{invoice}/wallet-credit', [InvoiceController::class, 'walletCreditQuote'])
+        ->whereUlid('invoice')
+        ->name('wallet_credit.quote');
+
+    Route::post('{invoice}/wallet-credit', [InvoiceController::class, 'payFromWalletCredit'])
+        ->whereUlid('invoice')
+        ->middleware('throttle:30,1,subscription-cancel:')
+        ->name('wallet_credit.pay');
 });
 
 Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {
@@ -84,6 +106,26 @@ Route::prefix('subscriptions')->as('subscriptions.')->group(function (): void {
      * should be expensive.
      */
     Route::post('{subscription}/cancel', [SubscriptionController::class, 'cancel'])
-        ->middleware('throttle:30,1')
+        ->middleware('throttle:30,1,plan-quote:')
         ->name('cancel');
+
+    /*
+     * Changing plan mid-cycle. Limited harder than cancelling: each change
+     * settles money both ways, and a client flapping between two plans would
+     * write a proration pair per request.
+     */
+    Route::post('{subscription}/plan', [SubscriptionController::class, 'changePlan'])
+        ->middleware('throttle:10,1,plan-change:')
+        ->name('plan');
+
+    /*
+     * What the plans on offer would cost this subscription.
+     *
+     * A read, and priced by the backend. The portal renders these numbers and
+     * computes none of them: proration, currency and rounding are the
+     * platform's rules, and a second implementation of them in TypeScript
+     * would agree until it did not.
+     */
+    Route::get('{subscription}/plan-options', [SubscriptionController::class, 'planOptions'])
+        ->name('plan_options');
 });

@@ -18,6 +18,7 @@ use Lynomia\Modules\Dedicated\Http\Resources\DedicatedServerResource;
 use Lynomia\Modules\Dedicated\Http\Resources\ReinstallRequestResource;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
+use Lynomia\Modules\Dedicated\Infrastructure\Queries\LatestServerReinstalls;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 
 /**
@@ -79,13 +80,25 @@ final class DedicatedServerController
             // cannot appear on two pages.
             ->orderByDesc('dedicated_servers.created_at')
             ->orderByDesc('dedicated_servers.id')
+            // The delivery date the resource publishes. Eager-loaded so that a
+            // page of machines is two queries rather than one per row.
+            ->with('service')
             // Bounded by the request, which clamps rather than refuses. The
             // clamp is what guarantees the query never sees the number a
             // caller asked for.
             ->paginate($request->perPage());
 
+        $reinstalls = LatestServerReinstalls::forServers(
+            $servers->getCollection()->map(static fn (DedicatedServer $server): string => (string) $server->getKey())->all(),
+        );
+
         return response()->json([
-            'data' => DedicatedServerResource::collection($servers->getCollection()),
+            'data' => $servers->getCollection()
+                ->map(static fn (DedicatedServer $server): DedicatedServerResource => new DedicatedServerResource(
+                    $server,
+                    $reinstalls[(string) $server->getKey()] ?? null,
+                ))
+                ->all(),
             'meta' => [
                 'page' => $servers->currentPage(),
                 'per_page' => $servers->perPage(),
@@ -109,8 +122,17 @@ final class DedicatedServerController
 
         $found = $this->serverForActingCustomer($server);
 
+        $serverId = (string) $found->getKey();
+
         return (new DedicatedServerResource(
-            $found->load(['components' => static fn ($query) => $query->orderBy('kind')->orderBy('id')])
+            $found->load([
+                'components' => static fn ($query) => $query->orderBy('kind')->orderBy('id'),
+                // Carries the delivery date. The chassis row's own created_at
+                // is when the platform racked it, which is not what a customer
+                // is asking when they ask how long they have had the machine.
+                'service',
+            ]),
+            LatestServerReinstalls::forServers([$serverId])[$serverId] ?? null,
         ))->response();
     }
 
@@ -133,7 +155,7 @@ final class DedicatedServerController
 
         $operation = $this->changePower->execute($found, $action);
 
-        return (new DedicatedServerResource($found))
+        return (new DedicatedServerResource($found, LatestServerReinstalls::forServers([(string) $found->getKey()])[(string) $found->getKey()] ?? null))
             ->additional([
                 'meta' => [
                     'action' => $action->value,

@@ -221,7 +221,9 @@ final readonly class IngestWebhookEvent
     private function decode(PaymentProvider $provider, string $rawPayload): array
     {
         try {
-            /** @var array<string, mixed> $decoded */
+            // No annotation asserting an array: a valid JSON document can be
+            // a string or a number, and the check below is what actually
+            // establishes this is an object.
             $decoded = json_decode($rawPayload, true, 32, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
             throw MalformedWebhookPayloadException::forProvider($provider->name(), 'the body is not valid JSON');

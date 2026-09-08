@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Dedicated\Infrastructure;
 use Lynomia\Modules\Dedicated\Domain\Contracts\DedicatedProvider;
 use Lynomia\Modules\Dedicated\Domain\Enums\BmcProtocol;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\BmcNotConfiguredException;
-use Lynomia\Modules\Dedicated\Domain\Exceptions\UnknownBmcProtocolException;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\BmcConnection;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\FakeDedicatedProvider;
@@ -55,7 +54,6 @@ final class DedicatedProviderFactory
     ) {}
 
     /**
-     * @throws UnknownBmcProtocolException
      * @throws BmcNotConfiguredException
      */
     public function for(BmcEndpoint $endpoint): DedicatedProvider
@@ -80,13 +78,6 @@ final class DedicatedProviderFactory
             BmcProtocol::Redfish => new RedfishDedicatedProvider($connection, $this->redactor),
             BmcProtocol::Ilo => new IloDedicatedProvider($connection, $this->redactor),
             BmcProtocol::Ipmi => new IpmiDedicatedProvider($connection, $this->redactor),
-            // Reached when the protocol enum gains a case ahead of its adapter,
-            // which is how an endpoint row comes to name a protocol the running
-            // code cannot speak.
-            default => throw UnknownBmcProtocolException::named(
-                $endpoint->protocol->value,
-                array_map(static fn (BmcProtocol $p): string => $p->value, BmcProtocol::cases()),
-            ),
         };
     }
 

@@ -166,15 +166,19 @@ final class ReverseDnsPublicationTest extends IpamApiTestCase
     #[Test]
     public function a_driver_this_build_cannot_speak_is_refused_rather_than_faked(): void
     {
-        config()->set('billing.providers.dns', 'cloudflare');
+        // Route 53 is named because it is a real provider this build genuinely
+        // has no adapter for. `cloudflare` used to stand here and no longer
+        // can: there is an adapter for it now, which is the point of the
+        // change, and a test asserting otherwise would be asserting the
+        // absence of the thing that was just added.
+        config()->set('billing.providers.dns', 'route53');
 
         // A silent fallback to the fake would publish nothing while reporting
         // every record as live — the one failure this module is arranged to
-        // avoid. There is no Cloudflare adapter in this build; its credentials
-        // are not available in this environment either.
-        $this->expectExceptionMessage('No reverse-DNS adapter is registered for the driver "cloudflare"');
+        // avoid.
+        $this->expectExceptionMessage('No reverse-DNS adapter is registered for the driver "route53"');
 
-        (new ReverseDnsProviderFactory)->make();
+        (new ReverseDnsProviderFactory($this->app->make(SecretRedactor::class)))->make();
     }
 
     #[Test]

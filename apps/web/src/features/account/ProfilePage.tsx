@@ -7,6 +7,7 @@ import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
 import { PageHeader } from '@/components/PageHeader'
 import { useCurrentUser } from '@/features/auth/useAuth'
+import { NotificationPreferencesSection } from '@/features/notifications/NotificationPreferencesSection'
 import { SUPPORTED_LOCALES, changeLocale, isSupportedLocale } from '@/i18n'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
@@ -69,7 +70,7 @@ export function ProfilePage() {
     <>
       <PageHeader title={t('nav.profile')} description={t('account.profileSubtitle')} />
 
-      <div className="max-w-xl">
+      <div className="flex max-w-xl flex-col gap-6">
         <Card>
           <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4" noValidate>
             {displayed !== null ? (
@@ -144,6 +145,13 @@ export function ProfilePage() {
             </div>
           </form>
         </Card>
+
+        {/*
+          * On the profile rather than the security page: what a person wants
+          * emailed is a preference, and the security page is for the controls
+          * that protect the account.
+          */}
+        <NotificationPreferencesSection />
       </div>
     </>
   )

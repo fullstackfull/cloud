@@ -204,9 +204,14 @@ final readonly class AdoptOrphanResource
     private function syncService(ProvisioningJob $job): void
     {
         $target = $job->kind->serviceStatusOnSuccess();
-        $service = $target === null ? null : $job->service()->lockForUpdate()->first();
 
-        if ($service === null || $target === null) {
+        if ($target === null) {
+            return;
+        }
+
+        $service = $job->service()->lockForUpdate()->first();
+
+        if ($service === null) {
             return;
         }
 

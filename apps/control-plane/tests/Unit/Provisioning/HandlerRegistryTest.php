@@ -32,15 +32,15 @@ final class HandlerRegistryTest extends TestCase
     #[Test]
     public function a_handler_is_resolved_by_the_kind_of_work_it_does(): void
     {
-        $handler = new FakeProvisioningHandler(ProvisioningJobKind::Suspend);
+        $handler = new FakeProvisioningHandler(ProvisioningJobKind::Stop);
         $this->registry->register($handler);
 
         // Lookup is by kind because the kind is what is persisted in the job
         // row, and a job queued today must still resolve after the handler
         // class has moved.
-        $this->assertSame($handler, $this->registry->get(ProvisioningJobKind::Suspend));
-        $this->assertTrue($this->registry->has(ProvisioningJobKind::Suspend));
-        $this->assertSame(['suspend'], $this->registry->kinds());
+        $this->assertSame($handler, $this->registry->get(ProvisioningJobKind::Stop));
+        $this->assertTrue($this->registry->has(ProvisioningJobKind::Stop));
+        $this->assertSame(['stop'], $this->registry->kinds());
     }
 
     #[Test]

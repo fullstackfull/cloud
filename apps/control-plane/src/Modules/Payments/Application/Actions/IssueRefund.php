@@ -17,6 +17,8 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Throwable;
 
 /**
@@ -36,11 +38,37 @@ use Throwable;
  * so a second refund arriving mid-flight sees the reservation, while holding a
  * row lock across a network call would block every other refund for the
  * duration of Stripe's latency.
+ *
+ * ---------------------------------------------------------------------------
+ * Money goes back the way it came
+ * ---------------------------------------------------------------------------
+ *
+ * An invoice can be paid partly from stored credit and partly by card, and
+ * each half is its own `transactions` row. A refund names one of those rows,
+ * so the channel is decided by which payment is being reversed rather than by
+ * a ratio somebody has to choose: the card half goes back to the card, the
+ * wallet half goes back to the wallet.
+ *
+ * The alternative policies were both rejected. Returning everything to the
+ * card pays out real money for credit the customer was given rather than paid
+ * — the platform would be converting promotional credit into cash. Returning
+ * everything to the wallet takes back money the customer actually paid and
+ * hands them a voucher instead, which is not a refund. Splitting by ratio
+ * gives a different answer depending on the order the payments happened to
+ * arrive in, and no way to explain the number on a statement.
+ *
+ * A wallet refund makes no network call, because the money never left. It is
+ * a credit through WalletLedger, succeeded at once — there is no pending state
+ * for a transfer that cannot fail halfway.
  */
 final readonly class IssueRefund
 {
+    /** The provider name a wallet-funded charge carries. */
+    public const string WALLET_PROVIDER = 'wallet';
+
     public function __construct(
         private PaymentProviderRegistry $registry,
+        private WalletLedger $wallet,
     ) {}
 
     /**
@@ -63,6 +91,10 @@ final readonly class IssueRefund
             $issuedBy,
             $invoiceId ?? $transaction->invoice_id,
         ));
+
+        if ($transaction->provider === self::WALLET_PROVIDER) {
+            return $this->returnToTheWallet($transaction, $refund, $amount, $reason, $issuedBy);
+        }
 
         $provider = $this->registry->get($transaction->provider);
 
@@ -116,6 +148,61 @@ final readonly class IssueRefund
                 issuedAt: now()->toImmutable(),
             ));
         }
+
+        return $refund;
+    }
+
+    /**
+     * Puts credit back where it was spent from.
+     *
+     * One transaction, and the refund row is settled inside it: unlike a card
+     * refund there is no outside system that can accept the instruction and
+     * then fail, so a pending state would be a state nothing could ever leave.
+     *
+     * The credit carries the refund's own id as its idempotency key, so a
+     * retried refund of the same row credits once.
+     */
+    private function returnToTheWallet(
+        Transaction $transaction,
+        Refund $refund,
+        Money $amount,
+        string $reason,
+        ?User $issuedBy,
+    ): Refund {
+        $customer = $transaction->customer;
+
+        DB::transaction(function () use ($customer, $transaction, $refund, $amount, $reason, $issuedBy): void {
+            $this->wallet->credit(
+                wallet: $this->wallet->walletFor($customer, $amount->currency()),
+                amount: $amount,
+                kind: WalletTransactionKind::Refund,
+                description: sprintf('Refunded: %s', mb_substr($reason, 0, 180)),
+                actor: $issuedBy,
+                metadata: ['refund_id' => (string) $refund->getKey()],
+                idempotencyKey: 'refund:'.$refund->getKey(),
+                invoiceId: $refund->invoice_id,
+                transactionId: (string) $transaction->getKey(),
+            );
+
+            $refund->fill([
+                'status' => RefundStatus::Succeeded,
+                'provider_reference' => (string) $refund->getKey(),
+                'processed_at' => now(),
+            ])->save();
+        });
+
+        event(new RefundIssued(
+            refundId: $refund->id,
+            transactionId: $transaction->id,
+            customerId: $transaction->customer_id,
+            invoiceId: $refund->invoice_id,
+            provider: self::WALLET_PROVIDER,
+            amount: $amount,
+            remainingRefundable: $transaction->fresh()?->refundableAmount() ?? Money::zero($amount->currency()),
+            reason: $reason,
+            issuedByUserId: $issuedBy?->id,
+            issuedAt: now()->toImmutable(),
+        ));
 
         return $refund;
     }

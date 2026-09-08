@@ -96,3 +96,38 @@ reaches their control panel without a second password.
 The session is created server-side and is short-lived. The panel password is never sent to
 the browser, and the SSO endpoint authorises against the platform's own session before
 brokering anything.
+
+## Reconciliation
+
+`hosting:reconcile`, every four hours, bounded by `hosting.reconcile_batch`.
+
+`listAccounts()` was implemented against cPanel and DirectAdmin in Phase 12 and
+had no caller until this one, which meant the platform's belief that a customer
+had a working website rested entirely on its own record of having built one.
+
+| What it finds | Recorded as | Severity |
+| --- | --- | --- |
+| The platform says the account exists; the panel has never heard of it | `missing_at_provider` | critical — the customer is paying for a site that is not served, and they will notice first |
+| An account on the panel that no row claims | `orphan_at_provider` | warning |
+| A row marked terminated whose account is still serving | `orphan_at_provider` | warning |
+| The two disagree about whether the account is switched off | `suspension_mismatch` | critical |
+| `account_count` disagrees with the rows | `spec_mismatch` on the node | warning |
+
+**Nothing is repaired.** Not at the panel and not in the platform's own rows.
+An account whose provenance nobody knows must not be handed to a customer as
+theirs, and one the platform cannot see must not be terminated on the strength
+of a single listing that might have paged badly. Whichever way the sweep
+guessed on a suspension mismatch, half the time it would be switching off a
+customer who has paid.
+
+A panel that will not answer produces no drift at all: nothing is concluded and
+the node keeps its old timestamp, so the next run looks again. A sweep that
+recorded "missing at the panel" for every account on a node whose API was down
+would report an outage as data loss, and bury the one real missing account in
+the middle of it. Nodes in maintenance are not asked, for the same reason.
+
+The capacity check is the one finding that is not about the panel at all.
+`account_count` is what the scheduler places against, and it is incremented and
+decremented by hand in two different actions; when it drifts, an over-counted
+node quietly refuses accounts it could hold and an under-counted one oversells
+its disk. Neither is visible from any screen.

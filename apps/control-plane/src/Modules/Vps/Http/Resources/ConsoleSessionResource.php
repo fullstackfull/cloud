@@ -46,7 +46,13 @@ final class ConsoleSessionResource extends JsonResource
         /** @var ConsoleSession $session */
         $session = $this->resource;
 
-        $gateway = config('vps.console.gateway_url');
+        /*
+         * Read from the gateway's own configuration rather than a `vps.*` key
+         * that did not exist — which meant this field was null in every
+         * deployment, gateway or no gateway, and a portal that could never
+         * offer a console however the platform was set up.
+         */
+        $gateway = config('console_gateway.public_url');
 
         return [
             'id' => $session->id,

@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Compute\Domain\Contracts;
 
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 
 /**
@@ -96,6 +99,82 @@ interface ComputeProvider
      * @throws ComputeProviderException
      */
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation;
+
+    /**
+     * Make a service policy state true at the provider.
+     *
+     * Suspension is not "stop the VM". A stop is indistinguishable at the
+     * hypervisor from the customer stopping their own machine, and nothing
+     * about a stopped VM prevents it being started again — so an adapter that
+     * implemented this as a stop would be implementing bookkeeping. What the
+     * policy asks for is that the machine cannot be brought back by the
+     * customer, or by a node reboot, until the platform lifts it.
+     *
+     * Must be idempotent. A suspension arriving twice — a retried job, a
+     * reconciliation confirming a state that is already true — must not fail
+     * and must not double anything.
+     *
+     * @throws ComputeProviderException
+     */
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation;
+
+    /**
+     * Undo whatever suspendVm did, and nothing else.
+     *
+     * Specifically it does not start the machine. Returning a customer's
+     * server to a running state is the platform's decision and belongs in the
+     * reactivation flow where it can be verified; an adapter that started it
+     * here would start machines that were deliberately powered off before they
+     * were ever suspended.
+     *
+     * @throws ComputeProviderException
+     */
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation;
+
+    /**
+     * Replace the machine's disk with a fresh image, keeping the machine.
+     *
+     * The most destructive call in this interface, and the one whose contract
+     * matters most, because everything it must NOT do is invisible in its
+     * signature:
+     *
+     *  - The machine keeps its provider id. An adapter that built a second
+     *    machine and destroyed the first would leave the platform's row
+     *    pointing at a machine that no longer exists, and the customer's
+     *    service mapped to nothing — while the new machine, which no row
+     *    names, is billed to nobody.
+     *  - The machine keeps its network interface, and with it its MAC address.
+     *    A customer's licences, DHCP reservations and firewall rules are all
+     *    keyed on it.
+     *  - The machine keeps its shape. A reinstall is not a resize; changing
+     *    the allocation here would change what the customer uses without
+     *    changing what they pay.
+     *  - Nothing about the address is touched. The platform's IPAM records
+     *    still hold the assignment, and the new guest is configured with the
+     *    same address through cloud-init.
+     *
+     * Must be safe to call on a machine that is running: the adapter powers it
+     * down itself rather than requiring the caller to sequence it, because a
+     * caller that forgets leaves the disk in use and the reinstall failing
+     * halfway.
+     *
+     * @throws ComputeProviderException
+     */
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation;
+
+    /**
+     * Where to connect for a console on this machine, and with what.
+     *
+     * Called by the console gateway after a permit has been redeemed, on the
+     * gateway's own server-side connection — never at the moment a permit is
+     * issued. The difference is the whole design: a provider's console ticket
+     * is a bearer credential for a root console, so it is fetched when the
+     * socket is about to open, used once, and never sent to a browser or
+     * written to a log.
+     *
+     * @throws ComputeProviderException
+     */
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint;
 
     /**
      * The hypervisor's view of one machine, or null when it does not have it.

@@ -17,7 +17,6 @@ use Lynomia\Modules\Catalog\Domain\Exceptions\OrderBelowCouponMinimumException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\UnknownCouponException;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
-use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -105,24 +104,6 @@ final class CouponValidator
         $this->assertCurrencyMatches($coupon, $context->orderAmount);
         $this->assertMeetsMinimum($coupon, $context->orderAmount);
         $this->assertAppliesToBasket($coupon, $context);
-    }
-
-    /**
-     * Whether the coupon would be accepted, without raising.
-     *
-     * For listing screens that show a customer which of their codes are
-     * currently usable, where nine refusals are an expected outcome rather
-     * than nine exceptions.
-     */
-    public function passes(Coupon $coupon, CouponContext $context): bool
-    {
-        try {
-            $this->validate($coupon, $context);
-        } catch (DomainException) {
-            return false;
-        }
-
-        return true;
     }
 
     /**

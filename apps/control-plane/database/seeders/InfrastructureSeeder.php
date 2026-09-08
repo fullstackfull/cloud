@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
+use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Domain\Enums\ClusterStatus;
@@ -65,6 +66,8 @@ use RuntimeException;
  */
 final class InfrastructureSeeder extends Seeder
 {
+    use AnnouncesProgress;
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -81,7 +84,7 @@ final class InfrastructureSeeder extends Seeder
         $this->hosting($datacenter);
         $this->dedicated($datacenter);
 
-        $this->command?->info(sprintf(
+        $this->announce(sprintf(
             'Infrastructure seeded: %d nodes, %d allocatable addresses, %d hosting nodes, %d dedicated servers.',
             ComputeNode::count(),
             // Allocatable, not total: the network, gateway and broadcast

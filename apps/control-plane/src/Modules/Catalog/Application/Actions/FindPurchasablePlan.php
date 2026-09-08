@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Catalog\Application\Actions;
 use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Catalog\Domain\Services\CataloguePriceVisibility;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 
 /**
  * One plan, addressed by slug or id, priced in the customer's currency.
@@ -27,7 +28,7 @@ final readonly class FindPurchasablePlan
         /** @var Plan $plan */
         $plan = Plan::query()
             ->purchasable()
-            ->whereHas('product', static fn (Builder $query): Builder => $query->purchasable())
+            ->whereHas('product', self::onlyPurchasableProducts(...))
             ->where(static fn (Builder $query): Builder => $query
                 ->where('slug', $identifier)
                 ->orWhere('id', $identifier))
@@ -35,5 +36,14 @@ final readonly class FindPurchasablePlan
             ->firstOrFail();
 
         return $this->prices->apply($plan, $currency);
+    }
+
+    /**
+     * @param  Builder<Product>  $query
+     * @return Builder<Product>
+     */
+    private static function onlyPurchasableProducts(Builder $query): Builder
+    {
+        return $query->purchasable();
     }
 }

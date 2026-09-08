@@ -27,6 +27,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -48,7 +49,7 @@ final class IssueRefundTest extends TestCase
         parent::setUp();
 
         $this->registry = new PaymentProviderRegistry($this->app);
-        $this->issue = new IssueRefund($this->registry);
+        $this->issue = new IssueRefund($this->registry, app(WalletLedger::class));
     }
 
     #[Test]

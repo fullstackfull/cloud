@@ -116,7 +116,7 @@ final readonly class InstallProfileRenderer
 
         $missing = [];
 
-        foreach ($matches[1] ?? [] as $key) {
+        foreach ($matches[1] as $key) {
             // A key present but null is still missing: "null" written into a
             // preseed is a literal four-character answer, not an absent one.
             if (! array_key_exists($key, $values) || $values[$key] === null) {

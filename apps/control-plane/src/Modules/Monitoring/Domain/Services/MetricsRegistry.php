@@ -41,14 +41,6 @@ final class MetricsRegistry
     }
 
     /**
-     * @return list<string>
-     */
-    public function registered(): array
-    {
-        return array_keys($this->collectors);
-    }
-
-    /**
      * @return list<Metric>
      */
     public function collect(): array

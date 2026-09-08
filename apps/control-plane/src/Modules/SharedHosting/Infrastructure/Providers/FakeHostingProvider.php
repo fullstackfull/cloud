@@ -215,7 +215,36 @@ final class FakeHostingProvider implements HostingProvider
 
     public function listAccounts(HostingNode $node): array
     {
+        /*
+         * The markers are read from the node's hostname here, not from a
+         * username: listing is the one call that is about the node rather than
+         * about an account, and it is the call the reconciler makes. A panel
+         * that is not answering has to be reproducible, because "what does the
+         * sweep do when the API is down" is the question that decides whether
+         * an outage gets recorded as data loss.
+         */
+        $this->refuseMarkedNode($node, 'list accounts on '.$node->hostname);
+
         return array_values($this->accounts[$this->nodeKey($node)] ?? []);
+    }
+
+    /**
+     * @throws HostingProviderException
+     */
+    private function refuseMarkedNode(HostingNode $node, string $operation): void
+    {
+        if (str_contains($node->hostname, self::TIMEOUT_MARKER)) {
+            throw HostingProviderException::requestFailed(
+                self::NAME,
+                $operation,
+                ['node' => $node->slug],
+                indeterminate: true,
+            );
+        }
+
+        if (str_contains($node->hostname, self::PROVIDER_FAILURE_MARKER)) {
+            throw HostingProviderException::requestFailed(self::NAME, $operation, ['node' => $node->slug]);
+        }
     }
 
     public function nodeHealth(HostingNode $node): NodeHealth

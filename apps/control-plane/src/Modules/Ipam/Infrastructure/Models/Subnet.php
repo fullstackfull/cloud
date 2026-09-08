@@ -120,7 +120,7 @@ class Subnet extends Model
     public function nonHostAddresses(): array
     {
         if ($this->ip_version !== IpVersion::V4) {
-            return array_values(array_filter([$this->gateway]));
+            return array_filter([$this->gateway]);
         }
 
         $block = $this->block();

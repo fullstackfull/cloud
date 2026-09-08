@@ -91,6 +91,18 @@ final class SubscriptionResource extends JsonResource
             // service is up on a day the customer has not paid for.
             'service_is_running' => $this->resource->serviceIsRunning(),
 
+            /*
+             * How long the data behind this subscription's services is kept
+             * once it ends.
+             *
+             * A platform-wide figure rather than a property of this row, and
+             * published here anyway: the screen that asks a customer to
+             * confirm a cancellation is the screen that has to tell them what
+             * happens to their data, and a portal that hard-coded the number
+             * would go on saying thirty the day a deployment changed it.
+             */
+            'data_retention_days' => max(0, (int) config('provisioning.termination.suspended_retention_days', 30)),
+
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

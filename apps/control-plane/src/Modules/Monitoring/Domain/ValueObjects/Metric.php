@@ -91,6 +91,6 @@ final readonly class Metric
             $seen[$key] = true;
         }
 
-        return new self($name, $type, $help, array_values($samples));
+        return new self($name, $type, $help, $samples);
     }
 }

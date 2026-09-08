@@ -9,6 +9,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Lynomia\Modules\Compute\Domain\DTOs\CloudInitConfig;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
@@ -563,6 +564,155 @@ final class ProxmoxComputeProviderTest extends TestCase
         // No "!" means this is a username, not a token id — which is what a
         // password-based configuration would look like.
         new ProxmoxConnection('https://pve.test:8006', 'root@pam', 'hunter2');
+    }
+
+    #[Test]
+    public function a_reinstall_stops_the_guest_before_it_deletes_anything(): void
+    {
+        /*
+         * The order is the safety property. Deleting a disk that a running
+         * guest still has open leaves the machine in the state this whole
+         * sequence exists to avoid — half rebuilt, with nobody able to say
+         * what survived.
+         */
+        config()->set('compute.reinstall.stop_poll_attempts', 1);
+
+        $calls = [];
+
+        Http::fake(function (Request $request) use (&$calls) {
+            $path = parse_url($request->url(), PHP_URL_PATH);
+            $calls[] = $request->method().' '.(is_string($path) ? $path : '').' '.json_encode($request->data());
+
+            if (str_contains((string) $path, '/status/current')) {
+                // Stopped from the first ask, so the loop does not sleep.
+                return Http::response(['data' => ['status' => 'stopped', 'name' => 'web-01']]);
+            }
+
+            return Http::response(['data' => self::UPID]);
+        });
+
+        $this->provider()->reinstallVm('pve-01', '101', $this->reinstallRequest());
+
+        $deleted = self::indexOfCall($calls, 'delete', 'scsi0');
+        $imported = self::indexOfCall($calls, 'import-from');
+
+        $this->assertNotNull($deleted, 'The old disk was never detached.');
+        $this->assertNotNull($imported, 'No replacement disk was imported.');
+        $this->assertLessThan($imported, $deleted, 'The replacement was created before the old disk was removed.');
+    }
+
+    #[Test]
+    public function a_guest_that_will_not_stop_keeps_its_disk(): void
+    {
+        /*
+         * The refusal that makes a reinstall failure survivable. A guest still
+         * running when the window closes has its disk left exactly where it
+         * was, so the customer still has the machine they had — and the
+         * operation ends as a plain failure rather than something a person has
+         * to investigate.
+         */
+        config()->set('compute.reinstall.stop_poll_attempts', 1);
+
+        $calls = [];
+
+        Http::fake(function (Request $request) use (&$calls) {
+            $path = parse_url($request->url(), PHP_URL_PATH);
+            $calls[] = $request->method().' '.(is_string($path) ? $path : '').' '.json_encode($request->data());
+
+            if (str_contains((string) $path, '/status/current')) {
+                return Http::response(['data' => ['status' => 'running', 'name' => 'web-01']]);
+            }
+
+            return Http::response(['data' => self::UPID]);
+        });
+
+        $this->expectException(ComputeProviderException::class);
+
+        try {
+            $this->provider()->reinstallVm('pve-01', '101', $this->reinstallRequest());
+        } finally {
+            $this->assertNull(
+                self::indexOfCall($calls, 'delete', 'scsi0'),
+                'A guest that would not stop had its disk detached anyway.',
+            );
+        }
+    }
+
+    #[Test]
+    public function a_reinstall_never_touches_the_machines_identity(): void
+    {
+        /*
+         * Everything absent from the config write is the point. A reinstall
+         * that rewrote net0 would issue a new MAC and break every licence and
+         * firewall rule keyed on the old one; one that wrote cores or memory
+         * would be a resize nobody billed for.
+         */
+        config()->set('compute.reinstall.stop_poll_attempts', 1);
+
+        $writes = [];
+
+        Http::fake(function (Request $request) use (&$writes) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+            if (str_contains($path, '/status/current')) {
+                return Http::response(['data' => ['status' => 'stopped', 'name' => 'web-01']]);
+            }
+
+            if ($request->method() === 'PUT' && str_ends_with($path, '/config')) {
+                $writes[] = $request->data();
+            }
+
+            return Http::response(['data' => self::UPID]);
+        });
+
+        $this->provider()->reinstallVm('pve-01', '101', $this->reinstallRequest());
+
+        foreach ($writes as $write) {
+            foreach (['net0', 'macaddr', 'cores', 'memory', 'sockets', 'vmid'] as $forbidden) {
+                $this->assertArrayNotHasKey(
+                    $forbidden,
+                    $write,
+                    sprintf('A reinstall wrote "%s", which belongs to the machine rather than to its image.', $forbidden),
+                );
+            }
+        }
+    }
+
+    private function reinstallRequest(): ReinstallVmRequest
+    {
+        return new ReinstallVmRequest(
+            templateReference: 'local:import/debian-13.qcow2',
+            storageName: 'local-nvme',
+            diskGib: 80,
+            hostname: 'web-01',
+            cloudInit: new CloudInitConfig(sshKeys: ['ssh-ed25519 AAAA test@lynomia']),
+        );
+    }
+
+    /**
+     * The first call whose recorded line contains every needle, or null.
+     *
+     * @param  list<string>  $calls
+     */
+    private static function indexOfCall(array $calls, string ...$needles): ?int
+    {
+        foreach ($calls as $index => $call) {
+            $matches = true;
+
+            foreach ($needles as $needle) {
+                if (! str_contains($call, $needle)) {
+                    $matches = false;
+
+                    break;
+                }
+            }
+
+            if ($matches) {
+                return $index;
+            }
+        }
+
+        return null;
     }
 
     private function provider(): ProxmoxComputeProvider

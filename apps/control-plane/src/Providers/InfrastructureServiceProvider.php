@@ -5,12 +5,32 @@ declare(strict_types=1);
 namespace Lynomia\Providers;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Console\Domain\Contracts\ConsoleUpstreamResolver;
+use Lynomia\Modules\Console\Infrastructure\Upstream\ProviderConsoleUpstreamResolver;
+use Lynomia\Modules\Dedicated\Application\Handlers\ProvisionDedicatedHandler;
+use Lynomia\Modules\Dedicated\Application\Handlers\ReinstallDedicatedHandler;
+use Lynomia\Modules\Dedicated\Domain\Contracts\HostReachability;
+use Lynomia\Modules\Dedicated\Infrastructure\DedicatedReinstallLedger;
+use Lynomia\Modules\Dedicated\Infrastructure\Reachability\TcpHostReachability;
+use Lynomia\Modules\Provisioning\Domain\Contracts\DestructiveOperationLedger;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
+use Lynomia\Modules\SharedHosting\Application\Handlers\ChangeHostingPackageHandler;
+use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\DestroyVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\ReinstallVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
+use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
 use Lynomia\Modules\Vps\Infrastructure\IpamReservationReleaser;
+use Lynomia\Modules\Vps\Infrastructure\NodeCapacityReleaser;
+use Lynomia\Modules\Vps\Infrastructure\VpsReinstallLedger;
+use Lynomia\Support\Provisioning\EveryDestructiveOperationLedger;
+use Lynomia\Support\Provisioning\EveryReservationReleaser;
 
 /**
  * Where the provisioning engine meets the things it provisions.
@@ -29,16 +49,61 @@ final class InfrastructureServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        /*
+         * How the platform checks that a rebuilt physical machine came back.
+         *
+         * Bound to a plain TCP connect, which is the only in-band check the
+         * platform is entitled to make: it holds no key to a customer's
+         * machine and should not. A deployment whose machines are only
+         * reachable through a bastion binds something that knows how.
+         */
+        $this->app->bind(HostReachability::class, TcpHostReachability::class);
+
+        /*
+         * The console gateway resolves its upstream through the machine's own
+         * cluster. There is deliberately no alternative binding for a
+         * "default" console host: a platform running two clusters would dial
+         * the wrong one, and a console dialled at the wrong cluster is either
+         * a failure or a connection to somebody else's machine with the same
+         * id.
+         */
+        $this->app->bind(ConsoleUpstreamResolver::class, ProviderConsoleUpstreamResolver::class);
+
         $this->app->singleton(ProvisioningHandlerRegistry::class);
         $this->app->bind(HandlerRegistry::class, ProvisioningHandlerRegistry::class);
 
         /*
-         * Compensation is bound to IPAM. The engine decides WHETHER to release
-         * or quarantine — that decision follows from the failure class and
-         * belongs to the engine — while this adapter decides what those words
-         * mean for an IP address.
+         * Compensation reaches every scarce resource a build takes, not one of
+         * them. The engine decides WHETHER to release or quarantine — that
+         * follows from the failure class and belongs to the engine — while
+         * each adapter decides what those words mean for the thing it
+         * allocated.
+         *
+         * This was a single binding to IPAM, and the effect was that a failed
+         * build handed back its address and kept the node's cpu, memory and
+         * storage for ever. ReleaseNodeCapacity had been written for exactly
+         * this and had no caller; there was only ever room for one releaser.
+         *
+         * The two adapters point opposite ways on quarantine, deliberately. An
+         * address that may be in use is held OUT of the pool; capacity that may
+         * be in use is held AS committed. Both are "do not let anyone else have
+         * this until a person has looked".
          */
-        $this->app->bind(ResourceReservationReleaser::class, IpamReservationReleaser::class);
+        $this->app->bind(ResourceReservationReleaser::class, static fn ($app) => new EveryReservationReleaser([
+            $app->make(IpamReservationReleaser::class),
+            $app->make(NodeCapacityReleaser::class),
+        ]));
+
+        /*
+         * The same composition, for the question an operator retry has to ask
+         * before it does anything: has this job already destroyed something?
+         * Both rebuildable things answer for themselves, and the engine keeps
+         * knowing about neither.
+         */
+        $this->app->bind(DestructiveOperationLedger::class, static fn ($app) => new EveryDestructiveOperationLedger([
+            $app->make(VpsReinstallLedger::class),
+            $app->make(DedicatedReinstallLedger::class),
+        ]));
 
         /*
          * There is deliberately no global ComputeProvider binding. The driver
@@ -55,9 +120,31 @@ final class InfrastructureServiceProvider extends ServiceProvider
         /** @var ProvisioningHandlerRegistry $handlers */
         $handlers = $this->app->make(ProvisioningHandlerRegistry::class);
 
-        // Registered as class strings with their kind stated, so that
-        // registration does not construct every handler — and therefore every
-        // provider client — on every request that touches the container.
+        /*
+         * Registered as class strings with their kind stated, so that
+         * registration does not construct every handler — and therefore every
+         * provider client — on every request that touches the container.
+         *
+         * Every kind any production code path can create must appear here.
+         * For most of this project's life only CreateVps did, and the effect
+         * was not a compile error or a failing test: a customer pressing
+         * "reboot", ordering shared hosting, or buying a dedicated server got
+         * a 202, a job row, and a queued job that died at the worker with
+         * HandlerNotRegisteredException. The handlers had been written; the
+         * suites registered them themselves and passed. HandlerCoverageTest
+         * now derives the required set from the code that creates jobs, so
+         * this list cannot fall behind again.
+         */
         $handlers->register(CreateVpsHandler::class, ProvisioningJobKind::CreateVps);
+        $handlers->register(StartVpsHandler::class, ProvisioningJobKind::Start);
+        $handlers->register(StopVpsHandler::class, ProvisioningJobKind::Stop);
+        $handlers->register(RestartVpsHandler::class, ProvisioningJobKind::Restart);
+        $handlers->register(ReinstallVpsHandler::class, ProvisioningJobKind::ReinstallVps);
+        $handlers->register(DestroyVpsHandler::class, ProvisioningJobKind::DestroyVps);
+        $handlers->register(ResizeVpsHandler::class, ProvisioningJobKind::Resize);
+        $handlers->register(CreateHostingAccountHandler::class, ProvisioningJobKind::CreateHostingAccount);
+        $handlers->register(ChangeHostingPackageHandler::class, ProvisioningJobKind::ChangeHostingPackage);
+        $handlers->register(ProvisionDedicatedHandler::class, ProvisioningJobKind::ProvisionDedicated);
+        $handlers->register(ReinstallDedicatedHandler::class, ProvisioningJobKind::ReinstallDedicated);
     }
 }

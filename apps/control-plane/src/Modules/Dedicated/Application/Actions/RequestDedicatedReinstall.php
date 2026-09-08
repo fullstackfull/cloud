@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dedicated\Application\Actions;
 
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedOperationRefusedException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\ReinstallConfirmationMismatchException;
 use Lynomia\Modules\Dedicated\Domain\Services\DedicatedOperationGuard;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
@@ -44,18 +48,15 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  * write one row that says what was asked for — and hands the rest to the
  * engine.
  *
- * **The handler for that work does not exist yet.** No `ProvisioningHandler`
- * is registered for {@see ProvisioningJobKind::Reinstall} on physical
- * hardware, so a job created here will fail at the worker with
- * `HandlerNotRegisteredException` rather than reinstall anything. That is the
- * correct failure while the handler is missing — loud, recorded against the
- * job, and visible to an operator — and it is emphatically better than this
- * action reaching for {@see AuthorisePxeBoot}
- * itself: that action refuses any machine that is not in `provisioning`, and
- * the state machine has no edge from `active` to `provisioning` at all. The
- * path from a running customer server to a rebuilt one is a decision this
- * module has not yet made, and faking it from an HTTP endpoint is how a
- * customer's server is erased by a transition nobody designed.
+ * The work itself is {@see ReinstallDedicatedHandler}, which the engine reaches
+ * through the registry. This action deliberately does not call
+ * {@see AuthorisePxeBoot} itself: arming a boot override inside an HTTP
+ * request would leave a machine primed to erase itself if the response were
+ * lost, with no job row to say why. The path from a running customer server to
+ * a rebuilt one now exists and is explicit — the machine moves to
+ * `reinstalling`, which is the one state other than `provisioning` where a
+ * network install is legal, and it is reached only by way of the typed
+ * confirmation above.
  *
  * ---------------------------------------------------------------------------
  * The order of the four steps is the design
@@ -82,6 +83,7 @@ final readonly class RequestDedicatedReinstall
     public function __construct(
         private CreateProvisioningJob $createJob,
         private DedicatedOperationGuard $guard,
+        private RecordAuditEntry $audit,
     ) {}
 
     /**
@@ -123,7 +125,7 @@ final readonly class RequestDedicatedReinstall
         $this->guard->assertNothingInFlight($server);
 
         $job = $this->createJob->execute(new ProvisioningJobRequest(
-            kind: ProvisioningJobKind::Reinstall,
+            kind: ProvisioningJobKind::ReinstallDedicated,
             idempotencyKey: $key,
             /*
              * The protocol the machine's own best controller speaks, read from
@@ -161,7 +163,45 @@ final readonly class RequestDedicatedReinstall
             maxAttempts: 1,
         ));
 
+        /*
+         * The operation record is written before the job is dispatched. A
+         * customer who has just typed a serial number to confirm the most
+         * destructive act available to them must see something happening, and
+         * a record created by the worker would appear only once a worker
+         * picked the job up. It also means a job that never reaches a worker
+         * still leaves evidence that a rebuild was asked for.
+         */
+        $operation = DedicatedReinstall::query()->create([
+            'dedicated_server_id' => $server->getKey(),
+            'service_id' => $server->service_id,
+            'customer_id' => $server->customer_id,
+            'provisioning_job_id' => $job->getKey(),
+            'state' => DedicatedReinstallState::Requested,
+            'state_changed_at' => now(),
+            'os_install_profile_id' => $profile?->getKey(),
+            'os_install_profile_slug' => $profile?->slug,
+            'bmc_endpoint_id' => $server->preferredBmcEndpoint()?->getKey(),
+            'bmc_protocol' => $server->preferredBmcEndpoint()?->protocol->value,
+        ]);
+
+        // The same record the virtual path keeps, for the same reason: this is
+        // the moment a person asked for a machine's disks to be erased.
+        $this->audit->execute(
+            action: AuditAction::DedicatedReinstallRequested,
+            subject: $server,
+            customerId: $server->customer_id,
+            context: [
+                'dedicated_server_id' => (string) $server->getKey(),
+                'serial' => $server->serial,
+                'provisioning_job_id' => (string) $job->getKey(),
+                'dedicated_reinstall_id' => (string) $operation->getKey(),
+                'os_install_profile_slug' => $profile?->slug,
+            ],
+        );
+
         if ($job->wasRecentlyCreated) {
+            $operation->advanceTo(DedicatedReinstallState::Queued);
+
             RunProvisioningJob::dispatch((string) $job->getKey());
         }
 

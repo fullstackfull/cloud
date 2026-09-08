@@ -50,22 +50,6 @@ final class InvoiceNumberAllocatorTest extends TestCase
     }
 
     #[Test]
-    public function a_batch_allocation_returns_a_contiguous_run(): void
-    {
-        $this->assertSame(
-            ['LYN-000001', 'LYN-000002', 'LYN-000003', 'LYN-000004', 'LYN-000005'],
-            $this->allocator->nextBatch(5),
-        );
-    }
-
-    #[Test]
-    public function an_empty_batch_consumes_nothing(): void
-    {
-        $this->assertSame([], $this->allocator->nextBatch(0));
-        $this->assertSame('LYN-000001', $this->allocator->next());
-    }
-
-    #[Test]
     public function concurrent_allocations_on_separate_connections_never_collide(): void
     {
         /*

@@ -194,7 +194,7 @@ final class SettleInvoiceTest extends TestCase
     #[Test]
     public function a_draft_or_void_invoice_cannot_be_settled(): void
     {
-        $draft = Invoice::factory()->totalling(Money::of('10.000', 'KWD'))->create();
+        $draft = Invoice::factory()->totalling(Money::of('10.000', 'KWD'))->draft()->create();
         $void = Invoice::factory()->totalling(Money::of('10.000', 'KWD'))->create(['status' => InvoiceStatus::Void]);
 
         foreach ([$draft, $void] as $invoice) {

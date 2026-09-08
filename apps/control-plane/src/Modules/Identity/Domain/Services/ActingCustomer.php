@@ -27,11 +27,6 @@ final class ActingCustomer
         $this->customer = $customer;
     }
 
-    public function isResolved(): bool
-    {
-        return $this->customer !== null;
-    }
-
     /**
      * The acting customer.
      *

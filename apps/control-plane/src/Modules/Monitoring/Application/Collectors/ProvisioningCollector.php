@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Monitoring\Domain\Contracts\MetricsCollector;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\Metric;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\MetricSample;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
+use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 
@@ -49,7 +52,64 @@ final readonly class ProvisioningCollector implements MetricsCollector
         return [
             $this->jobsByStateAndKind(),
             $this->durations(),
+            $this->drift(),
         ];
+    }
+
+    /**
+     * Open disagreements between the platform and its providers.
+     *
+     * RecordDrift's own docblock says the platform "records, alerts, and waits
+     * for a person". The recording was built and the alerting was not: drift
+     * accumulated in a table with no series behind it, so the only way to
+     * discover a customer's machine had gone missing at the hypervisor was for
+     * somebody to open the drift screen and look.
+     *
+     * Labelled by kind and severity and nothing else. Both are enums of three
+     * or four cases, so the series count is fixed at twelve however much drift
+     * there is — a metric labelled by service or provider reference would grow
+     * one series per missing machine, which is a cardinality explosion
+     * triggered precisely by the incident it is meant to report.
+     *
+     * Resolved drift is excluded. What an alert needs to know is what is still
+     * true, and a resolved row that kept its series would hold a rule open for
+     * ever after the problem was fixed.
+     */
+    private function drift(): Metric
+    {
+        $rows = DB::table('resource_drifts')
+            ->whereIn('status', [DriftStatus::Open->value, DriftStatus::Acknowledged->value])
+            ->selectRaw('kind, severity, count(*) as total')
+            ->groupBy('kind', 'severity')
+            ->get();
+
+        /** @var array<string, int> $counts */
+        $counts = [];
+
+        foreach ($rows as $row) {
+            /** @var object{kind: string, severity: string, total: int|string} $row */
+            $counts[$row->kind.'|'.$row->severity] = (int) $row->total;
+        }
+
+        $samples = [];
+
+        // The full cross product, zeros included: a series that only appears
+        // once there is drift is a series no alert rule can be written against
+        // in advance.
+        foreach (DriftKind::cases() as $kind) {
+            foreach (DriftSeverity::cases() as $severity) {
+                $samples[] = MetricSample::of(
+                    ['kind' => $kind->value, 'severity' => $severity->value],
+                    $counts[$kind->value.'|'.$severity->value] ?? 0,
+                );
+            }
+        }
+
+        return Metric::gauge(
+            'lynomia_resource_drift_open',
+            'Unresolved disagreements between the platform and a provider, by kind and severity. A critical one means a customer is paying for a machine the hypervisor does not have.',
+            $samples,
+        );
     }
 
     private function jobsByStateAndKind(): Metric
@@ -146,12 +206,12 @@ final readonly class ProvisioningCollector implements MetricsCollector
 
                 $samples[] = new MetricSample(
                     ['kind' => $kind->value, 'le' => (string) $boundary],
-                    (float) ($row?->{$property} ?? 0),
+                    (float) ($row->{$property} ?? 0),
                     '_bucket',
                 );
             }
 
-            $observations = (float) ($row?->observations ?? 0);
+            $observations = (float) ($row->observations ?? 0);
 
             // The +Inf bucket is mandatory and must equal _count. A histogram
             // missing it is silently useless: histogram_quantile() has no
@@ -164,7 +224,7 @@ final readonly class ProvisioningCollector implements MetricsCollector
 
             $samples[] = new MetricSample(
                 ['kind' => $kind->value],
-                (float) ($row?->elapsed_sum ?? 0),
+                (float) ($row->elapsed_sum ?? 0),
                 '_sum',
             );
 

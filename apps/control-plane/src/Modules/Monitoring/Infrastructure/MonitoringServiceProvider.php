@@ -6,12 +6,18 @@ namespace Lynomia\Modules\Monitoring\Infrastructure;
 
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Monitoring\Application\Collectors\CapacityCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\ConsoleCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\DnsCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\IpamCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\LifecycleCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\NotificationCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\OrdersCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\PaymentsCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\ProductCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ProvisioningCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\QueueCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\RevenueCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\SchedulerCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ServicesCollector;
 use Lynomia\Modules\Monitoring\Domain\Services\MetricsRegistry;
 
@@ -36,11 +42,17 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(OrdersCollector::class),
                 $app->make(ProvisioningCollector::class),
                 $app->make(ServicesCollector::class),
+                $app->make(LifecycleCollector::class),
                 $app->make(QueueCollector::class),
                 $app->make(IpamCollector::class),
                 $app->make(CapacityCollector::class),
                 $app->make(PaymentsCollector::class),
                 $app->make(RevenueCollector::class),
+                $app->make(SchedulerCollector::class),
+                $app->make(NotificationCollector::class),
+                $app->make(ConsoleCollector::class),
+                $app->make(DnsCollector::class),
+                $app->make(ProductCollector::class),
             );
         });
     }

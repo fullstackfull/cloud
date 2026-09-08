@@ -55,6 +55,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?int $rack_unit
  * @property int $height_units
  * @property ?string $hardware_profile
+ * @property ?string $os_install_profile_id
  * @property DedicatedServerStatus $status
  * @property PowerState $power_state
  * @property ?string $customer_id

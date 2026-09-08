@@ -40,7 +40,7 @@ final class VpsReinstallEndpointTest extends VpsApiTestCase
             ->withHeader('Idempotency-Key', 'rebuild-web-01-a')
             ->postJson('/api/v1/vps/'.$machine->id.'/reinstall', ['confirm_hostname' => 'web-01'])
             ->assertStatus(202)
-            ->assertJsonPath('data.kind', ProvisioningJobKind::Reinstall->value)
+            ->assertJsonPath('data.kind', ProvisioningJobKind::ReinstallVps->value)
             ->assertJsonPath('data.status', ProvisioningJobStatus::Queued->value);
 
         Queue::assertPushed(RunProvisioningJob::class, 1);

@@ -38,7 +38,7 @@ Proxmox Backup Server through explicit provider interfaces.
 
 ## Quick start
 
-Requirements: PHP 8.3+, Composer 2, Node 20+, Docker (for local Postgres/Redis/Mailpit).
+Requirements: PHP 8.4+, Composer 2, Node 20+, Docker (for local Postgres/Redis/Mailpit).
 
 ```bash
 make bootstrap   # install dependencies, start services, migrate from an empty DB

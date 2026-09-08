@@ -8,6 +8,7 @@ use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Contracts\Auth\CanResetPassword;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
@@ -44,7 +45,7 @@ final class NotificationRoutingServiceProvider extends ServiceProvider
          * has to handle — or be trusted with — signed-URL validation.
          */
         VerifyEmail::createUrlUsing(
-            static fn (MustVerifyEmail $notifiable): string => URL::temporarySignedRoute(
+            static fn (MustVerifyEmail&Model $notifiable): string => URL::temporarySignedRoute(
                 'api.v1.verification.verify',
                 now()->addMinutes((int) config('auth.verification.expire', 60)),
                 [

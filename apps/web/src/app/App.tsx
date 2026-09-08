@@ -4,6 +4,35 @@ import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { DashboardPage } from '@/features/account/DashboardPage'
+import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
+import { AdminDriftPage } from '@/features/admin/AdminDriftPage'
+import { AdminSupportPage } from '@/features/admin/AdminSupportPage'
+import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePage'
+import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
+import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
+import { AdminProvisioningPage } from '@/features/admin/AdminProvisioningPage'
+import { InvoicesPage } from '@/features/billing/InvoicesPage'
+import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
+import { CataloguePage } from '@/features/catalog/CataloguePage'
+import { ProductPage } from '@/features/catalog/ProductPage'
+import { DedicatedPage } from '@/features/infrastructure/DedicatedPage'
+import { HostingPage } from '@/features/infrastructure/HostingPage'
+import { IpAddressesPage } from '@/features/infrastructure/IpAddressesPage'
+import { NotificationsPage } from '@/features/notifications/NotificationsPage'
+import { BackupsPage } from '@/features/backups/BackupsPage'
+import { DnsPage } from '@/features/dns/DnsPage'
+import { DomainsPage } from '@/features/domains/DomainsPage'
+import { PlanChangePage } from '@/features/billing/PlanChangePage'
+import { ConsolePage } from '@/features/console/ConsolePage'
+import { VpsPage } from '@/features/infrastructure/VpsPage'
+import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
+import { OrdersPage } from '@/features/orders/OrdersPage'
+import { ServicesPage } from '@/features/services/ServicesPage'
+import { SupportPage } from '@/features/support/SupportPage'
+import { InvitationPage } from '@/features/team/InvitationPage'
+import { TeamPage } from '@/features/team/TeamPage'
+import { ApiTokensPage } from '@/features/tokens/ApiTokensPage'
+import { WalletPage } from '@/features/wallet/WalletPage'
 import { ProfilePage } from '@/features/account/ProfilePage'
 import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
@@ -16,7 +45,7 @@ import { ApiError } from '@/lib/api'
 import { AppLayout } from './AppLayout'
 import { NotFoundPage } from './NotFoundPage'
 import { PublicLayout } from './PublicLayout'
-import { RequireAuth, RequireGuest } from './guards'
+import { RequireAuth, RequireGuest, RequireOperator } from './guards'
 
 function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -61,8 +90,56 @@ export function App() {
             <Route element={<RequireAuth />}>
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
+
+                <Route path="/catalogue" element={<CataloguePage />} />
+                <Route path="/catalogue/:slug" element={<ProductPage />} />
+
+                <Route path="/orders" element={<OrdersPage />} />
+                <Route path="/orders/:id" element={<OrderDetailPage />} />
+                <Route path="/invoices" element={<InvoicesPage />} />
+                <Route path="/subscriptions" element={<SubscriptionsPage />} />
+                <Route path="/subscriptions/:id/plan" element={<PlanChangePage />} />
+                <Route path="/wallet" element={<WalletPage />} />
+
+                <Route path="/services" element={<ServicesPage />} />
+                <Route path="/vps" element={<VpsPage />} />
+                <Route path="/vps/:id/console" element={<ConsolePage />} />
+                <Route path="/backups" element={<BackupsPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
+                <Route path="/dedicated" element={<DedicatedPage />} />
+                <Route path="/hosting" element={<HostingPage />} />
+                <Route path="/ips" element={<IpAddressesPage />} />
+                <Route path="/dns" element={<DnsPage />} />
+                <Route path="/domains" element={<DomainsPage />} />
+
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />
+                <Route path="/api-tokens" element={<ApiTokensPage />} />
+                <Route path="/support" element={<SupportPage />} />
+                <Route path="/settings/team" element={<TeamPage />} />
+                {/*
+                  The invitee's landing page. Authenticated like everything
+                  else here, but deliberately not scoped to an account: the
+                  person arriving may belong to none yet, which is the whole
+                  point of the page.
+                */}
+                <Route path="/invitations/:token" element={<InvitationPage />} />
+
+                {/*
+                  The operator area. Gated for presentation by RequireOperator
+                  and enforced server-side by a permission on every endpoint —
+                  a customer who types the URL sees an empty shell and gets a
+                  403 from every request it makes.
+                */}
+                <Route element={<RequireOperator />}>
+                  <Route path="/admin/customers" element={<AdminCustomersPage />} />
+                  <Route path="/admin/provisioning" element={<AdminProvisioningPage />} />
+                  <Route path="/admin/operations" element={<AdminOperationsPage />} />
+                  <Route path="/admin/drift" element={<AdminDriftPage />} />
+                  <Route path="/admin/support" element={<AdminSupportPage />} />
+                  <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
+                  <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+                </Route>
               </Route>
             </Route>
 

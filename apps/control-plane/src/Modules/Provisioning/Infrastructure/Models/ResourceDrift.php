@@ -6,7 +6,6 @@ namespace Lynomia\Modules\Provisioning\Infrastructure\Models;
 
 use Carbon\CarbonImmutable;
 use Database\Factories\ResourceDriftFactory;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -14,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderPayloads;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * A disagreement between what the platform believes and what a provider
@@ -44,7 +43,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderP
 class ResourceDrift extends Model
 {
     /** @use HasFactory<ResourceDriftFactory> */
-    use HasFactory, HasUlids, RedactsProviderPayloads;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -54,6 +53,8 @@ class ResourceDrift extends Model
     protected function casts(): array
     {
         return [
+            'expected' => RedactedJsonCast::class,
+            'observed' => RedactedJsonCast::class,
             'kind' => DriftKind::class,
             'severity' => DriftSeverity::class,
             'status' => DriftStatus::class,
@@ -62,22 +63,6 @@ class ResourceDrift extends Model
             'last_seen_at' => 'immutable_datetime',
             'resolved_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function expected(): Attribute
-    {
-        return self::redactedJsonAttribute();
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function observed(): Attribute
-    {
-        return self::redactedJsonAttribute();
     }
 
     /**

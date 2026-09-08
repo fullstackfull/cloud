@@ -22,6 +22,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
+use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Services\OrderNumberAllocator;
@@ -234,7 +235,7 @@ final readonly class PlaceOrder
             $this->assertStock($customer, $plan, $claimedInThisBasket[$line->planId]);
 
             $lines[] = new PricingLine(
-                description: $plan->nameFor($customer->users()->first()?->locale ?? (string) config('app.locale')),
+                description: $plan->nameFor($customer->users()->first()->locale ?? (string) config('app.locale')),
                 quantity: $line->quantity,
                 unitPrice: $price->recurring(),
                 setupFee: $price->setup(),
@@ -340,7 +341,7 @@ final readonly class PlaceOrder
         ?User $placedBy,
     ): Order {
         try {
-            $order = DB::transaction(function () use (
+            return DB::transaction(function () use (
                 $customer, $request, $plans, $pricingLines, $priced, $coupon, $placedBy
             ): Order {
                 if ($coupon !== null) {
@@ -389,7 +390,56 @@ final readonly class PlaceOrder
                     ]);
                 }
 
-                return $order;
+                /*
+                 * Placed inside the same transaction as the insert.
+                 *
+                 * The order is still written as DRAFT and then transitioned, so
+                 * the state machine validates the move and the transition table
+                 * records how it got here — but committing the draft first made
+                 * that draft visible to every other connection for as long as
+                 * the second transaction took. Everything in the platform reads
+                 * a draft order as one the customer has not placed: it is kept
+                 * off the order list, it has no payment to start, and the loser
+                 * of an idempotency race would be handed one and told it was
+                 * their order. Two writes, one commit.
+                 */
+                $placed = $this->transition->execute(
+                    $order,
+                    $priced->isFree() ? OrderStatus::Paid : OrderStatus::PendingPayment,
+                    actorType: $placedBy !== null ? 'user' : 'system',
+                    actor: $placedBy,
+                    reason: $priced->isFree() ? 'order total is zero' : 'checkout submitted',
+                );
+
+                /*
+                 * Announced from inside the transaction and dispatched after it
+                 * commits.
+                 *
+                 * Announcing it here rather than in execute() is what keeps a
+                 * double-clicked buy button to one announcement: the loser of
+                 * the idempotency race never reaches this line, it leaves
+                 * through the catch below with the winner's order.
+                 *
+                 * Dispatch is held until the outermost transaction commits, for
+                 * the same reason RecordPaymentCapture holds PaymentCaptured: a
+                 * queued listener that dequeues before the order row is visible
+                 * would treat a purchase that exists as one that does not. The
+                 * level is checked rather than left to afterCommit's fallback,
+                 * because with nothing open the announcement belongs now and not
+                 * behind some other connection's commit.
+                 */
+                $announcement = new OrderPlaced(
+                    orderId: (string) $placed->getKey(),
+                    customerId: (string) $placed->customer_id,
+                    total: $priced->total,
+                    placedAt: ($placed->placed_at ?? now())->toImmutable(),
+                );
+
+                DB::afterCommit(static function () use ($announcement): void {
+                    event($announcement);
+                });
+
+                return $placed;
             });
         } catch (UniqueConstraintViolationException) {
             /*
@@ -407,22 +457,12 @@ final readonly class PlaceOrder
 
             throw new \RuntimeException('Order creation violated a unique constraint that was not the idempotency key.');
         }
-
-        // Written as DRAFT, then transitioned, so the state machine validates
-        // the move and the transition table records how the order got here.
-        return $this->transition->execute(
-            $order,
-            $priced->isFree() ? OrderStatus::Paid : OrderStatus::PendingPayment,
-            actorType: $placedBy !== null ? 'user' : 'system',
-            actor: $placedBy,
-            reason: $priced->isFree() ? 'order total is zero' : 'checkout submitted',
-        );
     }
 
     /**
      * Refuses a coupon whose remaining uses are already spoken for.
      *
-     * Redemption happens when the order is paid, and FulfilOrderOnInvoicePaid
+     * Redemption happens when the order is paid, and FulfilOrderOnSettlement
      * deliberately does not withhold a paying customer's service when that
      * redemption is refused. So the counter bounds the audit trail and nothing
      * else: a one-use code placed on ten orders before any of them is paid

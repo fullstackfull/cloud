@@ -96,7 +96,7 @@ final class IpAssignmentResource extends JsonResource
             // the customer API uses. Within the acting account by construction.
             'service_id' => $this->service_id,
 
-            'assigned_at' => $this->assigned_at?->toIso8601String(),
+            'assigned_at' => $this->assigned_at->toIso8601String(),
 
             // Enough to configure an interface, and nothing more.
             'network' => [

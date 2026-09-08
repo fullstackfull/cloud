@@ -176,7 +176,8 @@ final class ServiceShowEndpointTest extends ServiceApiTestCase
         $this->assertSame([
             'id', 'kind', 'label', 'state', 'is_usable', 'resources',
             'plan_id', 'order_id', 'order_item_id', 'subscription_id',
-            'activated_at', 'suspended_at', 'terminated_at', 'created_at',
+            'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
+            'terminated_at', 'created_at',
         ], array_keys($document));
 
         // And nothing the provider said, anywhere in the body — the node name

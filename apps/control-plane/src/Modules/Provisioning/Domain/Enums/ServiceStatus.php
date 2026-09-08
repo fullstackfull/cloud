@@ -17,6 +17,18 @@ enum ServiceStatus: string
     case Provisioning = 'provisioning';
     case Active = 'active';
     case Suspended = 'suspended';
+
+    /**
+     * Paid for again, and not yet usable.
+     *
+     * The state that exists because "the payment succeeded" and "the machine
+     * is back" are two different facts separated by a hypervisor call that can
+     * fail. Marking such a service active would tell a customer their server
+     * is running when it is still locked; leaving it suspended would tell them
+     * they still owe money. Neither is true, so there is a third state, and it
+     * is the one an operator screen filters on.
+     */
+    case Reactivating = 'reactivating';
     case Terminated = 'terminated';
     case Failed = 'failed';
 
@@ -26,7 +38,14 @@ enum ServiceStatus: string
         return $this === self::Terminated;
     }
 
-    /** Whether the customer can currently use what they bought. */
+    /**
+     * Whether the customer can currently use what they bought.
+     *
+     * Reactivating is deliberately not usable. The payment has landed and the
+     * machine has not come back, and telling a customer it is available when
+     * the hypervisor is still refusing them is the failure this state exists
+     * to prevent.
+     */
     public function isUsable(): bool
     {
         return $this === self::Active;
@@ -36,14 +55,20 @@ enum ServiceStatus: string
     public function holdsResources(): bool
     {
         return match ($this) {
-            self::Provisioning, self::Active, self::Suspended => true,
+            self::Provisioning, self::Active, self::Suspended, self::Reactivating => true,
             self::Pending, self::Terminated, self::Failed => false,
         };
     }
 
-    /** Whether an operator needs to look at this service. */
+    /**
+     * Whether an operator needs to look at this service.
+     *
+     * Reactivating counts. A service that has been reactivating for more than
+     * the few seconds a hypervisor call takes is a customer who has paid and
+     * cannot use what they paid for, and nobody else is going to notice.
+     */
     public function needsAttention(): bool
     {
-        return $this === self::Failed;
+        return $this === self::Failed || $this === self::Reactivating;
     }
 }

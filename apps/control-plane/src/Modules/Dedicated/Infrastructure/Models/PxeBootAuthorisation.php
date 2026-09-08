@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Dedicated\Infrastructure\Models;
 use Carbon\CarbonImmutable;
 use Database\Factories\PxeBootAuthorisationFactory;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,8 +14,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Dedicated\Domain\Enums\PxeAuthorisationStatus;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\PxeAuthorisationRefusedException;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderPayloads;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * One permission, for one machine, to erase itself and install an operating
@@ -54,7 +53,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 class PxeBootAuthorisation extends Model
 {
     /** @use HasFactory<PxeBootAuthorisationFactory> */
-    use HasFactory, HasUlids, RedactsProviderPayloads;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -64,19 +63,12 @@ class PxeBootAuthorisation extends Model
     protected function casts(): array
     {
         return [
+            'rendered_config' => RedactedJsonCast::class,
             'status' => PxeAuthorisationStatus::class,
             'expires_at' => 'immutable_datetime',
             'booted_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function renderedConfig(): Attribute
-    {
-        return self::redactedJsonAttribute();
     }
 
     /**

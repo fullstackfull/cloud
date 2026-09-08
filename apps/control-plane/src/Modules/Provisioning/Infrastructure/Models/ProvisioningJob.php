@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Provisioning\Infrastructure\Models;
 use Carbon\CarbonImmutable;
 use Database\Factories\ProvisioningJobFactory;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderPayloads;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * One unit of provisioning work, and everything needed to survive it failing.
@@ -38,6 +37,10 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderP
  * @property string $provider
  * @property ProvisioningJobStatus $status
  * @property ?string $remote_job_id
+ * @property ?string $remote_task_node
+ * @property ?string $remote_task_state
+ * @property ?CarbonImmutable $remote_task_polled_at
+ * @property int $remote_task_poll_count
  * @property int $attempts
  * @property int $max_attempts
  * @property int $timeout_seconds
@@ -52,7 +55,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Concerns\RedactsProviderP
 class ProvisioningJob extends Model
 {
     /** @use HasFactory<ProvisioningJobFactory> */
-    use HasFactory, HasUlids, RedactsProviderPayloads;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -62,32 +65,20 @@ class ProvisioningJob extends Model
     protected function casts(): array
     {
         return [
+            'payload' => RedactedJsonCast::class,
+            'result' => RedactedJsonCast::class,
             'kind' => ProvisioningJobKind::class,
             'status' => ProvisioningJobStatus::class,
             'failure_class' => FailureClass::class,
             'attempts' => 'integer',
             'max_attempts' => 'integer',
             'timeout_seconds' => 'integer',
+            'remote_task_poll_count' => 'integer',
+            'remote_task_polled_at' => 'immutable_datetime',
             'started_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',
             'next_attempt_at' => 'immutable_datetime',
         ];
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function payload(): Attribute
-    {
-        return self::redactedJsonAttribute();
-    }
-
-    /**
-     * @return Attribute<array<string, mixed>|null, string|null>
-     */
-    protected function result(): Attribute
-    {
-        return self::redactedJsonAttribute();
     }
 
     /**
@@ -121,21 +112,39 @@ class ProvisioningJob extends Model
      * folding it into the settle transaction, would mean the one crash it
      * exists to protect against is the one crash during which it is lost.
      */
-    public function recordRemoteJobId(string $remoteJobId): void
+    /**
+     * @param  ?string  $nodeName  Which node the task is running on. Written with the
+     *                             handle, because a handle without a node is a handle
+     *                             nothing can ask about — Proxmox answers per node, and
+     *                             a later reader would have to guess.
+     */
+    public function recordRemoteJobId(string $remoteJobId, ?string $nodeName = null): void
     {
-        if ($remoteJobId === '' || $this->remote_job_id === $remoteJobId) {
+        if ($remoteJobId === '' || ($this->remote_job_id === $remoteJobId && $this->remote_task_node === $nodeName)) {
             return;
         }
 
         $this->remote_job_id = $remoteJobId;
 
-        static::query()
-            ->whereKey($this->getKey())
-            ->update(['remote_job_id' => $remoteJobId, 'updated_at' => now()]);
+        $columns = ['remote_job_id' => $remoteJobId, 'updated_at' => now()];
 
-        // The attribute is now clean: a later save() of unrelated changes must
-        // not rewrite a column another worker may since have corrected.
+        if ($nodeName !== null && $nodeName !== '') {
+            $this->remote_task_node = $nodeName;
+            $columns['remote_task_node'] = $nodeName;
+        }
+
+        static::query()->whereKey($this->getKey())->update($columns);
+
+        // The attributes are now clean: a later save() of unrelated changes
+        // must not rewrite columns another worker may since have corrected.
+        // The node is synced only when it was set, because an attribute this
+        // instance never loaded is not one that can be synced — a nullable
+        // column with no default is absent from a freshly created model.
         $this->syncOriginalAttribute('remote_job_id');
+
+        if (array_key_exists('remote_task_node', $columns)) {
+            $this->syncOriginalAttribute('remote_task_node');
+        }
     }
 
     /**

@@ -45,3 +45,31 @@ export function RequireGuest() {
 
   return <Outlet />
 }
+
+/**
+ * Gate for the operator area.
+ *
+ * Presentation only, and worth being explicit about: every administrative
+ * endpoint checks its own permission server-side, so this decides what is worth
+ * drawing rather than what is allowed. A customer who guesses `/admin/customers`
+ * is redirected here, and would have been refused by the API either way.
+ */
+export function RequireOperator() {
+  const { data: user, isPending } = useCurrentUser()
+
+  if (isPending) return <LoadingScreen />
+
+  const isOperator = (user?.permissions ?? []).some((permission) =>
+    OPERATOR_PERMISSIONS.includes(permission),
+  )
+
+  return isOperator ? <Outlet /> : <Navigate to="/" replace />
+}
+
+const OPERATOR_PERMISSIONS = [
+  'customer.view_any',
+  'provisioning.view',
+  'infrastructure.view',
+  'invoice.view_any',
+  'payment.view_any',
+]

@@ -13,8 +13,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
-use Lynomia\Modules\Payments\Infrastructure\Models\Concerns\RedactsJsonSecrets;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
 
 /**
  * One movement of money between a customer and the platform.
@@ -39,7 +39,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 class Transaction extends Model
 {
     /** @use HasFactory<TransactionFactory> */
-    use HasFactory, HasUlids, RedactsJsonSecrets;
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -49,6 +49,7 @@ class Transaction extends Model
     protected function casts(): array
     {
         return [
+            'provider_metadata' => RedactedJsonCast::class,
             'kind' => TransactionKind::class,
             'status' => TransactionStatus::class,
             'amount_minor' => 'integer',

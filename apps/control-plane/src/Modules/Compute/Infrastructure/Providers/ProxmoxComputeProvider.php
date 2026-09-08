@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Http;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CloudInitConfig;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteTaskState;
@@ -20,6 +22,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
+use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Throwable;
@@ -61,6 +64,16 @@ final class ProxmoxComputeProvider implements ComputeProvider
     public const string NAME = 'proxmox';
 
     /**
+     * The value written to Proxmox's config `lock` when a service is suspended.
+     *
+     * Named rather than generic so that an operator reading `qm config` on a
+     * node can tell a Lynomia suspension apart from a lock left by a backup,
+     * a migration or a snapshot — and so the platform can tell them apart too,
+     * which is what stops reconciliation from clearing somebody else's lock.
+     */
+    public const string SUSPENSION_LOCK = SuspensionPolicy::LOCK_NAME;
+
+    /**
      * Marks the task id of an operation Proxmox completed synchronously.
      *
      * Some endpoints — a config change, for one — do their work before they
@@ -69,6 +82,11 @@ final class ProxmoxComputeProvider implements ComputeProvider
      * which would reject a task id the cluster never issued.
      */
     private const string SYNCHRONOUS_TASK_PREFIX = 'sync:';
+
+    /** How many times a reinstall asks whether the guest has stopped yet. */
+    private const int DEFAULT_STOP_POLL_ATTEMPTS = 60;
+
+    private const int DEFAULT_STOP_POLL_INTERVAL_MS = 2000;
 
     private const int BYTES_PER_MIB = 1048576;
 
@@ -124,6 +142,132 @@ final class ProxmoxComputeProvider implements ComputeProvider
     public function resetVm(string $nodeName, string $providerId): VmOperation
     {
         return $this->changePowerState($nodeName, $providerId, 'reset');
+    }
+
+    /**
+     * Suspension, in the only terms Proxmox actually has.
+     *
+     * Three steps, and the order is the whole design:
+     *
+     *  1. **Ask the guest to shut down, then stop it.** A customer who is late
+     *     paying has not consented to losing unflushed writes, so the guest is
+     *     asked first; the stop is the fallback for a guest that will not go.
+     *  2. **Clear `onboot`.** Without this, suspension survives until the next
+     *     time the node reboots and the unpaid machine quietly comes back.
+     *  3. **Set the config lock, last.** A locked VM refuses every subsequent
+     *     operation, including the two above — so locking first would leave a
+     *     running machine that nothing could then stop. This is the step the
+     *     customer cannot undo: `qm start` on the node itself is refused while
+     *     the lock is set.
+     *
+     * Idempotent by construction. Every step tolerates already being true: a
+     * stop on a stopped VM, a config write of values that already match, and a
+     * lock that is already ours are all no-ops at Proxmox.
+     */
+    public function suspendVm(string $nodeName, string $providerId, SuspensionPolicy $policy): VmOperation
+    {
+        if ($policy === SuspensionPolicy::RecordOnly) {
+            /*
+             * Nothing at the provider. Returned as a completed operation with
+             * no task, because there is genuinely nothing to poll — inventing
+             * a task id would give the poller something to chase for ever.
+             */
+            return new VmOperation(
+                taskId: $this->synchronousTaskId('suspend_vm', $nodeName, $providerId),
+                nodeName: $nodeName,
+                providerId: $providerId,
+                operation: 'suspend_vm',
+                status: RemoteTaskStatus::Succeeded,
+                metadata: ['policy' => $policy->value],
+            );
+        }
+
+        $taskId = null;
+
+        if ($policy->powersOff()) {
+            $taskId = $this->powerDownForSuspension($nodeName, $providerId);
+        }
+
+        /*
+         * onboot and the lock go through the same config PUT, which is one
+         * round trip and — more importantly — one atomic change at Proxmox.
+         * Two writes would leave a window in which the machine is locked and
+         * still set to start on boot, or unlocked and not.
+         */
+        $config = ['onboot' => 0];
+
+        if ($policy->locksAtProvider()) {
+            $config['lock'] = self::SUSPENSION_LOCK;
+        }
+
+        $this->put(sprintf('/nodes/%s/qemu/%s/config', $nodeName, $providerId), $config, 'suspend_vm');
+
+        /*
+         * The config PUT has already completed by the time Proxmox answers, so
+         * the only thing worth polling is the shutdown — and only when there
+         * was one. A machine that was already off gets a synchronous handle
+         * rather than a task that would never appear in the node's task log.
+         */
+        return new VmOperation(
+            taskId: $taskId ?? $this->synchronousTaskId('suspend_vm', $nodeName, $providerId),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'suspend_vm',
+            status: $taskId === null ? RemoteTaskStatus::Succeeded : RemoteTaskStatus::Running,
+            metadata: ['policy' => $policy->value],
+        );
+    }
+
+    /**
+     * Undoes the suspension, and does not start the machine.
+     *
+     * Returning a customer's server to a running state is the platform's
+     * decision and belongs in the reactivation flow where it can be verified.
+     * Starting it here would start machines that were deliberately powered off
+     * before they were ever suspended.
+     *
+     * The lock is cleared by writing an empty value, which is how Proxmox
+     * removes it. `onboot` is restored to 1: a machine that has been paid for
+     * again should survive a node reboot like any other.
+     */
+    public function liftSuspension(string $nodeName, string $providerId): VmOperation
+    {
+        /*
+         * `delete=lock` rather than `lock=`, because Proxmox treats an empty
+         * string as a value to set and refuses it. The delete parameter is the
+         * documented way to remove a config key.
+         */
+        $this->put(sprintf('/nodes/%s/qemu/%s/config', $nodeName, $providerId), [
+            'delete' => 'lock',
+            'onboot' => 1,
+        ], 'lift_suspension');
+
+        return new VmOperation(
+            taskId: $this->synchronousTaskId('lift_suspension', $nodeName, $providerId),
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'lift_suspension',
+            status: RemoteTaskStatus::Succeeded,
+        );
+    }
+
+    /**
+     * Shuts the guest down, falling back to a stop.
+     *
+     * @return string|null the task to poll, when Proxmox gave one
+     */
+    private function powerDownForSuspension(string $nodeName, string $providerId): ?string
+    {
+        $current = $this->getVm($nodeName, $providerId);
+
+        if ($current !== null && ! $current->powerState->isOn()) {
+            // Already off. Asking again would produce a task that fails, and a
+            // failed task on an idempotent path is noise an operator has to
+            // learn to ignore.
+            return null;
+        }
+
+        return $this->changePowerState($nodeName, $providerId, 'shutdown')->taskId;
     }
 
     public function resizeVm(string $nodeName, string $providerId, ResizeVmRequest $request): VmOperation
@@ -183,6 +327,188 @@ final class ProxmoxComputeProvider implements ComputeProvider
         );
     }
 
+    /**
+     * Lay a fresh image onto a machine that already exists.
+     *
+     * Proxmox has no "reinstall". What it has is a config that can be edited
+     * one key at a time, and the reinstall is that edit performed in an order
+     * chosen so the machine's identity survives it:
+     *
+     *  1. **Stop the guest, and wait until it really is stopped.** A disk in
+     *     use cannot be replaced, and Proxmox answers the stop before the
+     *     guest has finished stopping. Not waiting is how step 3 fails with
+     *     the volume still attached, halfway through a destructive sequence.
+     *  2. **Detach the disk.** `delete=scsi0` moves the volume to `unused0`;
+     *     it does not remove it. The machine is still the same machine, with
+     *     the same id, the same NIC and the same MAC.
+     *  3. **Destroy the detached volume.** Deleting an `unusedN` entry is what
+     *     actually removes the data. This is the line past which the
+     *     customer's disk is gone.
+     *  4. **Import the new image onto the same disk slot**, and rewrite the
+     *     identity that lives in the config rather than on the disk: name,
+     *     OS type, boot order, and the cloud-init keys and address.
+     *  5. **Start it.**
+     *
+     * What is never touched: `vmid`, `net0` — and therefore the MAC — the
+     * memory and core counts, and anything about where the machine lives. A
+     * clone-and-swap would have been fewer calls and would have produced a
+     * different machine wearing the same hostname, with the platform's row
+     * pointing at the old one.
+     */
+    public function reinstallVm(string $nodeName, string $providerId, ReinstallVmRequest $request): VmOperation
+    {
+        $this->stopForReinstall($nodeName, $providerId);
+
+        $configPath = sprintf('/nodes/%s/qemu/%s/config', $nodeName, $providerId);
+
+        /*
+         * Detach, then destroy. Two calls because Proxmox will not remove a
+         * volume that the config still references, and one call that tried to
+         * do both would either leave the old disk attached or leave an orphan
+         * volume on the storage that nothing refers to and nobody reclaims.
+         */
+        $this->put($configPath, ['delete' => 'scsi0'], 'reinstall_vm');
+        $this->put($configPath, ['delete' => 'unused0'], 'reinstall_vm');
+
+        $config = [
+            // The replacement disk, imported from the platform's image. Same
+            // slot, same size, same storage: the machine's shape is not a
+            // reinstall's business.
+            'scsi0' => sprintf(
+                '%s:%d,import-from=%s',
+                $request->storageName,
+                $request->diskGib,
+                $request->templateReference,
+            ),
+            'name' => $request->hostname,
+            'ostype' => $request->osFamily->proxmoxOsType(),
+            'boot' => 'order=scsi0',
+            // Restated because a machine that was suspended and reinstalled
+            // must not inherit the suspension's cleared onboot.
+            'onboot' => 1,
+        ];
+
+        if ($request->cloudInit !== null) {
+            /*
+             * The cloud-init drive itself is not recreated: it already exists
+             * from the build and re-adding it would be refused as an existing
+             * volume. Rewriting the parameters is what matters — a fresh guest
+             * has none of the customer's keys, and its address has to be
+             * handed back to it.
+             */
+            $config += $this->cloudInitParameters($request->cloudInit);
+        }
+
+        $data = $this->put($configPath, $config, 'reinstall_vm');
+
+        // The import can take minutes on a large image, so Proxmox may answer
+        // with a task. When it answers synchronously there is nothing to poll
+        // and a handle is minted rather than a task id that does not exist.
+        $taskId = is_string($data) && $data !== ''
+            ? $data
+            : $this->synchronousTaskId('reinstall_vm', $nodeName, $providerId);
+
+        if ($request->startAfterInstall) {
+            $this->changePowerState($nodeName, $providerId, 'start');
+        }
+
+        return new VmOperation(
+            taskId: $taskId,
+            nodeName: $nodeName,
+            providerId: $providerId,
+            operation: 'reinstall_vm',
+            metadata: [
+                'template_reference' => $request->templateReference,
+                'storage' => $request->storageName,
+                'disk_gib' => $request->diskGib,
+            ],
+        );
+    }
+
+    /**
+     * Stops the guest and waits for it to actually be stopped.
+     *
+     * A shutdown is asked for first: a customer rebuilding a server has not
+     * asked to lose whatever the guest is mid-write on, and the polite request
+     * costs nothing when the guest ignores it. The stop that follows is
+     * unconditional, because the disk is about to be replaced anyway.
+     *
+     * A guest that will not stop inside the window is refused *before* the
+     * destructive calls, which is the whole reason this is a separate step:
+     * nothing has been deleted, so the customer still has the machine they
+     * had, and the operation ends as a plain failure rather than a review.
+     *
+     * @throws ComputeProviderException
+     */
+    private function stopForReinstall(string $nodeName, string $providerId): void
+    {
+        $current = $this->getVm($nodeName, $providerId);
+
+        if ($current === null) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the machine does not exist at this node',
+            ]);
+        }
+
+        if (! $current->powerState->isOn()) {
+            return;
+        }
+
+        $this->changePowerState($nodeName, $providerId, 'shutdown');
+
+        /*
+         * Bounded by attempts rather than by a clock. A wall-clock deadline
+         * inside a loop is untestable without either sleeping through it or
+         * freezing time — and frozen time turns the deadline into a loop that
+         * never ends.
+         */
+        $attempts = max(1, $this->stopPollAttempts());
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $state = $this->getVm($nodeName, $providerId);
+
+            if ($state !== null && ! $state->powerState->isOn()) {
+                return;
+            }
+
+            if ($attempt === $attempts) {
+                break;
+            }
+
+            // Escalated from the polite request to the plug. Repeated
+            // deliberately: a stop against a guest that is already on its way
+            // down is a no-op at Proxmox, and one against a guest that ignored
+            // ACPI is the only thing that will work.
+            $this->changePowerState($nodeName, $providerId, 'stop');
+
+            usleep($this->stopPollIntervalMicroseconds());
+        }
+
+        throw ComputeProviderException::requestFailed(self::NAME, 'reinstall_vm', [
+            'node' => $nodeName,
+            'vmid' => $providerId,
+            'provider_message' => 'the guest did not stop, so its disk was left alone',
+        ]);
+    }
+
+    private function stopPollAttempts(): int
+    {
+        $configured = config('compute.reinstall.stop_poll_attempts');
+
+        return is_numeric($configured) ? (int) $configured : self::DEFAULT_STOP_POLL_ATTEMPTS;
+    }
+
+    private function stopPollIntervalMicroseconds(): int
+    {
+        $configured = config('compute.reinstall.stop_poll_interval_ms');
+
+        $milliseconds = is_numeric($configured) ? (int) $configured : self::DEFAULT_STOP_POLL_INTERVAL_MS;
+
+        return max(0, $milliseconds) * 1000;
+    }
+
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation
     {
         $upid = $this->expectTaskId(
@@ -202,6 +528,71 @@ final class ProxmoxComputeProvider implements ComputeProvider
             nodeName: $nodeName,
             providerId: $providerId,
             operation: 'destroy_vm',
+        );
+    }
+
+    /**
+     * Ask Proxmox for a one-shot console ticket, and say where to spend it.
+     *
+     * Two facts about the ticket decide the shape of this method. It is a
+     * bearer credential for a root console, and it expires within about a
+     * minute of being issued. So it is fetched here — at the moment the
+     * gateway is about to open the socket — rather than when the customer
+     * pressed the button, which may have been thirty seconds and one slow
+     * network ago.
+     *
+     * The websocket endpoint wants the ticket in the query string, which is
+     * Proxmox's design rather than this platform's: it is why the ticket is
+     * kept server-side and why nothing here is ever logged. The API token goes
+     * in a header on the same request, exactly as every other call in this
+     * adapter sends it.
+     */
+    public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint
+    {
+        $data = $this->post(
+            sprintf('/nodes/%s/qemu/%s/vncproxy', $nodeName, $providerId),
+            // Without this Proxmox issues a ticket for its own Java/VNC client
+            // rather than for a websocket, and the socket handshake fails in a
+            // way that reads as a network fault.
+            ['websocket' => 1],
+            'console_endpoint',
+        );
+
+        if (! is_array($data) || ! isset($data['ticket'], $data['port'])) {
+            throw ComputeProviderException::requestFailed(self::NAME, 'console_endpoint', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the cluster issued no console ticket',
+            ]);
+        }
+
+        $url = parse_url($this->connection->baseUrl());
+
+        $host = is_array($url) && is_string($url['host'] ?? null) ? $url['host'] : '';
+        $port = is_array($url) && is_int($url['port'] ?? null) ? $url['port'] : 8006;
+        $scheme = is_array($url) && is_string($url['scheme'] ?? null) ? $url['scheme'] : 'https';
+
+        if ($host === '') {
+            throw ComputeProviderException::requestFailed(self::NAME, 'console_endpoint', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the configured API URL names no host',
+            ]);
+        }
+
+        return new RemoteConsoleEndpoint(
+            host: $host,
+            port: $port,
+            path: sprintf(
+                '/api2/json/nodes/%s/qemu/%s/vncwebsocket?port=%s&vncticket=%s',
+                rawurlencode($nodeName),
+                rawurlencode($providerId),
+                rawurlencode((string) $data['port']),
+                rawurlencode((string) $data['ticket']),
+            ),
+            tls: $scheme === 'https',
+            headers: ['Authorization' => $this->connection->authorizationHeader()],
+            verifyTls: (bool) config('compute.proxmox.verify_tls', true),
         );
     }
 
@@ -521,6 +912,11 @@ final class ProxmoxComputeProvider implements ComputeProvider
             memoryMib: isset($row['maxmem']) ? $this->toMib($row['maxmem']) : null,
             diskGib: isset($row['maxdisk']) ? $this->toGib($row['maxdisk']) : null,
             uptimeSeconds: isset($row['uptime']) && is_numeric($row['uptime']) ? (int) $row['uptime'] : null,
+            // Reported so suspension can be verified rather than assumed. A
+            // lock cleared by hand at the node is exactly the drift the
+            // reconciler exists to find.
+            lock: isset($row['lock']) && is_string($row['lock']) && $row['lock'] !== '' ? $row['lock'] : null,
+            startsOnBoot: isset($row['onboot']) ? (bool) $row['onboot'] : null,
             raw: $this->redactor->redact($row),
         );
     }
@@ -649,23 +1045,10 @@ final class ProxmoxComputeProvider implements ComputeProvider
 
     private function request(): PendingRequest
     {
-        return Http::baseUrl($this->connection->baseUrl())
-            ->withHeaders(['Authorization' => $this->connection->authorizationHeader()])
-            // Explicit rather than left to the client default, so that a
-            // future change to that default cannot silently disable
-            // certificate verification for every cluster at once.
-            //
-            // Redirects are refused as well: a Location header is chosen by
-            // the cluster, and following one would let a compromised node
-            // point any request this adapter makes — the worker sits on the
-            // management network — at a host of its choosing, re-posting the
-            // body on a 307 or 308.
-            ->withOptions(['verify' => $this->connection->verifyTls, 'allow_redirects' => false])
-            ->timeout($this->connection->timeoutSeconds)
-            ->acceptJson()
-            // Proxmox takes form-encoded parameters, not JSON, on every
-            // write endpoint.
-            ->asForm();
+        // The transport rules live on the connection, which is the object that
+        // holds the credential and is shared with the backup adapter. See
+        // ProxmoxConnection::request().
+        return $this->connection->request();
     }
 
     /**
@@ -801,13 +1184,7 @@ final class ProxmoxComputeProvider implements ComputeProvider
      */
     private function scrub(string $message): string
     {
-        $withoutToken = str_replace(
-            [$this->connection->tokenSecret, $this->connection->authorizationHeader(), $this->connection->tokenId],
-            SecretRedactor::PLACEHOLDER,
-            $message,
-        );
-
-        return $this->redactor->redactString($withoutToken);
+        return $this->connection->scrub($message, $this->redactor);
     }
 
     private function toMib(mixed $bytes): int

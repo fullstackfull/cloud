@@ -13,6 +13,7 @@ use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCustomerLimitReachedExceptio
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponExpiredException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponFullyRedeemedException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\UnknownCouponException;
+use Lynomia\Modules\Catalog\Domain\Services\CouponValidator;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
@@ -251,23 +252,32 @@ final class RedeemCouponTest extends TestCase
     }
 
     #[Test]
-    public function a_pasted_code_can_be_resolved_and_redeemed_in_one_step(): void
+    public function a_pasted_code_resolves_and_redeems(): void
     {
+        /*
+         * Driven through the two calls checkout actually makes — resolve the
+         * code, then redeem the coupon — rather than through a one-step
+         * wrapper. The wrapper existed, was tested, and had no caller
+         * anywhere in the application; the behaviour it wrapped is the thing
+         * worth covering, and this is the path a customer's order takes.
+         */
         $coupon = Coupon::factory()->create(['code' => 'LAUNCH-25']);
 
-        $redemption = $this->redeem->byCode(" launch-25\n", $this->context());
+        $resolved = app(CouponValidator::class)->resolveCode(" launch-25\n");
+
+        $redemption = $this->redeem->execute($resolved, $this->context());
 
         $this->assertSame($coupon->id, $redemption->coupon_id);
         $this->assertSame(1, (int) DB::table('coupons')->where('id', $coupon->id)->value('redemption_count'));
     }
 
     #[Test]
-    public function redeeming_an_unknown_code_writes_nothing(): void
+    public function an_unknown_code_is_refused_before_anything_is_written(): void
     {
         $this->expectException(UnknownCouponException::class);
 
         try {
-            $this->redeem->byCode('NOPE', $this->context());
+            app(CouponValidator::class)->resolveCode('NOPE');
         } finally {
             $this->assertSame(0, DB::table('coupon_redemptions')->count());
         }

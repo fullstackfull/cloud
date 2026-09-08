@@ -270,11 +270,25 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             );
         }
 
+        /*
+         * Written the moment the handle exists, with the node it belongs to,
+         * rather than only on return. Two reasons, and the second is the one
+         * that matters: a worker that dies between here and the end must leave
+         * the handle behind, and the task poller needs to know which node to
+         * ask about it — a UPID without a node is a handle nothing can ask
+         * about.
+         */
+        $job->recordRemoteJobId($operation->taskId, $node->provider_name);
+
         $vm = VirtualMachine::query()->create([
             'service_id' => $job->service_id,
             'cluster_id' => $node->cluster_id,
             'node_id' => $node->getKey(),
             'provider_id' => $operation->providerId,
+            // Recorded rather than forgotten: a reinstall has to create the
+            // replacement disk on the storage this one is on, and its only
+            // alternative is to guess at a tier the customer did not buy.
+            'storage_name' => $decision->storageName,
             'hostname' => (string) ($payload['hostname'] ?? 'vps-'.strtolower((string) $job->getKey())),
             'vcpu' => $resources->vcpu,
             'memory_mib' => $resources->memoryMib,

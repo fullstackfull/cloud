@@ -317,7 +317,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'dedicated.operation_refused')
-            ->assertJsonPath('error.details.in_flight_kind', 'reinstall');
+            ->assertJsonPath('error.details.in_flight_kind', 'reinstall_dedicated');
 
         $this->assertSame([], $controller->calls);
     }
@@ -336,7 +336,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
          * chassis, and a job stuck in `running` must not cost them the button.
          */
         ProvisioningJob::factory()
-            ->kind(ProvisioningJobKind::Suspend)
+            ->kind(ProvisioningJobKind::Stop)
             ->status(ProvisioningJobStatus::Running)
             ->create([
                 'service_id' => $server->service_id,

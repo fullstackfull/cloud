@@ -30,7 +30,7 @@ final class VirtualMachineAddresses
 {
     /**
      * @param  list<string>  $machineIds
-     * @return array<string, list<array{address: string, version: string, is_primary: bool}>>
+     * @return array<string, list<array{address: string, ip_version: int, is_primary: bool}>>
      */
     public static function forMachines(array $machineIds): array
     {
@@ -62,7 +62,11 @@ final class VirtualMachineAddresses
 
             $byMachine[(string) $assignment->assignable_id][] = [
                 'address' => $address->address,
-                'version' => $address->ip_version->value,
+                // Named and typed as the IPAM resource names and types it. The
+                // enum is int-backed, so this is 4 or 6 and not "4" or "6":
+                // one endpoint answering with a string and another with a
+                // number is how a client ends up comparing them wrongly.
+                'ip_version' => $address->ip_version->value,
                 'is_primary' => $assignment->is_primary,
             ];
         }

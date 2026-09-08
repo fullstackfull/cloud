@@ -22,6 +22,7 @@ use Lynomia\Modules\Vps\Http\Resources\ConsoleSessionResource;
 use Lynomia\Modules\Vps\Http\Resources\ProvisioningOperationResource;
 use Lynomia\Modules\Vps\Http\Resources\VirtualMachineResource;
 use Lynomia\Modules\Vps\Infrastructure\Queries\CustomerVirtualMachines;
+use Lynomia\Modules\Vps\Infrastructure\Queries\LatestMachineReinstalls;
 use Lynomia\Modules\Vps\Infrastructure\Queries\VirtualMachineAddresses;
 
 /**
@@ -88,15 +89,19 @@ final class VpsController
             ->orderByDesc('virtual_machines.id')
             ->paginate($request->perPage());
 
-        $addresses = VirtualMachineAddresses::forMachines(
-            $machines->getCollection()->map(static fn (VirtualMachine $vm): string => (string) $vm->getKey())->all(),
-        );
+        $machineIds = $machines->getCollection()
+            ->map(static fn (VirtualMachine $vm): string => (string) $vm->getKey())
+            ->all();
+
+        $addresses = VirtualMachineAddresses::forMachines($machineIds);
+        $reinstalls = LatestMachineReinstalls::forMachines($machineIds);
 
         return response()->json([
             'data' => $machines->getCollection()
                 ->map(fn (VirtualMachine $vm): VirtualMachineResource => new VirtualMachineResource(
                     $vm,
                     $addresses[(string) $vm->getKey()] ?? [],
+                    $reinstalls[(string) $vm->getKey()] ?? null,
                 ))
                 ->all(),
             'meta' => [
@@ -118,9 +123,12 @@ final class VpsController
 
         $machine = $this->machine($vm);
 
+        $machineId = (string) $machine->getKey();
+
         return (new VirtualMachineResource(
             $machine,
-            VirtualMachineAddresses::forMachines([(string) $machine->getKey()])[(string) $machine->getKey()] ?? [],
+            VirtualMachineAddresses::forMachines([$machineId])[$machineId] ?? [],
+            LatestMachineReinstalls::forMachines([$machineId])[$machineId] ?? null,
         ))->response();
     }
 

@@ -4,6 +4,27 @@ declare(strict_types=1);
 
 return [
     /*
+     * What suspending a customer's machine does to it at the hypervisor.
+     *
+     * One of the values SuspensionPolicy declares, and nothing else: an
+     * unrecognised string falls back to the strict default rather than
+     * silently disabling enforcement, because the failure mode of a typo here
+     * is a fleet of unpaid machines that nobody notices are still running.
+     *
+     *   power_off_and_lock   shut down, clear onboot, and set Proxmox's config
+     *                        lock so nothing — including somebody typing
+     *                        `qm start` on the node — can bring it back
+     *   power_off            shut down and clear onboot, no lock
+     *   record_only          change nothing at the provider; the platform's
+     *                        own guard is the only thing stopping the customer
+     *
+     * record_only is what the platform did before Phase 30A. It is named so
+     * that a deployment which wants it has to choose it, rather than getting
+     * it from an omission nobody noticed.
+     */
+    'suspension_policy' => env('COMPUTE_SUSPENSION_POLICY', 'power_off_and_lock'),
+
+    /*
      * Placement scoring.
      *
      * Weights rather than hardcoded rules, because different fleets want
@@ -43,6 +64,51 @@ return [
         'max_customer_vms_per_node' => (int) env('COMPUTE_MAX_CUSTOMER_VMS_PER_NODE', 1),
     ],
 
+    /*
+     * Reinstalls.
+     *
+     * A reinstall replaces a machine's disk, which cannot happen while the
+     * guest is using it. The guest is asked to shut down and then asked again,
+     * harder, until it has — and if it never does, the reinstall is refused
+     * before anything is destroyed rather than forced through.
+     *
+     * Two minutes by default. Long enough for a database to flush and a
+     * journal to close; short enough that a customer watching a spinner gets
+     * an answer.
+     */
+    'reinstall' => [
+        'stop_poll_attempts' => (int) env('COMPUTE_REINSTALL_STOP_POLL_ATTEMPTS', 60),
+        'stop_poll_interval_ms' => (int) env('COMPUTE_REINSTALL_STOP_POLL_INTERVAL_MS', 2000),
+    ],
+
+    /*
+     * The fake hypervisor.
+     *
+     * `console_host` and `console_port` point the fake's console endpoint at
+     * whatever upstream a test or a demo environment is running. There is no
+     * default: a fabricated address would let the console gateway's tests pass
+     * against something that does not exist, which is the exact failure this
+     * phase is closing everywhere else.
+     */
+    'fake' => [
+        'task_delay_seconds' => (int) env('COMPUTE_FAKE_TASK_DELAY_SECONDS', 0),
+        'console_host' => env('COMPUTE_FAKE_CONSOLE_HOST'),
+        'console_port' => env('COMPUTE_FAKE_CONSOLE_PORT'),
+
+        /*
+         * A file the fake keeps its machines in, so that more than one process
+         * can see the same fleet.
+         *
+         * Unset by default, and unset everywhere but the tests that need it:
+         * an in-memory fake is the right one for a single process, and a
+         * shared file would let one test's machines leak into another's. It
+         * exists because a queue is proved by running a real worker in its own
+         * process, and a worker whose hypervisor has never heard of the
+         * customer's machine can prove nothing about a reinstall.
+         */
+        'state_path' => env('COMPUTE_FAKE_STATE_PATH'),
+    ],
+
     'proxmox' => [
         'timeout_seconds' => (int) env('PROXMOX_TIMEOUT_SECONDS', 30),
         'verify_tls' => (bool) env('PROXMOX_VERIFY_TLS', true),
@@ -53,4 +119,29 @@ return [
         // the ones running the most important workloads.
         'allow_memory_overcommit' => false,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Provider tasks
+    |--------------------------------------------------------------------------
+    |
+    | A hypervisor accepts a create in milliseconds and builds the machine
+    | minutes later, so a job that succeeded means "the request was taken",
+    | which is not the same sentence as "the machine exists". These govern the
+    | sweep that closes that gap.
+    |
+    | The backoff is exponential from the poll count and clamped: a fleet of
+    | slow builds must not become a fleet of API calls. Giving up does not mean
+    | assuming failure — it means putting the job in front of a person, which
+    | is the only thing that can settle it.
+    |
+    */
+
+    'tasks' => [
+        'poll_base_minutes' => (int) env('COMPUTE_TASK_POLL_BASE_MINUTES', 1),
+        'poll_max_minutes' => (int) env('COMPUTE_TASK_POLL_MAX_MINUTES', 15),
+        'poll_batch' => (int) env('COMPUTE_TASK_POLL_BATCH', 100),
+        'give_up_after_minutes' => (int) env('COMPUTE_TASK_GIVE_UP_MINUTES', 60),
+    ],
+
 ];

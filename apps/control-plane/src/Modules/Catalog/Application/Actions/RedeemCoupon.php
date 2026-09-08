@@ -6,7 +6,6 @@ namespace Lynomia\Modules\Catalog\Application\Actions;
 
 use Carbon\CarbonImmutable;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
-use Lynomia\Modules\Catalog\Domain\Exceptions\UnknownCouponException;
 use Lynomia\Modules\Catalog\Domain\Services\CouponValidator;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Catalog\Infrastructure\Models\CouponRedemption;
@@ -91,16 +90,6 @@ final readonly class RedeemCoupon
 
             return $redemption;
         });
-    }
-
-    /**
-     * Resolve a pasted code and redeem it in one step.
-     *
-     * @throws UnknownCouponException
-     */
-    public function byCode(string $code, CouponContext $context, ?string $orderId = null): CouponRedemption
-    {
-        return $this->execute($this->validator->resolveCode($code), $context, $orderId);
     }
 
     /**

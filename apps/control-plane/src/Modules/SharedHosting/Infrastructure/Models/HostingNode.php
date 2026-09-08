@@ -62,6 +62,7 @@ use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
  * @property ?float $load_average
  * @property ?CarbonImmutable $last_synced_at
  * @property ?string $last_sync_error
+ * @property ?CarbonImmutable $reconciled_at
  */
 class HostingNode extends Model
 {
@@ -93,6 +94,7 @@ class HostingNode extends Model
             'disk_used_mib' => 'integer',
             'load_average' => 'float',
             'last_synced_at' => 'immutable_datetime',
+            'reconciled_at' => 'immutable_datetime',
         ];
     }
 

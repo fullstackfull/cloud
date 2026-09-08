@@ -29,6 +29,28 @@ final class HostingProviderFactoryTest extends TestCase
     use RefreshDatabase;
 
     #[Test]
+    public function every_panel_the_enum_names_has_an_adapter(): void
+    {
+        /*
+         * The factory's match has no default arm, on purpose: an exhaustive
+         * match over an enum is a guarantee the analyser can check, and a
+         * default branch guarding a case that cannot occur is dead code that
+         * reads like a safety net. This is the safety net, and it runs at
+         * build time — a panel added without an adapter fails here rather
+         * than raising an UnhandledMatchError on a customer's SSO request.
+         *
+         * Written as a loop over cases() rather than as three named
+         * assertions, because a fourth case must fail this without anybody
+         * remembering to come back and add a line.
+         */
+        $factory = app(HostingProviderFactory::class);
+
+        foreach (HostingPanel::cases() as $panel) {
+            $this->assertNotNull($factory->forPanel($panel), $panel->value);
+        }
+    }
+
+    #[Test]
     public function each_node_is_driven_by_the_adapter_its_row_names(): void
     {
         $factory = app(HostingProviderFactory::class);
