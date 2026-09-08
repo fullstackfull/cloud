@@ -59,6 +59,34 @@ final class DeletingABackupTest extends VpsApiTestCase
     }
 
     #[Test]
+    public function calling_a_deletion_off_is_written_into_the_trail_beside_the_request(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $backup = $this->availableBackup($customer, $machine);
+
+        $this->actingAs($user)
+            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->postJson($this->url($machine, $backup).'/keep')
+            ->assertOk()
+            ->assertJsonPath('data.state', BackupState::Succeeded->value)
+            ->assertJsonPath('data.is_being_deleted', false);
+
+        /*
+         * Both halves, in order. A trail that recorded the request and not the
+         * reprieve would leave the next person reading it certain the archive
+         * is gone — and looking for a reason it is still on the datastore.
+         */
+        $this->assertSame(
+            [AuditAction::BackupDeletionRequested, AuditAction::BackupDeletionCancelled],
+            AuditEntry::query()->orderBy('created_at')->orderBy('id')->pluck('action')->all(),
+        );
+    }
+
+    #[Test]
     public function the_wrong_reference_deletes_nothing(): void
     {
         [$customer, $user] = $this->accountWithOwner();

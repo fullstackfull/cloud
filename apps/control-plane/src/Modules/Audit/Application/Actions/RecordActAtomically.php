@@ -40,7 +40,7 @@ final readonly class RecordActAtomically
      * @template TResult
      *
      * @param  callable(): TResult  $act
-     * @param  callable(TResult): AuditedAct  $describe
+     * @param  callable(TResult): ?AuditedAct  $describe
      * @return TResult
      */
     public function execute(callable $act, callable $describe): mixed
@@ -49,6 +49,10 @@ final readonly class RecordActAtomically
             $result = $act();
 
             $entry = $describe($result);
+
+            if (! $entry instanceof AuditedAct) {
+                return $result;
+            }
 
             $this->record->execute(
                 action: $entry->action,

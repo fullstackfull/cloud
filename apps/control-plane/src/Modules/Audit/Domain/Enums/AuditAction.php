@@ -107,6 +107,28 @@ enum AuditAction: string
      */
     case NotificationPreferenceChanged = 'notification.preference_changed';
     case BackupDeletionRequested = 'backup.deletion_requested';
+
+    /**
+     * Somebody called a deletion off while there was still time.
+     *
+     * The other half of the pair above, and worth as much: the grace period
+     * exists so a mis-click can be undone, and an archive that survives
+     * because a person changed their mind is a decision somebody made. Without
+     * this row the trail says a deletion was asked for and stops, and the next
+     * question — why is this backup still here — has no answer in it.
+     */
+    case BackupDeletionCancelled = 'backup.deletion_cancelled';
+
+    /**
+     * Credit was spent on an invoice.
+     *
+     * The transaction row records the money. This records the act: who was
+     * signed in when a balance the customer could have had refunded went to
+     * an invoice instead. It is the one payment path with no external
+     * processor behind it, so there is no gateway's own record to fall back
+     * on when somebody disputes it months later.
+     */
+    case WalletCreditSpent = 'wallet.credit_spent';
     case TicketAssigned = 'support.ticket_assigned';
     case TicketPrioritised = 'support.ticket_prioritised';
     case TicketResolved = 'support.ticket_resolved';

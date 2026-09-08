@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Wallet;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -59,6 +60,47 @@ final class PayingAnInvoiceFromCreditTest extends WalletApiTestCase
         $this->assertSame(TransactionKind::Charge, $charge->kind);
         $this->assertSame(TransactionStatus::Succeeded, $charge->status);
         $this->assertSame(9_000, (int) $charge->amount_minor);
+    }
+
+    #[Test]
+    public function spending_credit_is_written_into_the_trail_once_however_often_it_is_asked(): void
+    {
+        [$customer, $owner] = $this->accountWithOwner();
+        $this->credit($this->walletFor($customer), 9_000);
+
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 9_000,
+            'total_minor' => 9_000,
+        ]);
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            $this->actingAs($owner)
+                ->withHeaders($this->key('wallet-audited-0001'))
+                ->postJson("/api/v1/invoices/{$invoice->getKey()}/wallet-credit")
+                ->assertOk();
+        }
+
+        /*
+         * One row, not three. This is the only payment path with no external
+         * processor keeping its own record, so the trail is the whole of what
+         * a dispute months later can be settled against — and a trail that
+         * counts every retry as another spend would misstate the balance's
+         * history rather than merely repeat itself.
+         */
+        $entries = DB::table('audit_log')
+            ->where('action', 'wallet.credit_spent')
+            ->where('subject_id', (string) $invoice->getKey())
+            ->get();
+
+        $this->assertCount(1, $entries);
+
+        /** @var array<string, mixed> $context */
+        $context = json_decode((string) $entries->firstOrFail()->context, true);
+
+        $this->assertSame(9_000, $context['applied_minor']);
+        $this->assertSame('KWD', $context['currency']);
     }
 
     #[Test]

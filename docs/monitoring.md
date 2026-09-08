@@ -85,6 +85,18 @@ does not exist.
 | `lynomia_webhook_events_total` | provider, status | Money moving without being recorded |
 | `lynomia_mrr_minor`, `lynomia_failed_payments_total` | currency, — | The business numbers |
 | `lynomia_metrics_collector_up`, `lynomia_metrics_collect_duration_seconds` | collector | Whether the exposition itself is healthy |
+| `lynomia_invitation_total` | state | Whether invitation mail is arriving: a rising `pending` with no accepts is a mail problem, not a sales one |
+| `lynomia_account_member_total` | role | Who holds what across the platform, and whether anybody is using the narrow roles |
+| `lynomia_wallet_entry_total` | kind | Credit going in and coming out; the one payment path with no gateway keeping its own count |
+| `lynomia_support_ticket_total` | status | The support queue, including how much of it is waiting on the customer rather than on us |
+| `lynomia_support_backlog_age` | bucket | How much of the backlog is older than an hour, four, a day, three days — four buckets, deliberately few |
+| `lynomia_backup_deletion_total` | state | Backups in each stage of removal; a `deleting` count that does not fall is a datastore accepting deletes and keeping the archive |
+| `lynomia_backup_retention_total` | disposition | `due` is the retention sweep's queue, `held` is what a departing customer's window is protecting |
+| `lynomia_service_retention_window_open` | reason | Stopped services whose data still exists, by why they stopped; only `customer_cancelled` is ever ended automatically |
+| `lynomia_open_drift_total` | resource, kind | Unresolved disagreements by what disagrees and how — the hosting reconciler's output lands here |
+| `lynomia_provider_task_total` | state | Tasks behind jobs already called a success; a rising `unconfirmed` means the hypervisor is not being asked |
+| `lynomia_dns_zone_total`, `lynomia_dns_record_total` | state | DNS by state; `indeterminate` is the platform having lost track of something a customer's mail depends on |
+| `lynomia_dns_record_by_type_total` | type | Live records by type — six values, from the enum, and no domain names anywhere near it |
 
 ### What is never a label
 

@@ -61,6 +61,7 @@ final readonly class ProductCollector implements MetricsCollector
             $this->tickets(),
             $this->ticketAge(),
             $this->backupDeletion(),
+            $this->backupRetention(),
             $this->termination(),
             $this->drift(),
             $this->providerTasks(),
@@ -239,6 +240,50 @@ final readonly class ProductCollector implements MetricsCollector
             'lynomia_backup_deletion_total',
             'Backups in each stage of removal. A `deleting` count that does not fall is a datastore that accepts deletes and keeps the archive.',
             $samples,
+        );
+    }
+
+    /**
+     * What the retention sweep has left to do, and what it may not touch.
+     *
+     * Three dispositions, and the useful one is `held`: an archive kept past
+     * its own expiry because a departing customer's retention window outranks
+     * it. A `due` count that does not fall is the sweep not running or the
+     * datastore refusing; a `held` count that never falls is retention windows
+     * that never close.
+     */
+    private function backupRetention(): Metric
+    {
+        $available = [
+            BackupState::Succeeded->value,
+            BackupState::Verified->value,
+        ];
+
+        /** @var object{due: int|string, held: int|string, within: int|string} $row */
+        $row = DB::table('backups')
+            ->whereIn('state', $available)
+            ->selectRaw(<<<'SQL'
+                count(*) filter (
+                    where expires_at is not null and expires_at <= now()
+                      and (protected_until is null or protected_until <= now())
+                ) as due,
+                count(*) filter (
+                    where protected_until is not null and protected_until > now()
+                ) as held,
+                count(*) filter (
+                    where expires_at is null or expires_at > now()
+                ) as within
+            SQL)
+            ->first();
+
+        return Metric::gauge(
+            'lynomia_backup_retention_total',
+            'Archives the platform is keeping, by what retention says about them. `due` is the sweep\'s queue; `held` is kept through a cancellation\'s window whatever the plan says.',
+            [
+                MetricSample::of(['disposition' => 'due'], (float) $row->due),
+                MetricSample::of(['disposition' => 'held'], (float) $row->held),
+                MetricSample::of(['disposition' => 'within_policy'], (float) $row->within),
+            ],
         );
     }
 

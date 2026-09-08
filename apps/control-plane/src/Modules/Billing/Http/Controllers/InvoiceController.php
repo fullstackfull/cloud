@@ -8,6 +8,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
 use Lynomia\Modules\Billing\Http\Requests\ListInvoicesRequest;
 use Lynomia\Modules\Billing\Http\Requests\PayInvoiceFromCreditRequest;
 use Lynomia\Modules\Billing\Http\Resources\InvoiceResource;
@@ -141,10 +145,30 @@ final class InvoiceController
     {
         $this->authoriseWithinAccount($request, 'billing.pay');
 
-        $settlement = $this->payFromWallet->execute(
-            $this->actingCustomer->get(),
-            $this->scopedInvoice($invoice),
-            $request->idempotencyKey(),
+        $settlement = app(RecordActAtomically::class)->execute(
+            fn (): InvoiceSettlement => $this->payFromWallet->execute(
+                $this->actingCustomer->get(),
+                $this->scopedInvoice($invoice),
+                $request->idempotencyKey(),
+            ),
+            /*
+             * Nothing is recorded when nothing moved, which here means one
+             * thing only: the replay of a request that already succeeded. The
+             * first copy wrote this row; a second saying credit was spent
+             * again would misstate the balance's history for anybody reading
+             * it afterwards.
+             */
+            fn (InvoiceSettlement $result): ?AuditedAct => $result->movedNothing() ? null : new AuditedAct(
+                action: AuditAction::WalletCreditSpent,
+                subject: $result->invoice,
+                customerId: (string) $result->invoice->customer_id,
+                context: [
+                    'applied_minor' => $result->applied->minorUnits(),
+                    'currency' => $result->applied->currency(),
+                    'invoice_number' => $result->invoice->number,
+                    'settled' => $result->invoice->status->value,
+                ],
+            ),
         );
 
         return (new InvoiceResource($settlement->invoice->fresh(['items'])))->response();

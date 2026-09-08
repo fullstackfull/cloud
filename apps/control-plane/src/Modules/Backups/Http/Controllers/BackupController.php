@@ -203,7 +203,20 @@ final class BackupController
             ->whereKey($backup)
             ->firstOrFail();
 
-        return (new BackupResource($this->requestDeletion->cancel($row)))->response();
+        $kept = app(RecordActAtomically::class)->execute(
+            fn () => $this->requestDeletion->cancel($row),
+            fn (Backup $spared) => new AuditedAct(
+                action: AuditAction::BackupDeletionCancelled,
+                subject: $spared,
+                customerId: (string) $spared->customer_id,
+                context: [
+                    'service_id' => $spared->service_id,
+                    'archive_id' => $spared->archive_id,
+                ],
+            ),
+        );
+
+        return (new BackupResource($kept))->response();
     }
 
     /**

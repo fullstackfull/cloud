@@ -50,10 +50,12 @@ final class MetricsQueryBudgetTest extends TestCase
      * assertion below is the real test.
      *
      * Raised from 26 when the DNS and product collectors were added — nine
-     * more GROUP BYs, each of them one query whatever the fleet does. The
-     * number moves when collectors are added and must not move when data is.
+     * more GROUP BYs, each of them one query whatever the fleet does — and to
+     * 33 for the backup retention gauge, whose three dispositions come back
+     * from one query with three FILTERs rather than three queries. The number
+     * moves when collectors are added and must not move when data is.
      */
-    private const int BUDGET = 32;
+    private const int BUDGET = 33;
 
     private MetricsRegistry $registry;
 
