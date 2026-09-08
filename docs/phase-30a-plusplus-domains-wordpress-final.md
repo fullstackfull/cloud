@@ -15,8 +15,8 @@ is inherited from an earlier report.
 
 | | Start (`1327a82`) | End (`56ed5f1`) |
 | --- | --- | --- |
-| Backend tests | 2 302 | 2 444 |
-| Assertions | 65 124 | 69 575 |
+| Backend tests | 2 302 | 2 446 |
+| Assertions | 65 124 | 69 585 |
 | Browser specs | 94 | 105 |
 | Frontend tests | 54 | 54 |
 | Documented API operations | 134 | 150 |
@@ -27,7 +27,8 @@ is inherited from an earlier report.
 | Migrations | 42 | 45 |
 | PHPStan errors | 0 | 0 |
 
-Six commits. Two of them exist because of defects the work found in itself.
+Nine commits. Two of them exist because of defects the work found in itself,
+and one because a dependency advisory turned the security gate red.
 
 ---
 
@@ -323,6 +324,25 @@ Every one of those sentences is asserted in Arabic as well as English.
 
 The gate that did not catch anything is the interesting one: nothing static
 could see K.4.
+
+---
+
+## Q.1 A real worker, in its own process
+
+Two things the feature tests cannot see, because they run the job inline in the
+transaction that queued it: whether the payload survives Redis, and what a
+worker that dies mid-registration leaves behind.
+
+A worker started by `queue:work` against a real Redis, in a separate process,
+registers a committed name and the row says so.
+
+The second test constructs the state a dead worker leaves — claimed, `running`,
+nobody knowing whether the registry took it — and dispatches the job again
+against a real worker. The row is untouched: `mayBeStarted()` excludes
+`running`, so a redelivered purchase is a no-op. That state is constructed
+rather than raced on purpose: `running` is written before the provider call and
+nothing runs after the process dies, so it is the same row, and a timing-based
+version of this assertion would be worth less than a precise one.
 
 ---
 
