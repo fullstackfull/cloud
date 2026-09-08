@@ -19,6 +19,7 @@ use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
@@ -292,6 +293,89 @@ final class PlanChangeEndpointTest extends BillingApiTestCase
                 'price_id' => $this->priceOf($hostingPlan)->id,
             ])
             ->assertStatus(409);
+    }
+
+    #[Test]
+    public function a_price_from_another_plan_does_not_buy_that_plan_cheaply(): void
+    {
+        /*
+         * The plan and the price both arrive from the client and were checked
+         * only for existence. A request naming the largest plan and the
+         * smallest plan's price passed every other rule — same product, same
+         * currency, same billing period — and moved the subscription onto the
+         * large plan at 4.500 KWD a month, for ever.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->subscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'mismatched-price-1')
+            ->postJson("/api/v1/subscriptions/{$subscription->id}/plan", [
+                'plan_id' => $this->large->id,
+                'price_id' => $this->priceOf($this->smallerDisk)->id,
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'subscription.plan_change_refused')
+            ->assertJsonPath('error.details.refusals', PlanChangeRefusal::PriceNotForPlan->value);
+
+        // Nothing moved: not the plan, not the price, not the machine.
+        $this->assertSame($this->small->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(9_000, $subscription->fresh()?->recurring_amount_minor);
+        $this->assertSame(0, ProvisioningJob::query()->count());
+    }
+
+    #[Test]
+    public function a_suspended_service_cannot_be_sold_an_upgrade(): void
+    {
+        /*
+         * The money moves the moment a customer confirms and the machine
+         * catches up afterwards — so a plan change on a suspended service
+         * charges for an upgrade the platform has deliberately locked their
+         * machine against, and the resize then fails at the hypervisor for
+         * exactly the reason the suspension exists.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->subscriptionOn($customer, $this->small);
+        $service = $this->serviceWithMachine($customer, $subscription);
+
+        $service->forceFill(['status' => ServiceStatus::Suspended])->save();
+
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'suspended-upgrade-1')
+            ->postJson("/api/v1/subscriptions/{$subscription->id}/plan", [
+                'plan_id' => $this->large->id,
+                'price_id' => $this->priceOf($this->large)->id,
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.refusals', PlanChangeRefusal::ServiceNotActive->value);
+
+        $this->assertSame($this->small->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(0, ProvisioningJob::query()->count());
+    }
+
+    #[Test]
+    public function a_suspended_service_is_not_offered_an_upgrade_either(): void
+    {
+        // The options screen must agree with the endpoint, or a customer
+        // presses a button the API then refuses.
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->subscriptionOn($customer, $this->small);
+        $service = $this->serviceWithMachine($customer, $subscription);
+
+        $service->forceFill(['status' => ServiceStatus::Suspended])->save();
+
+        $options = $this->actingAs($user)
+            ->getJson("/api/v1/subscriptions/{$subscription->id}/plan-options")
+            ->assertOk()
+            ->json('data');
+
+        foreach ($options as $option) {
+            $this->assertFalse(
+                $option['is_available'] ?? true,
+                'A suspended service was offered a plan change the endpoint would refuse.',
+            );
+        }
     }
 
     #[Test]

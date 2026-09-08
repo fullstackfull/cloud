@@ -46,6 +46,7 @@ final readonly class GatewayMetrics
      */
     public const array REASONS = [
         'rate_limited',
+        'origin_not_allowed',
         'invalid_permit',
         'machine_gone',
         'machine_mismatch',

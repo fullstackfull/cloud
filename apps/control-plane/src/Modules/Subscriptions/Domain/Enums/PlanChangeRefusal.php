@@ -42,4 +42,28 @@ enum PlanChangeRefusal: string
 
     /** Something is already being done to the service this subscription pays for. */
     case ServiceBusy = 'service_busy';
+
+    /**
+     * The service is not in a state where it could receive the change.
+     *
+     * Suspended, being reactivated, still building, or already terminated.
+     * The money moves the moment the customer confirms a plan change and the
+     * machine catches up afterwards — so allowing one here would charge a
+     * customer for an upgrade the platform has deliberately locked their
+     * machine against, and the resize would fail at the hypervisor for
+     * exactly the reason the suspension exists.
+     */
+    case ServiceNotActive = 'service_not_active';
+
+    /**
+     * The price named does not belong to the plan named.
+     *
+     * Both arrive from the client, and they were checked separately: a
+     * request naming an expensive plan and a cheap plan's price moved the
+     * subscription onto the expensive plan at the cheap price, for ever.
+     * Nothing about a legitimate client produces this pair — the plan options
+     * endpoint returns each plan with its own prices — so it is refused
+     * rather than reconciled.
+     */
+    case PriceNotForPlan = 'price_not_for_plan';
 }

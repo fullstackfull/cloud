@@ -214,6 +214,48 @@ final class ConsoleGatewayRuntimeTest extends TestCase
     }
 
     #[Test]
+    public function a_page_on_another_origin_is_refused_before_the_permit_is_spent(): void
+    {
+        /*
+         * A WebSocket is not subject to the same-origin policy: any page in a
+         * customer's browser may open one to this gateway. The permit is what
+         * actually authenticates — a hostile page cannot read one — so this is
+         * defence in depth, and what it buys is that the attacker's page
+         * cannot even reach the authorisation step, let alone spend the
+         * connection budget of the address the customer is browsing from.
+         */
+        config()->set('console_gateway.allowed_origins', ['https://portal.lynomia.test']);
+
+        $session = $this->issue();
+
+        $client = $this->connect($session, origin: 'https://attacker.example');
+
+        $this->assertFalse(
+            $this->completeClientHandshake($client),
+            'A page on another origin opened a console.',
+        );
+
+        // And the permit was not burned: the customer's own tab still works.
+        $allowed = $this->connect($session, origin: 'https://portal.lynomia.test');
+
+        $this->assertTrue($this->completeClientHandshake($allowed), 'The portal itself was refused.');
+    }
+
+    #[Test]
+    public function a_prefix_of_the_portals_origin_is_not_the_portal(): void
+    {
+        // `https://portal.lynomia.test.attacker.example` starts with the
+        // portal's own origin, which is why the comparison is whole-string.
+        config()->set('console_gateway.allowed_origins', ['https://portal.lynomia.test']);
+
+        $session = $this->issue();
+
+        $client = $this->connect($session, origin: 'https://portal.lynomia.test.attacker.example');
+
+        $this->assertFalse($this->completeClientHandshake($client));
+    }
+
+    #[Test]
     public function a_client_that_hangs_up_takes_the_upstream_with_it(): void
     {
         /*
@@ -338,7 +380,7 @@ final class ConsoleGatewayRuntimeTest extends TestCase
      *
      * @return resource
      */
-    private function connect(ConsoleSession $session, ?string $machineId = null)
+    private function connect(ConsoleSession $session, ?string $machineId = null, ?string $origin = null)
     {
         $client = stream_socket_client(sprintf('tcp://127.0.0.1:%d', $this->gatewayPort));
 
@@ -355,7 +397,12 @@ final class ConsoleGatewayRuntimeTest extends TestCase
             rawurlencode($machineId ?? $session->virtualMachineId),
         );
 
-        fwrite($client, Handshake::clientRequest('gateway', $target, base64_encode(random_bytes(16))));
+        fwrite($client, Handshake::clientRequest(
+            'gateway',
+            $target,
+            base64_encode(random_bytes(16)),
+            $origin === null ? [] : ['Origin' => $origin],
+        ));
 
         $this->pump();
 

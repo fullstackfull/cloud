@@ -32,6 +32,27 @@ return [
      */
     'public_url' => env('VPS_CONSOLE_GATEWAY_URL'),
 
+    /*
+     * Browser origins allowed to open a console.
+     *
+     * A WebSocket is not subject to the same-origin policy: any page in a
+     * customer's browser may open one to this gateway. The permit is what
+     * actually authenticates — a page on another origin cannot read one,
+     * because the API that issues it is CORS-protected — so this is defence in
+     * depth rather than the lock itself, and it is the difference between a
+     * hostile page being unable to use a console and being unable to reach the
+     * gateway at all.
+     *
+     * A request with no Origin header is allowed through: native clients send
+     * none, and refusing them would break every non-browser console without
+     * stopping any attacker, who is not constrained by a browser either.
+     * Defaults to the portal.
+     */
+    'allowed_origins' => array_values(array_filter([
+        env('FRONTEND_URL'),
+        env('APP_URL'),
+    ], static fn (mixed $origin): bool => is_string($origin) && $origin !== '')),
+
     'limits' => [
         /*
          * How long a console may stay open without the platform re-checking

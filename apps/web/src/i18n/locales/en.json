@@ -655,7 +655,9 @@
       "not_available": "This plan is no longer available.",
       "would_shrink_disk": "This plan has a smaller disk than your server. We do not shrink disks, because it would destroy data.",
       "subscription_not_running": "This subscription is not currently running.",
-      "service_busy": "Something else is happening to this server. Try again when it has finished."
+      "service_busy": "Something else is happening to this server. Try again when it has finished.",
+      "service_not_active": "Your service is suspended or still changing state, so it cannot be moved onto another plan yet.",
+      "price_not_for_plan": "That price does not belong to that plan."
     },
     "warning": {
       "resize_required": "Your server will be resized as part of this change.",

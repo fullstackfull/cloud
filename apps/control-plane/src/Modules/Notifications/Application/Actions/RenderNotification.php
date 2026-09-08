@@ -65,7 +65,7 @@ final readonly class RenderNotification
     private function line(string $key, array $replacements, string $locale): string
     {
         /** @var array<string, string> $stringReplacements */
-        $stringReplacements = array_map(strval(...), array_filter(
+        $stringReplacements = array_map(self::oneLine(...), array_filter(
             $replacements,
             static fn (mixed $v): bool => $v !== null,
         ));
@@ -73,5 +73,28 @@ final readonly class RenderNotification
         $translated = Lang::get($key, $stringReplacements, $locale);
 
         return is_string($translated) ? $translated : $key;
+    }
+
+    /**
+     * Flatten a value that a customer chose into a single line.
+     *
+     * The values interpolated here are the customer's own: a hostname, a
+     * service label, an invoice number. One of them ends up in the subject
+     * line of an email, and a newline in a subject is a header — a header a
+     * customer chose is a Bcc a customer chose. The mail library would
+     * probably encode it; "probably" is not the standard for something that
+     * decides who receives a message.
+     *
+     * The same value is also the title in the in-app inbox, where a control
+     * character is merely wrong rather than dangerous. Both are fixed here,
+     * once, rather than at each place that reads a rendered line.
+     */
+    private static function oneLine(mixed $value): string
+    {
+        $flattened = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string) $value);
+
+        // A failed replace returns null, and an unfiltered value must never be
+        // what a failure falls back to.
+        return trim($flattened ?? '');
     }
 }

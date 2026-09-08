@@ -10,6 +10,7 @@ use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -202,6 +203,31 @@ final readonly class QuotePlanChange
 
         if ($subscription->plan !== null && $plan->product_id !== $subscription->plan->product_id) {
             $refusals[] = PlanChangeRefusal::DifferentProduct;
+        }
+
+        if ((string) $price->plan_id !== (string) $plan->getKey()) {
+            /*
+             * The plan and the price both come from the client, and until this
+             * check existed they were validated only for existence. A request
+             * naming the largest plan and the smallest plan's price passed
+             * every other rule — same product, same currency, same period —
+             * and moved the subscription onto the large plan at the small
+             * price. The catalogue is the authority for what a plan costs; a
+             * price belonging to another plan is not a discount, it is a
+             * mismatch.
+             */
+            $refusals[] = PlanChangeRefusal::PriceNotForPlan;
+        }
+
+        if ($service !== null && $service->status !== ServiceStatus::Active) {
+            /*
+             * A suspended customer can still be sold an upgrade otherwise: the
+             * money moves on confirmation and the resize is queued against a
+             * machine the platform has deliberately locked at the hypervisor,
+             * which then refuses it. The customer is charged for a plan they
+             * cannot be given.
+             */
+            $refusals[] = PlanChangeRefusal::ServiceNotActive;
         }
 
         if ($price->currency !== $subscription->currency) {

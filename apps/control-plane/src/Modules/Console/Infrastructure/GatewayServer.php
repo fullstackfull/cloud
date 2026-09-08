@@ -363,6 +363,40 @@ final class GatewayServer
     }
 
     /**
+     * Whether a browser on this origin may open a console.
+     *
+     * An absent Origin is allowed: native clients send none, and refusing them
+     * would break every non-browser console without stopping any attacker —
+     * who is not constrained by a browser either. Configured empty, the check
+     * is off, which is the honest default for a deployment that has not said
+     * where its portal lives.
+     */
+    private function originIsAllowed(?string $origin): bool
+    {
+        if ($origin === null || $origin === '') {
+            return true;
+        }
+
+        /** @var list<string> $allowed */
+        $allowed = config('console_gateway.allowed_origins', []);
+
+        if ($allowed === []) {
+            return true;
+        }
+
+        foreach ($allowed as $candidate) {
+            // Compared whole and case-insensitively on the scheme and host,
+            // never by prefix: `https://portal.lynomia.test.attacker.example`
+            // starts with the portal's own origin.
+            if (strcasecmp(rtrim($candidate, '/'), rtrim($origin, '/')) === 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Read the browser's upgrade request, authorise it, and dial the upstream.
      */
     private function completeHandshake(GatewayConnection $connection): void
@@ -382,6 +416,26 @@ final class GatewayServer
              */
             @fwrite($connection->client, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
             $this->close($connection, self::CLOSE_REFUSED, 'not a websocket upgrade');
+
+            return;
+        }
+
+        if (! $this->originIsAllowed($request->header('origin'))) {
+            /*
+             * A page on another origin. The permit is what actually
+             * authenticates a console and a hostile page cannot read one, so
+             * this is defence in depth — but a WebSocket is not subject to the
+             * same-origin policy, and a gateway that any page can reach is a
+             * gateway any page can spend the rate limit of.
+             *
+             * Refused with the same close code as every other refusal, and
+             * counted under its own reason so an operator can tell a
+             * misconfigured portal from an attack.
+             */
+            $connection->handshakeComplete = true;
+            $this->metrics->refused('origin_not_allowed');
+            $this->writeClient($connection, $this->closeFrame(self::CLOSE_REFUSED, 'refused'));
+            $this->close($connection, self::CLOSE_REFUSED, 'refused');
 
             return;
         }
