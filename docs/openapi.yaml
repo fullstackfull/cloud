@@ -77,6 +77,7 @@ tags:
   - name: "DNS"
   - name: "Dedicated servers"
     description: "Physical machines, controlled through a BMC the API never exposes."
+  - name: "Domains"
   - name: "IP addresses"
     description: "Addresses assigned to the account, and their reverse DNS."
   - name: "Notifications"
@@ -3360,6 +3361,740 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/DnsRecordResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains":
+    get:
+      operationId: "api_v1_domains_index"
+      tags:
+        - "Domains"
+      summary: "List this account's names"
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Domain"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_v1_domains_store"
+      tags:
+        - "Domains"
+      summary: "Register a name"
+      description: "Spends a quote, claims the name on this platform, records the registrant and issues an invoice. Nothing is registered until that invoice is paid. The registrant is required because every registry files a registration against one, and a registration submitted without it is refused after the customer has paid. A name another account already holds here answers 409."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                quote_id:
+                  description: "See the endpoint description; validated server-side."
+                registrant:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/quotes":
+    post:
+      operationId: "api_v1_domains_quotes_store"
+      tags:
+        - "Domains"
+      summary: "Ask what a name will cost"
+      description: "Writes a price the platform will honour and answers with its id. There is no price field on the request and there will not be one: a premium name can cost a hundred times the list price for its namespace, and a checkout that accepted an amount from the client would sell it for the price of an ordinary one. The registrar is asked again here rather than trusting whatever the search put on the screen."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                operation:
+                  description: "See the endpoint description; validated server-side."
+                term_years:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainQuoteResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/search":
+    get:
+      operationId: "api_v1_domains_search"
+      tags:
+        - "Domains"
+      summary: "Search for a name"
+      description: "Answers with all five availability states, `unknown` among them. A registrar that times out has said nothing: rendering that as available invites a customer to buy a name that is taken and get a refusal after their money moved, and rendering it as unavailable turns away a customer who could have had it. The price beside each answer is the catalogue's and is not a commitment — what the platform will honour is a quote."
+      parameters:
+        - name: "name"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "also_try"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/DomainSearchResult"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/transfers":
+    post:
+      operationId: "api_v1_domains_transfers_store"
+      tags:
+        - "Domains"
+      summary: "Transfer a name in"
+      description: "Takes the authorisation code from the losing registrar. The code is held encrypted between payment and dispatch, erased the moment it is sent, and never appears in any response. A started transfer sits in `awaiting_registry` until the losing registrar releases it, which can take five days: that is the registry's design and not a failure."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                quote_id:
+                  description: "See the endpoint description; validated server-side."
+                authorisation_code:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}":
+    get:
+      operationId: "api_v1_domains_show"
+      tags:
+        - "Domains"
+      summary: "Read one name"
+      description: "A domain belonging to another account answers 404 rather than 403: a 403 would confirm which account holds which name."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/authorisation-code":
+    post:
+      operationId: "api_v1_domains_authorisation_code_store"
+      tags:
+        - "Domains"
+      summary: "Take the authorisation code"
+      description: "The code that lets the customer move this name to another registrar. A POST rather than a GET because it is an act: most registrars regenerate the code when asked, and a GET would be repeated by a browser prefetch. The code is never stored by this platform and never written to the audit trail — only the fact that somebody asked for it."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainAuthorisationCodeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/contacts":
+    put:
+      operationId: "api_v1_domains_contacts_update"
+      tags:
+        - "Domains"
+      summary: "Change the registrant"
+      description: "The registry's copy is the one that decides disputes and transfers, so it is written first and the stored rows follow. Every field is personal data, encrypted at rest, and never published on any surface but this account's own."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                registrant:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/nameservers":
+    put:
+      operationId: "api_v1_domains_nameservers_update"
+      tags:
+        - "Domains"
+      summary: "Change the delegation"
+      description: "Between two and thirteen hosts, which is what registries enforce. Written at the registry first and recorded second: a stored delegation that ran ahead of the registry would send the customer debugging their own DNS. A registrar that times out leaves the stored copy alone and marks it for reconciliation rather than guessing."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                nameservers:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/renewals":
+    post:
+      operationId: "api_v1_domains_renewals_store"
+      tags:
+        - "Domains"
+      summary: "Renew a name"
+      description: "Issues an invoice; the registry is asked when it is paid, by the same listener that handles an automatic renewal. A second renewal while one is in flight answers 409 — two renewals for one name is two years bought, and registries do not give the extra one back."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                quote_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/transfer-lock":
+    put:
+      operationId: "api_v1_domains_transfer_lock_update"
+      tags:
+        - "Domains"
+      summary: "Lock or unlock the name"
+      description: "The registrar lock is the single most effective defence a domain has against being stolen. Unlocking is not made difficult — the customer owns the name — but it is recorded, because unlocking and taking the authorisation code are the two steps by which a name leaves."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                locked:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -9847,6 +10582,222 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DnsZone"
+    Domain:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type:
+            - "string"
+            - "null"
+        tld:
+          type:
+            - "string"
+            - "null"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "registration_pending, transfer_pending, active, expired, grace, redemption, deleted, transferred_away, failed, indeterminate or needs_review. `indeterminate` means a registrar did not answer and nobody yet knows whether the name is held — it is never resolved by guessing or by trying again."
+        is_held:
+          type: "boolean"
+        is_manageable:
+          type: "boolean"
+          description: "Whether nameservers, contacts and the lock can be changed. False while a registration is unconfirmed."
+        is_renewable:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        term_years:
+          type:
+            - "integer"
+            - "null"
+        auto_renew:
+          type: "boolean"
+          description: "On by default. A lapsed domain is not recoverable at the ordinary price, and it takes the customer's mail with it."
+        transfer_locked:
+          type:
+            - "boolean"
+            - "null"
+        nameservers:
+          type: "array"
+          items:
+            type: "string"
+        dns_zone_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        registered_at:
+          "$ref": "#/components/schemas/Timestamp"
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+        is_expiring:
+          type: "boolean"
+          description: "Computed from the expiry date at read time rather than stored, so it cannot be stale."
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DomainAuthorisationCode:
+      type: "object"
+      additionalProperties: false
+      properties:
+        authorisation_code:
+          type:
+            - "string"
+            - "null"
+          description: "A bearer credential for the whole domain. It is fetched from the registrar on request and never stored by this platform."
+    DomainAuthorisationCodeResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DomainAuthorisationCode"
+    DomainOperation:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        domain_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        name:
+          type:
+            - "string"
+            - "null"
+        kind:
+          type:
+            - "string"
+            - "null"
+          description: "register, renew, transfer or redeem."
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "requested, queued, running, awaiting_registry, completed, failed, indeterminate or needs_review. `awaiting_registry` is a transfer sitting with the losing registrar, which can take five days and is not a failure."
+        term_years:
+          type:
+            - "integer"
+            - "null"
+        currency:
+          type:
+            - "string"
+            - "null"
+        price_minor:
+          type:
+            - "integer"
+            - "null"
+        invoice_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        is_in_flight:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+          description: "True when a person has to decide. An operation in this state must not be retried by the client: the money may already have moved."
+        failure_message:
+          type:
+            - "string"
+            - "null"
+          description: "The registrar's own words, with anything credential-shaped removed before it was stored."
+        completed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DomainOperationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DomainOperation"
+    DomainQuote:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type:
+            - "string"
+            - "null"
+        tld:
+          type:
+            - "string"
+            - "null"
+        operation:
+          type:
+            - "string"
+            - "null"
+        term_years:
+          type:
+            - "integer"
+            - "null"
+        premium:
+          type: "boolean"
+        currency:
+          type:
+            - "string"
+            - "null"
+        price_minor:
+          type:
+            - "integer"
+            - "null"
+          description: "What the platform will honour. Computed on the server and stored; no amount is ever read from the client."
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DomainQuoteResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DomainQuote"
+    DomainResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Domain"
+    DomainSearchResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        name:
+          type:
+            - "string"
+            - "null"
+        tld:
+          type:
+            - "string"
+            - "null"
+        availability:
+          type:
+            - "string"
+            - "null"
+          description: "available, unavailable, premium, unknown or unsupported. `unknown` means the registrar did not answer: it is not a yes and not a no, and a client that renders it as either will either sell a name that is taken or turn away a customer who could have had one."
+        is_orderable:
+          type: "boolean"
+        premium:
+          type: "boolean"
+        currency:
+          type:
+            - "string"
+            - "null"
+        price_minor:
+          type:
+            - "integer"
+            - "null"
+          description: "Null whenever the platform will not commit to a number. A zero here would read as free."
+        term_years:
+          type:
+            - "integer"
+            - "null"
     Error:
       type: "object"
       description: |-

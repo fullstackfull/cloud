@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Domains\Infrastructure;
 
 use Lynomia\Modules\Domains\Domain\Contracts\DomainRegistrarProvider;
+use Lynomia\Modules\Domains\Domain\Exceptions\RegistrarNotAvailableException;
 use Lynomia\Modules\Domains\Domain\Exceptions\UnknownRegistrarDriverException;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Domains\Infrastructure\Providers\FakeDomainRegistrarProvider;
@@ -70,7 +71,29 @@ final class DomainRegistrarFactory
      */
     public function forTld(DomainTld $tld): DomainRegistrarProvider
     {
-        return $this->make($tld->provider);
+        $provider = $this->make($tld->provider);
+
+        /*
+         * The adapter has to agree that it serves this namespace.
+         *
+         * A TLD row is edited by a person, and the failure this catches is a
+         * quiet one: a `.com` row pointed at the wrong driver would send real
+         * registrations to a registry that does not run `.com`, and the first
+         * symptom would be a customer's paid order refused by a registrar
+         * nobody meant to ask. Refusing here costs one array lookup and turns
+         * a configuration mistake into an error at the boundary.
+         *
+         * A driver that names no namespaces serves whatever it is pointed at:
+         * that is how a test double stands in for a registrar without having
+         * to restate the catalogue.
+         */
+        $serves = $provider->supportedTlds();
+
+        if ($serves !== [] && ! in_array($tld->tld, $serves, strict: true)) {
+            throw RegistrarNotAvailableException::doesNotServe($provider->name(), $tld->tld);
+        }
+
+        return $provider;
     }
 
     /**

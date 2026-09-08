@@ -13,6 +13,7 @@ use Lynomia\Modules\Domains\Domain\DTOs\TransferStatus;
 use Lynomia\Modules\Domains\Domain\Enums\DomainAvailability;
 use Lynomia\Modules\Domains\Domain\Enums\RegistrarCapability;
 use Lynomia\Modules\Domains\Domain\Exceptions\DomainRegistrarException;
+use Lynomia\Modules\Domains\Domain\Exceptions\RegistrarNotAvailableException;
 use Lynomia\Modules\Ipam\Domain\Contracts\ReverseDnsProvider;
 
 /**
@@ -67,6 +68,19 @@ use Lynomia\Modules\Ipam\Domain\Contracts\ReverseDnsProvider;
  *    home address; an adapter that puts the request body in the error message
  *    puts it in the log.
  */
+/*
+ * Two exceptions, and callers must handle both.
+ *
+ * `DomainRegistrarException` is a registrar that answered badly or did not
+ * answer — and it carries `isIndeterminate()`, which decides whether the
+ * platform may act again.
+ *
+ * `RegistrarNotAvailableException` is an adapter with no integration behind
+ * it: nothing was sent, nothing is pending, and no retry will help. It is
+ * declared on every method here because a caller that catches only the first
+ * one leaves an operation running for ever the day a namespace is routed to a
+ * registrar this build cannot talk to.
+ */
 interface DomainRegistrarProvider
 {
     /**
@@ -105,6 +119,7 @@ interface DomainRegistrarProvider
      * @return list<AvailabilityAnswer>
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function checkAvailability(array $names): array;
 
@@ -125,6 +140,7 @@ interface DomainRegistrarProvider
      * the caller checks for exactly that rather than trusting the acceptance.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function renew(string $name, int $termYears): RegisteredDomain;
 
@@ -135,6 +151,7 @@ interface DomainRegistrarProvider
      * against.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function inspect(string $name): RegisteredDomain;
 
@@ -144,6 +161,7 @@ interface DomainRegistrarProvider
      * @param  list<string>  $nameservers
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function setNameservers(string $name, array $nameservers): void;
 
@@ -153,6 +171,7 @@ interface DomainRegistrarProvider
      * @param  array<string, ContactDetails>  $contacts  Keyed by role value.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function setContacts(string $name, array $contacts): void;
 
@@ -160,6 +179,7 @@ interface DomainRegistrarProvider
      * Set the registry's transfer lock.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function setTransferLock(string $name, bool $locked): void;
 
@@ -171,6 +191,7 @@ interface DomainRegistrarProvider
      * an audit context — the audit records that somebody asked for it.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function authorisationCode(string $name): string;
 
@@ -180,6 +201,7 @@ interface DomainRegistrarProvider
      * @param  list<string>  $nameservers
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function startTransfer(string $name, string $authorisationCode, array $nameservers = []): TransferStatus;
 
@@ -189,6 +211,7 @@ interface DomainRegistrarProvider
      * Polled, because a transfer takes days and no registrar calls back.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function transferStatus(string $name): TransferStatus;
 
@@ -200,6 +223,7 @@ interface DomainRegistrarProvider
      * for a redeemed name refuses it.
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function redeem(string $name): RegisteredDomain;
 
@@ -213,6 +237,7 @@ interface DomainRegistrarProvider
      * @return list<string>
      *
      * @throws DomainRegistrarException
+     * @throws RegistrarNotAvailableException when the adapter has no integration behind it
      */
     public function heldNames(): array;
 }

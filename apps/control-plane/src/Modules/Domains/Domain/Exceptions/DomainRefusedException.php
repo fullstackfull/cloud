@@ -99,6 +99,38 @@ final class DomainRefusedException extends DomainException
             ->withContext(['name' => $name]);
     }
 
+    /**
+     * A registration filed without somebody to file it against.
+     *
+     * Every registry records a registrant, and one submitted without it comes
+     * back refused — after the customer has paid, and after the platform has
+     * spent an idempotency key on it. Refused here instead.
+     */
+    public static function becauseAContactIsMissing(string $role): self
+    {
+        return (new self('This registration needs contact details before it can be filed.'))
+            ->withContext(['role' => $role])
+            ->as('domain.contact_missing')
+            ->status(422);
+    }
+
+    /**
+     * A delegation no registry would accept.
+     *
+     * Two nameservers is the floor every registry enforces and thirteen the
+     * ceiling. Checked here so the customer reads a sentence instead of a
+     * registry status code, and so a one-nameserver delegation — which
+     * resolves right up until that host reboots — is refused rather than
+     * filed.
+     */
+    public static function becauseTheNameserversAreNotUsable(string $name, int $given): self
+    {
+        return (new self('A domain needs between two and thirteen nameservers.'))
+            ->withContext(['domain' => $name, 'given' => $given])
+            ->as('domain.nameservers_unusable')
+            ->status(422);
+    }
+
     public static function becauseTheProviderCannot(string $capability): self
     {
         return (new self('The registrar holding this domain does not offer that.'))

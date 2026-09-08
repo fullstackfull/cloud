@@ -102,6 +102,43 @@ enum DomainState: string
      * as a domain the customer owns would be making the platform's uncertainty
      * into the customer's confidence.
      */
+    /**
+     * Whether this platform is the name's holder while it is in this state.
+     *
+     * Broader than {@see isHeld()}: a registration still pending and a name
+     * sitting in `indeterminate` are both names no second account may buy,
+     * even though neither is a name the customer can use yet.
+     *
+     * This predicate has a copy in the database — the partial unique index
+     * `domains_one_live_holder`, whose WHERE clause is the negation of it. The
+     * two are kept honest by a test rather than by hope, because the failure
+     * mode of them disagreeing is either a name sold twice or a name nobody
+     * can ever buy again.
+     */
+    public function holdsTheName(): bool
+    {
+        return match ($this) {
+            self::Deleted, self::TransferredAway, self::Failed => false,
+            default => true,
+        };
+    }
+
+    /**
+     * The stored values of every state in which this platform holds the name.
+     *
+     * For the one query that has to ask "is this name spoken for" without a
+     * row in hand.
+     *
+     * @return list<string>
+     */
+    public static function thatHoldTheName(): array
+    {
+        return array_values(array_map(
+            static fn (self $state): string => $state->value,
+            array_filter(self::cases(), static fn (self $state): bool => $state->holdsTheName()),
+        ));
+    }
+
     public function isHeld(): bool
     {
         return match ($this) {

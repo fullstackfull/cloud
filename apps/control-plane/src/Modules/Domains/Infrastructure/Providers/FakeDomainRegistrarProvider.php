@@ -65,6 +65,17 @@ final class FakeDomainRegistrarProvider implements DomainRegistrarProvider
 
     public const string TIMEOUT_MARKER = '-timeout';
 
+    /**
+     * A registrar that does not answer an availability check.
+     *
+     * Distinct from TIMEOUT_MARKER, and it has to be: that one means the
+     * registrar went quiet during a *purchase*, which a name has to be
+     * orderable to reach. One marker for both moments would make the
+     * interesting case — a name that searches cleanly and then times out with
+     * the customer's money in flight — impossible to rehearse.
+     */
+    public const string UNREACHABLE_MARKER = '-unreachable';
+
     public const string PREMIUM_MARKER = '-premium';
 
     public const string UNKNOWN_MARKER = '-unknown';
@@ -137,6 +148,20 @@ final class FakeDomainRegistrarProvider implements DomainRegistrarProvider
 
         foreach ($names as $name) {
             $name = strtolower($name);
+
+            /*
+             * A registrar that times out has not said the name is free. The
+             * fake throws here rather than answering, because the behaviour
+             * worth rehearsing is the caller's: a search must degrade to
+             * "we could not answer" and everything that spends money must
+             * refuse to proceed. Answering `available` would let both paths
+             * pass a test they should fail.
+             */
+            if (str_contains($name, self::UNREACHABLE_MARKER)) {
+                throw DomainRegistrarException::indeterminate(
+                    'the fake registrar did not answer an availability check for '.$name,
+                );
+            }
 
             $answers[] = match (true) {
                 // Asked about a name nobody can answer for.

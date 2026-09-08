@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
+use Lynomia\Modules\Domains\Application\Listeners\RegisterDomainOnPayment;
 use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
 use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnBillingEvent;
 use Lynomia\Modules\Notifications\Application\Listeners\NotifyOnProvisioningOutcome;
@@ -75,6 +76,14 @@ final class EventServiceProvider extends BaseEventServiceProvider
             // A renewal being paid is what ends dunning. Without this the
             // money arrived and the subscription stayed suspended.
             ReviveSubscriptionOnRenewalPayment::class,
+
+            /*
+             * A domain is registered only once its invoice is paid. It listens
+             * here rather than to OrderFinanciallySettled because a domain is
+             * invoiced directly rather than through the plan checkout: there
+             * is no order row for it to settle.
+             */
+            RegisterDomainOnPayment::class,
         ],
         SubscriptionStatusChanged::class => [
             EnforceServiceStateForSubscription::class,

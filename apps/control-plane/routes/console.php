@@ -219,6 +219,41 @@ Schedule::command('dns:reconcile')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * The domain clock, once a day just after midnight UTC.
+ *
+ * Daily rather than hourly because every deadline it works with is a date, not
+ * a time: a registry's grace period ends on a day, and a renewal ordered at
+ * 00:05 has the same twenty-nine days to be paid as one ordered at noon.
+ *
+ * It is what makes `auto_renew` mean anything. Without it the flag is a
+ * checkbox that renews nothing, and the first customer to find out is one who
+ * has lost their domain.
+ */
+Schedule::command('domains:sweep')
+    ->dailyAt('00:05')
+    ->withoutOverlapping(60)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Domain reconciliation, every three hours.
+ *
+ * This is the other half of the Timeout Rule. A registration that timed out is
+ * left alone by design — retrying a purchase that may have succeeded buys a
+ * second term — which means something else has to find out what the registry
+ * actually did. Without this sweep, `indeterminate` is not a safe state, it is
+ * an abandoned one, and the customer who paid is the one waiting.
+ *
+ * Every call it makes is a read. It settles rows and records disagreements; it
+ * never buys anything.
+ */
+Schedule::command('domains:reconcile')
+    ->cron('35 */3 * * *')
+    ->withoutOverlapping(30)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Address reclamation, every ten minutes.
  *
  * Both directions out of a pool were one-way: a reservation whose build never

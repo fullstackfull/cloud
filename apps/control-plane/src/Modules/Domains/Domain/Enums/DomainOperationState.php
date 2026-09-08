@@ -46,6 +46,25 @@ enum DomainOperationState: string
     /** A person has to decide, and the reason is on the row. */
     case NeedsReview = 'needs_review';
 
+    /**
+     * Whether a worker may pick this up and talk to the registrar.
+     *
+     * `Running` and `AwaitingRegistry` are excluded, and that exclusion is the
+     * guard against a redelivered queue message. A message can arrive twice —
+     * that is a property of every queue worth using — and the second delivery
+     * must not start a second purchase while the first is still out.
+     *
+     * The cost of the exclusion is an operation stuck in `Running` when a
+     * worker dies mid-call. That is deliberate: a process that vanished
+     * between sending a registration and hearing back is the textbook
+     * indeterminate case, and it is swept into `indeterminate` on a clock
+     * rather than retried on a hunch.
+     */
+    public function mayBeStarted(): bool
+    {
+        return $this === self::Requested || $this === self::Queued;
+    }
+
     /** Whether this attempt is still going somewhere on its own. */
     public function isInFlight(): bool
     {

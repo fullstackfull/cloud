@@ -57,12 +57,25 @@ class DomainOperation extends Model
     protected $guarded = [];
 
     /**
+     * Never serialised, whatever a resource forgets to exclude.
+     *
+     * The authorisation code held here is a bearer credential for the whole
+     * domain. It exists for the minutes between a transfer being paid for and
+     * being sent, and it must not reach a payload, a log line or a debug dump
+     * in between.
+     *
+     * @var list<string>
+     */
+    protected $hidden = ['authorisation_code'];
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
             'kind' => DomainOperationKind::class,
+            'authorisation_code' => 'encrypted',
             'state' => DomainOperationState::class,
             'last_attempted_at' => 'immutable_datetime',
             'completed_at' => 'immutable_datetime',

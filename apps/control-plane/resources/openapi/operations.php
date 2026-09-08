@@ -599,6 +599,90 @@ return [
         'body' => ['confirm_zone_name'],
         'response' => $one('DnsZone'),
     ],
+    /* ---------------------------------------------------------------------
+     | Domains
+     |
+     | The one product on this platform that cannot be repossessed. A registry
+     | fee is spent the moment a registration succeeds, so every path here
+     | invoices first and asks the registrar only once the money has arrived —
+     | and every path that spends money refuses to act on an answer a registrar
+     | never gave.
+     */
+
+    'api.v1.domains.search' => [
+        'tag' => 'Domains',
+        'summary' => 'Search for a name',
+        'description' => "Answers with all five availability states, `unknown` among them. A registrar that times out has said nothing: rendering that as available invites a customer to buy a name that is taken and get a refusal after their money moved, and rendering it as unavailable turns away a customer who could have had it. The price beside each answer is the catalogue's and is not a commitment — what the platform will honour is a quote.",
+        'query' => ['name', 'also_try'],
+        'response' => ['envelope' => 'list', 'schema' => 'DomainSearchResult'],
+    ],
+    'api.v1.domains.quotes.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Ask what a name will cost',
+        'description' => 'Writes a price the platform will honour and answers with its id. There is no price field on the request and there will not be one: a premium name can cost a hundred times the list price for its namespace, and a checkout that accepted an amount from the client would sell it for the price of an ordinary one. The registrar is asked again here rather than trusting whatever the search put on the screen.',
+        'body' => ['name', 'operation', 'term_years'],
+        'response' => $one('DomainQuote', 201),
+    ],
+    'api.v1.domains.index' => [
+        'tag' => 'Domains',
+        'summary' => "List this account's names",
+        'response' => ['envelope' => 'list', 'schema' => 'Domain'],
+    ],
+    'api.v1.domains.show' => [
+        'tag' => 'Domains',
+        'summary' => 'Read one name',
+        'description' => 'A domain belonging to another account answers 404 rather than 403: a 403 would confirm which account holds which name.',
+        'response' => $one('Domain'),
+    ],
+    'api.v1.domains.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Register a name',
+        'description' => 'Spends a quote, claims the name on this platform, records the registrant and issues an invoice. Nothing is registered until that invoice is paid. The registrant is required because every registry files a registration against one, and a registration submitted without it is refused after the customer has paid. A name another account already holds here answers 409.',
+        'body' => ['quote_id', 'registrant'],
+        'response' => $one('DomainOperation', 201),
+    ],
+    'api.v1.domains.renewals.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Renew a name',
+        'description' => 'Issues an invoice; the registry is asked when it is paid, by the same listener that handles an automatic renewal. A second renewal while one is in flight answers 409 — two renewals for one name is two years bought, and registries do not give the extra one back.',
+        'body' => ['quote_id'],
+        'response' => $one('DomainOperation', 201),
+    ],
+    'api.v1.domains.transfers.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Transfer a name in',
+        'description' => "Takes the authorisation code from the losing registrar. The code is held encrypted between payment and dispatch, erased the moment it is sent, and never appears in any response. A started transfer sits in `awaiting_registry` until the losing registrar releases it, which can take five days: that is the registry's design and not a failure.",
+        'body' => ['quote_id', 'authorisation_code'],
+        'response' => $one('DomainOperation', 201),
+    ],
+    'api.v1.domains.nameservers.update' => [
+        'tag' => 'Domains',
+        'summary' => 'Change the delegation',
+        'description' => 'Between two and thirteen hosts, which is what registries enforce. Written at the registry first and recorded second: a stored delegation that ran ahead of the registry would send the customer debugging their own DNS. A registrar that times out leaves the stored copy alone and marks it for reconciliation rather than guessing.',
+        'body' => ['nameservers'],
+        'response' => $one('Domain'),
+    ],
+    'api.v1.domains.contacts.update' => [
+        'tag' => 'Domains',
+        'summary' => 'Change the registrant',
+        'description' => "The registry's copy is the one that decides disputes and transfers, so it is written first and the stored rows follow. Every field is personal data, encrypted at rest, and never published on any surface but this account's own.",
+        'body' => ['registrant'],
+        'response' => $one('Domain'),
+    ],
+    'api.v1.domains.transfer_lock.update' => [
+        'tag' => 'Domains',
+        'summary' => 'Lock or unlock the name',
+        'description' => 'The registrar lock is the single most effective defence a domain has against being stolen. Unlocking is not made difficult — the customer owns the name — but it is recorded, because unlocking and taking the authorisation code are the two steps by which a name leaves.',
+        'body' => ['locked'],
+        'response' => $one('Domain'),
+    ],
+    'api.v1.domains.authorisation_code.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Take the authorisation code',
+        'description' => 'The code that lets the customer move this name to another registrar. A POST rather than a GET because it is an act: most registrars regenerate the code when asked, and a GET would be repeated by a browser prefetch. The code is never stored by this platform and never written to the audit trail — only the fact that somebody asked for it.',
+        'response' => $one('DomainAuthorisationCode'),
+    ],
+
     'api.v1.dns.records.index' => [
         'tag' => 'DNS',
         'summary' => 'List the records in a zone',

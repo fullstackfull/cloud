@@ -153,6 +153,32 @@ enum AuditAction: string
     case DnsRecordUpdated = 'dns.record.updated';
     case DnsRecordDeleted = 'dns.record.deleted';
 
+    /*
+     * Domains.
+     *
+     * A registration is money spent on something that cannot be given back:
+     * the registry fee is gone the moment it succeeds, and a name registered
+     * to the wrong registrant is a support case measured in weeks. So the
+     * order is recorded with the act that creates it, in the same
+     * transaction, rather than logged afterwards by whoever remembers.
+     */
+    case DomainRegistrationOrdered = 'domain.registration.ordered';
+    case DomainRenewalOrdered = 'domain.renewal.ordered';
+    case DomainTransferOrdered = 'domain.transfer.ordered';
+    case DomainNameserversChanged = 'domain.nameservers.changed';
+    case DomainContactsChanged = 'domain.contacts.changed';
+    case DomainLocked = 'domain.locked';
+
+    /*
+     * Unlocking and issuing an authorisation code are the two steps by which a
+     * name leaves this platform, and together they are what a stolen account
+     * does first. Recorded separately from the lock so that "somebody unlocked
+     * this and took the code within the minute" is one query rather than an
+     * eyeball exercise.
+     */
+    case DomainUnlocked = 'domain.unlocked';
+    case DomainAuthorisationCodeIssued = 'domain.authorisation_code.issued';
+
     /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.

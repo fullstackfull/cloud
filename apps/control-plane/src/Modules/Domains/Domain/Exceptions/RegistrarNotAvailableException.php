@@ -22,6 +22,20 @@ final class RegistrarNotAvailableException extends DomainException
         ))->withContext(['provider' => 'sy_registry']);
     }
 
+    /**
+     * A namespace routed to a driver that does not serve it.
+     *
+     * A catalogue mistake rather than a missing integration, and it is worth
+     * its own constructor because the two need different people: this one is
+     * fixed by editing a TLD row, and the one above by signing an agreement.
+     */
+    public static function doesNotServe(string $provider, string $tld): self
+    {
+        return (new self(
+            'This namespace is not on sale.',
+        ))->withContext(['provider' => $provider, 'tld' => $tld]);
+    }
+
     public function errorCode(): string
     {
         return 'domain.registrar_not_available';
