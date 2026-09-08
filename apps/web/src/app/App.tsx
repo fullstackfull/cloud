@@ -22,6 +22,7 @@ import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { BackupsPage } from '@/features/backups/BackupsPage'
 import { DnsPage } from '@/features/dns/DnsPage'
 import { DomainsPage } from '@/features/domains/DomainsPage'
+import { WordPressPage } from '@/features/wordpress/WordPressPage'
 import { PlanChangePage } from '@/features/billing/PlanChangePage'
 import { ConsolePage } from '@/features/console/ConsolePage'
 import { VpsPage } from '@/features/infrastructure/VpsPage'
@@ -111,6 +112,7 @@ export function App() {
                 <Route path="/ips" element={<IpAddressesPage />} />
                 <Route path="/dns" element={<DnsPage />} />
                 <Route path="/domains" element={<DomainsPage />} />
+                <Route path="/wordpress" element={<WordPressPage />} />
 
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />

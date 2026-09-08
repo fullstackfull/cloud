@@ -179,6 +179,15 @@ enum AuditAction: string
     case DomainUnlocked = 'domain.unlocked';
     case DomainAuthorisationCodeIssued = 'domain.authorisation_code.issued';
 
+    /*
+     * WordPress.
+     *
+     * Ordering a site commits the account to hosting and, where the name is
+     * being registered with it, to a registry fee. Recorded with the act that
+     * creates it rather than logged afterwards by whoever remembers.
+     */
+    case WordPressSiteOrdered = 'wordpress.site.ordered';
+
     /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\SharedHosting\Http\Controllers\HostingController;
+use Lynomia\Modules\SharedHosting\Http\Controllers\WordPressController;
 
 /*
  * hosting — customer surface.
@@ -72,4 +73,26 @@ Route::prefix('hosting')->as('hosting.')->group(function (): void {
         ->name('sso');
 
     Route::get('{account}/usage', [HostingController::class, 'usage'])->name('usage');
+});
+
+/*
+ * WordPress sites.
+ *
+ * Their own prefix rather than nested under an account, because a site exists
+ * before its account does: the row is created when the order is placed so the
+ * customer has something to watch progress against, and the account is built
+ * afterwards.
+ */
+Route::prefix('wordpress')->as('wordpress.')->group(function (): void {
+    Route::get('sites', [WordPressController::class, 'index'])->name('sites.index');
+
+    Route::post('sites', [WordPressController::class, 'store'])
+        // Each one builds an account on a shared node and installs software on
+        // it. A loop here is a loop of real machines.
+        ->middleware('throttle:10,1,wordpress-order:')
+        ->name('sites.store');
+
+    Route::get('sites/{site}', [WordPressController::class, 'show'])
+        ->whereUlid('site')
+        ->name('sites.show');
 });

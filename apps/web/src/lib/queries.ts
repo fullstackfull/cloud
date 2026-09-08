@@ -34,6 +34,7 @@ import type {
   VirtualMachine,
   WalletBalances,
   WalletCreditQuote,
+  WordPressSite,
 } from '@/lib/types'
 
 /**
@@ -947,6 +948,41 @@ export function useRevokeApiToken() {
  | records under another's name while the new ones load — the same reason the
  | backups key carries the machine.
  */
+
+export function useWordPressSites() {
+  return useQuery({
+    queryKey: ['wordpress', 'sites'],
+    queryFn: () => api.get<{ data: WordPressSite[]; meta: { total: number } }>('/wordpress/sites'),
+
+    /*
+     * Polled while anything is still being built. A site goes through four
+     * steps that finish minutes apart, and a customer watching a screen that
+     * only updates on reload is a customer who refreshes it, or opens a
+     * ticket.
+     */
+    refetchInterval: (query) =>
+      (query.state.data?.data ?? []).some((site) => !site.is_verified && !site.needs_attention)
+        ? 15_000
+        : false,
+  })
+}
+
+export function useOrderWordPressSite() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: {
+      domain: string
+      domain_source: string
+      admin_username: string
+      admin_email: string
+    }) => api.post<Envelope<WordPressSite>>('/wordpress/sites', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
 
 export function useDomains() {
   return useQuery({

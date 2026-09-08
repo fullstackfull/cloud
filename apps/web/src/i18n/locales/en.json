@@ -48,7 +48,8 @@
     "team": "Team",
     "usage": "Usage",
     "vps": "Cloud VPS",
-    "wallet": "Wallet & Credits"
+    "wallet": "Wallet & Credits",
+    "wordpress": "WordPress"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -522,17 +523,18 @@
         "capacity": "No capacity"
       },
       "kinds": {
+        "change_hosting_package": "Change hosting package",
+        "create_hosting_account": "Create hosting account",
         "create_vps": "Create VPS",
         "destroy_vps": "Destroy VPS",
-        "start": "Start machine",
-        "stop": "Stop machine",
-        "restart": "Restart machine",
-        "reinstall_vps": "Rebuild VPS",
+        "install_wordpress": "Install WordPress",
+        "provision_dedicated": "Provision dedicated",
         "reinstall_dedicated": "Rebuild dedicated server",
+        "reinstall_vps": "Rebuild VPS",
         "resize": "Resize machine",
-        "create_hosting_account": "Create hosting account",
-        "change_hosting_package": "Change hosting package",
-        "provision_dedicated": "Provision dedicated"
+        "restart": "Restart machine",
+        "start": "Start machine",
+        "stop": "Stop machine"
       },
       "needsReviewTitle_one": "{{count}} job needs a human",
       "retry": "Run it again",
@@ -950,5 +952,34 @@
     "transferLock": "Transfer lock",
     "unknownHint": "The registry did not answer. Try again in a moment.",
     "unlock": "Unlock this name"
+  },
+  "wordpress": {
+    "adminEmail": "WordPress email",
+    "adminUsername": "WordPress username",
+    "adminUsernameHint": "Anything but admin. That is the first name every attack tries.",
+    "awaitingCertificateHint": "Your site is up. The certificate is still being issued, so visitors may see a browser warning for a little longer.",
+    "awaitingDnsHint": "The name is not pointing here yet. Change its nameservers at the company you registered it with, and this page will update on its own.",
+    "create": "Create the site",
+    "domain": "Domain name",
+    "domainSource": "Where does this name come from?",
+    "domainSourceHint": "This decides what we are waiting for. A name you hold with us points here in seconds; one held elsewhere waits on you changing its DNS.",
+    "needsAttention": "Something did not finish. Please do not order this site again; our team is looking at it.",
+    "newSite": "New WordPress site",
+    "none": "You do not have any WordPress sites yet.",
+    "passwordExplainer": "We generate the WordPress password and show it to you once. We do not keep a copy — you can change it from your own dashboard.",
+    "sources": {
+      "existing": "A name I already hold here",
+      "external": "I will point a name I hold elsewhere",
+      "register": "Register it with this order",
+      "transfer": "Transfer it in from elsewhere"
+    },
+    "steps": {
+      "certificate": "The certificate is issued",
+      "dns": "The name points here",
+      "installed": "WordPress is installed",
+      "verified": "We loaded the site and it answered"
+    },
+    "subtitle": "Managed WordPress on shared hosting, with the name and the certificate handled.",
+    "verifiedExplainer": "A site is only marked live once we have loaded it ourselves and WordPress answered."
   }
 }

@@ -236,6 +236,24 @@ Schedule::command('domains:sweep')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * WordPress verification, every fifteen minutes.
+ *
+ * The most frequent sweep on the platform, and the cheapest thing it could
+ * possibly be doing: one HTTP GET per site. It runs this often because the
+ * window it closes is the one a customer sits in — between "we finished
+ * building your site" and "your site actually answers" — and every minute of
+ * it is a minute they might spend refreshing a page that says ready over a
+ * site that is not.
+ *
+ * Read-only towards every site and every panel. It records what answered.
+ */
+Schedule::command('wordpress:verify')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping(15)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Domain reconciliation, every three hours.
  *
  * This is the other half of the Timeout Rule. A registration that timed out is

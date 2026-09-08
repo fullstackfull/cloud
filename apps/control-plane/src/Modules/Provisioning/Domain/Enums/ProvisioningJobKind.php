@@ -41,6 +41,16 @@ enum ProvisioningJobKind: string
      * customer pays for, and this makes an account the quota they pay for.
      */
     case ChangeHostingPackage = 'change_hosting_package';
+
+    /*
+     * Putting WordPress into an account that already exists.
+     *
+     * Its own kind rather than a flag on the create, because the two fail
+     * differently and a customer should not lose their hosting because a
+     * toolkit was busy. A create can be placed on another node; an install
+     * runs against an account that is already somewhere.
+     */
+    case InstallWordPress = 'install_wordpress';
     case ProvisionDedicated = 'provision_dedicated';
 
     /**
@@ -81,7 +91,15 @@ enum ProvisioningJobKind: string
         return match ($this) {
             self::CreateVps, self::CreateHostingAccount, self::ProvisionDedicated => ServiceStatus::Active,
             self::DestroyVps => ServiceStatus::Terminated,
-            self::Start, self::Stop, self::Restart, self::Resize, self::ChangeHostingPackage => null,
+            /*
+             * An install does not change what the customer bought. The
+             * service is active the moment the hosting account exists; a site
+             * that has not finished installing is a site, not an undelivered
+             * service, and marking the service active only once WordPress
+             * answered would suspend a customer's hosting over a toolkit.
+             */
+            self::Start, self::Stop, self::Restart, self::Resize,
+            self::ChangeHostingPackage, self::InstallWordPress => null,
             self::ReinstallVps, self::ReinstallDedicated => null,
         };
     }

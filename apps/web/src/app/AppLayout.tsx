@@ -47,6 +47,7 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/ips', labelKey: 'nav.ips' },
   { to: '/dns', labelKey: 'nav.dns' },
   { to: '/domains', labelKey: 'nav.domains' },
+  { to: '/wordpress', labelKey: 'nav.wordpress' },
   { to: '/api-tokens', labelKey: 'nav.apiKeys' },
   { to: '/support', labelKey: 'nav.support' },
   { to: '/settings/team', labelKey: 'nav.team' },

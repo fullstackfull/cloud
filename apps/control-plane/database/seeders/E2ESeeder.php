@@ -51,9 +51,13 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Support\Domain\Enums\MessageAuthorKind;
 use Lynomia\Modules\Support\Domain\Enums\TicketCategory;
@@ -155,6 +159,13 @@ class E2ESeeder extends Seeder
 
     private const string UNSURE_DOMAIN = 'e2e-unsure.test';
 
+    /** A site that works, one waiting on its customer, one waiting on a person. */
+    private const string LIVE_SITE = 'e2e-live-site.test';
+
+    private const string WAITING_SITE = 'e2e-waiting-site.test';
+
+    private const string STUCK_SITE = 'e2e-stuck-site.test';
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -178,6 +189,7 @@ class E2ESeeder extends Seeder
         $this->workNobodyCanSettle($customer);
         $this->whatReconciliationFound($customer);
         $this->domains($customer);
+        $this->wordpressSites($customer);
         $this->team($customer);
         $this->ticket($customer);
 
@@ -644,6 +656,65 @@ class E2ESeeder extends Seeder
                 'auto_renew' => true,
                 'review_reason' => 'The registrar did not answer the registration. '
                     .'The name may or may not be held; check the registry before acting.',
+            ],
+        );
+    }
+
+    /**
+     * Three sites: one live, one waiting on the customer, one nobody can fix
+     * by retrying.
+     *
+     * The middle one is the reason this fixture exists. A customer whose name
+     * has not finished pointing here is waiting on themselves, and the screen
+     * has to say so — a spinner would leave them refreshing a page while
+     * nothing happens, because nothing is going to until they act.
+     */
+    private function wordpressSites(Customer $customer): void
+    {
+        WordPressSite::query()->updateOrCreate(
+            ['domain' => self::LIVE_SITE],
+            [
+                'customer_id' => $customer->getKey(),
+                'domain_source' => WordPressDomainSource::External,
+                'state' => WordPressSiteState::Ready,
+                'dns_ready' => true,
+                'installed' => true,
+                'ssl_status' => SslStatus::Active,
+                'verified_at' => now()->subHour(),
+                'site_url' => 'https://'.self::LIVE_SITE,
+                'admin_username' => 'sitemanager',
+                'wordpress_version' => '6.7.1',
+                'locale' => 'en_US',
+            ],
+        );
+
+        WordPressSite::query()->updateOrCreate(
+            ['domain' => self::WAITING_SITE],
+            [
+                'customer_id' => $customer->getKey(),
+                'domain_source' => WordPressDomainSource::External,
+                'state' => WordPressSiteState::AwaitingDns,
+                'dns_ready' => false,
+                'installed' => true,
+                'ssl_status' => SslStatus::Pending,
+                'site_url' => 'https://'.self::WAITING_SITE,
+                'admin_username' => 'sitemanager',
+                'locale' => 'en_US',
+            ],
+        );
+
+        WordPressSite::query()->updateOrCreate(
+            ['domain' => self::STUCK_SITE],
+            [
+                'customer_id' => $customer->getKey(),
+                'domain_source' => WordPressDomainSource::External,
+                'state' => WordPressSiteState::Indeterminate,
+                'dns_ready' => true,
+                'installed' => false,
+                'ssl_status' => SslStatus::Unknown,
+                'admin_username' => 'sitemanager',
+                'locale' => 'en_US',
+                'review_reason' => 'The toolkit did not answer the installation.',
             ],
         );
     }
