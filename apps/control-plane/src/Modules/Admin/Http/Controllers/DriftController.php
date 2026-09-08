@@ -7,7 +7,9 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Compute\Application\Jobs\ReconcileCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
@@ -76,25 +78,26 @@ final class DriftController
          * to re-throw something equivalent is how two error formats for one
          * event get invented.
          */
-        $reviewed = app(ReviewDrift::class)->execute(
-            drift: $found,
-            verdict: $verdict,
-            resolution: $validated['resolution'] ?? null,
-            reviewedByUserId: (string) $request->user()?->getAuthIdentifier(),
-        );
-
-        app(RecordAuditEntry::class)->execute(
-            action: $verdict === DriftStatus::Resolved
-                ? AuditAction::DriftResolved
-                : AuditAction::DriftAcknowledged,
-            subject: $reviewed,
-            context: [
-                'kind' => $reviewed->kind->value,
-                'severity' => $reviewed->severity->value,
-                'provider_reference' => $reviewed->provider_reference,
-                'resolution' => $reviewed->resolution,
-                'occurrences' => $reviewed->occurrences,
-            ],
+        $reviewed = app(RecordActAtomically::class)->execute(
+            act: static fn (): ResourceDrift => app(ReviewDrift::class)->execute(
+                drift: $found,
+                verdict: $verdict,
+                resolution: $validated['resolution'] ?? null,
+                reviewedByUserId: (string) $request->user()?->getAuthIdentifier(),
+            ),
+            describe: static fn (ResourceDrift $drift): AuditedAct => new AuditedAct(
+                action: $verdict === DriftStatus::Resolved
+                    ? AuditAction::DriftResolved
+                    : AuditAction::DriftAcknowledged,
+                subject: $drift,
+                context: [
+                    'kind' => $drift->kind->value,
+                    'severity' => $drift->severity->value,
+                    'provider_reference' => $drift->provider_reference,
+                    'resolution' => $drift->resolution,
+                    'occurrences' => $drift->occurrences,
+                ],
+            ),
         );
 
         return response()->json(['data' => $this->present($reviewed)]);

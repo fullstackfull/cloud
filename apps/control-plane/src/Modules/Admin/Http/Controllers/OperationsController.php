@@ -9,7 +9,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
-use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
@@ -225,30 +226,39 @@ final class OperationsController
         }
 
         $completed = $validated['verdict'] === 'completed';
-
-        if ($model instanceof VmReinstall) {
-            $model->advanceTo($completed ? ReinstallState::Completed : ReinstallState::Failed);
-        } else {
-            $model->advanceTo($completed ? DedicatedReinstallState::Completed : DedicatedReinstallState::Failed);
-        }
-
-        $this->settleTheJob($model->provisioning_job_id, $completed);
-
         $user = $request->user();
+        $failedBecause = $model->failure_code;
 
-        app(RecordAuditEntry::class)->execute(
-            action: $completed ? AuditAction::ReinstallConfirmed : AuditAction::ReinstallAbandoned,
-            subject: $model,
-            customerId: $model->customer_id,
-            context: [
-                'type' => $type,
-                'evidence' => $validated['evidence'],
-                'previous_failure_code' => $model->failure_code,
-                'provisioning_job_id' => $model->provisioning_job_id,
-                'resolved_by' => $user instanceof User
-                    ? sprintf('%s <%s>', $user->name, $user->email)
-                    : 'system',
-            ],
+        /*
+         * The verdict, the job it settles and the record of who said so, in
+         * one transaction. All three are database writes, and a verdict with
+         * no trail is the one row in this table nobody could ever check: it is
+         * the platform's belief about a machine changed on somebody's word.
+         */
+        app(RecordActAtomically::class)->execute(
+            act: function () use ($model, $completed): void {
+                if ($model instanceof VmReinstall) {
+                    $model->advanceTo($completed ? ReinstallState::Completed : ReinstallState::Failed);
+                } else {
+                    $model->advanceTo($completed ? DedicatedReinstallState::Completed : DedicatedReinstallState::Failed);
+                }
+
+                $this->settleTheJob($model->provisioning_job_id, $completed);
+            },
+            describe: static fn (): AuditedAct => new AuditedAct(
+                action: $completed ? AuditAction::ReinstallConfirmed : AuditAction::ReinstallAbandoned,
+                subject: $model,
+                customerId: $model->customer_id,
+                context: [
+                    'type' => $type,
+                    'evidence' => $validated['evidence'],
+                    'previous_failure_code' => $failedBecause,
+                    'provisioning_job_id' => $model->provisioning_job_id,
+                    'resolved_by' => $user instanceof User
+                        ? sprintf('%s <%s>', $user->name, $user->email)
+                        : 'system',
+                ],
+            ),
         );
 
         $this->tellTheCustomer($model, $completed, $type);

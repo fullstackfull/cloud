@@ -7,6 +7,9 @@ namespace Lynomia\Modules\Notifications\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
 use Lynomia\Modules\Notifications\Infrastructure\Models\NotificationPreference;
@@ -92,13 +95,32 @@ final class NotificationPreferenceController
             ]);
         }
 
-        NotificationPreference::query()->updateOrCreate(
-            [
-                'user_id' => (string) $request->user()?->getAuthIdentifier(),
-                'category' => $category,
-                'channel' => $channel,
-            ],
-            ['enabled' => $validated['enabled']],
+        $userId = (string) $request->user()?->getAuthIdentifier();
+
+        /*
+         * The change and its record together. The next dispute this settles is
+         * "nobody told me my server was suspended": the answer is either that
+         * the platform did, or that this person asked it not to on a date
+         * somebody can read.
+         */
+        app(RecordActAtomically::class)->execute(
+            act: static fn (): NotificationPreference => NotificationPreference::query()->updateOrCreate(
+                [
+                    'user_id' => $userId,
+                    'category' => $category,
+                    'channel' => $channel,
+                ],
+                ['enabled' => $validated['enabled']],
+            ),
+            describe: static fn (NotificationPreference $preference): AuditedAct => new AuditedAct(
+                action: AuditAction::NotificationPreferenceChanged,
+                subject: $preference,
+                context: [
+                    'category' => $category->value,
+                    'channel' => $channel->value,
+                    'enabled' => $validated['enabled'],
+                ],
+            ),
         );
 
         return $this->index($request);

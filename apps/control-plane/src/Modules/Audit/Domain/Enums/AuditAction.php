@@ -79,6 +79,16 @@ enum AuditAction: string
     case ReinstallAbandoned = 'reinstall.abandoned';
 
     /**
+     * Somebody turned an optional message off, or back on.
+     *
+     * Recorded because the next dispute is "you never told me my server was
+     * suspended", and the answer is either "we did, here it is" or "you asked
+     * us not to, on this date". Without the row the platform cannot tell those
+     * apart either.
+     */
+    case NotificationPreferenceChanged = 'notification.preference_changed';
+
+    /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.
      *

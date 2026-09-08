@@ -7,6 +7,9 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -112,9 +115,30 @@ final class CustomerController
 
         $found = Customer::query()->findOrFail($customer);
 
-        $found->forceFill([
-            'status' => CustomerStatus::from($validated['status']),
-        ])->save();
+        $status = CustomerStatus::from($validated['status']);
+
+        /*
+         * The act and its record together, because both are database writes
+         * and "an account was suspended and nothing says who or why" is a hole
+         * with nothing to trade against. Until this phase the reason was
+         * validated, echoed back to the operator as though it had been kept,
+         * and then dropped.
+         */
+        app(RecordActAtomically::class)->execute(
+            act: function () use ($found, $status): Customer {
+                $found->forceFill(['status' => $status])->save();
+
+                return $found;
+            },
+            describe: static fn (Customer $changed): AuditedAct => new AuditedAct(
+                action: $status === CustomerStatus::Suspended
+                    ? AuditAction::CustomerSuspended
+                    : AuditAction::CustomerUnsuspended,
+                subject: $changed,
+                customerId: (string) $changed->getKey(),
+                context: ['reason' => $validated['reason'], 'status' => $status->value],
+            ),
+        );
 
         return response()->json([
             'data' => [

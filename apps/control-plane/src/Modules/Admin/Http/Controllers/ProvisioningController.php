@@ -7,7 +7,8 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
-use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Application\Actions\AdoptOrphanResource;
@@ -113,23 +114,24 @@ final class ProvisioningController
             'evidence' => ['required', 'string', 'min:3', 'max:1000'],
         ]);
 
-        $requeued = app(RetryProvisioningJob::class)->execute($found);
-
         $user = $request->user();
 
-        app(RecordAuditEntry::class)->execute(
-            action: AuditAction::ProvisioningRetried,
-            subject: $requeued,
-            customerId: $requeued->customer_id,
-            context: [
-                'evidence' => $validated['evidence'],
-                'kind' => $requeued->kind->value,
-                'attempts' => $requeued->attempts,
-                'service_id' => $requeued->service_id,
-                'retried_by' => $user instanceof User
-                    ? sprintf('%s <%s>', $user->name, $user->email)
-                    : 'system',
-            ],
+        $requeued = app(RecordActAtomically::class)->execute(
+            act: static fn (): ProvisioningJob => app(RetryProvisioningJob::class)->execute($found),
+            describe: static fn (ProvisioningJob $job): AuditedAct => new AuditedAct(
+                action: AuditAction::ProvisioningRetried,
+                subject: $job,
+                customerId: $job->customer_id,
+                context: [
+                    'evidence' => $validated['evidence'],
+                    'kind' => $job->kind->value,
+                    'attempts' => $job->attempts,
+                    'service_id' => $job->service_id,
+                    'retried_by' => $user instanceof User
+                        ? sprintf('%s <%s>', $user->name, $user->email)
+                        : 'system',
+                ],
+            ),
         );
 
         return response()->json([
@@ -172,26 +174,27 @@ final class ProvisioningController
 
         $user = $request->user();
 
-        $adopted = app(AdoptOrphanResource::class)->execute(
-            job: $found,
-            providerReference: $validated['provider_reference'],
-            remoteJobId: $validated['remote_job_id'] ?? null,
-            evidence: ['note' => $validated['evidence']],
-            adoptedBy: $user instanceof User
-                ? sprintf('%s <%s>', $user->name, $user->email)
-                : 'system',
-        );
-
-        app(RecordAuditEntry::class)->execute(
-            action: AuditAction::OrphanAdopted,
-            subject: $adopted,
-            customerId: $adopted->customer_id,
-            context: [
-                'provider_reference' => $validated['provider_reference'],
-                'remote_job_id' => $validated['remote_job_id'] ?? null,
-                'evidence' => $validated['evidence'],
-                'service_id' => $adopted->service_id,
-            ],
+        $adopted = app(RecordActAtomically::class)->execute(
+            act: static fn (): ProvisioningJob => app(AdoptOrphanResource::class)->execute(
+                job: $found,
+                providerReference: $validated['provider_reference'],
+                remoteJobId: $validated['remote_job_id'] ?? null,
+                evidence: ['note' => $validated['evidence']],
+                adoptedBy: $user instanceof User
+                    ? sprintf('%s <%s>', $user->name, $user->email)
+                    : 'system',
+            ),
+            describe: static fn (ProvisioningJob $job): AuditedAct => new AuditedAct(
+                action: AuditAction::OrphanAdopted,
+                subject: $job,
+                customerId: $job->customer_id,
+                context: [
+                    'provider_reference' => $validated['provider_reference'],
+                    'remote_job_id' => $validated['remote_job_id'] ?? null,
+                    'evidence' => $validated['evidence'],
+                    'service_id' => $job->service_id,
+                ],
+            ),
         );
 
         return response()->json([

@@ -8,6 +8,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\CancelCustomerSubscription;
 use Lynomia\Modules\Billing\Http\Requests\CancelSubscriptionRequest;
 use Lynomia\Modules\Billing\Http\Requests\ChangePlanRequest;
@@ -124,10 +127,28 @@ final class SubscriptionController
             ->whereKey($subscription)
             ->firstOrFail();
 
-        $cancelled = $this->cancelSubscription->execute(
-            $found,
-            $request->immediately(),
-            $request->confirmation(),
+        /*
+         * Recorded with the cancellation itself. A customer ringing to say
+         * they never cancelled, or a dispute about when a service was stopped,
+         * is settled from this row — and both are common enough that a
+         * cancellation with no trail is a support case nobody can close.
+         */
+        $cancelled = app(RecordActAtomically::class)->execute(
+            act: fn (): Subscription => $this->cancelSubscription->execute(
+                $found,
+                $request->immediately(),
+                $request->confirmation(),
+            ),
+            describe: static fn (Subscription $subscription): AuditedAct => new AuditedAct(
+                action: AuditAction::SubscriptionCancelled,
+                subject: $subscription,
+                customerId: (string) $subscription->customer_id,
+                context: [
+                    'immediately' => $request->immediately(),
+                    'status' => $subscription->status->value,
+                    'ends_at' => $subscription->current_period_end?->toIso8601String(),
+                ],
+            ),
         );
 
         return (new SubscriptionResource($cancelled))->response();

@@ -8,7 +8,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
@@ -115,6 +117,27 @@ final class BillingController
             invoiceId: $found->invoice_id,
         );
 
+        /*
+         * Recorded after the fact and deliberately not inside a transaction
+         * with it: the refund has been issued at the payment provider, and
+         * rolling the platform's row back would make the trail less true
+         * rather than more. A write that fails here is loud — the operator
+         * gets a 500 and knows to look — which is the honest trade for an act
+         * that cannot be undone by a rollback.
+         */
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::PaymentRefunded,
+            subject: $refund,
+            customerId: $found->customer_id,
+            context: [
+                'transaction_id' => (string) $found->getKey(),
+                'invoice_id' => $found->invoice_id,
+                'amount_minor' => $validated['amount_minor'],
+                'currency' => $found->currency,
+                'reason' => $validated['reason'],
+            ],
+        );
+
         return response()->json([
             'data' => [
                 'id' => $refund->id,
@@ -151,21 +174,26 @@ final class BillingController
             'reason' => ['required', 'string', 'min:3', 'max:500'],
         ]);
 
-        $voided = app(VoidInvoice::class)->execute($found, $validated['reason']);
-
-        // After the act, never inside it: an audit row for something that
-        // rolled back is a confusing line, and an act with no audit row is the
-        // hole the table exists to close.
-        app(RecordAuditEntry::class)->execute(
-            action: AuditAction::InvoiceVoided,
-            subject: $voided,
-            customerId: $voided->customer_id,
-            context: [
-                'reason' => $validated['reason'],
-                'number' => $voided->number,
-                'total_minor' => $voided->total_minor,
-                'currency' => $voided->currency,
-            ],
+        /*
+         * Both in one transaction. Voiding is a database write and nothing
+         * else — the action refuses any invoice that has taken money — so
+         * there is nothing outside Postgres to be inconsistent with, and a
+         * cancelled bill with no record of who cancelled it is a hole with
+         * nothing to trade against.
+         */
+        $voided = app(RecordActAtomically::class)->execute(
+            act: static fn (): Invoice => app(VoidInvoice::class)->execute($found, $validated['reason']),
+            describe: static fn (Invoice $invoice): AuditedAct => new AuditedAct(
+                action: AuditAction::InvoiceVoided,
+                subject: $invoice,
+                customerId: $invoice->customer_id,
+                context: [
+                    'reason' => $validated['reason'],
+                    'number' => $invoice->number,
+                    'total_minor' => $invoice->total_minor,
+                    'currency' => $invoice->currency,
+                ],
+            ),
         );
 
         return response()->json([
