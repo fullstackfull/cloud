@@ -51,6 +51,22 @@ final class BackupResource extends JsonResource
             'retention_days' => $this->retention_days,
             'expires_at' => $this->expires_at?->toIso8601String(),
 
+            /*
+             * Where a deletion has got to, and whether it can still be called
+             * off. A screen showing "deleted" for an archive still sitting on
+             * a datastore would be the same false claim in the other
+             * direction as one showing "available" for one that has gone.
+             */
+            'is_being_deleted' => $this->state->isBeingDeleted(),
+            'deletion_requested_at' => $this->deletion_requested_at?->toIso8601String(),
+            'deleted_at' => $this->provider_deleted_at?->toIso8601String(),
+            /*
+             * A hold placed by the termination path. The customer sees it
+             * because it is the answer to "why can I not delete this", and it
+             * carries no reason string — the reason is on the service.
+             */
+            'protected_until' => $this->protected_until?->toIso8601String(),
+
             'started_at' => $this->started_at?->toIso8601String(),
             'finished_at' => $this->finished_at?->toIso8601String(),
             'created_at' => $this->created_at->toIso8601String(),

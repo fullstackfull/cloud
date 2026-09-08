@@ -180,8 +180,6 @@ final class NoDeadMethodsTest extends TestCase
          * what the provider reports, not by a verification this platform
          * starts.
          */
-        'ProxmoxBackupProvider::deleteBackup' => 'expired archives are not pruned at the provider',
-        'ProxmoxBackupProvider::listBackups' => 'there is no backup reconciler that lists what the provider holds',
         'ProxmoxBackupProvider::startVerification' => 'the platform does not start verifications; it records what it is told',
         'ProxmoxBackupProvider::supportsVerification' => 'the platform does not start verifications; it records what it is told',
 

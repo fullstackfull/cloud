@@ -62,4 +62,28 @@ Route::prefix('vps/{vm}/backups')->as('backups.')->group(function (): void {
     Route::post('{backup}/restore', [BackupController::class, 'restore'])
         ->middleware('throttle:5,1,backup-restore:')
         ->name('restore');
+
+    /*
+     * Deletion.
+     *
+     * `service.destroy`, not `service.manage`: a technical contact who may
+     * rebuild a machine may not destroy the thing that would let it be rebuilt
+     * afterwards. Behind the archive's own id typed back, and limited like the
+     * restore rather than like the list — a client retrying its way through an
+     * account's backups is what this limiter is for.
+     *
+     * The endpoint records a decision; the retention sweep acts on it after a
+     * grace period. Nothing here calls a provider, and the row says
+     * `delete_requested` rather than pretending the archive has gone.
+     */
+    Route::delete('{backup}', [BackupController::class, 'destroy'])
+        ->middleware('throttle:5,1,backup-delete:')
+        ->name('destroy');
+
+    /*
+     * Calling one off. The grace period exists so that a mis-click can be
+     * undone, and a grace period with no way to use it is an hour of waiting
+     * for nothing.
+     */
+    Route::post('{backup}/keep', [BackupController::class, 'keep'])->name('keep');
 });

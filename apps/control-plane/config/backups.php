@@ -63,4 +63,32 @@ return [
 
     'max_poll_hours' => (int) env('BACKUP_MAX_POLL_HOURS', 12),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Retention
+    |--------------------------------------------------------------------------
+    |
+    | `retention_days` is the platform's own floor, used for a service whose
+    | plan says nothing about backups. A plan that does say something overrides
+    | it — see BackupPolicy — because a retention window is part of what a
+    | customer bought, and things a customer bought belong in the catalogue
+    | rather than in a deployment's environment.
+    |
+    | `deletion_attempts` bounds how many times the sweep will ask a provider
+    | to remove an archive and find it still there. A row that exhausts it goes
+    | to needs-review rather than looping: an archive that will not delete is a
+    | datastore filling up, and that is a person's problem, not a retry's.
+    |
+    | `grace_hours` is the gap between a customer asking for a backup to go and
+    | the sweep acting on it. Deleting a backup is irreversible and a mis-click
+    | is common; an hour of hesitation costs a little datastore space and has
+    | saved a customer's only copy more than once.
+    |
+    */
+    'retention_days' => (int) env('BACKUP_RETENTION_DAYS', 7),
+
+    'deletion_attempts' => (int) env('BACKUP_DELETION_ATTEMPTS', 5),
+
+    'deletion_grace_hours' => (int) env('BACKUP_DELETION_GRACE_HOURS', 1),
+
 ];

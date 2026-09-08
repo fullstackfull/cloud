@@ -23,6 +23,9 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   pending_payment: 'info',
   processing: 'info',
 
+  delete_requested: 'warning',
+  deleting: 'warning',
+
   suspended: 'warning',
   reactivating: 'info',
   maintenance: 'warning',

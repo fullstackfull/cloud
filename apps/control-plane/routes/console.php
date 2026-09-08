@@ -122,6 +122,35 @@ Schedule::command('backups:reconcile')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * Retention.
+ *
+ * Hourly rather than more often, because the unit it works in is days and the
+ * grace period between marking and acting is an hour: running it every five
+ * minutes would make the grace period the only thing standing between a
+ * mis-click and a destroyed backup, and would ask a datastore to prune twelve
+ * times as often for no gain.
+ */
+Schedule::command('backups:enforce-retention')
+    ->hourlyAt(35)
+    ->withoutOverlapping(30)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Inventory.
+ *
+ * Six-hourly. It reads every datastore listing for every machine that has
+ * backups, which is the most expensive read this platform makes of a provider,
+ * and the drift it looks for — an archive that has silently gone — does not
+ * appear and disappear within a day.
+ */
+Schedule::command('backups:reconcile-inventory')
+    ->cron('45 */6 * * *')
+    ->withoutOverlapping(60)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Address reclamation, every ten minutes.
  *
  * Both directions out of a pool were one-way: a reservation whose build never

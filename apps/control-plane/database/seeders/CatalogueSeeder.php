@@ -87,6 +87,17 @@ final class CatalogueSeeder extends Seeder
                     'bandwidth_tib' => $bandwidthTib,
                     'ipv4_count' => 1,
                     'ipv6_count' => 1,
+
+                    /*
+                     * Backups are part of what the customer bought, so the
+                     * policy is a plan entitlement rather than a deployment
+                     * setting. Bigger tiers keep more and keep it longer,
+                     * which is the ordinary shape of the thing being sold.
+                     */
+                    'backup_retention_days' => 7 + ($i * 7),
+                    'backup_max_retained' => 3 + $i,
+                    'backup_manual_allowance' => 2 + $i,
+                    'backup_scheduled_allowance' => 30,
                 ],
                 placementConstraints: ['storage_class' => 'nvme'],
             );

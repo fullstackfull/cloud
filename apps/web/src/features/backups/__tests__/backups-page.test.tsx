@@ -44,6 +44,10 @@ const BACKUP = {
   verified_at: null,
   retention_days: 7,
   expires_at: null,
+  is_being_deleted: false,
+  deletion_requested_at: null,
+  deleted_at: null,
+  protected_until: null,
   started_at: '2026-03-01T00:00:00+00:00',
   finished_at: '2026-03-01T00:20:00+00:00',
   created_at: '2026-03-01T00:00:00+00:00',
@@ -52,10 +56,19 @@ const BACKUP = {
 
 const PAGE_META = { page: 1, per_page: 25, total: 1, last_page: 1 }
 
-function stubFetch(onRestore?: (body: unknown) => void) {
+interface Stubs {
+  onRestore?: (body: unknown) => void
+  onDelete?: (body: unknown) => void
+  onKeep?: () => void
+  /** What the list endpoint answers with, when the default row is not the case under test. */
+  listed?: Record<string, unknown>
+}
+
+function stubFetch({ onRestore, onDelete, onKeep, listed }: Stubs = {}) {
   return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
     const path = url.split('?')[0] ?? url
+    const row = listed ?? BACKUP
 
     let body: unknown = null
 
@@ -68,8 +81,14 @@ function stubFetch(onRestore?: (body: unknown) => void) {
       // rule honest about what is being parsed.
       onRestore?.(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
       body = { data: { ...BACKUP, state: 'restoring' } }
+    } else if (path.endsWith('/keep')) {
+      onKeep?.()
+      body = { data: { ...row, is_being_deleted: false, deletion_requested_at: null } }
+    } else if (init?.method === 'DELETE') {
+      onDelete?.(JSON.parse(typeof init.body === 'string' ? init.body : '{}'))
+      body = { data: { ...row, state: 'delete_requested', is_being_deleted: true } }
     } else if (path.endsWith('/backups')) {
-      body = { data: [BACKUP], meta: PAGE_META }
+      body = { data: [row], meta: PAGE_META }
     } else if (path.endsWith('/vps')) {
       body = { data: [MACHINE], meta: PAGE_META }
     } else {
@@ -116,7 +135,7 @@ describe('backups page', () => {
 
   it('will not restore until the hostname is typed exactly', async () => {
     const restored = vi.fn()
-    vi.stubGlobal('fetch', stubFetch(restored))
+    vi.stubGlobal('fetch', stubFetch({ onRestore: restored }))
     const user = userEvent.setup()
 
     renderPage()
@@ -142,6 +161,71 @@ describe('backups page', () => {
 
     await waitFor(() => {
       expect(restored).toHaveBeenCalledWith({ confirmation: 'web-kw-01' })
+    })
+  })
+
+  it('will not delete until the backup reference is typed back', async () => {
+    const deleted = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onDelete: deleted }))
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /^delete$/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    const confirm = within(dialog).getByRole('button', { name: /^delete$/i })
+    const box = within(dialog).getByRole('textbox')
+
+    expect(confirm).toBeDisabled()
+
+    // The reference of a *different* backup is the mistake this guards
+    // against — two tabs open, the wrong one confirmed.
+    await user.type(box, '01JOTHER')
+    expect(confirm).toBeDisabled()
+
+    await user.clear(box)
+    await user.type(box, '01JBACKUP')
+    expect(confirm).toBeEnabled()
+
+    await user.click(confirm)
+
+    // What the customer typed, not the id the client already held: the
+    // server's check is worthless if the client fills it in.
+    await waitFor(() => {
+      expect(deleted).toHaveBeenCalledWith({ confirm_backup_id: '01JBACKUP' })
+    })
+  })
+
+  it('offers to keep a backup whose deletion has been asked for, and not to delete it again', async () => {
+    const kept = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        onKeep: kept,
+        listed: {
+          ...BACKUP,
+          state: 'delete_requested',
+          is_restorable: false,
+          is_being_deleted: true,
+          deletion_requested_at: '2026-03-02T00:00:00+00:00',
+        },
+      }),
+    )
+    const user = userEvent.setup()
+
+    renderPage()
+
+    expect(await screen.findByText(/deletion requested/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^delete$/i })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /^keep$/i }))
+
+    // Keeping is the safe direction and asks for no confirmation: making a
+    // customer type a reference to *not* lose their data is friction pointed
+    // the wrong way.
+    await waitFor(() => {
+      expect(kept).toHaveBeenCalled()
     })
   })
 

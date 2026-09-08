@@ -116,7 +116,10 @@
     "unknown": "غير معروف",
     "removing": "قيد الإزالة",
     "revoked": "مُبطَل",
-    "succeeded": "نجحت"
+    "succeeded": "نجحت",
+    "delete_requested": "طُلب الحذف",
+    "deleting": "جارٍ الحذف",
+    "deleted": "محذوفة"
   },
   "account": {
     "welcome": "أهلاً، {{name}}",
@@ -618,7 +621,17 @@
     "noMachinesHint": "تُؤخذ النسخ الاحتياطية من خادم. اطلب خادمًا وستظهر هنا.",
     "restoreTitle": "استعادة هذه النسخة؟",
     "restoreWarning": "سيؤدي هذا إلى استبدال كل قرص على {{hostname}} بمحتوى هذه النسخة. سيُفقد كل ما كُتب بعد أخذ النسخة، ويتوقف الخادم أثناء التنفيذ. لا يمكن التراجع عن هذا.",
-    "restoreConfirmLabel": "اكتب {{hostname}} للتأكيد"
+    "restoreConfirmLabel": "اكتب {{hostname}} للتأكيد",
+    "kept": "الاحتفاظ",
+    "keptUntil": "محفوظة حتى {{date}}",
+    "expires": "تنتهي في {{date}}",
+    "deleted": "محذوفة",
+    "keep": "الاحتفاظ بها",
+    "delete": "حذف",
+    "deleteTitle": "حذف هذه النسخة الاحتياطية؟",
+    "deleteWarning": "يزيل هذا نسخة أقراص {{hostname}} من مخزن النسخ. لا يمكن التراجع عنه، ولا يؤثر على الخادم نفسه. وإن كانت هذه نسختك الوحيدة فلن يبقى لديك ما تستعيد منه.",
+    "deleteConfirmLabel": "اكتب مُعرّف النسخة الظاهر أدناه للتأكيد",
+    "deletionRequestedOn": "طُلب حذفها في {{date}}"
   },
   "confirm": {
     "typeToConfirm": "اكتب {{phrase}} للتأكيد"

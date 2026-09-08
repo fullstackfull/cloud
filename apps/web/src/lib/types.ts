@@ -240,6 +240,16 @@ export interface Backup {
   verified_at: string | null
   retention_days: number | null
   expires_at: string | null
+  /**
+   * Where a deletion has got to. `is_being_deleted` is true from the moment
+   * one is asked for; `deleted_at` is stamped only when the datastore no
+   * longer lists the archive. Showing "deleted" for one still on a datastore
+   * would be the same false claim as showing "available" for one that is gone.
+   */
+  is_being_deleted: boolean
+  deletion_requested_at: string | null
+  deleted_at: string | null
+  protected_until: string | null
   started_at: string | null
   finished_at: string | null
   created_at: string

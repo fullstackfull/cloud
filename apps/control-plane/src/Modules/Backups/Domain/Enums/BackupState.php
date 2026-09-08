@@ -15,7 +15,21 @@ namespace Lynomia\Modules\Backups\Domain\Enums;
  * strength of a job that was merely enqueued, finds out otherwise on the day
  * they need it.
  *
- * `NeedsReview` is the ninth state and it is not decoration. When a vzdump
+ * The three deletion states are late additions and they exist for one reason:
+ * a backup is not gone because the platform asked for it to go.
+ * `DeleteRequested` is somebody's decision, `Deleting` is a request the
+ * provider has accepted, and `Deleted` is a subsequent listing of the
+ * datastore that no longer contains the archive. Collapsing them would let the
+ * platform tell a customer their data is destroyed while it is still sitting
+ * on a datastore they are being billed for — or, worse, tell them it is still
+ * there when it is not.
+ *
+ * There is no `Indeterminate` here, and that is a convention rather than an
+ * omission: a deletion whose outcome cannot be established goes to
+ * `NeedsReview`, which is what this module has always called that situation
+ * and is the state an operator's screen already knows how to show.
+ *
+ * `NeedsReview` is not decoration. When a vzdump
  * request times out there is no task identifier to poll and no way to know
  * whether the provider started one: the backup may exist and be occupying
  * datastore space, or may not exist at all. Recording that as `Failed` invites
@@ -36,6 +50,15 @@ enum BackupState: string
     case Restored = 'restored';
     case NeedsReview = 'needs_review';
 
+    /** Somebody has asked for this archive to go; nothing has been sent yet. */
+    case DeleteRequested = 'delete_requested';
+
+    /** The provider has been asked and has not yet been seen to have done it. */
+    case Deleting = 'deleting';
+
+    /** A listing of the datastore no longer contains the archive. */
+    case Deleted = 'deleted';
+
     /**
      * Whether the platform is waiting on the provider for this row.
      */
@@ -54,6 +77,24 @@ enum BackupState: string
      * refusing, because a customer facing a lost machine would rather try an
      * unverified backup than be told no.
      */
+    /**
+     * Whether the archive is there and usable.
+     *
+     * What a customer means by "I have a backup", and what the retention
+     * counter counts. A backup on its way out is not one of them: it is still
+     * occupying space, but nobody should be told they can restore from it.
+     */
+    public function isAvailable(): bool
+    {
+        return in_array($this, [self::Succeeded, self::Verifying, self::Verified, self::Restored], true);
+    }
+
+    /** Whether this row is somewhere on the way to being removed. */
+    public function isBeingDeleted(): bool
+    {
+        return in_array($this, [self::DeleteRequested, self::Deleting], true);
+    }
+
     public function isRestorable(): bool
     {
         return in_array($this, [self::Succeeded, self::Verified, self::Restored], true);
@@ -65,7 +106,7 @@ enum BackupState: string
      */
     public function isSettled(): bool
     {
-        return in_array($this, [self::Succeeded, self::Failed, self::Verified, self::Restored], true);
+        return in_array($this, [self::Succeeded, self::Failed, self::Verified, self::Restored, self::Deleted], true);
     }
 
     /**
@@ -97,11 +138,28 @@ enum BackupState: string
         return match ($this) {
             self::Requested => [self::Running, self::Succeeded, self::Failed, self::NeedsReview],
             self::Running => [self::Succeeded, self::Failed, self::NeedsReview],
-            self::Succeeded => [self::Verifying, self::Restoring, self::Failed],
+            self::Succeeded => [self::Verifying, self::Restoring, self::Failed, self::DeleteRequested],
             self::Verifying => [self::Verified, self::Failed, self::NeedsReview],
-            self::Verified => [self::Verifying, self::Restoring],
+            self::Verified => [self::Verifying, self::Restoring, self::DeleteRequested],
             self::Restoring => [self::Restored, self::Succeeded, self::NeedsReview],
-            self::Restored => [self::Verifying, self::Restoring],
+            self::Restored => [self::Verifying, self::Restoring, self::DeleteRequested],
+
+            /*
+             * A requested deletion can still be called off — a customer
+             * changing their mind before the sweep picks it up returns the row
+             * to being a backup. Once the provider has been asked there is no
+             * way back: `Deleting` leads only to gone, or to a person.
+             */
+            self::DeleteRequested => [self::Deleting, self::Succeeded, self::NeedsReview],
+            self::Deleting => [self::Deleted, self::NeedsReview],
+
+            /*
+             * Nothing leaves Deleted. The archive is not there; a customer who
+             * wants one again takes a new backup, as a new row, so that the
+             * deletion stays visible in the history.
+             */
+            self::Deleted => [],
+
             self::Failed, self::NeedsReview => [],
         };
     }

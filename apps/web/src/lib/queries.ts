@@ -587,6 +587,50 @@ export function useSetReverseDns() {
 /* ----------------------------------------------------------- api tokens */
 
 /* --------------------------------------------------------------------------
+ | Deleting a backup
+ |
+ | Both mutations invalidate the whole backups key rather than one machine's:
+ | the retention ceiling is per service, so removing one backup can change
+ | what the list says about the others.
+ */
+
+export function useDeleteBackup() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /*
+     * The typed confirmation is forwarded rather than filled in from the id
+     * the caller already holds. Sending the known-correct value would make
+     * the server's check pass by construction, which is a confirmation only
+     * in name.
+     */
+    mutationFn: (payload: { vmId: string; backupId: string; confirmation: string }) =>
+      api.delete<Envelope<Backup>>(
+        `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}`,
+        { confirm_backup_id: payload.confirmation },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backups'] })
+    },
+  })
+}
+
+export function useKeepBackup() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { vmId: string; backupId: string }) =>
+      api.post<Envelope<Backup>>(
+        `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}/keep`,
+        {},
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backups'] })
+    },
+  })
+}
+
+/* --------------------------------------------------------------------------
  | Support
  |
  | The list and one ticket are separate queries rather than one filtered

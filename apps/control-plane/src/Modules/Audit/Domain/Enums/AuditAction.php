@@ -106,6 +106,7 @@ enum AuditAction: string
      * apart either.
      */
     case NotificationPreferenceChanged = 'notification.preference_changed';
+    case BackupDeletionRequested = 'backup.deletion_requested';
     case TicketAssigned = 'support.ticket_assigned';
     case TicketPrioritised = 'support.ticket_prioritised';
     case TicketResolved = 'support.ticket_resolved';

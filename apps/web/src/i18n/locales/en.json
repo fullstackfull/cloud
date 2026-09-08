@@ -116,7 +116,10 @@
     "unknown": "Unknown",
     "removing": "Removing",
     "revoked": "Revoked",
-    "succeeded": "Succeeded"
+    "succeeded": "Succeeded",
+    "delete_requested": "Deletion requested",
+    "deleting": "Deleting",
+    "deleted": "Deleted"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -610,7 +613,17 @@
     "noMachinesHint": "Backups are taken of a server. Order one and it will appear here.",
     "restoreTitle": "Restore this backup?",
     "restoreWarning": "This replaces every disk on {{hostname}} with the contents of this backup. Anything written since the backup was taken is lost, and the server is unavailable while it runs. This cannot be undone.",
-    "restoreConfirmLabel": "Type {{hostname}} to confirm"
+    "restoreConfirmLabel": "Type {{hostname}} to confirm",
+    "kept": "Kept",
+    "keptUntil": "Kept until {{date}}",
+    "expires": "Expires {{date}}",
+    "deleted": "Deleted",
+    "keep": "Keep",
+    "delete": "Delete",
+    "deleteTitle": "Delete this backup?",
+    "deleteWarning": "This removes this copy of {{hostname}}'s disks from the datastore. It cannot be undone, and it does not affect the server itself. If this is the only backup you have, you will have nothing to restore from.",
+    "deleteConfirmLabel": "Type the backup reference below to confirm",
+    "deletionRequestedOn": "Deletion asked for {{date}}"
   },
   "confirm": {
     "typeToConfirm": "Type {{phrase}} to confirm"

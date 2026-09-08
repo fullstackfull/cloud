@@ -545,6 +545,20 @@ return [
         'response' => $one('Invoice'),
     ],
 
+    'api.v1.backups.destroy' => [
+        'tag' => 'Backups',
+        'summary' => 'Delete a backup',
+        'description' => "Requires the backup's own id typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force.",
+        'body' => ['confirm_backup_id'],
+        'response' => $one('Backup'),
+    ],
+    'api.v1.backups.keep' => [
+        'tag' => 'Backups',
+        'summary' => 'Call off a deletion',
+        'description' => 'Only while the request is still waiting for the sweep. Once the provider has been asked there is nothing to call off, and pretending otherwise would leave a row reading `succeeded` for an archive that is being removed.',
+        'response' => $one('Backup'),
+    ],
+
     /* ---------------------------------------------------------------------
      | Support
      |

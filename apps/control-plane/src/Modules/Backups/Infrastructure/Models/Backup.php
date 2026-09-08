@@ -50,6 +50,13 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?string $restore_task_id
  * @property ?int $retention_days
  * @property ?CarbonImmutable $expires_at
+ * @property ?CarbonImmutable $protected_until
+ * @property ?CarbonImmutable $deletion_requested_at
+ * @property ?string $deletion_requested_by_user_id
+ * @property ?string $deletion_reason
+ * @property ?string $deletion_task_id
+ * @property ?CarbonImmutable $provider_deleted_at
+ * @property int $deletion_attempts
  * @property ?CarbonImmutable $started_at
  * @property ?CarbonImmutable $finished_at
  * @property ?CarbonImmutable $restore_started_at
@@ -83,6 +90,10 @@ class Backup extends Model
             'poll_count' => 'integer',
             'verified_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
+            'protected_until' => 'immutable_datetime',
+            'deletion_requested_at' => 'immutable_datetime',
+            'provider_deleted_at' => 'immutable_datetime',
+            'deletion_attempts' => 'integer',
             'started_at' => 'immutable_datetime',
             'finished_at' => 'immutable_datetime',
             'restore_started_at' => 'immutable_datetime',

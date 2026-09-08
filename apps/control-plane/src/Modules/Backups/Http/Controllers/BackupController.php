@@ -8,12 +8,17 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
+use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
+use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Backups\Application\Actions\RequestBackupDeletion;
 use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
 use Lynomia\Modules\Backups\Application\Actions\RestoreServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
+use Lynomia\Modules\Backups\Domain\Exceptions\BackupDeletionRefusedException;
 use Lynomia\Modules\Backups\Http\Requests\CreateBackupRequest;
+use Lynomia\Modules\Backups\Http\Requests\DeleteBackupRequest;
 use Lynomia\Modules\Backups\Http\Requests\ListBackupsRequest;
 use Lynomia\Modules\Backups\Http\Requests\RestoreBackupRequest;
 use Lynomia\Modules\Backups\Http\Resources\BackupResource;
@@ -45,6 +50,7 @@ final class BackupController
         private readonly ActingCustomer $acting,
         private readonly RequestServiceBackup $request,
         private readonly RestoreServiceBackup $restore,
+        private readonly RequestBackupDeletion $requestDeletion,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -121,6 +127,83 @@ final class BackupController
             ->firstOrFail();
 
         return (new BackupResource($row))->response();
+    }
+
+    /**
+     * Destroy one copy of a customer's data, at their request.
+     *
+     * `service.destroy` rather than `service.manage`: a technical contact who
+     * may rebuild a machine may not destroy the thing that would let it be
+     * rebuilt afterwards. And behind the archive's own id typed back, because
+     * this is irreversible and a mis-click is common.
+     *
+     * The endpoint records a decision; it does not call the provider. The
+     * retention sweep acts on it after the grace period, which is what gives a
+     * customer an hour to change their mind — and the row says
+     * `delete_requested` in the meantime rather than pretending to be gone.
+     */
+    public function destroy(DeleteBackupRequest $request, string $vm, string $backup): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.destroy');
+
+        $machine = $this->machine($vm);
+
+        /** @var Backup $row */
+        $row = Backup::query()
+            ->where('virtual_machine_id', $machine->getKey())
+            ->whereKey($backup)
+            ->firstOrFail();
+
+        // Compared exactly, and before anything else is read. hash_equals
+        // rather than a loose compare so the check cannot be shortened.
+        if (! hash_equals((string) $row->getKey(), $request->confirmation())) {
+            throw BackupDeletionRefusedException::becauseTheConfirmationDoesNotMatch();
+        }
+
+        $requested = app(RecordActAtomically::class)->execute(
+            fn () => $this->requestDeletion->execute(
+                $row,
+                RequestBackupDeletion::BY_CUSTOMER,
+                $request->user() instanceof User ? $request->user() : null,
+            ),
+            fn (Backup $marked) => new AuditedAct(
+                action: AuditAction::BackupDeletionRequested,
+                subject: $marked,
+                customerId: (string) $marked->customer_id,
+                context: [
+                    'service_id' => $marked->service_id,
+                    'archive_id' => $marked->archive_id,
+                    'reason' => RequestBackupDeletion::BY_CUSTOMER,
+                ],
+            ),
+        );
+
+        return (new BackupResource($requested))->response();
+    }
+
+    /**
+     * Change your mind, while there is still something to change.
+     *
+     * The grace period between a deletion being asked for and the sweep acting
+     * on it exists precisely so that a mis-click can be undone — and a grace
+     * period with no way to use it is an hour of waiting for nothing. Only
+     * from `delete_requested`: once the provider has been asked there is
+     * nothing to call off, and saying otherwise would leave a row reading
+     * `succeeded` for an archive that is being removed.
+     */
+    public function keep(Request $request, string $vm, string $backup): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.destroy');
+
+        $machine = $this->machine($vm);
+
+        /** @var Backup $row */
+        $row = Backup::query()
+            ->where('virtual_machine_id', $machine->getKey())
+            ->whereKey($backup)
+            ->firstOrFail();
+
+        return (new BackupResource($this->requestDeletion->cancel($row)))->response();
     }
 
     /**

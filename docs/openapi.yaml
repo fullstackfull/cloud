@@ -7262,6 +7262,81 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
   "/api/v1/vps/{vm}/backups/{backup}":
+    delete:
+      operationId: "api_v1_backups_destroy"
+      tags:
+        - "Backups"
+      summary: "Delete a backup"
+      description: "Requires the backup's own id typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                confirm_backup_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
     get:
       operationId: "api_v1_backups_show"
       tags:
@@ -7279,6 +7354,68 @@ paths:
           schema:
             type: "string"
         - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/keep":
+    post:
+      operationId: "api_v1_backups_keep"
+      tags:
+        - "Backups"
+      summary: "Call off a deletion"
+      description: "Only while the request is still waiting for the sweep. Once the provider has been asked there is nothing to call off, and pretending otherwise would leave a row reading `succeeded` for an archive that is being removed."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
       security:
         - sessionCookie: []
         - personalAccessToken: []
@@ -8851,6 +8988,17 @@ components:
           type:
             - "integer"
             - "null"
+        is_being_deleted:
+          type: "boolean"
+          description: "True from the moment a deletion is asked for until the provider is seen to have done it. A screen showing \"deleted\" for an archive still on a datastore would be the same false claim as one showing \"available\" for one that has gone."
+        deletion_requested_at:
+          "$ref": "#/components/schemas/Timestamp"
+        deleted_at:
+          "$ref": "#/components/schemas/Timestamp"
+          description: "Stamped only when a subsequent listing of the datastore no longer contains the archive. The provider accepting a delete is not the provider having deleted."
+        protected_until:
+          "$ref": "#/components/schemas/Timestamp"
+          description: "A hold placed by the termination path, keeping a departing customer's last backups through the retention window."
         expires_at:
           "$ref": "#/components/schemas/Timestamp"
         started_at:
