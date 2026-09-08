@@ -149,6 +149,37 @@ final readonly class ReinstallDedicatedHandler implements ProvisioningHandler
             );
         }
 
+        if ($operation->destructive_started_at !== null) {
+            /*
+             * A redelivery of a job whose first attempt had already armed the
+             * network installer and did not live to say what happened. The
+             * machine may be mid-install right now, and telling a controller
+             * to power-cycle it again would interrupt an install that is
+             * writing partition tables.
+             *
+             * So nothing is touched and the operation ends indeterminate: on
+             * hardware, "I do not know what this machine is doing" is a
+             * question for a person with access to the console, not for
+             * another automatic attempt.
+             */
+            $operation->recordFailure(
+                DedicatedReinstallState::Indeterminate,
+                'dedicated.reinstall_interrupted',
+                'A previous attempt had already started the installer on this machine and did not report an outcome.',
+            );
+
+            return ProvisioningResult::failed(
+                FailureClass::Timeout,
+                'dedicated.reinstall_interrupted',
+                'A previous attempt had already started the installer on this machine and did not report an outcome.',
+                metadata: [
+                    'dedicated_reinstall_id' => (string) $operation->getKey(),
+                    'dedicated_server_id' => (string) $server->getKey(),
+                    'reinstall_state' => $operation->state->value,
+                ],
+            );
+        }
+
         $operation->advanceTo(DedicatedReinstallState::Validating);
 
         $profile = $this->profileFor($payload, $server);

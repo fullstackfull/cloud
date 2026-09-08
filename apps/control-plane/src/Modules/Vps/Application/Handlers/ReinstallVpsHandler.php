@@ -137,6 +137,41 @@ final readonly class ReinstallVpsHandler implements ProvisioningHandler
             );
         }
 
+        if ($operation->destroyedData()) {
+            /*
+             * A redelivery of a job whose first attempt had already started
+             * replacing the disk, and did not live to write down how it went:
+             * the worker was killed, the node was drained, the process ran out
+             * of memory. The row says the destructive phase began, so this
+             * delivery must not begin it again — a second import onto a disk
+             * the first attempt was halfway through writing destroys whatever
+             * it managed to lay down, and the customer's data is already gone
+             * either way.
+             *
+             * Recorded as indeterminate for the same reason a provider timeout
+             * is: the platform does not know whether the first attempt
+             * finished, and the only honest answer is a person looking at the
+             * hypervisor.
+             */
+            $operation->recordFailure(
+                ReinstallState::Indeterminate,
+                'vps.reinstall_interrupted',
+                'A previous attempt had already begun replacing this disk and did not report an outcome.',
+            );
+
+            return ProvisioningResult::failed(
+                FailureClass::Timeout,
+                'vps.reinstall_interrupted',
+                'A previous attempt had already begun replacing this disk and did not report an outcome.',
+                metadata: [
+                    'reinstall_id' => (string) $operation->getKey(),
+                    'reinstall_state' => $operation->state->value,
+                    'provider_resource_id' => (string) $machine->provider_id,
+                    'virtual_machine_id' => (string) $machine->getKey(),
+                ],
+            );
+        }
+
         $operation->advanceTo(ReinstallState::Preparing);
 
         $node = $machine->node()->first();

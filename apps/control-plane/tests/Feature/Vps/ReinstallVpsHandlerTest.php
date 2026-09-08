@@ -378,6 +378,49 @@ final class ReinstallVpsHandlerTest extends TestCase
     }
 
     #[Test]
+    public function a_job_redelivered_after_a_worker_died_mid_rebuild_does_not_rebuild_again(): void
+    {
+        /*
+         * The crash a queue cannot avoid: the process holding the reinstall
+         * disappears after the disk has been handed to the provider and before
+         * anything was written about how it went. The row is left saying
+         * `reinstalling`, and Redis hands the message to the next worker.
+         *
+         * That worker must not start a second rebuild. The first attempt's
+         * import may be half written, and a second one lands on top of it.
+         */
+        $job = $this->job();
+
+        $operation = VmReinstall::query()->create([
+            'virtual_machine_id' => $this->machine->getKey(),
+            'service_id' => $this->service->getKey(),
+            'customer_id' => $this->customer->getKey(),
+            'provisioning_job_id' => $job->getKey(),
+            'state' => ReinstallState::Reinstalling,
+            'state_changed_at' => now(),
+            'destroyed_at' => now(),
+            'provider_resource_id' => self::VM_ID,
+            'provider_node' => $this->node->provider_name,
+        ]);
+
+        $before = $this->remote()?->raw['installed_template'] ?? null;
+
+        $result = $this->handler()->execute($job);
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('vps.reinstall_interrupted', $result->errorCode);
+
+        // A timeout, not a permanent failure: the engine escalates this to a
+        // person and never schedules it again.
+        $this->assertSame(FailureClass::Timeout, $result->failureClass);
+
+        $this->assertSame(ReinstallState::Indeterminate, $operation->refresh()->state);
+
+        // And the hypervisor was not asked to do anything.
+        $this->assertSame($before, $this->remote()?->raw['installed_template'] ?? null);
+    }
+
+    #[Test]
     public function a_machine_that_no_longer_exists_is_a_permanent_failure(): void
     {
         $this->machine->delete();

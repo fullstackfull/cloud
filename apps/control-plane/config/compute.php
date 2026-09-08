@@ -94,6 +94,19 @@ return [
         'task_delay_seconds' => (int) env('COMPUTE_FAKE_TASK_DELAY_SECONDS', 0),
         'console_host' => env('COMPUTE_FAKE_CONSOLE_HOST'),
         'console_port' => env('COMPUTE_FAKE_CONSOLE_PORT'),
+
+        /*
+         * A file the fake keeps its machines in, so that more than one process
+         * can see the same fleet.
+         *
+         * Unset by default, and unset everywhere but the tests that need it:
+         * an in-memory fake is the right one for a single process, and a
+         * shared file would let one test's machines leak into another's. It
+         * exists because a queue is proved by running a real worker in its own
+         * process, and a worker whose hypervisor has never heard of the
+         * customer's machine can prove nothing about a reinstall.
+         */
+        'state_path' => env('COMPUTE_FAKE_STATE_PATH'),
     ],
 
     'proxmox' => [

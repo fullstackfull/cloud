@@ -397,6 +397,44 @@ final class ReinstallDedicatedHandlerTest extends TestCase
     }
 
     #[Test]
+    public function a_job_redelivered_after_a_worker_died_mid_install_does_not_boot_the_machine_again(): void
+    {
+        /*
+         * The worker that armed the installer was killed before it could write
+         * down what happened, and the queue handed the message to another one.
+         * The stamp on the operation says the installer was already started,
+         * and on physical hardware that is the end of automatic action: the
+         * machine may be partway through writing a partition table, and
+         * power-cycling it again is how a rebuild becomes a dead server.
+         */
+        $this->completeTheInstallOnFirstPoll();
+
+        $job = $this->job();
+
+        $operation = DedicatedReinstall::query()->create([
+            'dedicated_server_id' => $this->server->getKey(),
+            'service_id' => $this->service->getKey(),
+            'customer_id' => $this->customer->id,
+            'provisioning_job_id' => $job->getKey(),
+            'state' => DedicatedReinstallState::Installing,
+            'state_changed_at' => now(),
+            'destructive_started_at' => now(),
+            'os_install_profile_id' => $this->osProfile->getKey(),
+        ]);
+
+        $result = $this->handler()->execute($job);
+
+        $this->assertFalse($result->successful);
+        $this->assertSame('dedicated.reinstall_interrupted', $result->errorCode);
+        $this->assertSame(FailureClass::Timeout, $result->failureClass);
+
+        $this->assertSame(DedicatedReinstallState::Indeterminate, $operation->refresh()->state);
+
+        // Nothing was armed and nothing was booted by this delivery.
+        $this->assertSame(0, PxeBootAuthorisation::query()->count());
+    }
+
+    #[Test]
     public function a_server_that_no_longer_exists_is_a_permanent_failure(): void
     {
         $job = $this->job();

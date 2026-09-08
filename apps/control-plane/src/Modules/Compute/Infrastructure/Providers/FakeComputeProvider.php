@@ -91,6 +91,13 @@ final class FakeComputeProvider implements ComputeProvider
 
     private int $taskDelaySeconds;
 
+    /**
+     * A file the fleet is kept in, or null to keep it in memory.
+     *
+     * @see config('compute.fake.state_path')
+     */
+    private ?string $statePath;
+
     public function __construct()
     {
         // Constructed, not resolved, is the moment worth guarding: a container
@@ -103,6 +110,10 @@ final class FakeComputeProvider implements ComputeProvider
         // task's completion in the past and make the "still running" state
         // unreachable, quietly disabling the behaviour this exists to model.
         $this->taskDelaySeconds = max(0, (int) config('compute.fake.task_delay_seconds', 0));
+
+        $path = config('compute.fake.state_path');
+
+        $this->statePath = is_string($path) && $path !== '' ? $path : null;
     }
 
     public function name(): string
@@ -112,6 +123,8 @@ final class FakeComputeProvider implements ComputeProvider
 
     public function createVirtualMachine(CreateVmRequest $request): VmOperation
     {
+        $this->readSharedFleet();
+
         if (self::hostnameCarries($request->hostname, self::PROVIDER_FAILURE_MARKER)) {
             throw ComputeProviderException::requestFailed(self::NAME, 'create_vm', [
                 'node' => $request->nodeName,
@@ -145,6 +158,8 @@ final class FakeComputeProvider implements ComputeProvider
         );
 
         unset($this->destroyed[$this->tombstoneKey($request->nodeName, $providerId)]);
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid(
@@ -208,6 +223,8 @@ final class FakeComputeProvider implements ComputeProvider
             // same rule the real adapter enforces.
             diskGib: $request->diskGib === null ? $machine->diskGib : ($machine->diskGib ?? 0) + $request->diskGib,
         );
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmconfig', $providerId, false),
@@ -289,6 +306,8 @@ final class FakeComputeProvider implements ComputeProvider
             ],
         );
 
+        $this->writeSharedFleet();
+
         return new VmOperation(
             taskId: $this->upid(
                 $nodeName,
@@ -319,6 +338,8 @@ final class FakeComputeProvider implements ComputeProvider
          * is already covered by the task id.
          */
         $this->destroyed[$this->tombstoneKey($nodeName, $providerId)] = true;
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmdestroy', $providerId, false),
@@ -363,6 +384,8 @@ final class FakeComputeProvider implements ComputeProvider
                 startsOnBoot: false,
             );
 
+        $this->writeSharedFleet();
+
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmsuspend', $providerId, false),
             nodeName: $nodeName,
@@ -394,6 +417,8 @@ final class FakeComputeProvider implements ComputeProvider
          * where it can be verified.
          */
         $this->machines[$nodeName][$providerId] = $machine->withSuspension($lock, startsOnBoot: true);
+
+        $this->writeSharedFleet();
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmunsuspend', $providerId, false),
@@ -443,6 +468,8 @@ final class FakeComputeProvider implements ComputeProvider
 
     public function listVms(string $nodeName): array
     {
+        $this->readSharedFleet();
+
         $machines = $this->machines[$nodeName] ?? [];
 
         // Sorted so that a test asserting on the second machine is asserting
@@ -552,6 +579,8 @@ final class FakeComputeProvider implements ComputeProvider
 
         $this->machines[$nodeName][$providerId] = $machine->withPowerState($resulting);
 
+        $this->writeSharedFleet();
+
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qm'.$action, $providerId, false),
             nodeName: $nodeName,
@@ -562,7 +591,72 @@ final class FakeComputeProvider implements ComputeProvider
 
     private function machine(string $nodeName, string $providerId): ?RemoteVmState
     {
+        $this->readSharedFleet();
+
         return $this->machines[$nodeName][$providerId] ?? null;
+    }
+
+    /**
+     * Reads the fleet another process may have changed.
+     *
+     * Does nothing at all unless a state path is configured, which is the
+     * normal case: a fake that went to disk on every call in every test would
+     * be slower and would let one test see another's machines. When a path is
+     * set, the file is the truth and this instance's memory is a cache of it
+     * that lives for exactly one call.
+     */
+    private function readSharedFleet(): void
+    {
+        if ($this->statePath === null || ! is_file($this->statePath)) {
+            return;
+        }
+
+        $contents = @file_get_contents($this->statePath);
+
+        if ($contents === false || $contents === '') {
+            return;
+        }
+
+        /** @var array{machines?: array<string, array<string, RemoteVmState>>, destroyed?: array<string, true>}|false $state */
+        $state = @unserialize($contents, ['allowed_classes' => true]);
+
+        if (! is_array($state)) {
+            return;
+        }
+
+        $this->machines = $state['machines'] ?? [];
+        $this->destroyed = $state['destroyed'] ?? [];
+    }
+
+    /**
+     * Publishes the fleet for other processes.
+     *
+     * Written to a neighbouring file and renamed, so a worker reading while
+     * this writes sees either the old fleet or the new one and never half of
+     * either.
+     */
+    private function writeSharedFleet(): void
+    {
+        if ($this->statePath === null) {
+            return;
+        }
+
+        $directory = dirname($this->statePath);
+
+        if (! is_dir($directory)) {
+            @mkdir($directory, 0o755, recursive: true);
+        }
+
+        $temporary = $this->statePath.'.'.getmypid().'.tmp';
+
+        if (@file_put_contents($temporary, serialize([
+            'machines' => $this->machines,
+            'destroyed' => $this->destroyed,
+        ])) === false) {
+            return;
+        }
+
+        @rename($temporary, $this->statePath);
     }
 
     private function noSuchMachine(string $nodeName, string $providerId, string $operation): ComputeProviderException
