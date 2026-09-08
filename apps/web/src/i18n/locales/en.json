@@ -108,7 +108,7 @@
     "verified": "Verified",
     "restoring": "Restoring",
     "restored": "Restored",
-    "needs_review": "Needs a human",
+    "needs_review": "Needs review",
     "under_review": "Being looked at",
     "manual_review": "Being looked at",
     "indeterminate": "Outcome unknown",
