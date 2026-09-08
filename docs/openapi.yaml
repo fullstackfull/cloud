@@ -366,6 +366,81 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/dedicated/{server}/return-to-stock":
+    post:
+      operationId: "api_admin_dedicated_return_to_stock"
+      tags:
+        - "Operator"
+      summary: "Put a decommissioned machine back on the shelf"
+      description: |-
+        The second half of ending a dedicated service, separate on purpose: nothing this platform can call proves that a physical disk was erased, so what this records is a person’s word for it, with what they did, beside their name, in the audit trail. Refuses a server still assigned to a customer (409) — that machine has not been decommissioned, whatever its status column says.
+
+        Requires the `dedicated.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminReturnedServerResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/drift":
     get:
       operationId: "api_admin_drift_index"
@@ -1580,7 +1655,7 @@ paths:
         - "Operator"
       summary: "End a service and destroy its machine"
       description: |-
-        The one act on this surface that destroys data. The retention window on a suspended service is enforced by the action, not by the caller: most suspensions are billing disputes that end with the customer paying. `force` skips it for an abuse case or a right-to-erasure request, needs the terminate permission checked a second time, and is recorded as forced. Answers 202 — the machine is destroyed by a worker, and the service reaches `terminated` when that worker succeeds, releasing the address into quarantine and the capacity back to the node.
+        The one act on this surface that destroys data. The retention window on a suspended service is enforced by the action, not by the caller: most suspensions are billing disputes that end with the customer paying. `force` skips it for an abuse case or a right-to-erasure request, needs the terminate permission checked a second time, and is recorded as forced. Answers 202. For a VPS the machine is destroyed by a worker, and the service reaches `terminated` when that worker succeeds, releasing the address into quarantine and the capacity back to the node. For a dedicated server nothing is queued: the machine leaves the customer and is held in `maintenance` until an operator states its disks have been erased, because no call this platform can make proves that they were.
 
         Requires the `service.terminate` permission.
       parameters:
@@ -6778,6 +6853,23 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminRetriedJob"
+    AdminReturnedServer:
+      type: "object"
+      additionalProperties: false
+      properties:
+        dedicated_server_id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+    AdminReturnedServerResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminReturnedServer"
     AdminTerminatedService:
       type: "object"
       additionalProperties: false
@@ -6794,6 +6886,10 @@ components:
             - "null"
         queued:
           type: "boolean"
+        dedicated_server_status:
+          type:
+            - "string"
+            - "null"
     AdminTerminatedServiceResponse:
       type: "object"
       required:

@@ -605,10 +605,18 @@ return [
     'api.admin.services.terminate' => [
         'tag' => 'Operator',
         'summary' => 'End a service and destroy its machine',
-        'description' => 'The one act on this surface that destroys data. The retention window on a suspended service is enforced by the action, not by the caller: most suspensions are billing disputes that end with the customer paying. `force` skips it for an abuse case or a right-to-erasure request, needs the terminate permission checked a second time, and is recorded as forced. Answers 202 — the machine is destroyed by a worker, and the service reaches `terminated` when that worker succeeds, releasing the address into quarantine and the capacity back to the node.',
+        'description' => 'The one act on this surface that destroys data. The retention window on a suspended service is enforced by the action, not by the caller: most suspensions are billing disputes that end with the customer paying. `force` skips it for an abuse case or a right-to-erasure request, needs the terminate permission checked a second time, and is recorded as forced. Answers 202. For a VPS the machine is destroyed by a worker, and the service reaches `terminated` when that worker succeeds, releasing the address into quarantine and the capacity back to the node. For a dedicated server nothing is queued: the machine leaves the customer and is held in `maintenance` until an operator states its disks have been erased, because no call this platform can make proves that they were.',
         'permission' => 'service.terminate',
         'body' => ['reason', 'force'],
         'response' => $one('AdminTerminatedService', 202),
+    ],
+    'api.admin.dedicated.return_to_stock' => [
+        'tag' => 'Operator',
+        'summary' => 'Put a decommissioned machine back on the shelf',
+        'description' => 'The second half of ending a dedicated service, separate on purpose: nothing this platform can call proves that a physical disk was erased, so what this records is a person’s word for it, with what they did, beside their name, in the audit trail. Refuses a server still assigned to a customer (409) — that machine has not been decommissioned, whatever its status column says.',
+        'permission' => 'dedicated.manage',
+        'body' => ['evidence'],
+        'response' => $one('AdminReturnedServer'),
     ],
     'api.admin.drift.index' => [
         'tag' => 'Operator',

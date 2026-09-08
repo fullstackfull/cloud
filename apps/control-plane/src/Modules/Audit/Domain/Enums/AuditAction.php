@@ -36,6 +36,16 @@ enum AuditAction: string
      * window" question has to stay answerable years later.
      */
     case ServiceTerminated = 'service.terminated';
+
+    /**
+     * A physical machine was declared empty and put back on the shelf.
+     *
+     * An assertion about the world in its purest form: nothing the platform
+     * can call proves that a disk was erased, so this row is somebody's word
+     * for it — and it is the row that matters if the next customer finds
+     * anything on the machine.
+     */
+    case DedicatedServerReturnedToStock = 'dedicated_server.returned_to_stock';
     case SubscriptionCancelled = 'subscription.cancelled';
 
     // Data that cannot be recovered once it is gone.
@@ -109,7 +119,8 @@ enum AuditAction: string
     {
         return match ($this) {
             self::OrphanAdopted, self::DriftResolved, self::DriftAcknowledged,
-            self::ReinstallConfirmed, self::ReinstallAbandoned => true,
+            self::ReinstallConfirmed, self::ReinstallAbandoned,
+            self::DedicatedServerReturnedToStock => true,
             default => false,
         };
     }

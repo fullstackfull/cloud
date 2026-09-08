@@ -887,6 +887,15 @@ return [
             'status' => ['type' => ['string', 'null']],
             'provisioning_job_id' => ['type' => ['string', 'null']],
             'queued' => ['type' => 'boolean'],
+            'dedicated_server_status' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminReturnedServer' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'dedicated_server_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
         ],
     ],
     'AdminReconciliationRequest' => [

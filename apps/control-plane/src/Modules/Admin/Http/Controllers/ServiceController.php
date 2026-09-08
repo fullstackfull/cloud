@@ -9,6 +9,10 @@ use Illuminate\Http\Request;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
+use Lynomia\Modules\Dedicated\Application\Actions\DecommissionDedicatedServer;
+use Lynomia\Modules\Dedicated\Application\Actions\ReturnDedicatedServerToStock;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
@@ -57,6 +61,51 @@ final class ServiceController
 
         $user = $request->user();
 
+        $terminatedBy = $user instanceof User
+            ? sprintf('%s <%s>', $user->name, $user->email)
+            : 'system';
+
+        /*
+         * A dedicated server ends differently, and the difference is physical.
+         * A machine's disks hold the customer's data until somebody erases
+         * them, and no call this platform can make proves that happened — so
+         * the server leaves the customer and goes to maintenance rather than
+         * back into stock, and a second, deliberate act returns it. There is
+         * nothing to queue: no provider is asked to destroy anything.
+         */
+        if ($found->kind === ProductKind::Dedicated->value) {
+            $server = app(RecordActAtomically::class)->execute(
+                act: static fn (): DedicatedServer => app(DecommissionDedicatedServer::class)
+                    ->execute($found, force: $force),
+                describe: static fn (DedicatedServer $decommissioned): AuditedAct => new AuditedAct(
+                    action: AuditAction::ServiceTerminated,
+                    subject: $found,
+                    customerId: $found->customer_id,
+                    context: [
+                        'reason' => $validated['reason'],
+                        'forced' => $force,
+                        'kind' => $found->kind,
+                        'dedicated_server_id' => (string) $decommissioned->getKey(),
+                        'serial' => $decommissioned->serial,
+                        'terminated_by' => $terminatedBy,
+                    ],
+                ),
+            );
+
+            return response()->json([
+                'data' => [
+                    'service_id' => (string) $found->getKey(),
+                    'status' => $found->fresh()?->status->value,
+                    'provisioning_job_id' => null,
+                    // Nothing is queued, and the machine is not back in stock:
+                    // it is held in maintenance until an operator says its
+                    // disks have been erased.
+                    'queued' => false,
+                    'dedicated_server_status' => $server->status->value,
+                ],
+            ], 202);
+        }
+
         $job = app(RecordActAtomically::class)->execute(
             act: static fn (): ProvisioningJob => app(TerminateVpsService::class)->execute($found, force: $force),
             describe: static fn (ProvisioningJob $queued): AuditedAct => new AuditedAct(
@@ -68,9 +117,7 @@ final class ServiceController
                     'forced' => $force,
                     'kind' => $found->kind,
                     'provisioning_job_id' => (string) $queued->getKey(),
-                    'terminated_by' => $user instanceof User
-                        ? sprintf('%s <%s>', $user->name, $user->email)
-                        : 'system',
+                    'terminated_by' => $terminatedBy,
                 ],
             ),
         );
@@ -83,7 +130,49 @@ final class ServiceController
                 // Queued, not done: the machine is destroyed by a worker, and
                 // the service reaches `terminated` when that worker succeeds.
                 'queued' => true,
+                'dedicated_server_status' => null,
             ],
         ], 202);
+    }
+
+    /**
+     * A decommissioned machine goes back on the shelf.
+     *
+     * The second half of ending a dedicated service, and separate on purpose:
+     * the platform cannot verify that a physical disk was erased, so what this
+     * records is a person's word for it — which is why they have to say what
+     * they did, beside their name, in the trail.
+     */
+    public function returnToStock(Request $request, string $server): JsonResponse
+    {
+        $found = DedicatedServer::query()->findOrFail($server);
+
+        $validated = $request->validate([
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $user = $request->user();
+
+        $returned = app(RecordActAtomically::class)->execute(
+            act: static fn (): DedicatedServer => app(ReturnDedicatedServerToStock::class)->execute($found),
+            describe: static fn (DedicatedServer $stock): AuditedAct => new AuditedAct(
+                action: AuditAction::DedicatedServerReturnedToStock,
+                subject: $stock,
+                context: [
+                    'evidence' => $validated['evidence'],
+                    'serial' => $stock->serial,
+                    'returned_by' => $user instanceof User
+                        ? sprintf('%s <%s>', $user->name, $user->email)
+                        : 'system',
+                ],
+            ),
+        );
+
+        return response()->json([
+            'data' => [
+                'dedicated_server_id' => (string) $returned->getKey(),
+                'status' => $returned->status->value,
+            ],
+        ]);
     }
 }

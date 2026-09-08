@@ -195,6 +195,15 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::ServiceTerminate->value)
         ->name('services.terminate');
 
+    /*
+     * Putting a decommissioned machine back into stock. Behind managing
+     * dedicated hardware rather than terminating services: this is a statement
+     * about a physical machine's disks, not about a customer's subscription.
+     */
+    Route::post('dedicated/{server}/return-to-stock', [ServiceController::class, 'returnToStock'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('dedicated.return_to_stock');
+
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)
         ->name('audit.index');
