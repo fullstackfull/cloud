@@ -135,19 +135,11 @@ final class NoDeadMethodsTest extends TestCase
         'DirectAdminHostingProvider::changePassword' => 'no password-reset path; customers reach the panel through SSO',
 
         /*
-         * Listing what a panel actually has. Its caller would be a hosting
-         * reconciler — the shared-hosting equivalent of the compute drift
-         * pass — which does not exist: an account created outside the
-         * platform, or deleted at the panel, is invisible to it.
-         */
-
-        /*
-         * Asking a hypervisor how a task it accepted is getting on.
-         *
-         * Handlers wait inside the adapter and verify by reading the resource
-         * back, and the task id is recorded for an operator rather than
-         * polled. Asynchronous completion tracking — a job that returns to the
-         * queue to check on a long-running provider task — is not built.
+         * `listAccounts` and `getTask` were both here until Phase 30A+.
+         * `ReconcileHostingNodes` calls the first and `PollProviderTasks` the
+         * second, so neither is reserved any more. Noted rather than deleted:
+         * the shape of this list is the record of which halves of the product
+         * were missing, and when they stopped being.
          */
 
         // A hard reset of a virtual machine. The customer API offers stop,
@@ -181,13 +173,8 @@ final class NoDeadMethodsTest extends TestCase
         'ProxmoxBackupProvider::supportsVerification' => 'the platform does not start verifications; it records what it is told',
 
         /*
-         * Taking money out of a wallet.
-         *
-         * Wallets are credited — an overpayment lands in one — and nothing can
-         * spend the balance: no customer path, no operator path. A customer
-         * with credit can see it and cannot use it. Deleting the debit would
-         * leave the platform able only to take money in, which is a worse
-         * shape, so it stays and the gap is stated.
+         * `WalletLedger::debit` was here for the same reason and left for the
+         * same one: `PayInvoiceFromWallet` spends the balance now.
          */
 
         /*
