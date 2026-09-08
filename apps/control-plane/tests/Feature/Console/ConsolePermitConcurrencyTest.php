@@ -60,6 +60,14 @@ final class ConsolePermitConcurrencyTest extends TestCase
         $this->app->forgetInstance('cache.store');
 
         if (! $this->redisIsReachable()) {
+            // A skip on a laptop with no Redis, a failure in a build: this is
+            // the only proof that a permit cannot be spent twice, and a suite
+            // that skipped it would report green for a console anybody could
+            // replay.
+            if (($ci = getenv('CI')) !== false && $ci !== '' && $ci !== 'false' && $ci !== '0') {
+                $this->fail('CI must run the console permit concurrency proof, and Redis is not reachable.');
+            }
+
             $this->markTestSkipped('Redis is not reachable; the console permit concurrency proof needs a real server.');
         }
 

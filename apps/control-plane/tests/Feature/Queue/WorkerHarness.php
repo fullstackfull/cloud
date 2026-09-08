@@ -71,6 +71,19 @@ abstract class WorkerHarness extends TestCase
         parent::setUp();
 
         if (! $this->redisIsReachable()) {
+            /*
+             * Skipped on a developer's machine, failed in CI.
+             *
+             * A skip is the right answer for somebody who has not started
+             * Redis; it is the wrong answer for the build, because these are
+             * the only tests in the repository that prove the queue works at
+             * all — and a suite that quietly skips them reports green for a
+             * platform whose provisioning does not run.
+             */
+            if (self::runningInCi()) {
+                $this->fail('CI must run the queue proofs, and Redis is not reachable.');
+            }
+
             $this->markTestSkipped('This test needs a real Redis; there is none on this machine.');
         }
 
@@ -194,6 +207,18 @@ abstract class WorkerHarness extends TestCase
     protected function queued(string $queue): int
     {
         return (int) Redis::connection()->llen('queues:'.$queue);
+    }
+
+    /**
+     * Whether this is a build rather than somebody's laptop.
+     *
+     * `CI` is set by GitHub Actions and by every other runner worth naming.
+     */
+    protected static function runningInCi(): bool
+    {
+        $flag = getenv('CI');
+
+        return is_string($flag) && $flag !== '' && $flag !== 'false' && $flag !== '0';
     }
 
     protected function redisIsReachable(): bool
