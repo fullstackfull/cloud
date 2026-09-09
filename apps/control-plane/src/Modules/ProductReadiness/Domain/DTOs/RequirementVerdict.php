@@ -30,6 +30,7 @@ final readonly class RequirementVerdict
         return [
             'category' => $this->requirement->category->value,
             'capabilities' => $this->requirement->capabilities,
+            'optional' => $this->requirement->optional,
             'shared' => $this->requirement->shared,
             'satisfied_up_to' => $this->satisfiedUpTo->value,
             'provider_id' => $this->providerId,

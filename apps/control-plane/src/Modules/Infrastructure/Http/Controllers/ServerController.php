@@ -10,14 +10,19 @@ use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Infrastructure\Application\Actions\ClassifyServer;
 use Lynomia\Modules\Infrastructure\Application\Actions\ClearForReimage;
 use Lynomia\Modules\Infrastructure\Application\Actions\DiscoverServer;
+use Lynomia\Modules\Infrastructure\Application\Actions\RegisterGpuDevice;
 use Lynomia\Modules\Infrastructure\Application\Actions\RegisterServer;
 use Lynomia\Modules\Infrastructure\Application\Actions\RevokeReimageClearance;
+use Lynomia\Modules\Infrastructure\Domain\Enums\GpuPassthroughMode;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\ClassificationRefused;
+use Lynomia\Modules\Infrastructure\Domain\Exceptions\DeploymentRefused;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\SafetyRefusal;
 use Lynomia\Modules\Infrastructure\Http\Requests\ClassifyServerRequest;
 use Lynomia\Modules\Infrastructure\Http\Requests\ClearForReimageRequest;
+use Lynomia\Modules\Infrastructure\Http\Requests\RegisterGpuDeviceRequest;
 use Lynomia\Modules\Infrastructure\Http\Requests\RegisterServerRequest;
+use Lynomia\Modules\Infrastructure\Http\Resources\GpuDeviceResource;
 use Lynomia\Modules\Infrastructure\Http\Resources\ServerFactResource;
 use Lynomia\Modules\Infrastructure\Http\Resources\ServerResource;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
@@ -242,6 +247,39 @@ final class ServerController
         return response()->json([
             'data' => $facts->map(fn ($fact): array => (new ServerFactResource($fact))->toArray($request))->all(),
         ]);
+    }
+
+    public function gpus(Request $request, string $server): JsonResponse
+    {
+        $found = ManagedServer::query()->findOrFail($server);
+
+        return response()->json([
+            'data' => $found->gpuDevices()->orderBy('pci_address')->get()
+                ->map(fn ($device): array => (new GpuDeviceResource($device))->toArray($request))
+                ->all(),
+        ]);
+    }
+
+    public function registerGpu(RegisterGpuDeviceRequest $request, string $server, RegisterGpuDevice $register): JsonResponse
+    {
+        $found = ManagedServer::query()->findOrFail($server);
+
+        try {
+            $device = $register->execute(
+                $found,
+                $request->string('vendor')->value(),
+                $request->string('model')->value(),
+                $request->integer('vram_mib'),
+                $request->string('pci_address')->value(),
+                GpuPassthroughMode::from($request->string('passthrough_mode')->value()),
+                $request->input('notes'),
+                $request->user(),
+            );
+        } catch (DeploymentRefused $refusal) {
+            return Refusals::deployment($refusal);
+        }
+
+        return response()->json(['data' => (new GpuDeviceResource($device))->toArray($request)], Response::HTTP_CREATED);
     }
 
     private function refused(string $message): JsonResponse

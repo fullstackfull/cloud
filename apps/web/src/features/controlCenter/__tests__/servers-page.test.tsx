@@ -59,6 +59,8 @@ function stubFetch(onClassify?: (body: unknown) => void) {
     } else if (path.endsWith('/classify')) {
       onClassify?.(parsed)
       body = { data: { ...CONFIGURABLE, safety: { ...CONFIGURABLE.safety, classification: parsed?.safety_class, reason: parsed?.reason } } }
+    } else if (path.endsWith('/gpus')) {
+      body = { data: [{ id: '01JGPU', server_id: '01JSRVCONFIG', vendor: 'NVIDIA', model: 'L40S', vram_mib: 49152, pci_address: '0000:41:00.0', passthrough_mode: 'pci_passthrough', dedicated: true, allocation_state: 'available', notes: null, registered_at: '2026-09-02T00:00:00+00:00' }] }
     } else if (path.endsWith('/facts')) {
       body = { data: [{ key: 'bmc.firmware', value: '2.81', source: 'discovered', observed_at: '2026-09-02T00:00:00+00:00', superseded_at: null }] }
     } else if (path.endsWith('/credentials')) {

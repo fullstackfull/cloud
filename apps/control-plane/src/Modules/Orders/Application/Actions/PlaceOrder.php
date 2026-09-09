@@ -26,6 +26,8 @@ use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Services\OrderNumberAllocator;
+use Lynomia\Modules\ProductReadiness\Application\Actions\AssertProductMaySell;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -64,6 +66,7 @@ final readonly class PlaceOrder
         private CouponValidator $coupons,
         private OrderNumberAllocator $numbers,
         private TransitionOrder $transition,
+        private AssertProductMaySell $sellable,
     ) {}
 
     /**
@@ -87,6 +90,7 @@ final readonly class PlaceOrder
         }
 
         $plans = $this->loadPlans($request);
+        $this->assertEveryLineIsOnSale($plans);
         $pricingLines = $this->buildPricingLines($customer, $request, $plans);
 
         $taxRate = $this->taxResolver->forCustomer($customer, now());
@@ -148,6 +152,33 @@ final readonly class PlaceOrder
             ->where('customer_id', $customer->getKey())
             ->where('idempotency_key', $key)
             ->first();
+    }
+
+    /**
+     * The readiness guard, once per product kind in the basket.
+     *
+     * A plan's kind is the product the readiness engine assesses — a VPS
+     * plan is the VPS product, whatever tier it is. In production a kind
+     * that is not ready_to_sell is refused before pricing, stock or coupons
+     * are consulted, because none of those matters for a thing the platform
+     * has decided it may not sell today. Outside production the guard stands
+     * aside; see AssertProductMaySell.
+     *
+     * @param  Collection<string, Plan>  $plans
+     */
+    private function assertEveryLineIsOnSale(Collection $plans): void
+    {
+        $kinds = [];
+
+        foreach ($plans as $plan) {
+            if ($plan->product !== null) {
+                $kinds[$plan->product->kind->value] = Product::from($plan->product->kind->value);
+            }
+        }
+
+        foreach ($kinds as $product) {
+            $this->sellable->execute($product);
+        }
     }
 
     /**

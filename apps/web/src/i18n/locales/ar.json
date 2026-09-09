@@ -742,7 +742,8 @@
         "blocked_licence": "محجوب: الترخيص",
         "blocked_network": "محجوب: الشبكة",
         "blocked_configuration": "محجوب: التهيئة",
-        "blocked_dependency": "محجوب: اعتماد على مزوّد آخر"
+        "blocked_dependency": "محجوب: اعتماد على مزوّد آخر",
+        "not_implemented": "غير مبنيّ"
       }
     },
     "credentials": {
@@ -898,7 +899,33 @@
         "discovered": "مكتشَف",
         "derived": "مشتق"
       },
-      "rackUnit": "وحدة الرف"
+      "rackUnit": "وحدة الرف",
+      "gpuHeading": "أجهزة GPU",
+      "noGpus": "لا يوجد جهاز GPU مسجَّل في هذا الجهاز.",
+      "gpuCountsNote": "يُحسب الجهاز سعةً فقط ما دام متاحاً، وفي وضع يمكن للضيف حمله، وهذا الجهاز مصنَّف بما يسمح بالتهيئة. تسجيله لا يرفع التصنيف.",
+      "registerGpu": "تسجيل GPU",
+      "registerGpuTitle": "تسجيل GPU في {{name}}",
+      "gpuVendor": "الصانع",
+      "gpuModel": "الطراز",
+      "gpuVram": "ذاكرة الفيديو (MiB)",
+      "gpuPciAddress": "عنوان PCI",
+      "gpuPciAddressHint": "كما يبلّغه المضيف، مثل 0000:41:00.0.",
+      "gpuPassthroughMode": "كيف يُسلَّم للضيف",
+      "gpuNotes": "ملاحظات",
+      "gpuDedicated": "مخصّص",
+      "gpuShared": "سيليكون مشترك",
+      "passthroughModes": {
+        "pci_passthrough": "الجهاز كاملاً (تمرير PCI)",
+        "vgpu": "vGPU (مشترك)",
+        "mig": "قسم MIG (مشترك)",
+        "none": "لا يمكن تسليمه للضيف"
+      },
+      "allocationStates": {
+        "available": "متاح",
+        "allocated": "مخصَّص",
+        "reserved": "محجوز",
+        "faulted": "معطوب"
+      }
     },
     "providers": {
       "title": "المزوّدون",
@@ -946,7 +973,13 @@
         "payment": "دفع",
         "email": "بريد",
         "bmc": "BMC",
-        "monitoring": "مراقبة"
+        "monitoring": "مراقبة",
+        "cdn": "CDN",
+        "object_storage": "تخزين الكائنات",
+        "email_hosting": "استضافة البريد",
+        "load_balancer": "موازن الأحمال",
+        "certificates": "الشهادات",
+        "cluster_lifecycle": "دورة حياة العنقود"
       },
       "capabilityStates": {
         "supported": "مدعومة",
@@ -1009,8 +1042,48 @@
         "wordpress": "ووردبريس",
         "domains": "النطاقات",
         "dns": "DNS",
-        "backups": "النسخ الاحتياطي"
-      }
+        "backups": "النسخ الاحتياطي",
+        "cdn": "شبكة توصيل المحتوى (CDN)",
+        "object_storage": "تخزين الكائنات",
+        "gpu_compute": "حوسبة GPU",
+        "email_hosting": "استضافة البريد",
+        "managed_kubernetes": "Kubernetes مُدار"
+      },
+      "software": {
+        "complete": "البرمجيات مكتملة",
+        "prepared": "البرمجيات مُعدّة",
+        "readiness_only": "جاهزية فقط"
+      },
+      "softwareNote": {
+        "complete": "يوجد مسار طلب، وتزويد، وشاشة عميل، واختبار دورة حياة كاملة.",
+        "prepared": "يوجد عقد المزوّد ومجموعة القدرات وصف الجاهزية. لا يستطيع عميل شراءه بعد، وهو محدود دون الإنتاج.",
+        "readiness_only": "لا يوجد سوى هذا الصف، بقرار: تعرف المنصّة ما سيحتاجه المنتج ولا أكثر. لا يمكن إعلانه قابلاً للبيع."
+      },
+      "questionsHeading": "الأسئلة",
+      "answers": {
+        "software": "البرمجيات جاهزة؟",
+        "infrastructure": "البنية التحتية متاحة؟",
+        "provider": "المزوّد متاح؟",
+        "credential": "الاعتماد متاح؟",
+        "licence": "الترخيص متاح؟",
+        "capabilities": "القدرات المطلوبة مكتشفة؟",
+        "dependencies": "الاعتماديات جاهزة؟",
+        "real_validation": "التحقّق الحقيقي مسجَّل؟",
+        "production": "الإنتاج مفعّل؟",
+        "sellable": "جاهز للبيع؟"
+      },
+      "answerValues": {
+        "yes": "نعم",
+        "no": "لا",
+        "not_applicable": "لا ينطبق"
+      },
+      "optional": "اختياري",
+      "openProvider": "افتح المزوّد",
+      "openProviders": "المزوّدون",
+      "openCredentials": "الاعتمادات",
+      "openLicences": "التراخيص",
+      "openMachines": "الأجهزة",
+      "drillNote": "تتبّع العائق إلى ما يحمله: المزوّد، ثم اعتماده أو ترخيصه، ثم الجهاز الذي يعمل عليه. استعمل زر الرجوع في المتصفح للعودة إلى هنا."
     },
     "plans": {
       "title": "الخطط",
@@ -1470,7 +1543,8 @@
       "licence": "اربط ترخيصاً صالحاً ثم اختبر.",
       "network": "أصلح نقطة النهاية أو المسار إليها ثم أعد الاختبار.",
       "configuration": "أكمل تهيئة المزوّد ثم أعد الاختبار.",
-      "dependency": "جهّز المزوّد الذي يعتمد عليه هذا أولاً."
+      "dependency": "جهّز المزوّد الذي يعتمد عليه هذا أولاً.",
+      "notImplemented": "برمجيات المنتج لم تُكتب بعد. لا يحرّك هذا أيّ إعداد؛ ينتظر بناءً."
     }
   }
 }

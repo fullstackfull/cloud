@@ -17,6 +17,8 @@ use Lynomia\Modules\Domains\Infrastructure\Models\DomainContact;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\ProductReadiness\Application\Actions\AssertProductMaySell;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -57,6 +59,7 @@ final readonly class OrderDomainRegistration
     public function __construct(
         private RedeemQuote $quotes,
         private DomainInvoicing $invoicing,
+        private AssertProductMaySell $sellable,
     ) {}
 
     /**
@@ -70,6 +73,12 @@ final readonly class OrderDomainRegistration
         array $contacts,
         ?string $idempotencyKey = null,
     ): DomainOperation {
+        // A new name is a new sale; the guard stands aside outside production
+        // and refuses in it while the domains line is not ready_to_sell.
+        // Renewal and redemption of a name already held are not sales and
+        // are not guarded: a customer keeps what they have.
+        $this->sellable->execute(Product::Domains);
+
         $quote = $this->quotes->execute($customer, $quoteId, DomainOperationKind::Register);
 
         $registrant = $contacts[DomainContactRole::Registrant->value] ?? null;

@@ -84,6 +84,38 @@ test.describe('an operator looking after machines', () => {
 
     await expect(row(page, name)).toContainText(/discovery only/i)
   })
+
+  test('records a GPU in a machine without touching it, and the classification stays where it was', async ({ page }) => {
+    const name = `e2e-gpu-host-${Date.now().toString(36)}`
+
+    await page.getByRole('button', { name: /register a machine/i }).click()
+    const form = page.getByRole('form', { name: /register a machine/i })
+    await form.getByLabel(/^name$/i).fill(name)
+    await form.getByRole('button', { name: /^register$/i }).click()
+    await row(page, name).getByRole('button', { name: /^open$/i }).click()
+
+    await expect(page.getByText(/no gpu device is recorded/i)).toBeVisible()
+    await page.getByRole('button', { name: /record a gpu/i }).click()
+
+    const dialog = page.getByRole('dialog')
+    const confirm = dialog.getByRole('button', { name: /record a gpu/i })
+    await expect(confirm).toBeDisabled()
+    await dialog.getByLabel(/^vendor$/i).fill('NVIDIA')
+    await dialog.getByLabel(/^model$/i).fill('L40S')
+    await dialog.getByLabel(/vram/i).fill('49152')
+    await dialog.getByLabel(/pci address/i).fill('0000:41:00.0')
+    await expect(confirm).toBeEnabled()
+    await confirm.click()
+
+    const gpus = page.getByRole('list', { name: /^gpu devices$/i })
+    await expect(gpus).toContainText(/NVIDIA L40S/)
+    await expect(gpus).toContainText(/0000:41:00\.0/)
+    await expect(gpus).toContainText(/whole device/i)
+    await expect(gpus).toContainText(/^.*available/i)
+
+    // Recording is not touching: the machine is still do-not-touch.
+    await expect(row(page, name)).toContainText(/do not touch/i)
+  })
 })
 
 test.describe('in Arabic', () => {

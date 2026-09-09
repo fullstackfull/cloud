@@ -12,6 +12,8 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
+use Lynomia\Modules\ProductReadiness\Application\Actions\AssertProductMaySell;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
@@ -54,6 +56,7 @@ final readonly class OrderWordPressSite
 {
     public function __construct(
         private PlaceOrder $orders,
+        private AssertProductMaySell $sellable,
     ) {}
 
     /**
@@ -69,6 +72,12 @@ final readonly class OrderWordPressSite
         string $locale = 'en_US',
         ?string $idempotencyKey = null,
     ): WordPressSite {
+        // The WordPress line is refused in production while it is not
+        // ready_to_sell, before the domain is looked at: a site nobody may
+        // sell has no domain worth validating. The hosting plan beneath it
+        // is guarded again by PlaceOrder, for the shared_hosting line.
+        $this->sellable->execute(Product::WordPress);
+
         $domain = strtolower(trim($domain, " \t\n\r\0\x0B."));
 
         if ($domain === '' || ! str_contains($domain, '.')) {

@@ -26,6 +26,8 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentKind;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentState;
+use Lynomia\Modules\Infrastructure\Domain\Enums\GpuAllocationState;
+use Lynomia\Modules\Infrastructure\Domain\Enums\GpuPassthroughMode;
 use Lynomia\Modules\Infrastructure\Domain\Enums\PlanRisk;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
@@ -35,6 +37,8 @@ use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductReadinessState;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductSoftwareState;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\ReadinessAnswer;
 use Lynomia\Modules\Providers\Domain\Enums\CapabilityState;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
@@ -152,6 +156,10 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.providers.categories' => [ProviderCategory::class],
         'admin.providers.capabilityStates' => [CapabilityState::class],
         'admin.readiness.products' => [Product::class],
+        'admin.readiness.software' => [ProductSoftwareState::class],
+        'admin.readiness.answerValues' => [ReadinessAnswer::class],
+        'admin.servers.passthroughModes' => [GpuPassthroughMode::class],
+        'admin.servers.allocationStates' => [GpuAllocationState::class],
         'admin.plans.risks' => [PlanRisk::class],
         'admin.deployments.kinds' => [DeploymentKind::class],
 

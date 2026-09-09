@@ -39,6 +39,13 @@ final readonly class DeclareProductSellable
     {
         return $this->record->execute(
             act: function () use ($product, $operator, $reason, $validationReference): ProductReadiness {
+                // Refused before the ladder is consulted, so the message
+                // names the real reason rather than the rung the ceiling
+                // happens to leave the product on.
+                if (! $product->softwareState()->maySell()) {
+                    throw ReadinessRefused::softwareNotComplete($product);
+                }
+
                 $verdict = $this->assess->execute($product);
 
                 if (! $verdict->state->atLeast(ProductReadinessState::ReadyForProduction)) {

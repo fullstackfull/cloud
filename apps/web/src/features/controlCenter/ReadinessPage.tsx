@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { Alert } from '@/components/Alert'
@@ -13,6 +14,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
 import {
   READINESS_LADDER,
+  READINESS_QUESTIONS,
   useAssessAllProducts,
   useDeclareSellable,
   useProductDependencies,
@@ -20,6 +22,8 @@ import {
   useWithdrawSellability,
   type ProductReadiness,
   type ProductReadinessState,
+  type ReadinessAnswer,
+  type RequirementRow,
 } from '@/lib/controlCenterQueries'
 import { formatDateTime } from '@/lib/format'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -60,6 +64,7 @@ export function ReadinessPage() {
       {describe(assess.error) === null ? null : <Alert tone="error">{describe(assess.error)?.message}</Alert>}
 
       <Alert tone="info">{t('admin.readiness.ladderNote')}</Alert>
+      <p className="text-sm text-[var(--text-muted)]">{t('admin.readiness.drillNote')}</p>
 
       {readiness.isPending ? (
         <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
@@ -133,6 +138,54 @@ function Ladder({ state }: { state: ProductReadinessState }) {
   )
 }
 
+/**
+ * The ten questions the addendum says readiness must answer, each yes, no or
+ * not applicable. Derived on the API from the same verdict as the ladder, so
+ * the grid and the ladder cannot disagree.
+ */
+function Answers({ product }: { product: ProductReadiness }) {
+  const { t } = useTranslation()
+  const tone = (answer: ReadinessAnswer): 'success' | 'warning' | 'neutral' => (answer === 'yes' ? 'success' : answer === 'no' ? 'warning' : 'neutral')
+
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-5" aria-label={t('admin.readiness.questionsHeading')}>
+      {READINESS_QUESTIONS.map((question) => (
+        <div key={question} className="flex flex-col gap-0.5">
+          <dt className="text-[var(--text-muted)]">{t(`admin.readiness.answers.${question}`)}</dt>
+          <dd><Badge tone={tone(product.answers[question])}>{t(`admin.readiness.answerValues.${product.answers[question]}`)}</Badge></dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/**
+ * Where to go for the blocker: the thing that carries it. A credential
+ * blocker goes to the credentials screen, a licence blocker to licences, a
+ * hardware blocker to the machines, and everything else to the provider row
+ * the blocked requirement names — opened, so the operator lands on it.
+ */
+function DrillLink({ product }: { product: ProductReadiness }) {
+  const { t } = useTranslation()
+  const blocked: RequirementRow | undefined = product.requirements.find((row) => row.blocker !== null && row.provider_id !== null)
+  const className = 'mt-1 block text-xs underline underline-offset-2'
+
+  switch (product.blocker) {
+    case 'blocked_credentials':
+      return <Link to="/admin/control-center/credentials" className={className}>{t('admin.readiness.openCredentials')}</Link>
+    case 'blocked_licence':
+      return <Link to="/admin/control-center/licences" className={className}>{t('admin.readiness.openLicences')}</Link>
+    case 'blocked_hardware':
+      return <Link to="/admin/control-center/machines" className={className}>{t('admin.readiness.openMachines')}</Link>
+    case 'not_implemented':
+      return null
+    default:
+      return blocked === undefined
+        ? <Link to="/admin/control-center/providers" className={className}>{t('admin.readiness.openProviders')}</Link>
+        : <Link to={`/admin/control-center/providers?open=${encodeURIComponent(blocked.provider_id ?? '')}`} className={className}>{t('admin.readiness.openProvider')}: <span className="technical">{blocked.provider_name}</span></Link>
+  }
+}
+
 function ProductCard({ product }: { product: ProductReadiness }) {
   const { t } = useTranslation()
   const locale = useActiveLocale()
@@ -148,14 +201,20 @@ function ProductCard({ product }: { product: ProductReadiness }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">{t(`admin.readiness.products.${product.product}`)}</h2>
+            <p className="text-xs text-[var(--text-muted)]">{t(`admin.readiness.softwareNote.${product.software}`)}</p>
             {product.assessed_at === null ? null : (
               <p className="text-xs text-[var(--text-muted)]">{t('admin.readiness.assessedAt', { when: formatDateTime(product.assessed_at, locale) })}</p>
             )}
           </div>
-          <StatusBadge status={product.state} />
+          <span className="flex flex-wrap items-center gap-2">
+            <Badge tone={product.software === 'complete' ? 'success' : product.software === 'prepared' ? 'info' : 'neutral'}>{t(`admin.readiness.software.${product.software}`)}</Badge>
+            <StatusBadge status={product.state} />
+          </span>
         </div>
 
         <Ladder state={product.state} />
+
+        <Answers product={product} />
 
         {product.blocker === null ? (
           <p className="text-sm text-[var(--text-secondary)]">{product.detail}</p>
@@ -167,6 +226,7 @@ function ProductCard({ product }: { product: ProductReadiness }) {
             </span>
             {product.next_action === null ? null : <span> — {t(product.next_action)}</span>}
             {product.detail === null ? null : <span className="block text-xs">{product.detail}</span>}
+            <DrillLink product={product} />
           </Alert>
         )}
 
@@ -187,10 +247,19 @@ function ProductCard({ product }: { product: ProductReadiness }) {
                     {t(`admin.providers.categories.${row.category}`)}
                     {row.shared ? <Badge tone="neutral">{t('admin.readiness.shared')}</Badge> : null}
                     <span className="technical block text-[var(--text-muted)]">{row.capabilities.join(', ')}</span>
+                    {row.optional.length === 0 ? null : (
+                      <span className="technical block text-[var(--text-muted)]">{row.optional.join(', ')} <span className="font-sans">({t('admin.readiness.optional')})</span></span>
+                    )}
                   </td>
                   <td className="py-1 pe-2"><StatusBadge status={row.satisfied_up_to} /></td>
                   <td className="py-1">
-                    <span className="technical">{row.provider_name ?? t('admin.readiness.nobody')}</span>
+                    {row.provider_id === null ? (
+                      <span className="technical">{t('admin.readiness.nobody')}</span>
+                    ) : (
+                      <Link to={`/admin/control-center/providers?open=${encodeURIComponent(row.provider_id)}`} className="technical underline-offset-2 hover:underline" aria-label={`${t('admin.readiness.openProvider')}: ${row.provider_name ?? ''}`}>
+                        {row.provider_name}
+                      </Link>
+                    )}
                     <span className="block text-[var(--text-muted)]">{row.detail}</span>
                   </td>
                 </tr>

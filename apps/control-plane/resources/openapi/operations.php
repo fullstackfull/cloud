@@ -1156,6 +1156,22 @@ return [
         'permission' => 'infrastructure.view',
         'response' => ['envelope' => 'list', 'schema' => 'ServerFact'],
     ],
+    'api.admin.infrastructure.servers.gpus.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The GPU devices recorded in a machine',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'GpuDevice'],
+    ],
+    'api.admin.infrastructure.servers.gpus.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a GPU device in a machine',
+        'description' => 'Recording is not touching: a device may be recorded on a machine of any classification and counts as '
+            .'capacity only on one classified to allow configuration. One row per PCI address per machine (409 otherwise). '
+            .'Nothing here raises a classification.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['vendor', 'model', 'vram_mib', 'pci_address', 'passthrough_mode', 'notes'],
+        'response' => $one('GpuDevice', 201),
+    ],
     /* ---------------------------------------------------------------------
      | The execution chain
      |

@@ -9,6 +9,8 @@ use Illuminate\Support\Collection;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\GpuDevice;
+use Lynomia\Modules\ProductReadiness\Domain\DTOs\CapacityFacts;
 use Lynomia\Modules\ProductReadiness\Domain\DTOs\ProductVerdict;
 use Lynomia\Modules\ProductReadiness\Domain\DTOs\ProviderFacts;
 use Lynomia\Modules\ProductReadiness\Domain\DTOs\RequirementVerdict;
@@ -49,10 +51,24 @@ final readonly class AssessProduct
     public function execute(Product $product, ?Collection $providers = null): ProductVerdict
     {
         $facts = $this->facts($providers ?? $this->providers());
+        $capacity = $this->capacity();
         $memo = [];
-        $verdict = $this->evaluate($product, $facts, $memo);
+        $verdict = $this->evaluate($product, $facts, $capacity, $memo);
 
         return $this->persist($verdict);
+    }
+
+    /**
+     * What the physical estate offers, counted once per assessment.
+     *
+     * A GPU counts only on a machine classified to allow configuration: a
+     * card in a chassis nobody may touch is not capacity.
+     */
+    public function capacity(): CapacityFacts
+    {
+        return new CapacityFacts(
+            gpuDevicesAvailable: GpuDevice::query()->capacity()->count(),
+        );
     }
 
     /**
@@ -67,19 +83,19 @@ final readonly class AssessProduct
      * @param  list<ProviderFacts>  $facts
      * @param  array<string, ProductReadinessState>  $memo
      */
-    private function evaluate(Product $product, array $facts, array &$memo): ProductVerdict
+    private function evaluate(Product $product, array $facts, CapacityFacts $capacity, array &$memo): ProductVerdict
     {
         $dependencies = [];
 
         foreach ($product->dependsOn() as $dependency) {
             if (! isset($memo[$dependency->value])) {
-                $memo[$dependency->value] = $this->evaluate($dependency, $facts, $memo)->state;
+                $memo[$dependency->value] = $this->evaluate($dependency, $facts, $capacity, $memo)->state;
             }
 
             $dependencies[$dependency->value] = $memo[$dependency->value];
         }
 
-        return $this->evaluator->evaluate($product, $this->requirements->for($product), $facts, $dependencies);
+        return $this->evaluator->evaluate($product, $this->requirements->for($product), $facts, $dependencies, $capacity);
     }
 
     private function persist(ProductVerdict $verdict): ProductVerdict

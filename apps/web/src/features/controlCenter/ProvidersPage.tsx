@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -50,7 +51,9 @@ export function ProvidersPage() {
   const [page, setPage] = useState(1)
   const [environment, setEnvironment] = useState<Environment | ''>('')
   const [registering, setRegistering] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // A deep link from the readiness screen names the provider to open.
+  const [params] = useSearchParams()
+  const [selectedId, setSelectedId] = useState<string | null>(params.get('open'))
 
   const { data, isPending, error } = useProviders(page, { environment })
   const selected = data?.data.find((provider) => provider.id === selectedId) ?? null

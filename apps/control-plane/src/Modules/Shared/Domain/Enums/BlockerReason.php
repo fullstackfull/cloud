@@ -35,6 +35,15 @@ enum BlockerReason: string
     case Dependency = 'blocked_dependency';
 
     /**
+     * The software that would use this does not exist yet.
+     *
+     * A product whose provider contract and requirement rows exist but whose
+     * customer flow has not been written. Nothing is wrong with any provider;
+     * the missing piece is code, and no operator action moves it.
+     */
+    case NotImplemented = 'not_implemented';
+
+    /**
      * What an operator should do next.
      *
      * Guidance, never automation: this tells somebody where to go, and stops
@@ -60,6 +69,7 @@ enum BlockerReason: string
             self::Network => 'controlCenter.guidance.network',
             self::Configuration => 'controlCenter.guidance.configuration',
             self::Dependency => 'controlCenter.guidance.dependency',
+            self::NotImplemented => 'controlCenter.guidance.notImplemented',
         };
     }
 
@@ -81,6 +91,9 @@ enum BlockerReason: string
             self::Network->value => 3,
             self::Configuration->value => 4,
             self::Dependency->value => 5,
+            // Last: it is never the thing to fix first, because nobody at the
+            // console can fix it at all.
+            self::NotImplemented->value => 6,
         ];
 
         usort($reasons, fn (self $a, self $b): int => $order[$a->value] <=> $order[$b->value]);

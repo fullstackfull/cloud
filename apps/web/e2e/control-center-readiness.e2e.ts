@@ -26,7 +26,7 @@ test.describe('an operator reading product readiness', () => {
 
   test('sees every product with its rung and its blocker in words', async ({ page }) => {
     const products = page.getByRole('list', { name: /^product readiness$/i })
-    await expect(products.getByRole('listitem', { name: /^(cloud vps|dedicated servers|shared hosting|wordpress|domains|dns|backups)$/i })).toHaveCount(7)
+    await expect(products.getByRole('listitem', { name: /^(cloud vps|dedicated servers|shared hosting|wordpress|domains|dns|backups|cdn|object storage|gpu compute|email hosting|managed kubernetes)$/i })).toHaveCount(12)
 
     const dns = products.getByRole('listitem', { name: /^dns$/i })
     await expect(dns).toContainText(/not ready/i)
@@ -41,6 +41,38 @@ test.describe('an operator reading product readiness', () => {
     // A dependency edge, in words.
     const view = page.getByRole('list', { name: /what each product leans on/i })
     await expect(view.getByRole('listitem', { name: /^wordpress$/i })).toContainText(/leans on shared hosting/i)
+    await expect(view.getByRole('listitem', { name: /^managed kubernetes$/i })).toContainText(/leans on cloud vps, dns, backups, object storage/i)
+  })
+
+  test('sees the prepared products as prepared, answered, and not for sale', async ({ page }) => {
+    const products = page.getByRole('list', { name: /^product readiness$/i })
+
+    // A prepared product says what it is, and the ten questions are answered
+    // in words. Nothing is registered for it, so the provider answer is no.
+    const cdn = products.getByRole('listitem', { name: /^cdn$/i })
+    await expect(cdn).toContainText(/software prepared/i)
+    await expect(cdn).toContainText(/provider available\?/i)
+    await expect(cdn).toContainText(/ready to sell\?/i)
+    await expect(cdn.getByRole('button', { name: /declare sellable/i })).toBeDisabled()
+
+    // Kubernetes is readiness only, and says so.
+    const k8s = products.getByRole('listitem', { name: /^managed kubernetes$/i })
+    await expect(k8s).toContainText(/readiness only/i)
+    await expect(k8s).toContainText(/cannot be declared sellable/i)
+
+    // GPU compute is blocked on hardware before anything else: no card in
+    // any machine the platform may configure.
+    const gpu = products.getByRole('listitem', { name: /^gpu compute$/i })
+    await expect(gpu).toContainText(/blocked: hardware/i)
+    await expect(gpu.getByRole('link', { name: /^machines$/i })).toBeVisible()
+
+    // The credential blocker on DNS links to the credentials screen, and the
+    // link goes there.
+    const dns = products.getByRole('listitem', { name: /^dns$/i })
+    await dns.getByRole('link', { name: /^credentials$/i }).click()
+    await expect(page).toHaveURL(/\/admin\/control-center\/credentials$/)
+    await page.goBack()
+    await expect(page.getByRole('heading', { name: /^product readiness$/i })).toBeVisible()
   })
 
   test('cannot declare anything sellable here, and is told why by the platform', async ({ page }) => {
@@ -52,7 +84,7 @@ test.describe('an operator reading product readiness', () => {
 
     // Reassessing is allowed and changes nothing on a settled estate.
     await page.getByRole('button', { name: /reassess everything/i }).click()
-    await expect(page.getByText(/assessed 7 products/i)).toBeVisible()
+    await expect(page.getByText(/assessed 12 products/i)).toBeVisible()
   })
 })
 
@@ -67,5 +99,7 @@ test.describe('in Arabic', () => {
     const dns = page.getByRole('list', { name: /جاهزية المنتجات/ }).getByRole('listitem', { name: /^DNS$/ })
     await expect(dns).toContainText(/غير جاهز/)
     await expect(dns).toContainText(/محجوب: الاعتماد/)
+    const k8s = page.getByRole('list', { name: /جاهزية المنتجات/ }).getByRole('listitem', { name: /Kubernetes مُدار/ })
+    await expect(k8s).toContainText(/جاهزية فقط/)
   })
 })

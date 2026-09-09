@@ -209,6 +209,14 @@ class ManagedServer extends Model
     }
 
     /**
+     * @return HasMany<GpuDevice, $this>
+     */
+    public function gpuDevices(): HasMany
+    {
+        return $this->hasMany(GpuDevice::class, 'managed_server_id');
+    }
+
+    /**
      * @return HasOne<DesiredState, $this>
      */
     public function desiredState(): HasOne

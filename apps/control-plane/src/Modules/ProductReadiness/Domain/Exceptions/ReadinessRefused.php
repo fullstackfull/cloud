@@ -22,6 +22,22 @@ final class ReadinessRefused extends RuntimeException
         ));
     }
 
+    /**
+     * A product whose software is prepared or readiness-only cannot be
+     * declared, whatever its providers report. There is nothing a person
+     * could have validated.
+     */
+    public static function softwareNotComplete(Product $product): self
+    {
+        return new self(sprintf(
+            '%s cannot be declared sellable: its software is %s. '
+            .'A prepared product has a provider contract and a readiness row and no customer flow; '
+            .'nothing exists for a person to have validated.',
+            $product->value,
+            $product->softwareState()->value,
+        ));
+    }
+
     public static function notDeclared(Product $product): self
     {
         return new self(sprintf('%s has no sellability declaration to withdraw.', $product->value));

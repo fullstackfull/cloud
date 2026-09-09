@@ -734,7 +734,8 @@
         "blocked_licence": "Blocked: licence",
         "blocked_network": "Blocked: network",
         "blocked_configuration": "Blocked: configuration",
-        "blocked_dependency": "Blocked: dependency"
+        "blocked_dependency": "Blocked: dependency",
+        "not_implemented": "Not implemented"
       }
     },
     "credentials": {
@@ -866,7 +867,33 @@
         "discovered": "discovered",
         "derived": "derived"
       },
-      "rackUnit": "Rack unit"
+      "rackUnit": "Rack unit",
+      "gpuHeading": "GPU devices",
+      "noGpus": "No GPU device is recorded in this machine.",
+      "gpuCountsNote": "A device counts as capacity only while it is available, in a mode a guest can hold, and this machine is classified to allow configuration. Recording one does not raise the classification.",
+      "registerGpu": "Record a GPU",
+      "registerGpuTitle": "Record a GPU in {{name}}",
+      "gpuVendor": "Vendor",
+      "gpuModel": "Model",
+      "gpuVram": "VRAM (MiB)",
+      "gpuPciAddress": "PCI address",
+      "gpuPciAddressHint": "As the host reports it, e.g. 0000:41:00.0.",
+      "gpuPassthroughMode": "How it is handed to a guest",
+      "gpuNotes": "Notes",
+      "gpuDedicated": "dedicated",
+      "gpuShared": "shared silicon",
+      "passthroughModes": {
+        "pci_passthrough": "Whole device (PCI passthrough)",
+        "vgpu": "vGPU (shared)",
+        "mig": "MIG partition (shared)",
+        "none": "Cannot be handed to a guest"
+      },
+      "allocationStates": {
+        "available": "Available",
+        "allocated": "Allocated",
+        "reserved": "Reserved",
+        "faulted": "Faulted"
+      }
     },
     "providers": {
       "title": "Providers",
@@ -914,7 +941,13 @@
         "payment": "Payment",
         "email": "Email",
         "bmc": "BMC",
-        "monitoring": "Monitoring"
+        "monitoring": "Monitoring",
+        "cdn": "CDN",
+        "object_storage": "Object storage",
+        "email_hosting": "Email hosting",
+        "load_balancer": "Load balancer",
+        "certificates": "Certificates",
+        "cluster_lifecycle": "Cluster lifecycle"
       },
       "capabilityStates": {
         "supported": "Supported",
@@ -977,8 +1010,48 @@
         "wordpress": "WordPress",
         "domains": "Domains",
         "dns": "DNS",
-        "backups": "Backups"
-      }
+        "backups": "Backups",
+        "cdn": "CDN",
+        "object_storage": "Object storage",
+        "gpu_compute": "GPU compute",
+        "email_hosting": "Email hosting",
+        "managed_kubernetes": "Managed Kubernetes"
+      },
+      "software": {
+        "complete": "Software complete",
+        "prepared": "Software prepared",
+        "readiness_only": "Readiness only"
+      },
+      "softwareNote": {
+        "complete": "Order path, provisioning, customer screen and whole-life test exist.",
+        "prepared": "Provider contract, capability set and readiness row exist. No customer can buy it yet, and it is capped below production.",
+        "readiness_only": "Only this row exists, by decree: the platform knows what the product would need and nothing more. It cannot be declared sellable."
+      },
+      "questionsHeading": "The questions",
+      "answers": {
+        "software": "Software ready?",
+        "infrastructure": "Infrastructure available?",
+        "provider": "Provider available?",
+        "credential": "Credential available?",
+        "licence": "Licence available?",
+        "capabilities": "Required capabilities discovered?",
+        "dependencies": "Dependencies ready?",
+        "real_validation": "Real validation recorded?",
+        "production": "Production enabled?",
+        "sellable": "Ready to sell?"
+      },
+      "answerValues": {
+        "yes": "Yes",
+        "no": "No",
+        "not_applicable": "Not applicable"
+      },
+      "optional": "optional",
+      "openProvider": "Open provider",
+      "openProviders": "Providers",
+      "openCredentials": "Credentials",
+      "openLicences": "Licences",
+      "openMachines": "Machines",
+      "drillNote": "Follow a blocker to the thing that carries it: the provider, then its credential or licence, then the machine it runs on. Use the browser's back button to return here."
     },
     "plans": {
       "title": "Plans",
@@ -1438,7 +1511,8 @@
       "licence": "Attach a valid licence, then test.",
       "network": "Fix the endpoint or the route to it, then test again.",
       "configuration": "Complete the provider's configuration, then test again.",
-      "dependency": "Make the provider this one depends on ready first."
+      "dependency": "Make the provider this one depends on ready first.",
+      "notImplemented": "The product's software is not written yet. No setting moves this; it waits for a build."
     }
   }
 }

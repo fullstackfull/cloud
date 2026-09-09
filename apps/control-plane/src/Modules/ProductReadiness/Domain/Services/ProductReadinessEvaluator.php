@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\ProductReadiness\Domain\Services;
 
+use Lynomia\Modules\ProductReadiness\Domain\DTOs\CapacityFacts;
 use Lynomia\Modules\ProductReadiness\Domain\DTOs\ProductVerdict;
 use Lynomia\Modules\ProductReadiness\Domain\DTOs\ProviderFacts;
 use Lynomia\Modules\ProductReadiness\Domain\DTOs\Requirement;
@@ -37,6 +38,16 @@ use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
  * The product's rung is the lowest of its requirements' rungs and of its
  * dependencies' rungs. A dependency that is behind caps the dependent with a
  * dependency blocker naming it, because the fix is over there.
+ *
+ * Two caps the scope addendum added, applied after the rules above:
+ *
+ *   5. A product that needs physical capacity (a GPU in a machine) is not
+ *      ready while the estate has none, whatever its providers report. The
+ *      blocker is hardware, because that is what is missing.
+ *   6. A product whose software is prepared or readiness-only cannot pass
+ *      real validation: production means nothing in the control plane stops
+ *      live use, and code that does not exist is such a stop. The blocker is
+ *      not_implemented, which no operator action moves.
  */
 final readonly class ProductReadinessEvaluator
 {
@@ -45,8 +56,9 @@ final readonly class ProductReadinessEvaluator
      * @param  list<ProviderFacts>  $providers
      * @param  array<string, ProductReadinessState>  $dependencies  Verdicts already reached for what this product leans on, keyed by product value.
      */
-    public function evaluate(Product $product, array $requirements, array $providers, array $dependencies): ProductVerdict
+    public function evaluate(Product $product, array $requirements, array $providers, array $dependencies, ?CapacityFacts $capacity = null): ProductVerdict
     {
+        $capacity ??= CapacityFacts::empty();
         $verdicts = array_map(fn (Requirement $requirement): RequirementVerdict => $this->judge($requirement, $providers), $requirements);
 
         $state = ProductReadinessState::ReadyForProduction;
@@ -76,9 +88,34 @@ final readonly class ProductReadinessEvaluator
             }
         }
 
+        // Hardware outranks every other blocker, as BlockerReason::first()
+        // says: a provider for a GPU product is work in the wrong order while
+        // no GPU exists, so the missing card is reported even when a provider
+        // is missing too.
+        $hardware = $product->hardwareRequirement();
+        if ($hardware !== null && ! $capacity->satisfies($hardware)) {
+            $state = ProductReadinessState::NotReady;
+            $blocker = BlockerReason::Hardware;
+            $detail = $capacity->describeMissing($hardware);
+        }
+
         if ($state === ProductReadinessState::ReadyForProduction) {
             $blocker = null;
             $detail = 'Every requirement is met by a real provider enabled in production. Not yet declared sellable.';
+        }
+
+        // At or above the ceiling, the thing that stops the next rung is the
+        // software, whatever else is also at that rung — and it is the one
+        // blocker no operator can move, so it is the one to show.
+        $ceiling = $product->softwareState()->ceiling();
+        if (! $product->softwareState()->maySell() && $state->atLeast($ceiling)) {
+            $state = $ceiling;
+            $blocker = BlockerReason::NotImplemented;
+            $detail = sprintf(
+                'The providers would carry this to %s, but the product\'s software is %s: there is no customer flow to enable.',
+                ProductReadinessState::ReadyForProduction->value,
+                $product->softwareState()->value,
+            );
         }
 
         return new ProductVerdict(
