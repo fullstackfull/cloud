@@ -1,0 +1,83 @@
+---
+# Destroy the operating system on one named machine and install a new one.
+#
+# Every guard here exists because of a specific way this goes wrong:
+#
+#   - `target` is mandatory and must name a single host, because a typo that
+#     expands to a group is how a cluster gets wiped.
+#   - `all`, `*` and group names are refused outright.
+#   - safety_gate demands REIMAGE_ALLOWED *and* allow_reimage: true on that
+#     individual host.
+#   - `reimage_confirm` must be the hostname, typed. A flag that is just `true`
+#     is one the wrong window can supply.
+#
+# There is no variant of this play that operates on more than one machine.
+
+- name: Refuse a wildcard before resolving anything
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: A single named target was given
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | length > 0
+          - target not in ['all', '*', 'ungrouped']
+          - "'*' not in target"
+          - "',' not in target"
+          - "':' not in target"
+        fail_msg: >-
+          reimage takes exactly one host name. No wildcard, no list, no group.
+          Run it once per machine, deliberately.
+        quiet: true
+
+# `target` is defaulted only so the play can be parsed by a syntax check.
+# The guard play above fails hard when it is missing, so this pattern —
+# which matches no host — is never reached in a real run.
+- name: Reimage
+  hosts: "{{ target | default('__no_target_given__') }}"
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    safety_gate_action: reimage
+  tasks:
+    - name: The play resolved to exactly one machine
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          '{{ target }}' resolved to {{ ansible_play_hosts_all | length }} machines:
+          {{ ansible_play_hosts_all | join(', ') }}. Reimage acts on one.
+        quiet: true
+
+    - name: The classification and the host both permit this
+      ansible.builtin.include_role:
+        name: safety_gate
+
+    - name: The operator typed this machine's name
+      ansible.builtin.assert:
+        that:
+          - reimage_confirm is defined
+          - reimage_confirm == inventory_hostname
+        fail_msg: >-
+          pass -e reimage_confirm={{ inventory_hostname }} to confirm that this
+          is the machine whose disks you mean to destroy.
+        quiet: true
+
+    - name: Record the intent before acting on it
+      ansible.builtin.debug:
+        msg: >-
+          REIMAGE {{ inventory_hostname }} ({{ ansible_host }}) — owner
+          {{ owner }} — purpose {{ purpose }}
+
+    # The steps that actually wipe and install are deliberately absent until a
+    # machine exists to run them against. Writing an untested destructive
+    # sequence and leaving it here for somebody to trust is worse than an
+    # honest gap. See docs/phase-30b-real-infrastructure-inventory.md.
+    - name: Nothing to reimage yet
+      ansible.builtin.fail:
+        msg: >-
+          No reimage implementation has been written or tested, because no
+          machine classified REIMAGE_ALLOWED has been made available. The gates
+          above are real; the destructive body is not written on speculation.

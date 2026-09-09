@@ -1,0 +1,45 @@
+---
+# Loki.
+#
+# Retention is finite on purpose. Application logs carry operational detail, and
+# the platform's rule is that logs never carry passwords, API secrets, auth
+# codes, registrant PII, WordPress passwords or payment secrets — so what is
+# kept here is safe to keep, and kept only as long as it is useful.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /var/lib/loki
+  storage:
+    filesystem:
+      chunks_directory: /var/lib/loki/chunks
+      rules_directory: /var/lib/loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 720h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  max_query_series: 5000
+
+compactor:
+  working_directory: /var/lib/loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem

@@ -1,0 +1,49 @@
+---
+# Alertmanager.
+#
+# The receiver URLs and keys are not here. They are read from files the
+# deployment controller writes at deploy time, which is why every receiver
+# below uses a *_file field rather than an inline secret.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: platform-oncall
+  group_by: ['alertname', 'environment']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Money and provider disagreement wake somebody. Capacity warnings do not.
+    - matchers:
+        - severity = "critical"
+      receiver: platform-oncall-urgent
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - matchers:
+        - severity = "warning"
+      receiver: platform-oncall
+      repeat_interval: 12h
+
+inhibit_rules:
+  # While the collector is down every derived alert is noise about stale data.
+  - source_matchers:
+      - alertname = "MetricsCollectorDown"
+    target_matchers:
+      - severity =~ "warning|critical"
+    equal: ['environment']
+
+receivers:
+  - name: platform-oncall
+    email_configs:
+      - to: "${LYNOMIA_ALERT_EMAIL}"
+        send_resolved: true
+
+  - name: platform-oncall-urgent
+    email_configs:
+      - to: "${LYNOMIA_ALERT_EMAIL}"
+        send_resolved: true
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/urgent-webhook-url
+        send_resolved: true

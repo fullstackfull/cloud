@@ -1,0 +1,18 @@
+---
+# Deploy the Lynomia control plane onto machines that already boot.
+#
+# This play changes configuration and releases code. It never touches
+# partitions, RAID, firmware or boot order — that is a different play, with a
+# different gate.
+
+- name: Control plane
+  hosts: control_plane
+  gather_facts: true
+  become: true
+  any_errors_fatal: true
+  vars:
+    safety_gate_action: configure
+  roles:
+    - role: safety_gate
+    - role: common
+    - role: control_plane

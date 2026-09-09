@@ -1,0 +1,55 @@
+// Grafana Alloy — collects logs from the control plane machines and ships them
+// to Loki.
+//
+// The drop stage below is the important part. Logs are the easiest place for a
+// secret to escape, so anything that pattern-matches a credential, an auth code
+// or a registrant's personal details is dropped at the collector rather than
+// relied upon to have never been written.
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+loki.write "default" {
+  endpoint {
+    url = env("LYNOMIA_LOKI_URL")
+  }
+}
+
+local.file_match "lynomia" {
+  path_targets = [
+    {__path__ = "/srv/lynomia/shared/storage/logs/*.log", job = "lynomia-app"},
+    {__path__ = "/var/log/nginx/*.log", job = "nginx"},
+  ]
+}
+
+loki.source.file "lynomia" {
+  targets    = local.file_match.lynomia.targets
+  forward_to = [loki.process.redact.receiver]
+}
+
+loki.process "redact" {
+  forward_to = [loki.write.default.receiver]
+
+  // Drop any line that looks like it is carrying a credential. Coarse on
+  // purpose: a dropped log line costs an investigation some detail, a leaked
+  // one costs a customer their domain.
+  stage.drop {
+    expression = "(?i)(password|passwd|api[_-]?secret|auth[_-]?code|private[_-]?key|BEGIN [A-Z ]*PRIVATE KEY)"
+    drop_counter_reason = "possible_secret"
+  }
+
+  // Registrant contact details belong in the database, behind access control,
+  // not in a log aggregator.
+  stage.replace {
+    expression = "(?i)(registrant_email|admin_email|contact_email)=\\S+"
+    replace    = "${1}=[redacted]"
+  }
+
+  stage.labels {
+    values = {
+      environment = "",
+    }
+  }
+}

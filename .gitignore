@@ -90,3 +90,16 @@ appendonlydir/
 # Playwright output: traces and error-context snapshots from the last local run.
 apps/web/test-results/
 apps/web/playwright-report/
+
+# Infrastructure state. OpenTofu state contains every value a provider returned,
+# including secrets, so it lives in the deployment controller's backend and
+# never here.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+infra/**/secrets/
+infra/ansible/*.retry
+
+# ansible-lint scratch
+.ansible/

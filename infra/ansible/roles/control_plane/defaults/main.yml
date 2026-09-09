@@ -1,0 +1,8 @@
+---
+# Configuration only. Every secret this role needs is read from the deployment
+# controller's environment at the moment of use and written to a file the
+# application user alone can read; none of them are stored in Git.
+control_plane_releases_to_keep: 5
+control_plane_worker_processes: 2
+control_plane_php_fpm_pool: lynomia
+control_plane_health_path: /health

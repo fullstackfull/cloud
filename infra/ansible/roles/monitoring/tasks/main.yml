@@ -1,0 +1,29 @@
+---
+# Ships the configuration in infra/monitoring/ onto the monitoring host. The
+# configuration itself is validated in CI by infra/scripts/validate-monitoring.py,
+# so a rule with a typo fails the build rather than the alert.
+
+- name: Prometheus configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/prometheus/"
+    dest: /etc/prometheus/
+    owner: prometheus
+    group: prometheus
+    mode: "0640"
+  notify: Reload prometheus
+
+- name: Alertmanager configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/alertmanager/alertmanager.yml"
+    dest: /etc/alertmanager/alertmanager.yml
+    owner: alertmanager
+    group: alertmanager
+    mode: "0640"
+  notify: Reload alertmanager
+
+- name: Loki configuration
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../monitoring/loki/loki.yml"
+    dest: /etc/loki/loki.yml
+    mode: "0640"
+  notify: Restart loki

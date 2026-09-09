@@ -1,0 +1,187 @@
+---
+# Alerts on the platform's own metrics.
+#
+# Every expression below names a metric family the control plane actually
+# exports; infra/scripts/validate-monitoring.py compares this file against
+# docs/monitoring.md and fails on a rule that alerts on a metric nobody emits.
+groups:
+  - name: lynomia-collector
+    rules:
+      - alert: MetricsCollectorDown
+        expr: lynomia_metrics_collector_up == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The metrics collector is failing"
+          description: >-
+            Every other alert here is derived from this collector. While it is
+            down the dashboards are stale, not healthy.
+          runbook: infra/runbooks/monitoring-blind.md
+
+      - alert: MetricsCollectorSlow
+        expr: lynomia_metrics_collect_duration_seconds > 20
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Metric collection is taking {{ $value }}s"
+          runbook: infra/runbooks/monitoring-blind.md
+
+  - name: lynomia-queue
+    rules:
+      - alert: QueueBacklog
+        expr: lynomia_queue_depth > 500
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue {{ $labels.queue }} has {{ $value }} jobs waiting"
+          runbook: infra/runbooks/queue-backlog.md
+
+      - alert: QueueStalled
+        expr: min_over_time(lynomia_queue_depth[30m]) > 50 and rate(lynomia_provisioning_jobs_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Jobs are queued and nothing is being processed"
+          description: >-
+            Depth is not falling and no provisioning job has completed in half
+            an hour. Suspects: no worker running, or every worker is blocked on
+            one provider.
+          runbook: infra/runbooks/queue-backlog.md
+
+      - alert: FailedJobsRising
+        expr: increase(lynomia_failed_jobs_total[1h]) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} jobs failed in the last hour"
+          runbook: infra/runbooks/queue-backlog.md
+
+  - name: lynomia-scheduler
+    rules:
+      - alert: ScheduledCommandFailingRepeatedly
+        expr: lynomia_scheduled_command_consecutive_failures >= 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.command }} has failed {{ $value }} times in a row"
+          runbook: infra/runbooks/scheduler-stale.md
+
+      - alert: ScheduledCommandStale
+        expr: time() - lynomia_scheduled_command_last_success_timestamp_seconds > 7200
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.command }} has not succeeded for over two hours"
+          description: >-
+            Expiry sweeps, reconciliation and renewal all live in the scheduler.
+            A stale scheduler is silently not renewing things.
+          runbook: infra/runbooks/scheduler-stale.md
+
+  - name: lynomia-providers
+    rules:
+      - alert: ProviderTasksIndeterminate
+        expr: sum(lynomia_provider_task_total{state="indeterminate"}) > 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} provider operations are indeterminate"
+          description: >-
+            The Timeout Rule means these are never auto-retried. Each one is a
+            person deciding what really happened at the provider.
+          runbook: infra/runbooks/provider-indeterminate.md
+
+      - alert: ResourceDriftOpen
+        expr: lynomia_resource_drift_open > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} resources disagree with their provider"
+          runbook: infra/runbooks/drift.md
+
+  - name: lynomia-capacity
+    rules:
+      - alert: NodeNearCapacity
+        expr: lynomia_node_capacity_ratio > 0.85
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node {{ $labels.node }} is at {{ $value | humanizePercentage }}"
+          runbook: infra/runbooks/node-unavailable.md
+
+      - alert: HostingNodeDiskHigh
+        expr: lynomia_hosting_node_disk_ratio > 0.90
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Hosting node {{ $labels.node }} disk at {{ $value | humanizePercentage }}"
+          runbook: infra/runbooks/hosting-panel-unavailable.md
+
+      - alert: IpPoolRunwayShort
+        expr: lynomia_ip_pool_runway_days < 30
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pool {{ $labels.pool }} runs out of addresses in {{ $value }} days"
+          runbook: infra/runbooks/node-unavailable.md
+
+  - name: lynomia-money
+    rules:
+      - alert: PaymentsFailing
+        expr: increase(lynomia_failed_payments_total[1h]) > 5
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} payments failed in the last hour"
+          runbook: infra/runbooks/payment-webhook-outage.md
+
+      - alert: WebhookEventsStopped
+        expr: rate(lynomia_webhook_events_total[2h]) == 0
+        for: 2h
+        labels:
+          severity: critical
+        annotations:
+          summary: "No payment webhook has arrived for two hours"
+          description: >-
+            Orders will sit paid-but-unprovisioned, or unpaid-but-charged.
+            Check the gateway's delivery log before assuming quiet trade.
+          runbook: infra/runbooks/payment-webhook-outage.md
+
+  - name: lynomia-products
+    rules:
+      - alert: DomainOperationsStuck
+        expr: sum(lynomia_domain_operations_total{state="running"}) > 0 and rate(lynomia_domain_operations_total{state="succeeded"}[1h]) == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Domain operations are running but none complete"
+          runbook: infra/runbooks/registrar-timeout.md
+
+      - alert: WordPressProvisioningStuck
+        expr: sum(lynomia_wordpress_sites_total{state="installing"}) > 0 and rate(lynomia_wordpress_sites_total{state="ready"}[2h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "WordPress installs are not reaching ready"
+          runbook: infra/runbooks/wordpress-provisioning-stuck.md
+
+      - alert: SupportBacklogAging
+        expr: lynomia_support_backlog_age > 172800
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest open ticket is {{ $value | humanizeDuration }} old"
+          runbook: infra/runbooks/queue-backlog.md

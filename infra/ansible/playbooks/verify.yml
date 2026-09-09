@@ -1,0 +1,92 @@
+---
+# Verify. Asks the machines what is true rather than trusting that apply
+# exiting zero means the system works. Read-only.
+
+- name: Verify the control plane
+  hosts: control_plane
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Reading is permitted here
+      ansible.builtin.include_role:
+        name: safety_gate
+      vars:
+        safety_gate_action: read
+
+    - name: The application answers its health check
+      ansible.builtin.uri:
+        url: "https://{{ lynomia_public_hostname }}/health"
+        return_content: true
+        status_code: 200
+      register: health
+      delegate_to: localhost
+
+    - name: Health reports every dependency up
+      ansible.builtin.assert:
+        that:
+          - health.json.status == 'ok'
+          - health.json.database == 'ok'
+          - health.json.cache == 'ok'
+        fail_msg: "health endpoint answered but reports {{ health.json }}"
+        quiet: true
+
+    - name: No migration is still pending
+      ansible.builtin.command:
+        cmd: php artisan migrate:status --pending
+        chdir: "{{ lynomia_app_root }}/current/apps/control-plane"
+      register: pending
+      changed_when: false
+      failed_when: false
+      become: true
+      become_user: "{{ lynomia_run_user }}"
+
+    - name: Say so if a migration is pending
+      ansible.builtin.assert:
+        that:
+          - "'Pending' not in pending.stdout"
+        fail_msg: "migrations are pending after apply: {{ pending.stdout }}"
+        quiet: true
+
+    - name: A queue worker is running
+      ansible.builtin.systemd_service:
+        name: lynomia-worker
+      register: worker
+      changed_when: false
+
+    - name: The worker is active
+      ansible.builtin.assert:
+        that:
+          - worker.status.ActiveState == 'active'
+        fail_msg: "lynomia-worker is {{ worker.status.ActiveState }}"
+        quiet: true
+
+    - name: The scheduler ran recently
+      ansible.builtin.systemd_service:
+        name: lynomia-scheduler.timer
+      register: scheduler
+      changed_when: false
+
+    - name: The scheduler timer is active
+      ansible.builtin.assert:
+        that:
+          - scheduler.status.ActiveState == 'active'
+        fail_msg: "lynomia-scheduler.timer is {{ scheduler.status.ActiveState }}"
+        quiet: true
+
+    - name: No fake provider is enabled
+      ansible.builtin.command:
+        cmd: php artisan lynomia:providers --json
+        chdir: "{{ lynomia_app_root }}/current/apps/control-plane"
+      register: providers
+      changed_when: false
+      become: true
+      become_user: "{{ lynomia_run_user }}"
+
+    - name: Fake providers stay out of a real environment
+      ansible.builtin.assert:
+        that:
+          - "'fake' not in (providers.stdout | lower)"
+        fail_msg: >-
+          a fake provider is enabled on {{ inventory_hostname }}: {{ providers.stdout }}
+        quiet: true
+      when: lynomia_environment != 'local'

@@ -1,0 +1,11 @@
+---
+- name: Monitoring stack
+  hosts: monitoring
+  gather_facts: true
+  become: true
+  vars:
+    safety_gate_action: configure
+  roles:
+    - role: safety_gate
+    - role: common
+    - role: monitoring

@@ -1,0 +1,8 @@
+---
+common_timezone: UTC
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - rsync
+  - unattended-upgrades

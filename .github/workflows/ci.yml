@@ -365,6 +365,92 @@ jobs:
 
           echo "No committed secrets found."
 
+  infrastructure:
+    name: Infrastructure validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validators' dependencies
+        run: pip install --quiet pyyaml ansible-core==2.18.1 ansible-lint==24.12.2
+
+      # Every host in an inventory is a machine somebody may be about to change.
+      # This is what stops one arriving without a stated purpose, a named owner
+      # and a deliberate safety class — and what stops a credential arriving
+      # alongside it.
+      - name: Inventory schema and safety classification
+        run: python3 infra/scripts/validate-inventory.py infra
+
+      - name: The inventory validator still rejects what it claims to reject
+        run: python3 infra/scripts/test_validate_inventory.py
+
+      # An alert on a metric nobody emits never fires. It reads as coverage and
+      # is silence in an incident.
+      - name: Alert rules name metrics the control plane exports
+        run: python3 infra/scripts/validate-monitoring.py infra
+
+      - name: Ansible syntax
+        run: |
+          set -euo pipefail
+          cd infra/ansible
+          for playbook in playbooks/*.yml; do
+            echo "-- $playbook"
+            # -e target=localhost: reimage-node.yml and discover.yml declare
+            # `target` mandatory so that a destructive run cannot be started
+            # without naming one machine. Syntax-checking parses the play, so it
+            # needs the variable to exist; it does not connect to anything.
+            ansible-playbook -i inventories/staging/hosts.yml "$playbook" \
+              --syntax-check -e target=localhost
+          done
+
+      # From infra/ansible so that ansible.cfg's roles_path applies, and
+      # offline so the build does not ask Galaxy whether our own YAML parses.
+      - name: Ansible lint
+        working-directory: infra/ansible
+        run: ansible-lint --offline
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.8.7
+
+      - name: OpenTofu is formatted and valid
+        run: |
+          set -euo pipefail
+          tofu fmt -check -recursive infra/opentofu
+          for dir in infra/opentofu/environments/*/; do
+            echo "-- $dir"
+            # -backend=false: init must not reach the state backend. CI has no
+            # business holding state credentials, and does not need them to
+            # decide whether the configuration parses.
+            ( cd "$dir" && tofu init -backend=false -input=false && tofu validate )
+          done
+
+      # Nothing in this job applies anything. CI validates and plans;
+      # a person, on the deployment controller, applies. A pipeline that can
+      # reimage a node on merge is a pipeline that will.
+      - name: No workflow applies infrastructure
+        run: python3 infra/scripts/check-ci-cannot-apply.py .
+
+      # The infra tree is the likeliest place for a credential to be committed,
+      # because it is the tree that talks to everything.
+      - name: Fail if a credential was committed under infra/
+        run: |
+          set -euo pipefail
+          if git ls-files infra | grep -E '\.(pem|key|p12|pfx|tfstate)$|(^|/)id_(rsa|ed25519|ecdsa)$'; then
+            echo "::error::A key or state file is tracked under infra/."
+            exit 1
+          fi
+          if git grep -nIP '^\s*[a-z_]*(password|token|secret|api_key)\s*:\s*(?!\$\{)\S' -- infra; then
+            echo "::error::An inline credential appears under infra/."
+            exit 1
+          fi
+          echo "No committed credentials under infra/."
+
   production-guards:
     name: Production guards
     runs-on: ubuntu-latest

@@ -1,0 +1,15 @@
+---
+- name: Reload php-fpm
+  ansible.builtin.systemd_service:
+    name: "php{{ lynomia_php_version }}-fpm"
+    state: reloaded
+
+- name: Restart workers
+  ansible.builtin.systemd_service:
+    name: lynomia-worker
+    state: restarted
+
+- name: Reload nginx
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: reloaded

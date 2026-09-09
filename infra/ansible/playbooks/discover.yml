@@ -1,0 +1,35 @@
+---
+# Discovery. The only play that may run against a DISCOVERY_ONLY host, and it
+# writes its output to the controller, never to the target.
+
+- name: A target was named
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  tasks:
+    - name: Discovery reads one named host or group, never an implicit everything
+      ansible.builtin.assert:
+        that:
+          - target is defined
+          - target | length > 0
+        fail_msg: "pass -e target=<host or group> to discover"
+        quiet: true
+
+- name: Discover
+  hosts: "{{ target | default('__no_target_given__') }}"
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Reading is permitted here
+      ansible.builtin.include_role:
+        name: safety_gate
+      vars:
+        safety_gate_action: read
+
+    - name: Write the facts to the controller for the inventory document
+      ansible.builtin.copy:
+        content: "{{ ansible_facts | to_nice_json }}\n"
+        dest: "{{ discovery_output_dir | default('/tmp/lynomia-discovery') }}/{{ inventory_hostname }}.json"
+        mode: "0640"
+      delegate_to: localhost
+      become: false

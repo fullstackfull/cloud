@@ -1,0 +1,11 @@
+---
+# ansible-lint runs offline. Resolving collections from Galaxy at lint time
+# makes the build depend on a network service to tell us whether our own YAML is
+# well-formed, and fails for a reason that has nothing to do with the change.
+offline: true
+
+exclude_paths:
+  # A fictional inventory that exists to exercise
+  # infra/scripts/validate-inventory.py. It is never a deployment target;
+  # infra/scripts/preflight.sh refuses the name outright.
+  - inventories/examples/

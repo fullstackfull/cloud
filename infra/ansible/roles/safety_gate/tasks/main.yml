@@ -1,0 +1,53 @@
+---
+# Refuse to touch a machine the inventory has not given us permission to touch.
+#
+# This runs before anything else in every play. It is deliberately not a comment
+# in a runbook: a classification that only a person enforces is a classification
+# that gets skipped at 3am.
+
+- name: The host declares a safety class
+  ansible.builtin.assert:
+    that:
+      - safety_class is defined
+      - safety_class in ['DISCOVERY_ONLY', 'CONFIGURATION_ALLOWED', 'REIMAGE_ALLOWED', 'DO_NOT_TOUCH']
+    fail_msg: >-
+      {{ inventory_hostname }} has no usable safety_class. A machine with no
+      stated class is DO_NOT_TOUCH, not an implicit yes.
+    quiet: true
+
+- name: The host is not DO_NOT_TOUCH
+  ansible.builtin.assert:
+    that:
+      - safety_class != 'DO_NOT_TOUCH'
+    fail_msg: >-
+      {{ inventory_hostname }} is DO_NOT_TOUCH. Change the inventory entry, with
+      the owner's agreement, before running anything against it.
+    quiet: true
+
+- name: The class permits configuration
+  ansible.builtin.assert:
+    that:
+      - safety_class in ['CONFIGURATION_ALLOWED', 'REIMAGE_ALLOWED']
+    fail_msg: >-
+      {{ inventory_hostname }} is {{ safety_class }}, which permits reading facts
+      and nothing else. This play changes configuration.
+    quiet: true
+  when: safety_gate_action in ['configure', 'reimage']
+
+- name: The class and the host both permit a reimage
+  ansible.builtin.assert:
+    that:
+      - safety_class == 'REIMAGE_ALLOWED'
+      - allow_reimage is defined
+      - allow_reimage | bool
+    fail_msg: >-
+      {{ inventory_hostname }} may not be reimaged. A destructive play needs
+      safety_class REIMAGE_ALLOWED *and* allow_reimage: true on this individual
+      host. An unused-looking disk is not evidence that a disk is spare.
+    quiet: true
+  when: safety_gate_action == 'reimage'
+
+- name: Say what was permitted
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ safety_class }} permits '{{ safety_gate_action }}'

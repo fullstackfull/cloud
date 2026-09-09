@@ -1,0 +1,65 @@
+---
+# Release, migrate, restart. The order matters: the new code is on disk and
+# healthy before anything is pointed at it, and workers restart last so a
+# half-deployed release never picks up a job.
+
+- name: A release ref was given
+  ansible.builtin.assert:
+    that:
+      - lynomia_release_ref | length > 0
+    fail_msg: >-
+      LYNOMIA_RELEASE_REF is empty. A deploy names the commit it deploys;
+      "whatever is on the branch right now" is not a release.
+    quiet: true
+
+- name: The release directory exists
+  ansible.builtin.file:
+    path: "{{ lynomia_app_root }}/releases/{{ lynomia_release_ref }}"
+    state: directory
+    owner: "{{ lynomia_run_user }}"
+    group: "{{ lynomia_run_user }}"
+    mode: "0750"
+
+- name: The environment file is present and unreadable to anyone else
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ lynomia_app_root }}/shared/.env"
+    owner: "{{ lynomia_run_user }}"
+    group: "{{ lynomia_run_user }}"
+    mode: "0600"
+  no_log: true
+  notify:
+    - Reload php-fpm
+    - Restart workers
+
+- name: Migrations run before the release is pointed at
+  ansible.builtin.command:
+    cmd: php artisan migrate --force
+    chdir: "{{ lynomia_app_root }}/releases/{{ lynomia_release_ref }}/apps/control-plane"
+  become: true
+  become_user: "{{ lynomia_run_user }}"
+  register: migrated
+  changed_when: "'Nothing to migrate' not in migrated.stdout"
+
+- name: The release becomes current
+  ansible.builtin.file:
+    src: "{{ lynomia_app_root }}/releases/{{ lynomia_release_ref }}"
+    dest: "{{ lynomia_app_root }}/current"
+    state: link
+    owner: "{{ lynomia_run_user }}"
+    group: "{{ lynomia_run_user }}"
+  notify:
+    - Reload php-fpm
+    - Reload nginx
+    - Restart workers
+
+- name: Older releases are pruned, newest kept
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      ls -1dt {{ lynomia_app_root }}/releases/*/
+      | tail -n +{{ control_plane_releases_to_keep + 1 }}
+      | xargs -r rm -rf
+  args:
+    executable: /bin/bash
+  changed_when: false
