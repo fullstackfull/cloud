@@ -1,0 +1,90 @@
+# Control Center alerts, driven by the control plane's own /metrics endpoint.
+#
+# Every series here is a count of rows in a state, exported as a gauge, and
+# every rule compares the current count rather than a rate: a deployment that
+# is waiting for a person is waiting now, whatever it was doing an hour ago.
+
+groups:
+  - name: control-center.deployments
+    rules:
+      - alert: DeploymentWaitingForAPerson
+        # Indeterminate: a playbook that outlived its deadline and may be
+        # half-way through a machine. Needs review: a change that was made
+        # and could not be confirmed. Neither is retried by anything, by
+        # design, so nothing moves until somebody looks.
+        expr: sum(lynomia_deployments{state=~"indeterminate|needs_review"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: control-center
+        annotations:
+          summary: '{{ $value }} deployment(s) waiting for a person'
+          description: >-
+            A deployment stopped without an answer (indeterminate) or with a change that
+            could not be confirmed (needs_review). Nothing retries it and nothing else runs
+            on that machine until it is resolved. Open the Deployments screen, look at the
+            machine, and resolve the run with what you found.
+          runbook: docs/runbooks/deployment-indeterminate.md
+
+  - name: control-center.providers
+    rules:
+      - alert: EnabledProviderNotReady
+        # An operator switched it on; since then its credential was revoked,
+        # its licence lapsed or its endpoint stopped answering. Nothing
+        # switches a provider off on a key event — that is the operator's
+        # call — so this is the number that needs one.
+        expr: lynomia_providers_enabled_not_ready > 0
+        for: 15m
+        labels:
+          severity: warning
+          component: control-center
+        annotations:
+          summary: '{{ $value }} enabled provider(s) are no longer ready'
+          description: >-
+            A provider that is enabled has lost the readiness it was enabled on. Work
+            routed to it will fail at the provider. The Providers screen names the
+            blocker in dependency order; fix that one and reassess.
+          runbook: docs/runbooks/provider-not-ready.md
+
+      - alert: CredentialMissing
+        # A reference the deployment controller has no value behind. Every
+        # provider and machine pointing at it reports a credentials blocker.
+        expr: lynomia_credentials{state="missing"} > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: control-center
+        annotations:
+          summary: '{{ $value }} credential reference(s) have no value on the controller'
+          description: >-
+            The Credentials screen lists them. Put the value in the controller's
+            environment under the reference's variable name, then mark the credential
+            rotated so its state is re-read.
+          runbook: docs/runbooks/credential-missing.md
+
+      - alert: LicenceExpiring
+        expr: lynomia_licences{state="expiring"} > 0
+        for: 1h
+        labels:
+          severity: warning
+          component: control-center
+        annotations:
+          summary: '{{ $value }} licence(s) expire within thirty days'
+          description: >-
+            When a licence expires the provider under it stops being ready and, if it is
+            serving, stops working at the vendor. Renew it with the vendor and record the
+            new term on the Licences screen.
+          runbook: docs/runbooks/licence-expiry.md
+
+      - alert: LicenceExpired
+        expr: lynomia_licences{state="expired"} > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: control-center
+        annotations:
+          summary: '{{ $value }} licence(s) have expired'
+          description: >-
+            Every provider under an expired licence reports a licence blocker and is no
+            longer ready. If one of them was serving, customers on it are affected now.
+          runbook: docs/runbooks/licence-expiry.md

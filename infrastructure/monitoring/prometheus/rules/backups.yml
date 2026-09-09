@@ -38,6 +38,7 @@ groups:
             as its last successful snapshot — check that age before deciding how urgent
             this is, because a failed run on top of a week of successes is very different
             from a failed run on top of nothing.
+          runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
 
@@ -57,6 +58,7 @@ groups:
             on {{ $labels.datastore }} was {{ $value | humanizeDuration }} ago, against a
             daily schedule. Thirty-six hours rather than twenty-four so that one late or
             skipped nightly run does not page, but two consecutive misses do.
+          runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
 
       - alert: BackupCollectorStale
@@ -77,6 +79,7 @@ groups:
             Either the textfile collector on the backup server has stopped, or its
             output is no longer being scraped. Until it is fixed, every other backup
             alert in this file is blind and their silence means nothing.
+          runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
 
   - name: backups.verification
@@ -99,6 +102,7 @@ groups:
             it will not restore. Treat this guest as having NO usable backup at this
             snapshot: take a fresh backup immediately, then find out whether the datastore
             itself is damaged before trusting anything else on it.
+          runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
 
@@ -118,6 +122,7 @@ groups:
             Verification on {{ $labels.datastore }} last ran {{ $value | humanizeDuration }}
             ago, against a weekly schedule. Nothing is known to be wrong — and nothing is
             known to be right either, which is the entire point of the alert.
+          runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
 
       - alert: UnverifiedSnapshotsAccumulating
@@ -133,4 +138,5 @@ groups:
             This usually means the verify job is timing out rather than failing, so
             nothing reports an error while the proportion of the datastore that has
             actually been proven restorable quietly shrinks.
+          runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed

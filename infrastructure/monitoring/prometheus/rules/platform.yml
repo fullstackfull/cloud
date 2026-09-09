@@ -33,6 +33,7 @@ groups:
             carries the refusal and the reason. A timeout instead means the collectors
             have stopped being cheap and want profiling. Until either is fixed, every
             provisioning, capacity and revenue alert is silent.
+          runbook: docs/runbooks/monitoring-blind.md
           runbook_url: https://docs.lynomia.internal/runbooks/metrics-endpoint
 
       - alert: MetricsCollectorFailing
@@ -52,6 +53,7 @@ groups:
             its last run, so the metrics it owns are missing rather than zero. The
             application log carries the exception class and message. Until it is fixed,
             treat the silence of every alert derived from that collector as meaningless.
+          runbook: docs/runbooks/monitoring-blind.md
           runbook_url: https://docs.lynomia.internal/runbooks/metrics-endpoint
 
       - alert: MetricsCollectionSlow
@@ -70,6 +72,7 @@ groups:
             will start timing out, and consecutive collections will overlap and hold
             database connections the application needs. Profile the collector's query
             before the scrape interval catches up with it.
+          runbook: docs/runbooks/monitoring-blind.md
           runbook_url: https://docs.lynomia.internal/runbooks/metrics-endpoint
 
       - alert: DatabaseUnavailable
@@ -117,6 +120,7 @@ groups:
             Redis backs both the queue and the cache. While it is down no provisioning
             job is dispatched, so paid orders sit untouched and the backlog is invisible
             because the queue itself is unreachable.
+          runbook: docs/runbooks/redis-outage.md
           runbook_url: https://docs.lynomia.internal/runbooks/redis-down
 
       - alert: RedisExporterMissing
@@ -130,6 +134,7 @@ groups:
           description: >-
             No redis_up series exists, so RedisUnavailable cannot fire regardless of
             what Redis is doing.
+          runbook: docs/runbooks/redis-outage.md
           runbook_url: https://docs.lynomia.internal/runbooks/redis-down
 
       - alert: RedisEvictingKeys
@@ -148,6 +153,7 @@ groups:
             Redis is under memory pressure and evicting. If any evicted key was a queued
             job, that work is gone silently — a paid order with no provisioning job and no
             error. Check maxmemory-policy is noeviction on the queue instance.
+          runbook: docs/runbooks/redis-outage.md
           runbook_url: https://docs.lynomia.internal/runbooks/redis-down
 
   - name: platform.provisioning
@@ -177,6 +183,7 @@ groups:
             an expired provider token, a deleted template, an exhausted pool or a
             hypervisor that stopped accepting work. Group the failures by kind before
             touching anything — the failing kind names the subsystem.
+          runbook: docs/runbooks/provisioning-stuck.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
 
@@ -196,6 +203,7 @@ groups:
             which is almost always a provider timeout. The resource may exist at the
             provider. Reconcile against the provider before retrying: retrying a timeout
             is how a customer ends up with two of something.
+          runbook: docs/runbooks/provider-indeterminate.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
 
       - alert: ProvisioningStalled
@@ -216,6 +224,7 @@ groups:
             Jobs are queued and nothing is completing. Check that the queue workers are
             running at all before looking at any individual job — this is far more often
             a stopped worker or a wedged Horizon supervisor than a broken provider.
+          runbook: docs/runbooks/provisioning-stuck.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
 
   - name: platform.queue
@@ -239,6 +248,7 @@ groups:
             it. On the provisioning queue this is paid customers waiting. Add workers or
             find the job that is blocking one — a single job holding a lock will produce
             exactly this shape.
+          runbook: docs/runbooks/queue-backlog.md
           runbook_url: https://docs.lynomia.internal/runbooks/queue-backlog
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
 
@@ -254,6 +264,7 @@ groups:
             The backlog on {{ $labels.queue }} is large enough that even a healthy worker
             pool will take hours to clear it. Anything queued behind it — including
             provisioning for orders already paid — is delayed by that much.
+          runbook: docs/runbooks/queue-backlog.md
           runbook_url: https://docs.lynomia.internal/runbooks/queue-backlog
 
       - alert: FailedJobsAppearing
@@ -271,4 +282,5 @@ groups:
             Jobs are exhausting their retries. Read one exception before retrying the
             batch: a failed job that will fail identically on retry only wastes the
             worker capacity that the healthy jobs behind it need.
+          runbook: docs/runbooks/queue-backlog.md
           runbook_url: https://docs.lynomia.internal/runbooks/queue-backlog

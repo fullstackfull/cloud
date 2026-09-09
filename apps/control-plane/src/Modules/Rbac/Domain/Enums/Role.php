@@ -64,6 +64,13 @@ enum Role: string
                 Permission::ServiceViewAny, Permission::ServiceManage,
                 Permission::ServiceSuspend, Permission::ServiceTerminate,
                 Permission::InfrastructureView, Permission::InfrastructureManage,
+                Permission::ProviderManage, Permission::CredentialManage,
+                Permission::LicenceManage, Permission::DeploymentRun,
+                Permission::SafetyChange,
+                // Not AllowReimage. Clearing a machine for a wipe is the single
+                // most destructive thing an operator can authorise, and it sits
+                // with the super-admin until somebody deliberately grants it —
+                // a permission held by default is one nobody notices being used.
                 Permission::NodeMaintenance, Permission::VmManage, Permission::VmConsole,
                 Permission::DedicatedManage, Permission::DedicatedPowerControl,
                 Permission::BmcAccess,

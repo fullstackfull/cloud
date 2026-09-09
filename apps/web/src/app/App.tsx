@@ -11,6 +11,16 @@ import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePag
 import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
 import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
 import { AdminProvisioningPage } from '@/features/admin/AdminProvisioningPage'
+import { CredentialsPage } from '@/features/controlCenter/CredentialsPage'
+import { DeploymentsPage } from '@/features/controlCenter/DeploymentsPage'
+import { DiscoveryPage } from '@/features/controlCenter/DiscoveryPage'
+import { LicencesPage } from '@/features/controlCenter/LicencesPage'
+import { OverviewPage } from '@/features/controlCenter/OverviewPage'
+import { PlansPage } from '@/features/controlCenter/PlansPage'
+import { ProvidersPage } from '@/features/controlCenter/ProvidersPage'
+import { ReadinessPage } from '@/features/controlCenter/ReadinessPage'
+import { ServersPage } from '@/features/controlCenter/ServersPage'
+import { SitesPage } from '@/features/controlCenter/SitesPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
 import { CataloguePage } from '@/features/catalog/CataloguePage'
@@ -22,6 +32,7 @@ import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { BackupsPage } from '@/features/backups/BackupsPage'
 import { DnsPage } from '@/features/dns/DnsPage'
 import { DomainsPage } from '@/features/domains/DomainsPage'
+import { WordPressPage } from '@/features/wordpress/WordPressPage'
 import { PlanChangePage } from '@/features/billing/PlanChangePage'
 import { ConsolePage } from '@/features/console/ConsolePage'
 import { VpsPage } from '@/features/infrastructure/VpsPage'
@@ -111,6 +122,7 @@ export function App() {
                 <Route path="/ips" element={<IpAddressesPage />} />
                 <Route path="/dns" element={<DnsPage />} />
                 <Route path="/domains" element={<DomainsPage />} />
+                <Route path="/wordpress" element={<WordPressPage />} />
 
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />
@@ -139,6 +151,16 @@ export function App() {
                   <Route path="/admin/support" element={<AdminSupportPage />} />
                   <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
                   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+                  <Route path="/admin/control-center" element={<OverviewPage />} />
+                  <Route path="/admin/control-center/sites" element={<SitesPage />} />
+                  <Route path="/admin/control-center/credentials" element={<CredentialsPage />} />
+                  <Route path="/admin/control-center/licences" element={<LicencesPage />} />
+                  <Route path="/admin/control-center/machines" element={<ServersPage />} />
+                  <Route path="/admin/control-center/providers" element={<ProvidersPage />} />
+                  <Route path="/admin/control-center/discovery" element={<DiscoveryPage />} />
+                  <Route path="/admin/control-center/readiness" element={<ReadinessPage />} />
+                  <Route path="/admin/control-center/plans" element={<PlansPage />} />
+                  <Route path="/admin/control-center/deployments" element={<DeploymentsPage />} />
                 </Route>
               </Route>
             </Route>

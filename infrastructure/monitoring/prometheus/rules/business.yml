@@ -34,6 +34,7 @@ groups:
             payment event the platform has not recorded: customers charged with orders
             still showing unpaid. Reconcile against the provider dashboard rather than
             waiting for their retries, and expect the tickets before the retries finish.
+          runbook: docs/runbooks/payment-webhook-outage.md
           runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
 
@@ -60,6 +61,7 @@ groups:
             the webhook endpoint. Check the provider's delivery log: a run of 5xx or
             timeouts there means the platform is losing payment events silently, and the
             provider will eventually stop retrying them.
+          runbook: docs/runbooks/payment-webhook-outage.md
           runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
 
       - alert: FailedPaymentsElevated
@@ -74,6 +76,7 @@ groups:
             An elevated rate of declines. Distinguish a provider or gateway problem from
             genuine customer declines before acting — a spike concentrated in one method
             (KNET, one card network) is ours; a spread across all of them is usually not.
+          runbook: docs/runbooks/payment-reconciliation.md
           runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
 
       - alert: RevenueRecognitionStalled
@@ -118,6 +121,7 @@ groups:
             more space takes longer than that. Start now: reclaim quarantined addresses,
             audit assignments to terminated services, and open the RIR request in
             parallel rather than in sequence.
+          runbook: docs/runbooks/ip-exhaustion.md
           runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
 
@@ -134,6 +138,7 @@ groups:
             AFTER the customer has paid — the address is reserved during provisioning,
             not at checkout. Stop selling into the affected region if reclamation cannot
             close the gap today.
+          runbook: docs/runbooks/ip-exhaustion.md
           runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
 
       - alert: IpPoolNearlyEmpty
@@ -150,6 +155,7 @@ groups:
           description: >-
             Fewer than sixteen usable addresses remain in {{ $labels.pool }}, regardless
             of what the consumption rate suggests. A single batch of orders exhausts this.
+          runbook: docs/runbooks/ip-exhaustion.md
           runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
 
       - alert: ComputeNodeCapacityExhausted
@@ -189,6 +195,7 @@ groups:
             placing new accounts. If node_exporter disagrees with this figure, the node's
             sync into the control plane has stalled and placement is deciding on stale
             data.
+          runbook: docs/runbooks/hosting-panel-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
 
@@ -209,6 +216,7 @@ groups:
             These customers have paid and have nothing. Check the provisioning queue and
             the worker pool first — an order stuck here with a healthy queue means the
             dispatch step failed, which is a different fault from a failing provider.
+          runbook: docs/runbooks/provisioning-stuck.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
 
@@ -224,4 +232,5 @@ groups:
             Manual review holds an order until a human clears it. Two hours is long
             enough that nobody is coming on their own — this alert exists because the
             review queue is otherwise a page nobody opens.
+          runbook: docs/runbooks/provider-indeterminate.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck

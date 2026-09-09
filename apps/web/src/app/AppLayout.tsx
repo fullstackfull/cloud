@@ -12,6 +12,8 @@ import { cn } from '@/lib/cn'
 interface NavItem {
   to: string
   labelKey: string
+  /** Match this route exactly, so a section's index link is not lit on every child. */
+  end?: boolean
 }
 
 /**
@@ -47,6 +49,7 @@ const SECONDARY_NAV: NavItem[] = [
   { to: '/ips', labelKey: 'nav.ips' },
   { to: '/dns', labelKey: 'nav.dns' },
   { to: '/domains', labelKey: 'nav.domains' },
+  { to: '/wordpress', labelKey: 'nav.wordpress' },
   { to: '/api-tokens', labelKey: 'nav.apiKeys' },
   { to: '/support', labelKey: 'nav.support' },
   { to: '/settings/team', labelKey: 'nav.team' },
@@ -69,6 +72,24 @@ const OPERATOR_NAV: NavItem[] = [
   { to: '/admin/support', labelKey: 'admin.nav.support' },
   { to: '/admin/infrastructure', labelKey: 'admin.nav.infrastructure' },
   { to: '/admin/payments', labelKey: 'admin.nav.payments' },
+]
+
+/**
+ * The Control Center: one navigation area over three bounded concerns —
+ * Infrastructure, Providers and Product Readiness. A composition of screens,
+ * not a module of its own; each screen's requests go to its own concern's API.
+ */
+const CONTROL_CENTER_NAV: NavItem[] = [
+  { to: '/admin/control-center', labelKey: 'admin.nav.overview', end: true },
+  { to: '/admin/control-center/sites', labelKey: 'admin.nav.sites' },
+  { to: '/admin/control-center/machines', labelKey: 'admin.nav.machines' },
+  { to: '/admin/control-center/providers', labelKey: 'admin.nav.providers' },
+  { to: '/admin/control-center/discovery', labelKey: 'admin.nav.discovery' },
+  { to: '/admin/control-center/plans', labelKey: 'admin.nav.plans' },
+  { to: '/admin/control-center/deployments', labelKey: 'admin.nav.deployments' },
+  { to: '/admin/control-center/readiness', labelKey: 'admin.nav.readiness' },
+  { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
+  { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },
 ]
 
 export function AppLayout() {
@@ -111,6 +132,13 @@ export function AppLayout() {
                       {t('admin.nav.section')}
                     </p>
                     {OPERATOR_NAV.map((item) => (
+                      <NavItemLink key={item.to} item={item} />
+                    ))}
+                    <hr className="my-1 border-[var(--border-subtle)]" />
+                    <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
+                      {t('admin.controlCenter.section')}
+                    </p>
+                    {CONTROL_CENTER_NAV.map((item) => (
                       <NavItemLink key={item.to} item={item} />
                     ))}
                   </>
@@ -180,7 +208,7 @@ function NavItemLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => v
   return (
     <NavLink
       to={item.to}
-      end={item.to === '/'}
+      end={item.end ?? item.to === '/'}
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(

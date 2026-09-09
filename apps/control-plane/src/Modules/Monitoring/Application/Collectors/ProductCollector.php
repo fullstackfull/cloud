@@ -65,6 +65,7 @@ final readonly class ProductCollector implements MetricsCollector
             $this->backupRetention(),
             $this->domains(),
             $this->domainOperations(),
+            $this->wordPressSites(),
             $this->termination(),
             $this->drift(),
             $this->providerTasks(),
@@ -362,6 +363,38 @@ final readonly class ProductCollector implements MetricsCollector
                 MetricSample::of(['disposition' => 'in_flight'], (float) $row->in_flight),
                 MetricSample::of(['disposition' => 'needs_attention'], (float) $row->needs_attention),
                 MetricSample::of(['disposition' => 'failed'], (float) $row->failed),
+            ],
+        );
+    }
+
+    /**
+     * WordPress sites, by how much of the promise is actually true.
+     *
+     * `live` counts only sites this platform has fetched and found WordPress
+     * on. Every other number here is a site somebody is waiting on, and
+     * `stuck` is the one worth alerting on: an install nobody can repeat
+     * safely, waiting for a person.
+     */
+    private function wordPressSites(): Metric
+    {
+        /** @var object{live: int|string, building: int|string, waiting_on_dns: int|string, stuck: int|string} $row */
+        $row = DB::table('wordpress_sites')
+            ->selectRaw(<<<'SQL'
+                count(*) filter (where state = 'ready' and verified_at is not null) as live,
+                count(*) filter (where state in ('requested', 'installing', 'awaiting_certificate')) as building,
+                count(*) filter (where state = 'awaiting_dns') as waiting_on_dns,
+                count(*) filter (where state in ('indeterminate', 'needs_review', 'failed')) as stuck
+            SQL)
+            ->first();
+
+        return Metric::gauge(
+            'lynomia_wordpress_sites_total',
+            'WordPress sites by disposition. `live` counts only sites the platform fetched and found WordPress on; `waiting_on_dns` is waiting on the customer, and `stuck` is waiting on a person here.',
+            [
+                MetricSample::of(['disposition' => 'live'], (float) $row->live),
+                MetricSample::of(['disposition' => 'building'], (float) $row->building),
+                MetricSample::of(['disposition' => 'waiting_on_dns'], (float) $row->waiting_on_dns),
+                MetricSample::of(['disposition' => 'stuck'], (float) $row->stuck),
             ],
         );
     }

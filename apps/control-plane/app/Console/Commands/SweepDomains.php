@@ -26,9 +26,11 @@ final class SweepDomains extends Command
         $outcome = $sweep->execute();
 
         $this->info(sprintf(
-            'Domains: %d renewals ordered, %d customers warned, %d expired, %d in redemption, %d deleted, %d left alone.',
+            'Domains: %d renewals ordered, %d customers warned, %d abandoned claims released, '
+                .'%d expired, %d in redemption, %d deleted, %d left alone.',
             $outcome['renewals_ordered'],
             $outcome['warned'],
+            $outcome['abandoned'],
             $outcome['expired'],
             $outcome['redemption'],
             $outcome['deleted'],

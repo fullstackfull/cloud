@@ -179,6 +179,66 @@ enum AuditAction: string
     case DomainUnlocked = 'domain.unlocked';
     case DomainAuthorisationCodeIssued = 'domain.authorisation_code.issued';
 
+    /*
+     * WordPress.
+     *
+     * Ordering a site commits the account to hosting and, where the name is
+     * being registered with it, to a registry fee. Recorded with the act that
+     * creates it rather than logged afterwards by whoever remembers.
+     */
+    case WordPressSiteOrdered = 'wordpress.site.ordered';
+
+    // ---------------------------------------------------------------------
+    // Infrastructure: the machines, and what an operator may do to them
+    // ---------------------------------------------------------------------
+    //
+    // Safety changes are recorded apart from every other server edit, because
+    // they are the acts that decide what else is possible and the ones an
+    // investigation reads first.
+    //
+    // Each word here is added in the same commit as the thing that writes it.
+    // Declaring the whole vocabulary up front and filling it in later is how
+    // an enum comes to describe capabilities the platform does not have, which
+    // is the defect EveryAuditActionIsRecordedSomewhereTest exists to catch.
+    case ServerRegistered = 'infrastructure.server.registered';
+    case ServerSafetyChanged = 'infrastructure.server.safety_changed';
+    case ServerReimageCleared = 'infrastructure.server.reimage_cleared';
+    case ServerReimageClearanceRevoked = 'infrastructure.server.reimage_clearance_revoked';
+    case ServerDiscovered = 'infrastructure.server.discovered';
+    case DatacenterRegistered = 'infrastructure.datacenter.registered';
+    case RackRegistered = 'infrastructure.rack.registered';
+    case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
+    case DesiredStateCleared = 'infrastructure.desired_state.cleared';
+    case PlanComputed = 'infrastructure.plan.computed';
+    case PlanApproved = 'infrastructure.plan.approved';
+    case PlanApprovalRevoked = 'infrastructure.plan.approval_revoked';
+    case DeploymentRequested = 'infrastructure.deployment.requested';
+    case DeploymentFinished = 'infrastructure.deployment.finished';
+    case DeploymentResolved = 'infrastructure.deployment.resolved';
+    case DeploymentCancelled = 'infrastructure.deployment.cancelled';
+
+    case ConnectionTested = 'providers.connection.tested';
+    case ProviderRegistered = 'providers.provider.registered';
+    case ProviderEnabled = 'providers.provider.enabled';
+    case ProviderDisabled = 'providers.provider.disabled';
+    case CredentialRecorded = 'providers.credential.recorded';
+    case CredentialAttached = 'providers.credential.attached';
+    case CredentialDetached = 'providers.credential.detached';
+    case CredentialRotated = 'providers.credential.rotated';
+    case CredentialRevoked = 'providers.credential.revoked';
+    case LicenceRecorded = 'providers.licence.recorded';
+    case LicenceAttached = 'providers.licence.attached';
+    case LicenceDetached = 'providers.licence.detached';
+    case LicenceRenewed = 'providers.licence.renewed';
+    case LicenceInvalidated = 'providers.licence.invalidated';
+    case LicenceStateChanged = 'providers.licence.state_changed';
+
+    // Product readiness: conclusions the engine reached, and the one
+    // declaration a person makes on top of them.
+    case ProductReadinessChanged = 'product_readiness.changed';
+    case ProductDeclaredSellable = 'product_readiness.declared_sellable';
+    case ProductSellabilityWithdrawn = 'product_readiness.sellability_withdrawn';
+
     /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.

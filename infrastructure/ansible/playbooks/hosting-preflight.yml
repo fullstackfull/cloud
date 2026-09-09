@@ -52,4 +52,8 @@
       no_log: true
 
   roles:
+    # Refuse the machine before doing anything to it.
+    - role: safety_gate
+      vars:
+        safety_gate_action: read
     - role: hosting

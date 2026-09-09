@@ -258,6 +258,70 @@ final class KeepingAndMovingADomainTest extends TestCase
     }
 
     #[Test]
+    public function a_name_claimed_for_an_order_nobody_paid_for_is_given_back(): void
+    {
+        $abandoned = Domain::factory()->create([
+            'customer_id' => $this->customer->getKey(),
+            'name' => 'abandoned.test',
+            'tld' => 'test',
+            'state' => DomainState::RegistrationPending,
+            'provider' => 'fake',
+            'created_at' => now()->subDays(30),
+        ]);
+
+        DomainOperation::factory()->create([
+            'domain_id' => $abandoned->getKey(),
+            'customer_id' => $this->customer->getKey(),
+            'name' => 'abandoned.test',
+            'kind' => DomainOperationKind::Register,
+            'state' => DomainOperationState::Requested,
+            'provider' => 'fake',
+        ]);
+
+        $this->assertSame(1, app(SweepDomainLifecycle::class)->execute()['abandoned']);
+
+        $released = $abandoned->fresh();
+
+        /*
+         * The claim is what stops two customers buying one name in the same
+         * minute. Without an expiry on it, one unpaid order holds a name
+         * against everybody — this platform included — for ever.
+         */
+        $this->assertSame(DomainState::Failed, $released?->state);
+        $this->assertFalse($released->state->holdsTheName());
+        $this->assertStringContainsString('never paid', (string) $released->review_reason);
+    }
+
+    #[Test]
+    public function a_claim_with_a_paid_registration_behind_it_is_left_alone(): void
+    {
+        $paid = Domain::factory()->create([
+            'customer_id' => $this->customer->getKey(),
+            'name' => 'paidfor.test',
+            'tld' => 'test',
+            'state' => DomainState::RegistrationPending,
+            'provider' => 'fake',
+            'created_at' => now()->subDays(30),
+        ]);
+
+        DomainOperation::factory()->create([
+            'domain_id' => $paid->getKey(),
+            'customer_id' => $this->customer->getKey(),
+            'name' => 'paidfor.test',
+            'kind' => DomainOperationKind::Register,
+            // Queued: the money arrived and a worker has it.
+            'state' => DomainOperationState::Queued,
+            'provider' => 'fake',
+        ]);
+
+        $this->assertSame(0, app(SweepDomainLifecycle::class)->execute()['abandoned']);
+
+        // Releasing a name under a registration that is running is how a
+        // customer pays for a name the platform just gave away.
+        $this->assertSame(DomainState::RegistrationPending, $paid->fresh()?->state);
+    }
+
+    #[Test]
     public function a_lapsed_name_walks_the_registrys_own_clock(): void
     {
         $domain = $this->heldName('lapsed.test', now()->subDay()->toIso8601String());

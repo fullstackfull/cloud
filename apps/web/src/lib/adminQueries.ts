@@ -22,13 +22,17 @@ function adminPath(path: string, params: Record<string, string | number | undefi
   return `/api/admin${path}${serialised === '' ? '' : `?${serialised}`}`
 }
 
-const admin = {
+export const admin = {
   get: <T>(path: string, params?: Record<string, string | number | undefined>) =>
     request<T>(adminPath(path, params), { method: 'GET', absolute: true }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(adminPath(path), { method: 'POST', body, absolute: true }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(adminPath(path), { method: 'PUT', body, absolute: true }),
+  // A body on DELETE carries the reason for an undo — a withdrawn
+  // declaration, a detached licence — so the audit row has one.
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(adminPath(path), { method: 'DELETE', absolute: true, ...(body === undefined ? {} : { body }) }),
 }
 
 export interface AdminCustomer {

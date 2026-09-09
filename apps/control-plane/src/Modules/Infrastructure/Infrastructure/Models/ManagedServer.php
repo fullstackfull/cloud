@@ -1,0 +1,250 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Lynomia\Modules\Infrastructure\Infrastructure\Models;
+
+use Database\Factories\ManagedServerFactory;
+use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
+use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
+use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
+use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
+use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest;
+use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
+use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
+
+/**
+ * A machine, seen from the operator's side rather than the customer's.
+ *
+ * compute_nodes says how much capacity a hypervisor has. hosting_nodes says
+ * how many accounts a web server is carrying. Neither says whether anybody has
+ * agreed we may write to the thing, which credential opens it, or what was
+ * last read off it — and those questions have the same answer shape for every
+ * machine we own, including one that has arrived and has no role yet.
+ *
+ * @property string $id
+ * @property string $name
+ * @property DeploymentEnvironment $environment
+ * @property ServerState $state
+ * @property SafetyClass $safety_class
+ * @property bool $allow_reimage
+ * @property ConnectionState $connection_state
+ */
+class ManagedServer extends Model
+{
+    /** @use HasFactory<ManagedServerFactory> */
+    use HasFactory, HasUlids;
+
+    protected $guarded = ['id'];
+
+    /**
+     * The BMC provider bound to this machine, if any.
+     *
+     * A machine is reached through its baseboard management controller, and
+     * which driver speaks to that controller is a fact about the provider
+     * bound to the machine — never something a request may supply. A caller
+     * that could name the driver could point a test at any adapter.
+     */
+    public function bmc(): ?ProviderInstance
+    {
+        /** @var ?ProviderInstance $bmc */
+        $bmc = $this->providerInstances()
+            ->where('category', ProviderCategory::Bmc->value)
+            ->orderBy('created_at')
+            ->first();
+
+        return $bmc;
+    }
+
+    /**
+     * The state a row has before anything happens to it — and here, the most
+     * important default in the module.
+     *
+     * A ManagedServer built in memory without going through RegisterServer had
+     * a null safety_class, which meant permits() and isTouchable() were being
+     * asked a question about a machine with no classification at all. The
+     * database has always defaulted this to do_not_touch; the object did not,
+     * and the object is what the safety gate reads.
+     *
+     * allow_reimage is here for the same reason and not because null was
+     * dangerous — null is falsy, so that failure would have been safe. It is
+     * declared so the pair is set together, since they are one decision.
+     *
+     * @var array<string, string|bool>
+     */
+    protected $attributes = [
+        'safety_class' => 'do_not_touch',
+        'allow_reimage' => false,
+        'state' => 'registered',
+        'connection_state' => 'not_tested',
+    ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'environment' => DeploymentEnvironment::class,
+            'state' => ServerState::class,
+            'safety_class' => SafetyClass::class,
+            'connection_state' => ConnectionState::class,
+            'allow_reimage' => 'boolean',
+            'rack_unit' => 'integer',
+            'height_units' => 'integer',
+            'management_port' => 'integer',
+            'bmc_port' => 'integer',
+            'safety_changed_at' => 'immutable_datetime',
+            'last_connection_test_at' => 'immutable_datetime',
+            'last_discovery_at' => 'immutable_datetime',
+            'last_deployment_at' => 'immutable_datetime',
+            'last_verification_at' => 'immutable_datetime',
+        ];
+    }
+
+    /**
+     * May this machine be acted on in this way, right now?
+     *
+     * The whole safety model reduces to this method, and everything that could
+     * change a machine is expected to ask it rather than reason about the
+     * class itself. Reimage needs both halves: the classification, which is an
+     * operator's standing decision about the machine, and allow_reimage, which
+     * is their decision about this particular piece of scheduled work.
+     *
+     * The database enforces that the second cannot be true without the first,
+     * so this cannot be tricked by a row written around the application.
+     */
+    public function permits(InfrastructureAction $action): bool
+    {
+        if (! $this->safety_class->permits($action)) {
+            return false;
+        }
+
+        if ($action === InfrastructureAction::Reimage) {
+            return $this->allow_reimage;
+        }
+
+        return true;
+    }
+
+    /** Is anything at all permitted against this machine? */
+    public function isTouchable(): bool
+    {
+        return $this->safety_class !== SafetyClass::DoNotTouch;
+    }
+
+    /**
+     * The machine's role-specific row, if it has been given one.
+     *
+     * Deliberately not a polymorphic relation: there are three kinds and they
+     * are genuinely different tables with different meanings, and a morph would
+     * buy tidiness at the cost of every query having to know which it got.
+     *
+     * @return BelongsTo<ComputeNode, $this>
+     */
+    public function computeNode(): BelongsTo
+    {
+        return $this->belongsTo(ComputeNode::class);
+    }
+
+    /**
+     * @return BelongsTo<HostingNode, $this>
+     */
+    public function hostingNode(): BelongsTo
+    {
+        return $this->belongsTo(HostingNode::class);
+    }
+
+    /**
+     * @return BelongsTo<Datacenter, $this>
+     */
+    public function datacenter(): BelongsTo
+    {
+        return $this->belongsTo(Datacenter::class);
+    }
+
+    /**
+     * @return BelongsTo<Rack, $this>
+     */
+    public function rack(): BelongsTo
+    {
+        return $this->belongsTo(Rack::class);
+    }
+
+    /**
+     * @return BelongsTo<CredentialReference, $this>
+     */
+    public function credential(): BelongsTo
+    {
+        return $this->belongsTo(CredentialReference::class, 'credential_reference_id');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function safetyChangedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'safety_changed_by');
+    }
+
+    /**
+     * @return HasMany<ServerFact, $this>
+     */
+    public function facts(): HasMany
+    {
+        return $this->hasMany(ServerFact::class);
+    }
+
+    /**
+     * @return HasOne<DesiredState, $this>
+     */
+    public function desiredState(): HasOne
+    {
+        return $this->hasOne(DesiredState::class);
+    }
+
+    /**
+     * @return HasMany<DeploymentPlan, $this>
+     */
+    public function plans(): HasMany
+    {
+        return $this->hasMany(DeploymentPlan::class);
+    }
+
+    /**
+     * @return HasMany<DeploymentJob, $this>
+     */
+    public function deployments(): HasMany
+    {
+        return $this->hasMany(DeploymentJob::class);
+    }
+
+    /**
+     * @return HasMany<ConnectionTest, $this>
+     */
+    public function connectionTests(): HasMany
+    {
+        return $this->hasMany(ConnectionTest::class);
+    }
+
+    /**
+     * @return HasMany<ProviderInstance, $this>
+     */
+    public function providerInstances(): HasMany
+    {
+        return $this->hasMany(ProviderInstance::class);
+    }
+}

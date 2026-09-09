@@ -57,8 +57,12 @@ hand-write a transaction. Re-drive it from the provider instead, so the amount, 
 and reference come from the provider rather than from a human:
 
 ```bash
-php artisan payments:retrieve --provider=stripe --reference=<PAYMENT_INTENT_ID>
+php artisan payments:reconcile --older-than=0 --limit=25
 ```
+
+That asks the provider about attempts that never produced a webhook and settles
+them from the provider's own answer, so the amount, currency and reference come
+from the provider rather than from a person.
 
 Then confirm the invoice settled and the order advanced:
 

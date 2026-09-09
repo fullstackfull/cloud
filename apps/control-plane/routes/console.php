@@ -56,6 +56,31 @@ Schedule::command('subscriptions:sweep')
  *
  * It corrects nothing — see the command for why.
  */
+/*
+ * Licence states are stored, so a licence that lapses at midnight is still
+ * "active" in the database until something looks. This looks, once a day,
+ * early enough that the morning's first screen is right. Each change is
+ * audited and the providers under it reassessed.
+ */
+// A deployment whose worker died would otherwise hold the machine's
+// one-in-flight slot for ever. Marked indeterminate, never restarted.
+Schedule::command('deployments:detect-stale')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+// Managed machines that no longer match their profile, into the drift
+// queue with everything else that disagrees with reality. Reads facts only.
+Schedule::command('infrastructure:detect-drift')
+    ->dailyAt('00:40')
+    ->withoutOverlapping()
+    ->onOneServer();
+
+Schedule::command('licences:refresh')
+    ->dailyAt('00:10')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('wallet:verify')
     ->dailyAt('03:20')
     ->withoutOverlapping(30)
@@ -232,6 +257,24 @@ Schedule::command('dns:reconcile')
 Schedule::command('domains:sweep')
     ->dailyAt('00:05')
     ->withoutOverlapping(60)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * WordPress verification, every fifteen minutes.
+ *
+ * The most frequent sweep on the platform, and the cheapest thing it could
+ * possibly be doing: one HTTP GET per site. It runs this often because the
+ * window it closes is the one a customer sits in — between "we finished
+ * building your site" and "your site actually answers" — and every minute of
+ * it is a minute they might spend refreshing a page that says ready over a
+ * site that is not.
+ *
+ * Read-only towards every site and every panel. It records what answered.
+ */
+Schedule::command('wordpress:verify')
+    ->everyFifteenMinutes()
+    ->withoutOverlapping(15)
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/schedule.log'));
 

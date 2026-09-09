@@ -365,6 +365,93 @@ jobs:
 
           echo "No committed secrets found."
 
+  infrastructure:
+    name: Infrastructure validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validators' dependencies
+        run: pip install --quiet pyyaml ansible-core==2.18.1 ansible-lint==24.12.2
+
+      # Every host in an inventory is a machine somebody may be about to
+      # change. safety_class is the question that comes before the per-operation
+      # flags this tree already uses: may we connect to it and write to it at
+      # all? A host with no answer is DO_NOT_TOUCH, not an implicit yes.
+      - name: Inventory safety classification
+        run: python3 infrastructure/scripts/validate-inventory.py infrastructure
+
+      - name: The inventory validator still rejects what it claims to reject
+        run: python3 infrastructure/scripts/test_validate_inventory.py
+
+      # A classification the role does not enforce is an assertion, not a gate.
+      # This runs safety_gate against a throwaway inventory pointing at
+      # localhost, once per class-and-action pair, and checks the play reaches
+      # its body exactly when it should.
+      - name: The safety gate still refuses what it claims to refuse
+        run: infrastructure/scripts/test_safety_gate.sh
+
+      # An alert on a metric nothing emits never fires. It reads as coverage in
+      # a review and is silence in an incident.
+      - name: Alert rules name metrics something exports
+        run: python3 infrastructure/scripts/validate-monitoring.py infrastructure
+
+      # A command in a runbook that does not exist costs the operator the
+      # minutes they have least of.
+      - name: Runbooks name commands that exist
+        run: python3 infrastructure/scripts/validate-runbooks.py infrastructure
+
+      - name: Ansible syntax
+        working-directory: infrastructure/ansible
+        run: |
+          set -euo pipefail
+          for playbook in playbooks/*.yml; do
+            echo "-- $playbook"
+            ansible-playbook -i inventories/staging/hosts.yml "$playbook" --syntax-check
+          done
+
+      # Offline so the build does not ask Galaxy whether our own YAML parses.
+      - name: Ansible lint
+        working-directory: infrastructure/ansible
+        run: ansible-lint --offline
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.8.7
+
+      - name: OpenTofu is formatted and valid
+        run: |
+          set -euo pipefail
+          tofu fmt -check -recursive infrastructure/tofu
+          for dir in infrastructure/tofu/environments/*/; do
+            echo "-- $dir"
+            # -backend=false: CI has no business holding state credentials, and
+            # does not need them to decide whether the configuration parses.
+            ( cd "$dir" && tofu init -backend=false -input=false && tofu validate )
+          done
+
+      # Nothing in this job applies anything. A pipeline that can reimage a node
+      # on merge is a pipeline that eventually will, on a branch nobody meant to
+      # merge. CI validates; a person applies.
+      - name: No workflow applies infrastructure
+        run: python3 infrastructure/scripts/check-ci-cannot-apply.py .
+
+      # infrastructure/ is the tree that talks to everything, so it is the
+      # likeliest place for a credential to be committed.
+      - name: Fail if a credential was committed under infrastructure/
+        run: |
+          set -euo pipefail
+          if git ls-files infrastructure | grep -E '\.(pem|key|p12|pfx|tfstate)$|(^|/)id_(rsa|ed25519|ecdsa)$'; then
+            echo "::error::A key or state file is tracked under infrastructure/."
+            exit 1
+          fi
+          echo "No committed credentials under infrastructure/."
+
   production-guards:
     name: Production guards
     runs-on: ubuntu-latest

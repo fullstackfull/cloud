@@ -13,6 +13,19 @@ use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\SiteController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\SoftwareProfileController;
+use Lynomia\Modules\ProductReadiness\Http\Controllers\ProductReadinessController;
+use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
+use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
+use Lynomia\Modules\Providers\Http\Controllers\LicenceController;
+use Lynomia\Modules\Providers\Http\Controllers\ProviderCatalogueController;
+use Lynomia\Modules\Providers\Http\Controllers\ProviderController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 
@@ -169,6 +182,320 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
      * shift can be given the screen without being given the authority to
      * declare a customer's missing machine a non-issue.
      */
+    /*
+     |--------------------------------------------------------------------------
+     | Control Centre — the machines
+     |--------------------------------------------------------------------------
+     |
+     | Two permissions rather than one across these routes, because they are two
+     | different decisions. safety.change raises or lowers what may be done to a
+     | machine; safety.allow_reimage clears one for a wipe. An operator can
+     | reasonably hold the first and not the second, and the infrastructure-admin
+     | role is granted exactly that way.
+     |
+     | Reaching the destructive classification is checked twice — on the route
+     | and again in the controller — because the route protects the endpoint and
+     | the controller protects the specific transition, and only one of those
+     | knows which classification was asked for.
+     */
+    Route::get('infrastructure/servers', [ServerController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.index');
+
+    Route::get('infrastructure/servers/{server}', [ServerController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.show');
+
+    Route::post('infrastructure/servers', [ServerController::class, 'store'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.store');
+
+    Route::post('infrastructure/servers/{server}/classify', [ServerController::class, 'classify'])
+        ->middleware('permission:'.Permission::SafetyChange->value)
+        ->name('infrastructure.servers.classify');
+
+    Route::post('infrastructure/servers/{server}/clear-for-reimage', [ServerController::class, 'clearForReimage'])
+        ->middleware('permission:'.Permission::AllowReimage->value)
+        ->name('infrastructure.servers.clear_for_reimage');
+
+    Route::delete('infrastructure/servers/{server}/clear-for-reimage', [ServerController::class, 'revokeReimageClearance'])
+        ->middleware('permission:'.Permission::SafetyChange->value)
+        ->name('infrastructure.servers.revoke_reimage_clearance');
+
+    Route::post('infrastructure/servers/{server}/credential', [ServerController::class, 'attachCredential'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('infrastructure.servers.attach_credential');
+
+    Route::delete('infrastructure/servers/{server}/credential', [ServerController::class, 'detachCredential'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('infrastructure.servers.detach_credential');
+
+    Route::post('infrastructure/servers/{server}/discover', [ServerController::class, 'discover'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.discover');
+
+    Route::get('infrastructure/servers/{server}/facts', [ServerController::class, 'facts'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.facts');
+
+    Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.connection_test');
+
+    /*
+     | The execution chain: profile → desired state → plan → approval → run.
+     |
+     | Reading is the operator-view permission. Stating what a machine should
+     | be and computing what that would take is infrastructure.manage; saying
+     | yes to a specific plan is deployment.approve, which the
+     | infrastructure-admin role does not hold; starting the run and settling
+     | one that stopped is deployment.run. Three decisions, three permissions,
+     | and the four-eyes rule inside the approval on top.
+     */
+    /*
+     | The overview and the site registry. Reading is the operator-view
+     | permission; registering a place is infrastructure.manage.
+     */
+    Route::get('infrastructure/overview', [OverviewController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.overview');
+
+    Route::get('infrastructure/regions', [SiteController::class, 'regions'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.regions.index');
+
+    Route::get('infrastructure/datacenters', [SiteController::class, 'datacenters'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.datacenters.index');
+
+    Route::post('infrastructure/datacenters', [SiteController::class, 'storeDatacenter'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.datacenters.store');
+
+    Route::get('infrastructure/racks', [SiteController::class, 'racks'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.racks.index');
+
+    Route::post('infrastructure/racks', [SiteController::class, 'storeRack'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.racks.store');
+
+    Route::get('infrastructure/profiles', [SoftwareProfileController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.profiles.index');
+
+    Route::get('infrastructure/servers/{server}/desired-state', [DesiredStateController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.desired_state');
+
+    Route::put('infrastructure/servers/{server}/desired-state', [DesiredStateController::class, 'assign'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.assign_desired_state');
+
+    Route::delete('infrastructure/servers/{server}/desired-state', [DesiredStateController::class, 'clear'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.clear_desired_state');
+
+    Route::get('infrastructure/servers/{server}/plan', [DeploymentPlanController::class, 'current'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.plan');
+
+    Route::post('infrastructure/servers/{server}/plan', [DeploymentPlanController::class, 'plan'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.compute_plan');
+
+    Route::get('infrastructure/plans/{plan}', [DeploymentPlanController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.plans.show');
+
+    Route::post('infrastructure/plans/{plan}/approve', [DeploymentPlanController::class, 'approve'])
+        ->middleware('permission:'.Permission::DeploymentApprove->value)
+        ->name('infrastructure.plans.approve');
+
+    Route::delete('infrastructure/plans/{plan}/approval', [DeploymentPlanController::class, 'revokeApproval'])
+        ->middleware('permission:'.Permission::DeploymentApprove->value)
+        ->name('infrastructure.plans.revoke_approval');
+
+    Route::get('infrastructure/deployments', [DeploymentJobController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.deployments.index');
+
+    Route::get('infrastructure/deployments/{deployment}', [DeploymentJobController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.deployments.show');
+
+    Route::post('infrastructure/servers/{server}/deployments', [DeploymentJobController::class, 'request'])
+        ->middleware('permission:'.Permission::DeploymentRun->value)
+        ->name('infrastructure.servers.request_deployment');
+
+    Route::post('infrastructure/deployments/{deployment}/resolve', [DeploymentJobController::class, 'resolve'])
+        ->middleware('permission:'.Permission::DeploymentRun->value)
+        ->name('infrastructure.deployments.resolve');
+
+    Route::post('infrastructure/deployments/{deployment}/cancel', [DeploymentJobController::class, 'cancel'])
+        ->middleware('permission:'.Permission::DeploymentRun->value)
+        ->name('infrastructure.deployments.cancel');
+
+    /*
+     | Providers: the accounts Lynomia holds with other people.
+     |
+     | The catalogue is behind the view permission because it describes this
+     | build rather than any account — it is the list a registration screen is
+     | drawn from, and it names no endpoint, no credential and no customer.
+     |
+     | Enabling and disabling are separate endpoints rather than a state field
+     | on an update, so that each is one intention with one audit row. A PATCH
+     | that could carry `state: enabled` among other edits would make "who
+     | turned on the payment provider" a question about a diff.
+     */
+    Route::get('providers/catalogue', [ProviderCatalogueController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('providers.catalogue');
+
+    Route::get('providers', [ProviderController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('providers.index');
+
+    Route::get('providers/{provider}', [ProviderController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('providers.show');
+
+    Route::post('providers', [ProviderController::class, 'store'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.store');
+
+    Route::post('providers/{provider}/enable', [ProviderController::class, 'enable'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.enable');
+
+    Route::post('providers/{provider}/disable', [ProviderController::class, 'disable'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.disable');
+
+    // Recomputing what is blocking a provider changes nothing at the provider
+    // and contacts nobody, so it sits behind managing rather than anything
+    // sharper.
+    Route::post('providers/{provider}/assess', [ProviderController::class, 'assess'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.assess');
+
+    Route::post('providers/{provider}/credential', [CredentialController::class, 'attachToProvider'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('providers.attach_credential');
+
+    Route::delete('providers/{provider}/credential', [CredentialController::class, 'detachFromProvider'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('providers.detach_credential');
+
+    /*
+     | Credentials: references into the secret store, never values.
+     |
+     | Reading is the operator-view permission — a credential's row says its
+     | name, its state and what uses it, none of which opens anything. Every
+     | write is credential.manage, which the support role does not hold.
+     */
+    Route::get('credentials', [CredentialController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('credentials.index');
+
+    Route::get('credentials/{credential}', [CredentialController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('credentials.show');
+
+    Route::post('credentials', [CredentialController::class, 'store'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('credentials.store');
+
+    Route::post('credentials/{credential}/revoke', [CredentialController::class, 'revoke'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('credentials.revoke');
+
+    Route::post('credentials/{credential}/rotated', [CredentialController::class, 'rotated'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('credentials.rotated');
+
+    Route::post('providers/{provider}/licence', [LicenceController::class, 'attachToProvider'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('providers.attach_licence');
+
+    Route::delete('providers/{provider}/licence', [LicenceController::class, 'detachFromProvider'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('providers.detach_licence');
+
+    /*
+     | Licences: what was bought, what it covers, and when it lapses.
+     |
+     | The state follows the calendar and is recomputed nightly; `refresh`
+     | runs the same sweep on demand. An operator's one override is to
+     | declare the vendor rejected a licence — never to declare an expired
+     | one active.
+     */
+    Route::get('licences', [LicenceController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('licences.index');
+
+    Route::get('licences/{licence}', [LicenceController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('licences.show');
+
+    Route::post('licences', [LicenceController::class, 'store'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.store');
+
+    Route::post('licences/refresh', [LicenceController::class, 'refresh'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.refresh');
+
+    Route::post('licences/{licence}/renew', [LicenceController::class, 'renew'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.renew');
+
+    Route::post('licences/{licence}/invalidate', [LicenceController::class, 'invalidate'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.invalidate');
+
+    Route::post('providers/{provider}/connection-test', [ConnectionTestController::class, 'forProvider'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.connection_test');
+
+    /*
+     | Product readiness: whether the platform may sell a thing.
+     |
+     | Reading is the operator-view permission. Reassessing contacts nobody and
+     | changes nothing at any provider, so it sits behind provider.manage like
+     | a provider reassessment does. Declaring a product sellable is its own
+     | permission that no operator role holds by default: it is a commercial
+     | decision on top of a technical fact, and the audit row must name the
+     | person who made it.
+     */
+    Route::get('readiness/products', [ProductReadinessController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('readiness.products.index');
+
+    Route::get('readiness/dependencies', [ProductReadinessController::class, 'dependencies'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('readiness.dependencies');
+
+    Route::post('readiness/products/assess', [ProductReadinessController::class, 'assessAll'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('readiness.products.assess_all');
+
+    Route::get('readiness/products/{product}', [ProductReadinessController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('readiness.products.show');
+
+    Route::post('readiness/products/{product}/assess', [ProductReadinessController::class, 'assess'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('readiness.products.assess');
+
+    Route::post('readiness/products/{product}/sellable', [ProductReadinessController::class, 'declareSellable'])
+        ->middleware('permission:'.Permission::ReadinessDeclare->value)
+        ->name('readiness.products.declare_sellable');
+
+    Route::delete('readiness/products/{product}/sellable', [ProductReadinessController::class, 'withdrawSellability'])
+        ->middleware('permission:'.Permission::ReadinessDeclare->value)
+        ->name('readiness.products.withdraw_sellability');
+
     Route::get('drift', [DriftController::class, 'index'])
         ->middleware('permission:'.Permission::DriftView->value)
         ->name('drift.index');

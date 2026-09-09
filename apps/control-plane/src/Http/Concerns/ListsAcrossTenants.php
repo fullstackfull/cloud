@@ -2,11 +2,21 @@
 
 declare(strict_types=1);
 
-namespace Lynomia\Modules\Admin\Http\Controllers\Concerns;
+namespace Lynomia\Http\Concerns;
 
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+
+/*
+ * Lives outside every module on purpose.
+ *
+ * It is pagination help for an administrative list — a framework concern
+ * rather than the Admin module's domain — and while it sat in Admin\Http, any
+ * other module's controller that wanted it had to reach into another module's
+ * HTTP layer. LayeringTest forbids exactly that, and rightly: a controller is
+ * the answer to "what does this request look like", not a library.
+ */
 
 /**
  * The administrative surface reads across every customer, deliberately.

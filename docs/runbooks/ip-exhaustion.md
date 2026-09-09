@@ -36,9 +36,13 @@ ORDER BY r.created_at;
 Reservations whose job is in a terminal failed state are safe to release:
 
 ```bash
-php artisan ipam:reap-reservations --dry-run
-php artisan ipam:reap-reservations
+php artisan ipam:reclaim --reservations=25    # a small pass first
+php artisan ipam:reclaim
 ```
+
+`ipam:reclaim` returns *expired* reservations and elapsed quarantines. It has no
+dry run; the `--reservations` and `--quarantined` limits are how you keep a first
+pass small enough to read the result of.
 
 **Never release a reservation whose job is still running**, however old it looks. A slow
 hypervisor is not a dead job, and reclaiming an address that is seconds from being
@@ -103,13 +107,12 @@ The order in which to reach for options:
 
 Put affected plans out of stock rather than letting checkout succeed:
 
-```bash
-php artisan catalog:plan-stock --plan=<PLAN_SLUG> --out-of-stock \
-  --reason='IPv4 capacity in <region>'
-```
+Take the plan out of stock from the operator portal's catalogue screen. There is
+no CLI for it — putting a plan out of stock stops the platform selling something,
+which is a commercial decision with an audit entry, not a shell command.
 
-Capacity is checked at order time as well as at provisioning time precisely so this is
-possible. Use it.
+Capacity is checked at order time as well as at provisioning time precisely so
+this is possible. Use it.
 
 ## 5. Prevention
 

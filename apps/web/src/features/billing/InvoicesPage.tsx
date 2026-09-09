@@ -192,6 +192,10 @@ export function InvoicesPage() {
         }
         confirmLabel={t('invoices.useCredit')}
         loading={payFromCredit.isPending}
+        // The same condition the handler checks before it will send anything.
+        // Stated here too so the button is disabled, rather than enabled and
+        // inert, until the quote has said the invoice can be paid this way.
+        ready={quote.data?.data.is_payable === true}
         error={creditError?.message}
         onCancel={() => { setPayingFromCredit(null); }}
         onConfirm={() => {

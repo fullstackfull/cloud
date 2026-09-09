@@ -14,6 +14,9 @@ export const users = {
   // since every check passes for a super admin.
   billingAdmin: { email: 'billing@lynomia.local', password: 'password' },
   noc: { email: 'noc@lynomia.local', password: 'password' },
+  // A second super-admin, because a plan is not approved by the person who
+  // planned it and the chain spec needs two people.
+  secondOperator: { email: 'ops2@lynomia.local', password: 'password' },
 } as const
 
 /** Fixtures the specs assert on by name. Mirrors E2ESeeder's constants. */
@@ -32,6 +35,21 @@ export const fixtures = {
   ticketReference: 'LYN-E2E-000001',
   ticketSubject: 'Cannot reach my server over SSH',
   ticketInternalNote: 'do not mention the batch',
+  // Control Center. The first references a variable the E2E API process has;
+  // the second references one it does not, so the screen has both states.
+  credentialPresent: 'e2e-registrar-key',
+  credentialMissing: 'e2e-bmc-password',
+  credentialPresentReference: 'LYNOMIA_E2E_REGISTRAR_SECRET',
+  // Machines and providers. The reachable machine has a fake BMC provider
+  // with a credential the controller holds; the untouched one has nothing,
+  // and no spec changes it. The blocked provider has no credential.
+  machineReachable: 'e2e-node-01',
+  machineUntouched: 'e2e-node-02',
+  providerTestable: 'e2e-bmc-node-01',
+  providerBlocked: 'e2e-dns',
+  machineConfigurable: 'e2e-node-03',
+  rack: 'E2E-R1',
+  datacenter: 'Kuwait Central 1',
 } as const
 
 /**

@@ -49,14 +49,27 @@ test.describe('in English', () => {
     await invoiceRow(page, fixtures.openInvoice)
       .getByRole('button', { name: /use credit/i })
       .click()
+
+    /*
+     * Wait for the quote to be on screen before confirming, and assert the
+     * absence of the warning only once it is.
+     *
+     * The dialogue's confirm button is enabled while the quote is still
+     * loading, and pressing it then does nothing: the handler checks that a
+     * quote says the invoice is payable and otherwise returns, with no request
+     * and no message. This spec used to assert `toHaveCount(0)` on the warning
+     * and click — and a count of zero is also what an empty, still-loading
+     * dialogue reports, so on a slow runner the click landed before the quote
+     * and was swallowed. CI run 100 failed twice that way: the quote request
+     * in the server log, and no payment after it.
+     */
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText(/credit available/i)).toBeVisible()
     await expect(
-      page.getByText(/does not cover the whole invoice/i),
+      dialog.getByText(/does not cover the whole invoice/i),
     ).toHaveCount(0)
 
-    await page
-      .getByRole('button', { name: /^use credit$/i })
-      .last()
-      .click()
+    await dialog.getByRole('button', { name: /^use credit$/i }).click()
 
     /*
      * The invoice reaches the paid state, which is the outcome the customer

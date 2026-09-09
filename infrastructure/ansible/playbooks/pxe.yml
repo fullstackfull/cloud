@@ -61,6 +61,10 @@
           'DHCP will NOT be served — configuration is written, the service stays stopped') }}
 
   roles:
+    # Refuse the machine before doing anything to it.
+    - role: safety_gate
+      vars:
+        safety_gate_action: configure
     - role: common
     - role: hardening
     - role: pxe

@@ -21,8 +21,12 @@ use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\ProductReadiness\Application\Listeners\ReassessProductsWhenAProviderChanges;
+use Lynomia\Modules\Providers\Domain\Events\ProviderReadinessChanged;
 use Lynomia\Modules\Provisioning\Application\Listeners\AlertOnCriticalDrift;
 use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
+use Lynomia\Modules\SharedHosting\Application\Listeners\InstallWordPressOnceTheAccountExists;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
@@ -101,8 +105,23 @@ final class EventServiceProvider extends BaseEventServiceProvider
          * right page would see. The first sighting of a critical
          * disagreement now says so where the platform's alerting can find it.
          */
+        /*
+         * A hosting account that finished building is the moment a WordPress
+         * order can proceed. Without this the whole feature is unreachable:
+         * every piece exists and nothing joins them.
+         */
+        ProvisioningJobSucceeded::class => [
+            InstallWordPressOnceTheAccountExists::class,
+        ],
+
         DriftRecorded::class => [
             AlertOnCriticalDrift::class,
+        ],
+
+        ProviderReadinessChanged::class => [
+            // A provider that stopped being ready takes every product that
+            // needs it down with it, in the same transaction.
+            ReassessProductsWhenAProviderChanges::class,
         ],
 
     ];

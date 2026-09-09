@@ -12,6 +12,8 @@ use Lynomia\Modules\Dedicated\Application\Handlers\ReinstallDedicatedHandler;
 use Lynomia\Modules\Dedicated\Domain\Contracts\HostReachability;
 use Lynomia\Modules\Dedicated\Infrastructure\DedicatedReinstallLedger;
 use Lynomia\Modules\Dedicated\Infrastructure\Reachability\TcpHostReachability;
+use Lynomia\Modules\Infrastructure\Domain\Contracts\DeploymentController;
+use Lynomia\Modules\Infrastructure\Infrastructure\Deployment\DeploymentControllerFactory;
 use Lynomia\Modules\Provisioning\Domain\Contracts\DestructiveOperationLedger;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
@@ -19,6 +21,10 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
 use Lynomia\Modules\SharedHosting\Application\Handlers\ChangeHostingPackageHandler;
 use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
+use Lynomia\Modules\SharedHosting\Application\Handlers\InstallWordPressHandler;
+use Lynomia\Modules\SharedHosting\Domain\Contracts\SiteProbe;
+use Lynomia\Modules\SharedHosting\Infrastructure\Probes\FakeSiteProbe;
+use Lynomia\Modules\SharedHosting\Infrastructure\Probes\HttpSiteProbe;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\DestroyVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\ReinstallVpsHandler;
@@ -49,6 +55,16 @@ final class InfrastructureServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // The bridge to the machines. Bound, not singleton: the fake reads
+        // the environment at construction and refuses production there, and
+        // that refusal must happen on every resolution.
+        $this->app->bind(DeploymentController::class, static fn ($app): DeploymentController => (new DeploymentControllerFactory(
+            (string) config('infrastructure.controller.driver', 'fake'),
+            (string) $app->environment(),
+            config('infrastructure.controller.iac_path'),
+            getenv('CI') !== false && getenv('CI') !== '',
+        ))->make());
+
         /*
          * How the platform checks that a rebuilt physical machine came back.
          *
@@ -58,6 +74,20 @@ final class InfrastructureServiceProvider extends ServiceProvider
          * reachable through a bastion binds something that knows how.
          */
         $this->app->bind(HostReachability::class, TcpHostReachability::class);
+
+        /*
+         * Who looks at a customer's site to decide whether it is really there.
+         *
+         * The fake is chosen by configuration and refuses to construct in
+         * production, so a deployment that reaches for it by mistake fails
+         * loudly rather than reporting every site as healthy.
+         */
+        $this->app->bind(SiteProbe::class, static fn ($app): SiteProbe => match (
+            (string) config('hosting.wordpress.probe', 'http')
+        ) {
+            'fake' => new FakeSiteProbe,
+            default => new HttpSiteProbe,
+        });
 
         /*
          * The console gateway resolves its upstream through the machine's own
@@ -143,6 +173,7 @@ final class InfrastructureServiceProvider extends ServiceProvider
         $handlers->register(DestroyVpsHandler::class, ProvisioningJobKind::DestroyVps);
         $handlers->register(ResizeVpsHandler::class, ProvisioningJobKind::Resize);
         $handlers->register(CreateHostingAccountHandler::class, ProvisioningJobKind::CreateHostingAccount);
+        $handlers->register(InstallWordPressHandler::class, ProvisioningJobKind::InstallWordPress);
         $handlers->register(ChangeHostingPackageHandler::class, ProvisioningJobKind::ChangeHostingPackage);
         $handlers->register(ProvisionDedicatedHandler::class, ProvisioningJobKind::ProvisionDedicated);
         $handlers->register(ReinstallDedicatedHandler::class, ProvisioningJobKind::ReinstallDedicated);

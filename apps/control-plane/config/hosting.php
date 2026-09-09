@@ -71,4 +71,30 @@ return [
 
     'reconcile_batch' => (int) env('HOSTING_RECONCILE_BATCH', 25),
 
+    /*
+    |--------------------------------------------------------------------------
+    | WordPress
+    |--------------------------------------------------------------------------
+    |
+    | `probe` decides who fetches a customer's site to check it answers. The
+    | HTTP one is the only thing on this platform that makes a request to an
+    | address a customer chose, and it refuses names that resolve anywhere
+    | private — see HttpSiteProbe for why that is three separate defences
+    | rather than one.
+    |
+    | The fake answers from markers in the name and never touches the network,
+    | which is what lets the browser and feature suites rehearse a site that is
+    | down, a site that is somebody else's, and a site with no certificate.
+    |
+    */
+
+    'wordpress' => [
+        'probe' => env('HOSTING_SITE_PROBE', 'http'),
+
+        // How many sites one verification pass fetches. Bounded because each
+        // is an outbound request with a five-second ceiling, and a sweep that
+        // ran for an hour would overlap itself.
+        'verify_batch' => (int) env('HOSTING_VERIFY_BATCH', 200),
+    ],
+
 ];

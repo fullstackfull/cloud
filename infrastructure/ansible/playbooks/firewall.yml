@@ -83,4 +83,8 @@
           - "A ruleset applied to the edge can remove the path used to undo it."
 
   roles:
+    # Refuse the machine before doing anything to it.
+    - role: safety_gate
+      vars:
+        safety_gate_action: configure
     - role: opnsense

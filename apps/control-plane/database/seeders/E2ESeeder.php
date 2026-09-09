@@ -7,6 +7,7 @@ namespace Database\Seeders;
 use Carbon\CarbonImmutable;
 use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Date;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
@@ -22,6 +23,7 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
@@ -29,6 +31,8 @@ use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
@@ -37,6 +41,13 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Providers\Application\Actions\AssessProvider;
+use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
+use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
+use Lynomia\Modules\Providers\Infrastructure\Models\Licence;
+use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
@@ -48,12 +59,17 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Support\Domain\Enums\MessageAuthorKind;
 use Lynomia\Modules\Support\Domain\Enums\TicketCategory;
@@ -155,6 +171,13 @@ class E2ESeeder extends Seeder
 
     private const string UNSURE_DOMAIN = 'e2e-unsure.test';
 
+    /** A site that works, one waiting on its customer, one waiting on a person. */
+    private const string LIVE_SITE = 'e2e-live-site.test';
+
+    private const string WAITING_SITE = 'e2e-waiting-site.test';
+
+    private const string STUCK_SITE = 'e2e-stuck-site.test';
+
     public function run(): void
     {
         if (app()->isProduction()) {
@@ -178,8 +201,14 @@ class E2ESeeder extends Seeder
         $this->workNobodyCanSettle($customer);
         $this->whatReconciliationFound($customer);
         $this->domains($customer);
+        $this->wordpressSites($customer);
         $this->team($customer);
         $this->ticket($customer);
+        $this->credentials();
+        $this->licences();
+        $this->machinesAndProviders();
+        $this->secondOperator();
+        $this->rack();
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -648,6 +677,65 @@ class E2ESeeder extends Seeder
         );
     }
 
+    /**
+     * Three sites: one live, one waiting on the customer, one nobody can fix
+     * by retrying.
+     *
+     * The middle one is the reason this fixture exists. A customer whose name
+     * has not finished pointing here is waiting on themselves, and the screen
+     * has to say so — a spinner would leave them refreshing a page while
+     * nothing happens, because nothing is going to until they act.
+     */
+    private function wordpressSites(Customer $customer): void
+    {
+        WordPressSite::query()->updateOrCreate(
+            ['domain' => self::LIVE_SITE],
+            [
+                'customer_id' => $customer->getKey(),
+                'domain_source' => WordPressDomainSource::External,
+                'state' => WordPressSiteState::Ready,
+                'dns_ready' => true,
+                'installed' => true,
+                'ssl_status' => SslStatus::Active,
+                'verified_at' => now()->subHour(),
+                'site_url' => 'https://'.self::LIVE_SITE,
+                'admin_username' => 'sitemanager',
+                'wordpress_version' => '6.7.1',
+                'locale' => 'en_US',
+            ],
+        );
+
+        WordPressSite::query()->updateOrCreate(
+            ['domain' => self::WAITING_SITE],
+            [
+                'customer_id' => $customer->getKey(),
+                'domain_source' => WordPressDomainSource::External,
+                'state' => WordPressSiteState::AwaitingDns,
+                'dns_ready' => false,
+                'installed' => true,
+                'ssl_status' => SslStatus::Pending,
+                'site_url' => 'https://'.self::WAITING_SITE,
+                'admin_username' => 'sitemanager',
+                'locale' => 'en_US',
+            ],
+        );
+
+        WordPressSite::query()->updateOrCreate(
+            ['domain' => self::STUCK_SITE],
+            [
+                'customer_id' => $customer->getKey(),
+                'domain_source' => WordPressDomainSource::External,
+                'state' => WordPressSiteState::Indeterminate,
+                'dns_ready' => true,
+                'installed' => false,
+                'ssl_status' => SslStatus::Unknown,
+                'admin_username' => 'sitemanager',
+                'locale' => 'en_US',
+                'review_reason' => 'The toolkit did not answer the installation.',
+            ],
+        );
+    }
+
     private function whatReconciliationFound(Customer $customer): void
     {
         $account = HostingAccount::query()->where('username', self::HOSTING_USERNAME)->firstOrFail();
@@ -847,5 +935,176 @@ class E2ESeeder extends Seeder
             // actually exercised.
             ['balance_minor' => 12750],
         );
+    }
+
+    /**
+     * Two credential references for the Control Center specs.
+     *
+     * The first names a variable the browser suite's API process is given
+     * (see playwright.config.ts), so the screen reports it present; the
+     * second names one it is not, so the screen reports it missing. Neither
+     * row holds a value — there is no column for one.
+     */
+    private function credentials(): void
+    {
+        CredentialReference::query()->updateOrCreate(
+            ['name' => 'e2e-registrar-key'],
+            [
+                'purpose' => 'Registrar API',
+                'environment' => DeploymentEnvironment::Staging,
+                'backend' => 'controller_environment',
+                'backend_reference' => 'LYNOMIA_E2E_REGISTRAR_SECRET',
+                'state' => CredentialState::Configured,
+                'masked_hint' => 'Q7X2',
+            ],
+        );
+
+        CredentialReference::query()->updateOrCreate(
+            ['name' => 'e2e-bmc-password'],
+            [
+                'purpose' => 'BMC of the rack A chassis',
+                'environment' => DeploymentEnvironment::Staging,
+                'backend' => 'controller_environment',
+                'backend_reference' => 'LYNOMIA_E2E_BMC_SECRET',
+                'state' => CredentialState::Missing,
+            ],
+        );
+    }
+
+    /**
+     * Three licences for the Control Center specs: one comfortably in force,
+     * one within the thirty-day window, one already lapsed. All by the
+     * calendar, so the states the screen shows are the ones the sweep would
+     * compute.
+     */
+    private function licences(): void
+    {
+        foreach ([
+            ['product' => 'cpanel', 'licence_type' => 'admin', 'expires_on' => now()->addYear(), 'state' => LicenceState::Active, 'external_reference' => 'E2E-ORDER-1'],
+            ['product' => 'directadmin', 'licence_type' => 'standard', 'expires_on' => now()->addDays(12), 'state' => LicenceState::Expiring, 'external_reference' => 'E2E-ORDER-2'],
+            ['product' => 'litespeed', 'licence_type' => null, 'expires_on' => now()->subDays(3), 'state' => LicenceState::Expired, 'external_reference' => 'E2E-ORDER-3'],
+        ] as $licence) {
+            Licence::query()->updateOrCreate(
+                ['external_reference' => $licence['external_reference']],
+                $licence + ['environment' => DeploymentEnvironment::Staging, 'starts_on' => now()->subMonths(6), 'seats' => 50],
+            );
+        }
+    }
+
+    /**
+     * Two machines and two providers for the Control Center specs.
+     *
+     * The first machine is classified discovery_only with a controlled BMC
+     * bound to it and the present credential attached, so a spec can test and
+     * discover it. The second is untouched — do_not_touch, nothing bound —
+     * which is what every machine looks like on the day it arrives, and what
+     * the refusals are proven against. The DNS provider is registered and
+     * nothing more, so the screen shows what it is waiting for.
+     */
+    /**
+     * A second super-admin. A plan is not approved by the person who planned
+     * it, so the browser suite needs two people who may approve.
+     */
+    /**
+     * One rack in the seeded datacenter, so the site screen has a row and a
+     * name that already exists to refuse a duplicate of.
+     */
+    private function rack(): void
+    {
+        $datacenter = Datacenter::query()->orderBy('created_at')->firstOrFail();
+
+        Rack::query()->updateOrCreate(
+            ['datacenter_id' => $datacenter->getKey(), 'name' => 'E2E-R1'],
+            ['row' => 'A', 'units' => 42, 'power_notes' => 'Feed A/B from PDU-1', 'network_notes' => 'sw-1 ports 1-24'],
+        );
+    }
+
+    private function secondOperator(): void
+    {
+        $second = User::firstOrCreate(
+            ['email' => 'ops2@lynomia.local'],
+            [
+                'name' => 'Second Operator',
+                'password' => 'password',
+                'email_verified_at' => Date::now(),
+                'password_changed_at' => Date::now(),
+            ],
+        );
+        $second->syncRoles([Role::SuperAdmin->value]);
+    }
+
+    private function machinesAndProviders(): void
+    {
+        $present = CredentialReference::query()->where('name', 'e2e-registrar-key')->firstOrFail();
+
+        $reachable = ManagedServer::query()->updateOrCreate(
+            ['name' => 'e2e-node-01'],
+            [
+                'environment' => DeploymentEnvironment::Staging,
+                'safety_class' => SafetyClass::DiscoveryOnly,
+                'safety_reason' => 'Seeded for the browser suite.',
+                'allow_reimage' => false,
+                'vendor' => 'Fabrikam',
+                'model' => 'FX-2200',
+                'management_address' => 'fake://connected',
+                'bmc_address' => 'fake://connected',
+                'credential_reference_id' => $present->getKey(),
+            ],
+        );
+
+        $bmc = ProviderInstance::query()->updateOrCreate(
+            ['name' => 'e2e-bmc-node-01'],
+            [
+                'category' => ProviderCategory::Bmc,
+                'driver' => 'fake_bmc',
+                'environment' => DeploymentEnvironment::Staging,
+                'endpoint' => 'fake://connected',
+                'managed_server_id' => $reachable->getKey(),
+                'credential_reference_id' => $present->getKey(),
+            ],
+        );
+
+        ManagedServer::query()->updateOrCreate(
+            ['name' => 'e2e-node-02'],
+            [
+                'environment' => DeploymentEnvironment::Staging,
+                'safety_class' => SafetyClass::DoNotTouch,
+                'allow_reimage' => false,
+                'management_address' => '10.66.0.2',
+            ],
+        );
+
+        // A machine the execution chain may be walked on: configurable,
+        // reachable through the fake controller, nothing installed yet.
+        ManagedServer::query()->updateOrCreate(
+            ['name' => 'e2e-node-03'],
+            [
+                'environment' => DeploymentEnvironment::Staging,
+                'safety_class' => SafetyClass::ConfigurationAllowed,
+                'safety_reason' => 'Seeded for the browser suite: a lab machine the chain may be rehearsed on.',
+                'allow_reimage' => false,
+                'vendor' => 'Fabrikam',
+                'model' => 'FX-1100',
+                'management_address' => 'fake://connected',
+            ],
+        );
+
+        $dns = ProviderInstance::query()->updateOrCreate(
+            ['name' => 'e2e-dns'],
+            [
+                'category' => ProviderCategory::Dns,
+                'driver' => 'fake',
+                'environment' => DeploymentEnvironment::Staging,
+                'endpoint' => 'fake://connected',
+            ],
+        );
+
+        // Assessed the way registration assesses, so the rows carry the
+        // blocker the screen is expected to name. A provider written straight
+        // to the table has no verdict at all, which is a state the API never
+        // produces and the browser suite must not be built against.
+        $assess = app(AssessProvider::class);
+        $assess->execute($bmc);
+        $assess->execute($dns);
     }
 }

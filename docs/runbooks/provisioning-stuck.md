@@ -36,9 +36,13 @@ SELECT id, status, attempts, last_error FROM provisioning_jobs WHERE order_id = 
 **No row:** the dispatch never happened. Re-dispatch — the job is idempotent on its
 idempotency key, so this cannot create a second resource:
 
-```bash
-php artisan provisioning:dispatch --order=<ORDER_ULID>
 ```
+POST /admin/provisioning/jobs/{job}/retry
+```
+
+Re-driving is an operator action, not a shell command: it is idempotent on the
+job's idempotency key so it cannot create a second resource, and it is recorded
+as an audit entry against whoever asked for it.
 
 **A row with `attempts = 0`:** it is queued and the worker is not consuming. Fix the
 worker; do not re-dispatch.
@@ -57,16 +61,22 @@ FROM provisioning_jobs WHERE order_id = '<ORDER_ULID>';
 If `remote_job_id` is set, ask the provider directly:
 
 ```bash
-php artisan proxmox:task --node=<NODE> --upid='<REMOTE_JOB_ID>'
+php artisan compute:poll-tasks
 ```
+
+This asks every cluster whether the tasks it accepted actually finished, and
+updates the jobs it can settle. What it cannot settle stays visible at
+`GET /admin/provisioning/needs-review`.
 
 - **Provider says running:** wait. Note the expected duration for the operation; a disk
   clone of a large template legitimately takes minutes.
 - **Provider says finished successfully:** the platform missed the completion. Reconcile
   rather than retry — the resource exists:
   ```bash
-  php artisan provisioning:reconcile --job=<JOB_ULID>
+  php artisan infrastructure:reconcile --cluster=<CLUSTER>
   ```
+  Reconciliation records the difference; it does not change the provider. Work
+  the resulting row through `drift.md`.
 - **Provider says failed:** go to §3.
 - **Provider has no such task:** the task expired from the provider's history. Do **not**
   retry blindly; go to §4 and check for an orphan first.
@@ -93,8 +103,8 @@ Match the cause before retrying:
 
 Retry once the cause is addressed:
 
-```bash
-php artisan provisioning:retry --job=<JOB_ULID>
+```
+POST /admin/provisioning/jobs/{job}/retry
 ```
 
 ## 4. Timeout after creation — the dangerous case
@@ -106,13 +116,19 @@ ends up with one of them unbilled and unmanaged.
 Look for the resource before doing anything:
 
 ```bash
-php artisan proxmox:find-orphans --cluster=<CLUSTER> --since='<JOB_STARTED_AT>'
+php artisan infrastructure:reconcile --cluster=<CLUSTER>
 ```
 
+Reconciliation compares the cluster against what the platform believes and
+records anything it finds that Lynomia does not know about. Those land in the
+drift queue at `GET /admin/drift`.
+
 - **The resource exists:** adopt it. Never create a second.
-  ```bash
-  php artisan provisioning:adopt --job=<JOB_ULID> --vmid=<VMID> --node=<NODE>
   ```
+  POST /admin/provisioning/jobs/{job}/adopt
+  ```
+  Adoption is deliberately a person's decision with an audit entry, taken after
+  looking at the provider — not a command that could be run in a loop.
 - **It genuinely does not exist:** release the reserved IP and capacity, then retry.
 
 This is why provisioning jobs persist the provider's own job ID *before* the call is

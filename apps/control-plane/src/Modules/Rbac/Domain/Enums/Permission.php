@@ -45,6 +45,30 @@ enum Permission: string
     // --- Infrastructure -------------------------------------------------------
     case InfrastructureView = 'infrastructure.view';
     case InfrastructureManage = 'infrastructure.manage';
+
+    // --- The control centre ---------------------------------------------------
+    //
+    // Separate from infrastructure.manage, because these are the permissions
+    // that decide what may be destroyed, which secrets exist and what the
+    // platform will sell — and a support agent who can legitimately restart a
+    // VM has no business holding any of them.
+    //
+    // SafetyChange and AllowReimage are two permissions rather than one for the
+    // same reason the machine has two columns: raising a classification is a
+    // standing decision about a machine, and clearing it for a wipe is a
+    // decision about today. An operator may reasonably hold the first and not
+    // the second.
+    case ProviderManage = 'provider.manage';
+    case CredentialManage = 'credential.manage';
+    case LicenceManage = 'licence.manage';
+    case DeploymentApprove = 'deployment.approve';
+    case DeploymentRun = 'deployment.run';
+    // Declaring a product sellable is a commercial decision on top of a
+    // technical fact, and no operator role holds it by default: only the
+    // super-admin gate grants it, so the declaration is always somebody's.
+    case ReadinessDeclare = 'readiness.declare';
+    case SafetyChange = 'safety.change';
+    case AllowReimage = 'safety.allow_reimage';
     case NodeMaintenance = 'node.maintenance';
     case VmManage = 'vm.manage';
     case VmConsole = 'vm.console';

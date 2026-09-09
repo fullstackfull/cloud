@@ -14,10 +14,26 @@ infrastructure/
 │   └── roles/                 one role per concern, idempotent
 ├── tofu/           OpenTofu for the platform's OWN VMs and DNS
 ├── monitoring/     the observability stack's configuration (deployed by Ansible)
-├── proxmox/ pbs/ pxe/ networking/ security/ dedicated/ hosting/
-                    subsystem-specific material owned by other parts of the platform
+├── scripts/        checks that keep the above honest, run by CI
 └── README.md
 ```
+
+### Subsystem directories that are named elsewhere and do not exist
+
+`proxmox/`, `pbs/`, `pxe/`, `networking/`, `security/`, `dedicated/` and
+`hosting/` are referred to in places around this repository as though they were
+here. They are not, and this listing no longer implies otherwise —
+`scripts/validate-monitoring.py` fails the build if this tree names a directory
+that is missing.
+
+One of those absences has teeth. `monitoring/README.md` declares a textfile
+collector contract for `lynomia_backup_*` and says the collector belongs to
+`infrastructure/pbs`. Nothing implements it, so the six alerts in
+`monitoring/prometheus/rules/backups.yml` — including the two that exist to
+catch an unverified backup, the failure that looks exactly like success until a
+restore — cannot fire. The same check names that gap on every run, so it stays
+visible until something writes those series. See
+`docs/phase-30b-real-infrastructure-validation.md` section Q.
 
 ---
 
@@ -404,6 +420,10 @@ ansible-playbook -i inventories/staging playbooks/<name>.yml --diff
 ## Checking this repository
 
 ```bash
+# Everything below in one go, which is also what CI's "Infrastructure
+# validation" job runs. No network, no hosts touched.
+make infra-validate
+
 cd infrastructure/ansible
 ansible-playbook --syntax-check -i inventories/production playbooks/*.yml
 ansible-lint                      # profile and offline mode pinned in .ansible-lint
@@ -412,3 +432,15 @@ cd ../tofu
 tofu fmt -check -recursive
 tofu init -backend=false && tofu validate    # needs registry.opentofu.org
 ```
+
+`scripts/` holds the checks that keep the rest of this tree honest, and each
+exists because of a specific thing that went wrong:
+
+| Script | Refuses |
+| --- | --- |
+| `validate-inventory.py` | A host with no `safety_class`, an `allow_reimage` its class does not permit, or a variable that reads like a credential |
+| `test_validate_inventory.py` | The above validator quietly stopping to reject any of those |
+| `test_safety_gate.sh` | The `safety_gate` role quietly stopping to enforce a classification — ten class-and-action pairs against a throwaway localhost inventory |
+| `validate-monitoring.py` | An alert naming a metric nothing emits, an alert with nowhere for the operator to look, a `runbook` path that does not exist, a directory this README claims and does not have, or a collector contract with no implementation and no acknowledgement of that |
+| `validate-runbooks.py` | A `php artisan` line in a runbook or playbook that names a command the application does not define |
+| `check-ci-cannot-apply.py` | A workflow step that applies infrastructure. CI validates; a person applies |

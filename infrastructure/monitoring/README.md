@@ -277,7 +277,19 @@ counters: those rows are appended and never re-classified.
 PBS has no Prometheus endpoint. These are written by a textfile collector on the
 backup host, read by its node_exporter from
 `/var/lib/node_exporter/textfile_collector/`. The collector belongs to
-`infrastructure/pbs`; this is the contract the alerts in `backups.yml` expect:
+`infrastructure/pbs`.
+
+**NOT IMPLEMENTED.** `infrastructure/pbs` does not exist and nothing writes these
+series, so every alert in `backups.yml` is currently incapable of firing —
+including `BackupVerificationFailed` and `UnverifiedSnapshotsAccumulating`,
+which exist to catch the failure that looks exactly like success until somebody
+tries to restore. Blocker: `BLOCKED_HARDWARE` — the collector reads
+`proxmox-backup-manager` output, and writing it against output nobody has seen
+is guesswork with a green tick on it. `scripts/validate-monitoring.py` prints
+this gap on every run and fails the build if this paragraph is deleted while the
+directory is still missing.
+
+This is the contract the alerts in `backups.yml` expect:
 
 ```
 # 0 = last run succeeded, 1 = last run failed

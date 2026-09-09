@@ -6,6 +6,7 @@ namespace Lynomia\Modules\SharedHosting\Infrastructure\Providers;
 
 use Carbon\CarbonImmutable;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
+use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressInstaller;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\AccountUsage;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\CreateAccountRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\HostingAccountResult;
@@ -13,6 +14,8 @@ use Lynomia\Modules\SharedHosting\Domain\DTOs\LicenceStatus;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\NodeHealth;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\RemoteAccount;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\SsoSession;
+use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressInstallation;
+use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressInstallRequest;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
@@ -46,7 +49,7 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
  *    without creating them, so in production it would mark services active and
  *    send login details for hosting that is not there.
  */
-final class FakeHostingProvider implements HostingProvider
+final class FakeHostingProvider implements HostingProvider, WordPressInstaller
 {
     public const string NAME = 'fake';
 
@@ -62,8 +65,28 @@ final class FakeHostingProvider implements HostingProvider
      */
     public const string TIMEOUT_MARKER = 'timeout';
 
+    /**
+     * A domain carrying this installs WordPress and then fails to answer.
+     *
+     * The install marker that matters. An installer that goes quiet may well
+     * have written a database and a wp-config, so the platform must not try
+     * again over the top of it — and the only way to rehearse that is a fake
+     * that really does record the installation before it throws.
+     */
+    public const string INSTALL_TIMEOUT_MARKER = 'wp-timeout';
+
+    /** A domain carrying this is refused outright, with nothing written. */
+    public const string INSTALL_REFUSED_MARKER = 'wp-refused';
+
     /** A username carrying this reports no measurements at all, as a panel mid-restart does. */
     public const string NO_USAGE_MARKER = 'no-usage';
+
+    /**
+     * WordPress installations, keyed by node then domain.
+     *
+     * @var array<string, array<string, WordPressInstallation>>
+     */
+    private array $installations = [];
 
     /**
      * Accounts this instance holds, keyed by node and username.
@@ -340,6 +363,78 @@ final class FakeHostingProvider implements HostingProvider
         }
 
         return $account;
+    }
+
+    public function installWordPress(HostingNode $node, WordPressInstallRequest $request): WordPressInstallation
+    {
+        $this->assertNoMarkers($node, $request->username, 'install_wordpress');
+        $this->require($node, $request->username, 'install_wordpress');
+
+        $key = $this->nodeKey($node);
+        $domain = strtolower($request->domain);
+
+        if (str_contains($domain, self::INSTALL_REFUSED_MARKER)) {
+            // The panel answered and said no. Nothing was written, so a caller
+            // may try again once whatever it objected to is fixed.
+            throw HostingProviderException::requestFailed(self::NAME, 'install_wordpress', [
+                'node' => $node->hostname,
+                'domain' => $domain,
+                'provider_message' => 'the toolkit refused this installation',
+            ]);
+        }
+
+        $installation = new WordPressInstallation(
+            domain: $domain,
+            siteUrl: 'https://'.$domain,
+            adminUrl: 'https://'.$domain.'/wp-admin/',
+            version: '6.7.1',
+        );
+
+        /*
+         * Recorded before the timeout throws, and that ordering is the whole
+         * value of this fake. An installer that stopped answering has often
+         * finished the work, and a platform that retried would install over a
+         * site the customer may already have written a post on.
+         */
+        $this->installations[$key][$domain] = $installation;
+
+        if (str_contains($domain, self::INSTALL_TIMEOUT_MARKER)) {
+            throw HostingProviderException::requestFailed(self::NAME, 'install_wordpress', [
+                'node' => $node->hostname,
+                'domain' => $domain,
+                'provider_message' => 'the toolkit stopped answering by design',
+            ], indeterminate: true);
+        }
+
+        return $installation;
+    }
+
+    public function wordPressInstallation(
+        HostingNode $node,
+        string $username,
+        string $domain,
+    ): WordPressInstallation {
+        $this->assertNoMarkers($node, $username, 'wordpress_installation');
+
+        $domain = strtolower($domain);
+        $found = $this->installations[$this->nodeKey($node)][$domain] ?? null;
+
+        if ($found instanceof WordPressInstallation) {
+            return $found;
+        }
+
+        /*
+         * Answered, and the answer is "there is nothing here". Distinct from
+         * throwing: a read that fails tells the caller nothing, and a read
+         * that says `exists: false` is how reconciliation learns an install
+         * the platform believes in did not happen.
+         */
+        return new WordPressInstallation(
+            domain: $domain,
+            siteUrl: 'https://'.$domain,
+            adminUrl: 'https://'.$domain.'/wp-admin/',
+            exists: false,
+        );
     }
 
     private function nodeKey(HostingNode $node): string

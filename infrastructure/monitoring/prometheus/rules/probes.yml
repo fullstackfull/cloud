@@ -119,6 +119,7 @@ groups:
           description: >-
             One or more rules in {{ $labels.rule_group }} cannot be evaluated, so the
             alerts they define cannot fire. Their silence currently means nothing.
+          runbook: docs/runbooks/monitoring-blind.md
           runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
 
       - alert: AlertmanagerNotificationsFailing
@@ -132,6 +133,7 @@ groups:
           description: >-
             Alerts are firing and not reaching anyone. Every other alert in this system
             is currently unable to do its job.
+          runbook: docs/runbooks/monitoring-blind.md
           runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
 
       - alert: LokiIngestionStopped
@@ -150,4 +152,5 @@ groups:
             Either Alloy has stopped shipping or the application has stopped logging.
             Both are worth knowing before the next incident, when the logs are the first
             thing anyone reaches for.
+          runbook: docs/runbooks/monitoring-blind.md
           runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health

@@ -37,6 +37,10 @@
   any_errors_fatal: false
 
   roles:
+    # Refuse the machine before doing anything to it.
+    - role: safety_gate
+      vars:
+        safety_gate_action: read
     - role: preflight
 
 - name: Summarise the fleet

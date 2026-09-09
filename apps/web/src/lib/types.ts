@@ -550,6 +550,37 @@ export interface DomainOperation {
   created_at: string
 }
 
+/**
+ * A WordPress site: an account, a name, a certificate and an installation.
+ *
+ * `is_verified` is the only field here that is this platform's own
+ * observation. Everything else is somebody else's report — the panel's, the
+ * installer's, the certificate authority's — and all three can be true while
+ * the site serves a database error.
+ */
+export interface WordPressSite {
+  id: string
+  domain: string
+  domain_source: 'register' | 'existing' | 'transfer' | 'external'
+  domain_id: string | null
+  state: string
+  is_usable: boolean
+  is_verified: boolean
+  needs_attention: boolean
+  dns_ready: boolean
+  installed: boolean
+  ssl_status: string
+  site_url: string | null
+  admin_url: string | null
+  admin_username: string | null
+  wordpress_version: string | null
+  locale: string | null
+  failure_reason: string | null
+  hosting_account_id: string | null
+  verified_at: string | null
+  created_at: string
+}
+
 export interface DnsZone {
   id: string
   name: string

@@ -1,0 +1,61 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Database\Factories;
+
+use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
+use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
+
+/**
+ * @extends Factory<CredentialReference>
+ */
+class CredentialReferenceFactory extends Factory
+{
+    protected $model = CredentialReference::class;
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function definition(): array
+    {
+        return [
+            'name' => 'credential-'.Str::lower(Str::random(6)),
+            'purpose' => 'connection test',
+            'environment' => DeploymentEnvironment::Staging,
+            'backend' => 'controller_environment',
+            'backend_reference' => 'LYNOMIA_TEST_'.Str::upper(Str::random(6)),
+            'state' => CredentialState::Configured,
+        ];
+    }
+
+    public function forEnvironment(DeploymentEnvironment $environment): self
+    {
+        return $this->state(fn (): array => ['environment' => $environment]);
+    }
+
+    public function missing(): self
+    {
+        return $this->state(fn (): array => ['state' => CredentialState::Missing]);
+    }
+
+    public function in(CredentialState $state): self
+    {
+        return $this->state(fn (): array => ['state' => $state]);
+    }
+
+    /**
+     * A credential somebody has successfully used.
+     *
+     * Named for what it means rather than for the enum case, because the
+     * distinction this factory keeps having to express is "configured" versus
+     * "proven", and `valid()` reads like a judgement about the string.
+     */
+    public function proven(): self
+    {
+        return $this->state(fn (): array => ['state' => CredentialState::Valid]);
+    }
+}
