@@ -131,14 +131,15 @@ be removed **first**.
 | Inventory safety classification | — | **Verified in CI** | n/a | `validate-inventory.py` over 32 hosts + `test_validate_inventory.py`, 15/15 | Verified (mechanism, not a real host) | — |
 | CI cannot apply infrastructure | — | **Verified in CI** | n/a | `check-ci-cannot-apply.py`, 37 run steps inspected | Verified | — |
 | Runbooks name real commands | — | **Verified in CI** | n/a | `validate-runbooks.py`: 57 invocations across 110 files, all resolving | Verified (mechanism, not a live incident) | — |
+| Safety gate refuses correctly | — | **Verified in CI** | n/a | `test_safety_gate.sh`: ten class-and-action pairs against a localhost inventory, 10/10 | Verified (mechanism, not a real host) | — |
 | Database backup and restore | PostgreSQL | Runbook written | Not attempted | `docs/runbooks/database-restore.md` | Blocked | `BLOCKED_HARDWARE` |
 | Restore the platform itself | — | Runbook written | Not attempted | — | Blocked | `BLOCKED_HARDWARE` |
 
 ---
 
-## What the four "verified" rows mean, and what they do not
+## What the five "verified" rows mean, and what they do not
 
-Four rows above are verified, and every one of them verifies a *mechanism* in
+Five rows above are verified, and every one of them verifies a *mechanism* in
 CI rather than a real machine:
 
 - Every metric an alert names resolves to something that emits it — the control
@@ -147,6 +148,12 @@ CI rather than a real machine:
   something real. It does not mean an alert has ever fired, and it does not
   cover the six backup alerts whose collector is declared and unwritten: those
   are listed as dead above, and the check prints that gap on every run.
+- `safety_gate` genuinely refuses. Ten class-and-action pairs run against a
+  throwaway inventory pointing at localhost, and the play reached its body
+  exactly when it should: `DO_NOT_TOUCH` refuses even a read, `DISCOVERY_ONLY`
+  permits a read and refuses configuration, `CONFIGURATION_ALLOWED` refuses a
+  reimage, and `REIMAGE_ALLOWED` still refuses one until that individual host
+  carries `allow_reimage: true`.
 - The inventory validator rejects a host with no safety classification, an
   `allow_reimage` its class does not permit, or an embedded credential — proven
   by its own test suite, which covers group inheritance and per-host overrides.

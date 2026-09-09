@@ -389,6 +389,13 @@ jobs:
       - name: The inventory validator still rejects what it claims to reject
         run: python3 infrastructure/scripts/test_validate_inventory.py
 
+      # A classification the role does not enforce is an assertion, not a gate.
+      # This runs safety_gate against a throwaway inventory pointing at
+      # localhost, once per class-and-action pair, and checks the play reaches
+      # its body exactly when it should.
+      - name: The safety gate still refuses what it claims to refuse
+        run: infrastructure/scripts/test_safety_gate.sh
+
       # An alert on a metric nothing emits never fires. It reads as coverage in
       # a review and is silence in an incident.
       - name: Alert rules name metrics something exports

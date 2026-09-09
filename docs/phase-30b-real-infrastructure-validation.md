@@ -573,14 +573,28 @@ Every run on this branch during Phase 30B, including the red one.
 | Run | Commit | Result |
 | --- | --- | --- |
 | 84 | `f755083` | Green — the Phase 30A++ baseline, re-measured here |
-| 85 | `dd1cd59` | **Red**, then cancelled. Security checks failed: the committed-secret gate matched this phase's own test fixture, the case proving the inventory validator rejects an inlined private key. Fixed by assembling the header from fragments rather than adding a third exclusion to the gate — an exclusion would mean a real key pasted into that file went uncaught |
-| 86 | `c2f7007` | Green. First run of the Infrastructure validation job to pass in full |
-| 87 | `5cd3893` | The consolidation: `infra/` deleted, everything folded into `infrastructure/` |
-| 88 | `7e2214f` | `make infra-validate` and the README table |
+| 85 | `dd1cd59` | **Red**, then cancelled. Security checks failed: the committed-secret gate matched this phase's own test fixture, the case proving the inventory validator rejects an inlined private key. Fixed by assembling the header from fragments rather than adding a third exclusion to the gate — an exclusion would mean a real key pasted into that file went uncaught. The Infrastructure validation job passed all thirteen of its steps in the same run |
+| 86 | `c2f7007` | **Green**, all jobs |
+| 87 | `5cd3893` | Cancelled — the consolidation |
+| 88 | `7e2214f` | Cancelled |
+| 89 | `b730ae1` | Cancelled |
+| 91 | `faa7539` | Cancelled |
 
-The Infrastructure validation job's first complete run was on 85, where all
-thirteen of its own steps passed while the security job failed beside it. It has
-not been red since.
+Four consecutive runs were cancelled, and that is worth stating plainly rather
+than leaving as a gap in the numbering. The workflow's concurrency group cancels
+an in-progress run when a new commit lands on the same ref, and pushes went out
+faster than CI could finish. So the last run to complete on its own merits was
+86 — which predates the consolidation entirely, and therefore tested the
+duplicate tree rather than this one.
+
+The fix was to stop pushing and wait, which is the discipline the concurrency
+setting assumes and which this phase did not show until it had wasted four runs.
+
+Measured locally on the consolidated tree in the meantime: 2,446 backend tests
+green with 69,585 assertions; `ansible-lint` clean at the production profile
+across 126 files; both OpenTofu environments valid; and all the static checks
+passing, including the two that test the gates themselves — 15/15 for the
+inventory validator and 10/10 for the safety gate.
 
 A report that lists only green runs is not a record of what happened.
 

@@ -104,6 +104,7 @@ deploy-staging: ## Deploy to staging via Ansible
 infra-validate: ## Static checks over the infrastructure tree (no network, no hosts)
 	python3 infrastructure/scripts/validate-inventory.py infrastructure
 	python3 infrastructure/scripts/test_validate_inventory.py
+	infrastructure/scripts/test_safety_gate.sh
 	python3 infrastructure/scripts/validate-monitoring.py infrastructure
 	python3 infrastructure/scripts/validate-runbooks.py infrastructure
 	python3 infrastructure/scripts/check-ci-cannot-apply.py .
