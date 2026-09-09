@@ -403,7 +403,8 @@ is listed with its cause; none was re-run into green without a code change.
 | 108 | `ad8e179` | green | metrics, alerts, runbooks, dashboard, infrastructure drift |
 | 109 | `ba0f4ab` | green | overview and site registry — the last commit of code |
 | 110 | `1c01aa5` | green | this report and the matrices; documents only, no code changed after `ba0f4ab` |
-| 111 | this correction | the run attached to this commit | the PHPStan wording in the summary and the Clean Room row; documents only |
+| 111–112 | `1c01aa5`, `618729a` | green | the same two commits run again on the pull-request trigger |
+| 113 | `618729a` | green | the PHPStan wording in the summary, the Clean Room row and this table; documents only |
 
 ## L. Verdict
 
