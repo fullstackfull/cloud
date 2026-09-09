@@ -259,6 +259,28 @@ groups:
           runbook: docs/runbooks/file-restore-indeterminate.md
           runbook_url: https://docs.lynomia.internal/runbooks/file-restore-indeterminate
 
+  - name: business.accounts
+    rules:
+      - alert: CurrencyChangeNeedsReview
+        # An account's country/currency change that an operator approved
+        # and the platform then refused to apply, because an invoice, an
+        # order or a subscription appeared on the account in between.
+        # Nothing was written. The customer has been told to wait; a person
+        # decides whether to reject it or approve it again.
+        expr: >-
+          sum(lynomia_country_currency_changes_total{state="needs_review"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "An approved country/currency change is on hold"
+          description: >-
+            {{ $value }} account change(s) are in needs_review: approved,
+            then held at the last check. Nothing was applied.
+          runbook: docs/runbooks/currency-change-needs-review.md
+          runbook_url: https://docs.lynomia.internal/runbooks/currency-change-needs-review
+
   - name: business.domains
     rules:
       - alert: DomainRedemptionNeedsReview

@@ -66,6 +66,7 @@ const SECONDARY_NAV: NavItem[] = [
  */
 const OPERATOR_NAV: NavItem[] = [
   { to: '/admin/customers', labelKey: 'admin.nav.customers' },
+  { to: '/admin/account-changes', labelKey: 'admin.nav.accountChanges' },
   { to: '/admin/provisioning', labelKey: 'admin.nav.provisioning' },
   { to: '/admin/operations', labelKey: 'admin.nav.operations' },
   { to: '/admin/drift', labelKey: 'admin.nav.drift' },

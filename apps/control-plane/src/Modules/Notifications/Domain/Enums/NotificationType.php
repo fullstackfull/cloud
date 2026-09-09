@@ -37,6 +37,17 @@ enum NotificationType: string
     case SuspensionWarning = 'billing.suspension_warning';
     case CancellationScheduled = 'billing.cancellation_scheduled';
 
+    /*
+     * The account's country or currency, decided. Applied says from when
+     * new invoices carry the new currency and tax and that old ones do not
+     * change; rejected carries the operator's note; needs-review says the
+     * change was approved and then held because something on the account
+     * changed, and asks nothing of the customer but patience.
+     */
+    case CountryCurrencyChangeApplied = 'billing.country_currency_change_applied';
+    case CountryCurrencyChangeRejected = 'billing.country_currency_change_rejected';
+    case CountryCurrencyChangeNeedsReview = 'billing.country_currency_change_needs_review';
+
     // ----------------------------------------------------------------- service
     case ServiceProvisioning = 'service.provisioning';
     case ServiceReady = 'service.ready';
@@ -127,7 +138,10 @@ enum NotificationType: string
             self::RenewalFailed,
             self::GracePeriodStarted,
             self::SuspensionWarning,
-            self::CancellationScheduled => NotificationCategory::Billing,
+            self::CancellationScheduled,
+            self::CountryCurrencyChangeApplied,
+            self::CountryCurrencyChangeRejected,
+            self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
 
             self::IncidentAffectingService,
             self::MaintenanceScheduled => NotificationCategory::Operational,
@@ -154,6 +168,7 @@ enum NotificationType: string
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
             self::RenewalUpcoming, self::RenewalFailed,
             self::GracePeriodStarted, self::SuspensionWarning, self::CancellationScheduled,
+            self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,
             self::ServiceEnded, self::ServiceTerminated, self::DataRetentionEnding,

@@ -185,6 +185,20 @@ Schedule::command('backups:reconcile-inventory')
  * exponential backoff per task on top, so a fleet of slow builds does not
  * become a fleet of API calls.
  */
+/*
+ * Scheduled account country/currency changes, every five minutes.
+ *
+ * An operator may approve a change for a later moment — the start of the
+ * next billing month, typically. This applies the ones whose moment has
+ * come, after checking the account's facts one last time; one that has
+ * grown a blocker since approval is held for a person, not applied.
+ */
+Schedule::command('customers:apply-country-currency-changes')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
 Schedule::command('compute:poll-tasks')
     ->everyFiveMinutes()
     ->withoutOverlapping(10)

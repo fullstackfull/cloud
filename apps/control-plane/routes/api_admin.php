@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Admin\Http\Controllers\AuditController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
+use Lynomia\Modules\Admin\Http\Controllers\CountryCurrencyChangeController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
 use Lynomia\Modules\Admin\Http\Controllers\DomainsController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
@@ -60,6 +61,27 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('customers', [CustomerController::class, 'index'])
         ->middleware('permission:'.Permission::CustomerViewAny->value)
         ->name('customers.index');
+
+    /*
+     * Requests to change an account's country or currency. Reading the
+     * queue is `customer.view_any`; deciding one is `customer.update`, the
+     * permission for changing what an account says about itself — which is
+     * exactly what this changes, after the platform has checked the facts.
+     *
+     * Declared before `customers/{customer}`: routes match in order, and a
+     * literal segment declared after a parameter is a 404 for ever.
+     */
+    Route::get('customers/country-currency-changes', [CountryCurrencyChangeController::class, 'index'])
+        ->middleware('permission:'.Permission::CustomerViewAny->value)
+        ->name('customers.country_currency_changes.index');
+
+    Route::post('customers/country-currency-changes/{change}/approve', [CountryCurrencyChangeController::class, 'approve'])
+        ->middleware('permission:'.Permission::CustomerUpdate->value)
+        ->name('customers.country_currency_changes.approve');
+
+    Route::post('customers/country-currency-changes/{change}/reject', [CountryCurrencyChangeController::class, 'reject'])
+        ->middleware('permission:'.Permission::CustomerUpdate->value)
+        ->name('customers.country_currency_changes.reject');
 
     Route::get('customers/{customer}', [CustomerController::class, 'show'])
         ->middleware('permission:'.Permission::CustomerView->value)

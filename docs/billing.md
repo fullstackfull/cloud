@@ -204,3 +204,73 @@ A wallet refund makes no network call, because the money never left. It is a cre
 through `WalletLedger`, succeeded at once — there is no pending state for a transfer that
 cannot fail halfway. Its idempotency key is the refund row's own id, so a retried refund
 credits once.
+
+## Changing an account's country or currency
+
+An account is registered with one currency and one country, and everything
+it is billed is written in that currency with that country's tax. Both can
+change later — but as a **request**, analysed and decided, never as a
+setting flipped on a form. The rule that makes the workflow what it is:
+
+**Nothing already written is ever converted.** An invoice keeps the
+currency and the tax it was issued with. A payment keeps what was paid. An
+order keeps what was ordered. A subscription keeps the currency it was sold
+in. A wallet balance is not exchanged. The change sets what the account is
+billed in *from that moment on*, and every document before it stands as it
+was.
+
+### What a currency change is blocked by
+
+The account must have nothing priced in the old currency that is still
+live. Each of these is a blocker, reported in words on the request:
+
+| Blocker | Why | What clears it |
+| --- | --- | --- |
+| An open invoice in the old currency | It would be paid in a currency the account no longer holds | Pay it, or an operator voids it |
+| An order between placement and provisioning | It has a price in the old currency and an invoice on the way | Let it complete, or cancel it |
+| A domain operation with the registrar | Its quote and any refund are in the old currency | Let it finish |
+| An active, past-due or suspended subscription | A renewal is a new invoice; issuing it in a currency the account does not hold is a silent repricing | End the subscription, then order again from the new price list, knowingly |
+| A wallet balance in the old currency | Credit is never exchanged | Spend it, or ask for a refund |
+| No price in the new currency anywhere in the catalogue | The account could be billed nothing | An operator prices the catalogue in that currency |
+
+A **country-only** change (same currency) is not blocked by any of these.
+It changes the tax rate on invoices issued from then on; invoices already
+issued keep the tax they were issued with. Both rates are shown on the
+request as a warning.
+
+### The lifecycle
+
+```
+requested ─► blocked ◄──────────────┐        (customer re-checks after
+    │            │                  │         paying / ending / spending)
+    │            └─► awaiting_approval ─► scheduled ─► applied
+    │                     │                  │
+    │                     └─► rejected       └─► needs_review ─► (approve again | rejected)
+    └─► withdrawn (any open state, until applied)
+```
+
+- The analysis runs when the customer asks, when they re-check, when an
+  operator approves, and once more at the moment of applying. There is no
+  stored "analysing" state: a request is `blocked` or `awaiting_approval`
+  the moment it exists.
+- Approval needs `customer.update` and a note. Approved for now, the
+  account changes in the same request. Approved with `apply_at`, the change
+  is `scheduled` and `customers:apply-country-currency-changes` applies it
+  at that moment — the start of the next billing month, typically.
+- A blocker that appears between approval and application (an invoice
+  issued, an order placed) holds the change in `needs_review`. Nothing is
+  written, the customer is told the change is on hold, the alert
+  `CurrencyChangeNeedsReview` fires, and a person decides — see
+  `docs/runbooks/currency-change-needs-review.md`.
+- One open request per account.
+
+### What is recorded
+
+Audit: `account.country_currency_change.requested`, `.withdrawn`,
+`.approved`, `.rejected`, `.applied` (with the before and after), and
+`.blocked` (with the blockers, when the last check held it). Notifications:
+applied, rejected (with the operator's note), and on hold. Metric:
+`lynomia_country_currency_changes_total{state}`.
+
+The applying action is the only place the account's `country` and
+`currency` columns are written after registration.

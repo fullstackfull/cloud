@@ -8,6 +8,7 @@ import type {
   BackupFileDownload,
   BackupFileListing,
   BackupFileRestore,
+  CountryCurrencyChange,
   DedicatedServer,
   DnsRecord as DnsRecordRow,
   DnsZone,
@@ -1296,5 +1297,56 @@ export function useExportZone() {
   return useMutation({
     mutationFn: (zoneId: string) =>
       api.get<Envelope<ZoneExport>>(`/dns/zones/${encodeURIComponent(zoneId)}/export`),
+  })
+}
+
+/* ------------------------------------------------- the account's currency */
+
+/**
+ * Requests to change what the account is billed in, with the currencies the
+ * catalogue prices anything in — the only ones an account can be moved to.
+ */
+export function useCountryCurrencyChanges() {
+  return useQuery({
+    queryKey: ['account', 'country-currency-changes'],
+    queryFn: () =>
+      api.get<{ data: CountryCurrencyChange[]; meta: { currencies: string[] } }>('/account/country-currency-changes'),
+  })
+}
+
+export function useRequestCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { country: string | null; currency: string; reason: string }) =>
+      api.post<Envelope<CountryCurrencyChange>>('/account/country-currency-changes', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account'] })
+      void queryClient.invalidateQueries({ queryKey: ['auth'] })
+    },
+  })
+}
+
+export function useReanalyseCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<Envelope<CountryCurrencyChange>>(`/account/country-currency-changes/${encodeURIComponent(id)}/reanalyse`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account'] })
+    },
+  })
+}
+
+export function useWithdrawCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<Envelope<CountryCurrencyChange>>(`/account/country-currency-changes/${encodeURIComponent(id)}/withdraw`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account'] })
+    },
   })
 }

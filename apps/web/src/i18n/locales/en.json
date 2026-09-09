@@ -208,7 +208,11 @@
     "validating": "Validating",
     "verified": "Verified",
     "verifying": "Verifying",
-    "void": "Void"
+    "void": "Void",
+    "scheduled": "Scheduled",
+    "applied": "Applied",
+    "rejected": "Rejected",
+    "withdrawn": "Withdrawn"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -229,7 +233,34 @@
     "timezoneHint": "An IANA name, such as Asia/Kuwait.",
     "phone": "Phone",
     "verifyEmailTitle": "Verify your email address",
-    "verifyEmailBody": "Ordering is available once the address on this account is verified. Check your inbox for the link we sent."
+    "verifyEmailBody": "Ordering is available once the address on this account is verified. Check your inbox for the link we sent.",
+    "countryCurrency": {
+      "title": "Country and currency",
+      "subtitle": "What this account is billed in. A change is a request: the platform checks what it would touch, and a person approves it.",
+      "current": "Billed in {{currency}}{{country}}",
+      "policy": "Nothing already issued is ever converted. Invoices, payments and orders keep the currency and the tax they were written with; only what is issued after the change is in the new currency.",
+      "request": "Request a change",
+      "country": "Country (two letters)",
+      "countryHint": "The ISO code of the country the account is registered in, such as KW or SA. Leave empty for none.",
+      "currency": "Currency",
+      "reason": "Why",
+      "reasonHint": "A sentence for the person who reviews it.",
+      "submit": "Send the request",
+      "requested": "Your request has been recorded.",
+      "open": "Current request",
+      "history": "Earlier requests",
+      "to": "To {{currency}}{{country}}",
+      "blockers": "What must change first",
+      "warnings": "What this means",
+      "recheck": "Check again",
+      "withdraw": "Withdraw",
+      "note": "Note from our team",
+      "scheduledFor": "Scheduled for {{date}}",
+      "appliedAt": "Applied {{date}}",
+      "needsReview": "This change was approved and then put on hold because something on the account changed. Our team is looking at it; nothing needs doing on your side.",
+      "awaiting": "Waiting for our team to approve it.",
+      "blocked": "The account has to clear the items below first. Once they are cleared, check again."
+    }
   },
   "security": {
     "subtitle": "Second factor, password, and where your account is signed in.",
@@ -535,7 +566,8 @@
       "plans": "Plans",
       "deployments": "Deployments",
       "overview": "Overview",
-      "sites": "Sites"
+      "sites": "Sites",
+      "accountChanges": "Account changes"
     },
     "customers": {
       "title": "Customers",
@@ -1186,6 +1218,31 @@
       "unitsLabel": "Units",
       "powerNotes": "Power notes",
       "networkNotes": "Network notes"
+    },
+    "accountChanges": {
+      "title": "Account changes",
+      "subtitle": "Requests to change what an account is billed in. Approval checks the facts again and refuses past a blocker.",
+      "account": "Account",
+      "change": "Change",
+      "state": "State",
+      "asked": "Asked",
+      "decide": "Decision",
+      "empty": "No requests.",
+      "filter": "State",
+      "allOpen": "All open",
+      "blockers": "Blockers",
+      "warnings": "Warnings",
+      "reason": "Customer's reason",
+      "approve": "Approve",
+      "reject": "Reject",
+      "approveTitle": "Approve the change for {{name}}",
+      "rejectTitle": "Reject the change for {{name}}",
+      "approveBody": "The account will be billed in {{currency}}{{country}} from the moment this is applied. The platform re-checks the account first and refuses if an invoice, order, subscription or wallet balance in the old currency has appeared since. Nothing already issued is converted.",
+      "rejectBody": "The account keeps its country and currency. The customer is told, with your note.",
+      "note": "Note",
+      "applyAt": "Apply at (optional)",
+      "applyAtHint": "Leave empty to apply now. Set a moment — the first of next month, say — to schedule it; the platform checks the account again then.",
+      "now": "now"
     }
   },
   "backups": {

@@ -26,6 +26,7 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainAvailability;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
+use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentKind;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentState;
@@ -105,6 +106,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             // StatusBadge, on the customer's screens.
             BackupState::class,
             FileRestoreState::class,
+            CountryCurrencyChangeState::class,
             DnsState::class,
             HostingAccountStatus::class,
             InvoiceStatus::class,

@@ -43,6 +43,18 @@ return [
             'title' => 'استلمنا الطلب :number',
             'body' => 'استلمنا طلبك وسنبدأ التنفيذ فور سداده.',
         ],
+        'country_currency_change_applied' => [
+            'title' => 'أصبحت فوترة حسابك بعملة :currency',
+            'body' => 'من الآن فصاعدًا تصدر الفواتير الجديدة لهذا الحساب بعملة :currency وبضريبة :country. الفواتير والمدفوعات والطلبات المسجّلة سابقًا لا تتغير.',
+        ],
+        'country_currency_change_rejected' => [
+            'title' => 'لم تتم الموافقة على تغيير البلد/العملة',
+            'body' => 'رُفض طلب نقل هذا الحساب إلى :currency / :country: :note. لم يتغير شيء في الحساب.',
+        ],
+        'country_currency_change_needs_review' => [
+            'title' => 'تغيير البلد/العملة معلّق',
+            'body' => 'تعذّر تطبيق التغيير المعتمد إلى :currency / :country لأن شيئًا في الحساب تغيّر منذ اعتماده. فريقنا يراجع الأمر؛ لا شيء عليك فعله.',
+        ],
         'invoice_issued' => [
             'title' => 'فاتورة :number بمبلغ :amount',
             'body' => 'صدرت الفاتورة :number بمبلغ :amount وتستحق في :due_date.',

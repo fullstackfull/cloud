@@ -25,6 +25,19 @@ enum AuditAction: string
     // Taking a service away, and giving it back.
     case CustomerSuspended = 'customer.suspended';
     case CustomerUnsuspended = 'customer.unsuspended';
+
+    /*
+     * The account's country or currency. Requested by the customer, decided
+     * by an operator, applied by the platform after checking the facts one
+     * last time — and `blocked` is the last check finding an invoice or an
+     * order that was not there at approval, so nothing was applied.
+     */
+    case CountryCurrencyChangeRequested = 'account.country_currency_change.requested';
+    case CountryCurrencyChangeWithdrawn = 'account.country_currency_change.withdrawn';
+    case CountryCurrencyChangeApproved = 'account.country_currency_change.approved';
+    case CountryCurrencyChangeRejected = 'account.country_currency_change.rejected';
+    case CountryCurrencyChangeApplied = 'account.country_currency_change.applied';
+    case CountryCurrencyChangeBlocked = 'account.country_currency_change.blocked';
     case HostingAccountUnsuspended = 'hosting_account.unsuspended';
     case HostingAccountTerminated = 'hosting_account.terminated';
 

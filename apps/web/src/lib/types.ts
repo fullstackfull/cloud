@@ -266,6 +266,35 @@ export interface Backup {
   files: { supported: boolean; reason: string | null }
 }
 
+export interface CountryCurrencyImpact {
+  /** Counts and minor-unit amounts in the currency named beside them. Nothing is converted. */
+  facts: Record<string, string | number | boolean>
+  /** What must change before this can be applied, in words. */
+  blockers: string[]
+  /** What will be true afterwards; not a reason to refuse. */
+  warnings: string[]
+}
+
+export interface CountryCurrencyChange {
+  id: string
+  customer_id: string
+  state: string
+  is_open: boolean
+  needs_attention: boolean
+  from_country: string | null
+  to_country: string | null
+  from_currency: string
+  to_currency: string
+  reason: string
+  impact: CountryCurrencyImpact
+  decision_note: string | null
+  analysed_at: string
+  decided_at: string | null
+  scheduled_for: string | null
+  applied_at: string | null
+  created_at: string
+}
+
 export type BackupFileKind = 'file' | 'directory' | 'symlink' | 'other'
 
 export interface BackupFileEntry {

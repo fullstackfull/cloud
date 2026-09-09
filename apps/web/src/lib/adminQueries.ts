@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { request } from '@/lib/api'
-import type { Envelope, Money, Paginated } from '@/lib/types'
+import type { CountryCurrencyChange, Envelope, Money, Paginated } from '@/lib/types'
 
 /**
  * The administrative surface.
@@ -452,4 +452,37 @@ export function useReopenTicket() {
   return useTicketMutation((id: string) =>
     admin.post<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(id)}/reopen`, {}),
   )
+}
+
+/* --------------------------------------------- account country/currency */
+
+export interface AdminCountryCurrencyChange extends CountryCurrencyChange {
+  customer: { id: string; display_name: string | null; billing_email: string | null }
+}
+
+export function useAdminCountryCurrencyChanges(page: number, state: string) {
+  return useQuery({
+    queryKey: ['admin', 'country-currency-changes', page, state],
+    queryFn: () =>
+      admin.get<Paginated<AdminCountryCurrencyChange>>('/customers/country-currency-changes', {
+        page,
+        state: state === '' ? undefined : state,
+      }),
+  })
+}
+
+export function useDecideCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, verdict, note, applyAt }: { id: string; verdict: 'approve' | 'reject'; note: string; applyAt?: string }) =>
+      admin.post<Envelope<AdminCountryCurrencyChange>>(
+        `/customers/country-currency-changes/${encodeURIComponent(id)}/${verdict}`,
+        verdict === 'approve' && applyAt !== undefined && applyAt !== '' ? { note, apply_at: applyAt } : { note },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'country-currency-changes'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'customers'] })
+    },
+  })
 }

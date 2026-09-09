@@ -43,6 +43,18 @@ return [
             'title' => 'Order :number received',
             'body' => 'We have your order and will start work as soon as it is paid.',
         ],
+        'country_currency_change_applied' => [
+            'title' => 'Your account is now billed in :currency',
+            'body' => 'From now on, new invoices for this account are issued in :currency with the tax for :country. Invoices, payments and orders already recorded are unchanged.',
+        ],
+        'country_currency_change_rejected' => [
+            'title' => 'Your country/currency change was not approved',
+            'body' => 'The request to move this account to :currency / :country was declined: :note. Nothing on the account has changed.',
+        ],
+        'country_currency_change_needs_review' => [
+            'title' => 'Your country/currency change is on hold',
+            'body' => 'The approved change to :currency / :country could not be applied because something on the account changed since it was approved. Our team is looking at it; nothing needs doing on your side.',
+        ],
         'invoice_issued' => [
             'title' => 'Invoice :number for :amount',
             'body' => 'Invoice :number has been issued for :amount and is due on :due_date.',

@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { PageHeader } from '@/components/PageHeader'
+import { CountryCurrencySection } from '@/features/account/CountryCurrencySection'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
@@ -93,6 +94,18 @@ export function DashboardPage() {
           </Link>
         </Card>
       </div>
+
+      {/*
+        * One billing account is the ordinary case, and its country and
+        * currency are shown with the request to change them. Several
+        * accounts each get their own card: what one is billed in says
+        * nothing about another.
+        */}
+      {user.customers.map((customer) => (
+        <div key={customer.id} className="mt-4">
+          <CountryCurrencySection customer={customer} />
+        </div>
+      ))}
     </>
   )
 }

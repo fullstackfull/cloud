@@ -449,6 +449,30 @@ return [
 
     'api.admin.customers.index' => ['tag' => 'Operator', 'summary' => 'Search accounts', 'permission' => 'customer.view_any', 'query' => ['q', 'status'], 'response' => $many('AdminCustomer')],
     'api.admin.customers.show' => ['tag' => 'Operator', 'summary' => 'One account', 'permission' => 'customer.view', 'response' => $one('AdminCustomer')],
+    'api.admin.customers.country_currency_changes.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Requests to change an account\'s country or currency',
+        'description' => 'Open requests by default (needs_review first, then awaiting approval, then scheduled); `state` filters. Each carries the analysis as last run: counts and minor-unit amounts in the currency named beside them, the blockers in words, and the warnings.',
+        'permission' => 'customer.view_any',
+        'query' => ['state'],
+        'response' => $many('AdminCountryCurrencyChange'),
+    ],
+    'api.admin.customers.country_currency_changes.approve' => [
+        'tag' => 'Operator',
+        'summary' => 'Approve a country/currency change',
+        'description' => 'Runs the analysis again first and refuses (409 `account.country_currency_change.blocked`) if the account has grown a blocker since the customer asked — an open invoice, an order in flight, a subscription in the old currency, a wallet balance. Approved for now, the account changes in the same request; approved with `apply_at`, the change is `scheduled` and the sweep applies it then after checking again. Nothing already issued is converted.',
+        'permission' => 'customer.update',
+        'body' => ['note', 'apply_at'],
+        'response' => $one('AdminCountryCurrencyChange'),
+    ],
+    'api.admin.customers.country_currency_changes.reject' => [
+        'tag' => 'Operator',
+        'summary' => 'Reject a country/currency change',
+        'description' => 'With a note the customer is told. Also takes a scheduled change back before the sweep applies it.',
+        'permission' => 'customer.update',
+        'body' => ['note'],
+        'response' => $one('AdminCountryCurrencyChange'),
+    ],
     'api.admin.customers.status' => [
         'tag' => 'Operator',
         'summary' => 'Suspend or reinstate an account',
@@ -492,6 +516,36 @@ return [
         'body' => ['confirmation'],
         'response' => $one('Backup', 202),
     ],
+    /* ---------------------------------------------------------------------
+     | The account's country and currency
+     */
+
+    'api.v1.account.country_currency_changes.index' => [
+        'tag' => 'Account',
+        'summary' => 'Requests to change this account\'s country or currency',
+        'description' => 'The last twenty, newest first, each with its analysis. `meta.currencies` lists the currencies the catalogue prices anything in — the only ones an account can be billed in. Requires `customer.manage`.',
+        'response' => $many('CountryCurrencyChange'),
+    ],
+    'api.v1.account.country_currency_changes.store' => [
+        'tag' => 'Account',
+        'summary' => 'Ask for the country or currency to change',
+        'description' => 'Nothing on the account changes here. The request is analysed against the account as it is and recorded as `blocked` — with what must change first, in words — or `awaiting_approval` for an operator. A currency change is blocked while anything priced in the old currency is still live: an open invoice, an order between placement and provisioning, a domain operation with the registrar, an active or past-due subscription, a wallet balance; and while the catalogue prices nothing in the new currency. A country-only change is not blocked by those; it changes the tax on invoices issued from then on and is reported as such. Nothing already issued is ever converted. One open request per account (409).',
+        'body' => ['country', 'currency', 'reason'],
+        'response' => $one('CountryCurrencyChange', 201),
+    ],
+    'api.v1.account.country_currency_changes.reanalyse' => [
+        'tag' => 'Account',
+        'summary' => 'Check a request against the account again',
+        'description' => 'After paying the invoice or ending the subscription the blockers named: moves between `blocked` and `awaiting_approval` as the facts say.',
+        'response' => $one('CountryCurrencyChange'),
+    ],
+    'api.v1.account.country_currency_changes.withdraw' => [
+        'tag' => 'Account',
+        'summary' => 'Take a request back',
+        'description' => 'While it is open — including after an operator scheduled it, up to the moment it is applied.',
+        'response' => $one('CountryCurrencyChange'),
+    ],
+
     'api.v1.me.notification_preferences.index' => [
         'tag' => 'Account',
         'summary' => 'Which optional messages this person wants',

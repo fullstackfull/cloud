@@ -12,6 +12,7 @@ use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
+use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Monitoring\Domain\Contracts\MetricsCollector;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\Metric;
@@ -67,6 +68,7 @@ final readonly class ProductCollector implements MetricsCollector
             $this->backupDeletion(),
             $this->backupRetention(),
             $this->fileRestores(),
+            $this->countryCurrencyChanges(),
             $this->domains(),
             $this->domainOperations(),
             $this->domainRedemptions(),
@@ -273,6 +275,31 @@ final readonly class ProductCollector implements MetricsCollector
         return Metric::gauge(
             'lynomia_backup_file_restores_total',
             'File-level restores by state. `needs_review` is one the provider did not confirm; it is never retried and waits for a person.',
+            $samples,
+        );
+    }
+
+    /**
+     * Requests to change an account's country or currency, by state.
+     * `needs_review` is one that was approved and then found a blocker at
+     * the moment of applying; nothing was written and a person decides.
+     */
+    private function countryCurrencyChanges(): Metric
+    {
+        $counts = DB::table('customer_country_currency_changes')
+            ->selectRaw('state, count(*) as total')
+            ->groupBy('state')
+            ->pluck('total', 'state');
+
+        $samples = [];
+
+        foreach (CountryCurrencyChangeState::cases() as $state) {
+            $samples[] = MetricSample::of(['state' => $state->value], (float) ($counts[$state->value] ?? 0));
+        }
+
+        return Metric::gauge(
+            'lynomia_country_currency_changes_total',
+            'Account country/currency change requests by state. `needs_review` was approved and then held at the last check; `blocked` is waiting on the customer.',
             $samples,
         );
     }

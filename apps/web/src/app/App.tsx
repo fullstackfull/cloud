@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { DashboardPage } from '@/features/account/DashboardPage'
+import { AdminAccountChangesPage } from '@/features/admin/AdminAccountChangesPage'
 import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
 import { AdminDriftPage } from '@/features/admin/AdminDriftPage'
 import { AdminSupportPage } from '@/features/admin/AdminSupportPage'
@@ -145,6 +146,7 @@ export function App() {
                 */}
                 <Route element={<RequireOperator />}>
                   <Route path="/admin/customers" element={<AdminCustomersPage />} />
+                  <Route path="/admin/account-changes" element={<AdminAccountChangesPage />} />
                   <Route path="/admin/provisioning" element={<AdminProvisioningPage />} />
                   <Route path="/admin/operations" element={<AdminOperationsPage />} />
                   <Route path="/admin/drift" element={<AdminDriftPage />} />

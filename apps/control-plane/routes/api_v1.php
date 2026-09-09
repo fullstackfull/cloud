@@ -175,6 +175,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->gro
         'notifications',
         'support',
         'team',
+        'account',
     ] as $module) {
         $file = __DIR__.'/v1/'.$module.'.php';
 
