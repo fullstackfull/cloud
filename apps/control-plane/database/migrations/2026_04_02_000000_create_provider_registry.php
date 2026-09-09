@@ -71,6 +71,14 @@ return new class extends Migration
             $table->index(['environment', 'state']);
         });
 
+        // Deferred from the registry migration, which creates managed_servers
+        // before this table exists.
+        Schema::table('managed_servers', function (Blueprint $table): void {
+            $table->foreign('credential_reference_id')
+                ->references('id')->on('credential_references')
+                ->nullOnDelete();
+        });
+
         Schema::create('licences', function (Blueprint $table): void {
             $table->ulid('id')->primary();
 
@@ -197,6 +205,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        Schema::table('managed_servers', function (Blueprint $table): void {
+            $table->dropForeign(['credential_reference_id']);
+        });
+
         Schema::dropIfExists('connection_tests');
         Schema::dropIfExists('provider_capabilities');
         Schema::dropIfExists('provider_instances');

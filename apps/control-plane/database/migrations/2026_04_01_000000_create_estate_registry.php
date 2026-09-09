@@ -100,6 +100,13 @@ return new class extends Migration
 
             $table->string('operating_system')->nullable();
 
+            // How we authenticate to it. A reference, never a secret — the
+            // same architecture provider instances use, because a machine's
+            // BMC password is exactly as dangerous as a registrar's API key.
+            // The foreign key is added by the provider migration, which is
+            // where credential_references is created.
+            $table->ulid('credential_reference_id')->nullable();
+
             // Safety. The two columns the CHECK constraint below ties together.
             $table->string('safety_class')->default('do_not_touch');
             $table->boolean('allow_reimage')->default(false);

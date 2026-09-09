@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
+use Lynomia\Modules\Estate\Infrastructure\EstateServiceProvider;
 use Lynomia\Modules\Notifications\Infrastructure\NotificationServiceProvider;
 use Lynomia\Modules\Payments\Infrastructure\PaymentsServiceProvider;
 use Lynomia\Providers\ApiTokenServiceProvider;
@@ -27,5 +28,6 @@ return [
     PaymentsServiceProvider::class,
     EventServiceProvider::class,
     InfrastructureServiceProvider::class,
+    EstateServiceProvider::class,
     NotificationServiceProvider::class,
 ];

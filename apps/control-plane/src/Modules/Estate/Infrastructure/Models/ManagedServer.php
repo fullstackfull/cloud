@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Estate\Infrastructure\Models;
 
+use Database\Factories\ManagedServerFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -39,7 +41,8 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
  */
 class ManagedServer extends Model
 {
-    use HasUlids;
+    /** @use HasFactory<ManagedServerFactory> */
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
@@ -133,6 +136,14 @@ class ManagedServer extends Model
     public function rack(): BelongsTo
     {
         return $this->belongsTo(Rack::class);
+    }
+
+    /**
+     * @return BelongsTo<CredentialReference, $this>
+     */
+    public function credential(): BelongsTo
+    {
+        return $this->belongsTo(CredentialReference::class, 'credential_reference_id');
     }
 
     /**

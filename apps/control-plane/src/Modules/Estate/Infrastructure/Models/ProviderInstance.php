@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Estate\Infrastructure\Models;
 
+use Database\Factories\ProviderInstanceFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -40,7 +42,8 @@ use Lynomia\Modules\Estate\Domain\Enums\ReadinessState;
  */
 class ProviderInstance extends Model
 {
-    use HasUlids;
+    /** @use HasFactory<ProviderInstanceFactory> */
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 
