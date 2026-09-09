@@ -15,6 +15,7 @@ use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
+use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderCatalogueController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
@@ -213,6 +214,14 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::SafetyChange->value)
         ->name('infrastructure.servers.revoke_reimage_clearance');
 
+    Route::post('infrastructure/servers/{server}/credential', [ServerController::class, 'attachCredential'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('infrastructure.servers.attach_credential');
+
+    Route::delete('infrastructure/servers/{server}/credential', [ServerController::class, 'detachCredential'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('infrastructure.servers.detach_credential');
+
     Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.connection_test');
@@ -259,6 +268,41 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('providers/{provider}/assess', [ProviderController::class, 'assess'])
         ->middleware('permission:'.Permission::ProviderManage->value)
         ->name('providers.assess');
+
+    Route::post('providers/{provider}/credential', [CredentialController::class, 'attachToProvider'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('providers.attach_credential');
+
+    Route::delete('providers/{provider}/credential', [CredentialController::class, 'detachFromProvider'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('providers.detach_credential');
+
+    /*
+     | Credentials: references into the secret store, never values.
+     |
+     | Reading is the operator-view permission — a credential's row says its
+     | name, its state and what uses it, none of which opens anything. Every
+     | write is credential.manage, which the support role does not hold.
+     */
+    Route::get('credentials', [CredentialController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('credentials.index');
+
+    Route::get('credentials/{credential}', [CredentialController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('credentials.show');
+
+    Route::post('credentials', [CredentialController::class, 'store'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('credentials.store');
+
+    Route::post('credentials/{credential}/revoke', [CredentialController::class, 'revoke'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('credentials.revoke');
+
+    Route::post('credentials/{credential}/rotated', [CredentialController::class, 'rotated'])
+        ->middleware('permission:'.Permission::CredentialManage->value)
+        ->name('credentials.rotated');
 
     Route::post('providers/{provider}/connection-test', [ConnectionTestController::class, 'forProvider'])
         ->middleware('permission:'.Permission::ProviderManage->value)

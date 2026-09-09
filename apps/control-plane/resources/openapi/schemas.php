@@ -631,6 +631,38 @@ return [
             'available_here' => ['type' => 'boolean', 'description' => 'False for the controlled drivers on a production installation.'],
         ],
     ],
+    'Credential' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A reference to a secret: where it lives and whether it works. Never the secret, and never '
+            .'its location in the store. `present` says whether the deployment controller currently holds a value '
+            .'behind the reference, which is the one question about a secret that may be answered over the network.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'name' => ['type' => 'string'],
+            'purpose' => ['type' => ['string', 'null']],
+            'environment' => ['type' => 'string', 'enum' => ['development', 'staging', 'production']],
+            'backend' => ['type' => 'string'],
+            'state' => [
+                'type' => 'string',
+                'enum' => ['missing', 'configured', 'untested', 'valid', 'invalid', 'expired', 'rotation_due', 'revoked'],
+                'description' => 'Configured means recorded and present; Valid means somebody used it successfully. Only Valid serves.',
+            ],
+            'usable' => ['type' => 'boolean'],
+            'present' => ['type' => 'boolean'],
+            'masked_hint' => ['type' => ['string', 'null'], 'description' => 'At most four characters of a public identifier the operator chose. Never derived from the secret.'],
+            'usage' => ['type' => 'object', 'additionalProperties' => true],
+            'providers' => ['type' => 'integer'],
+            'servers' => ['type' => 'integer'],
+            'last_tested_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'rotated_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'rotates_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'revoked_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'revoked_reason' => ['type' => ['string', 'null']],
+            'notes' => ['type' => ['string', 'null']],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
     'IpAssignment' => [
         'type' => 'object',
         'additionalProperties' => false,

@@ -171,7 +171,13 @@
     "validating": "قيد التحقق",
     "verified": "مُتحقَّق منه",
     "verifying": "قيد التأكد",
-    "void": "ملغاة"
+    "void": "ملغاة",
+    "missing": "مفقود",
+    "configured": "مُعدّ",
+    "untested": "غير مختبَر",
+    "valid": "صالح",
+    "invalid": "غير صالح",
+    "rotation_due": "يستحق التدوير"
   },
   "account": {
     "welcome": "أهلاً، {{name}}",
@@ -491,7 +497,9 @@
       "payments": "المدفوعات",
       "operations": "إعادة التثبيت",
       "drift": "الانحراف",
-      "support": "الدعم"
+      "support": "الدعم",
+      "controlCenter": "مركز التحكم",
+      "credentials": "الاعتمادات"
     },
     "customers": {
       "title": "العملاء",
@@ -672,6 +680,60 @@
       "reopen": "إعادة الفتح",
       "close": "إغلاق",
       "reopenedTimes": "أُعيد فتح هذه التذكرة {{count}} مرّة. قد لا تكون قد حُلّت فعلًا."
+    },
+    "controlCenter": {
+      "section": "مركز التحكم",
+      "allEnvironments": "كل البيئات",
+      "environments": {
+        "development": "تطوير",
+        "staging": "تجريب",
+        "production": "إنتاج"
+      }
+    },
+    "credentials": {
+      "title": "الاعتمادات",
+      "subtitle": "أين يقع كل سرّ، وهل يملكه المتحكّم، وهل عمل يوماً. لا يُعرض السرّ نفسه أبداً.",
+      "record": "تسجيل اعتماد",
+      "recordTitle": "تسجيل مكان الاعتماد",
+      "neverPaste": "لا تلصق السرّ. أدخل اسم المتغيّر الذي يحمله على متحكّم النشر. أي قيمة تُرسل هنا تُرفض — وقد صارت في جسم طلب، فدوّرها.",
+      "name": "الاسم",
+      "purpose": "الغرض",
+      "environment": "البيئة",
+      "reference": "اسم المتغيّر على المتحكّم",
+      "referenceHint": "أحرف كبيرة وأرقام وشرطات سفلية، مثل LYNOMIA_REGISTRAR_API_KEY.",
+      "maskedHint": "تلميح عام",
+      "maskedHintHint": "حتى أربعة أحرف من معرّف عام، مثل نهاية معرّف الرمز. ليس جزءاً من السرّ أبداً.",
+      "rotatesAt": "موعد التدوير",
+      "notes": "ملاحظات",
+      "submit": "تسجيل",
+      "state": "الحالة",
+      "present": "موجود على المتحكّم",
+      "absent": "غير موجود على المتحكّم",
+      "usage": "يستخدمه",
+      "usageProviders_zero": "لا مزوّدين",
+      "usageProviders_one": "مزوّد واحد",
+      "usageProviders_two": "مزوّدان",
+      "usageProviders_few": "{{count}} مزوّدين",
+      "usageProviders_many": "{{count}} مزوّداً",
+      "usageProviders_other": "{{count}} مزوّد",
+      "usageServers_zero": "لا أجهزة",
+      "usageServers_one": "جهاز واحد",
+      "usageServers_two": "جهازان",
+      "usageServers_few": "{{count}} أجهزة",
+      "usageServers_many": "{{count}} جهازاً",
+      "usageServers_other": "{{count}} جهاز",
+      "lastTested": "آخر اختبار",
+      "never": "لم يُختبر",
+      "markRotated": "تم التدوير",
+      "markRotatedTitle": "تم تدوير {{name}}",
+      "markRotatedBody": "أكّد أن القيمة على متحكّم النشر استُبدلت. يُنسى كل ما ثبت عن القيمة القديمة: تعود الحالة إلى «مُعدّ»، وكل مزوّد يستخدمها يجب اختباره مجدداً قبل تفعيله.",
+      "revoke": "إلغاء",
+      "revokeTitle": "إلغاء {{name}}",
+      "revokeBody": "لن يُجرَّب هذا الاعتماد مرة أخرى. كل مزوّد وجهاز يشير إليه سيبلّغ عن مُعيق اعتمادات من الآن. لا يُعطَّل شيء تلقائياً — ذلك قرارك. يبقى الصف ليقول تلك المُعيقات لماذا.",
+      "revokeReason": "لماذا؟",
+      "revokeReasonHint": "يُسجَّل في سجل التدقيق ويُعرض بجانب كل مُعيق يسبّبه.",
+      "revokedOn": "أُلغي {{when}}",
+      "empty": "لا اعتمادات مسجَّلة."
     }
   },
   "backups": {

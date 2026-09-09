@@ -12,11 +12,11 @@ reserved for Phase 30B resuming against real systems.
 |---|---|
 | Branch | `claude/hv-t6hq1p` |
 | HEAD at time of writing | see the commit that introduced this revision of the file |
-| Backend tests | 2570 / 2570 passing locally (run 99 in CI: 2568 passed, 1 failed — the gate fixed here) |
+| Backend tests | 2589 / 2589 passing locally |
 | PHPStan | 0 errors |
-| Frontend unit tests | 54 / 54 (9 files) |
-| Browser E2E | 105 tests in 15 files (none yet cover the Control Center — no Control Center screens exist) |
-| OpenAPI operations | 165, generator and committed document in agreement |
+| Frontend unit tests | 61 / 61 (11 files) |
+| Browser E2E | 110 tests in 16 files (5 cover the Control Center credentials screen) |
+| OpenAPI operations | 174, generator and committed document in agreement |
 
 ---
 
@@ -59,7 +59,7 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Datacenter/Rack Registry | PARTIAL | Tables pre-existed (`datacenters`, `racks`); `racks` extended with `power_notes`/`network_notes`. No registry actions, API or screen for this phase. |
 | Server Registry | COMPLETE (backend) | `RegisterServer`, `ServerController::{index,show,store}`, `ServerResource`, OpenAPI, audit `infrastructure.server.registered`, 13 + 8 feature tests. **No operator screen yet.** |
 | Server Detail | PARTIAL | `show` endpoint carries `safety.permits.*` so a screen can disable controls. No screen. |
-| Server Onboarding | PARTIAL | Register → classify → credential → connection-test works over HTTP. No wizard screen; no credential-attach endpoint (arrives with Credential References). |
+| Server Onboarding | PARTIAL | Register → classify → attach credential → connection-test works over HTTP, all with screens still to come except credentials. No wizard screen. |
 | Safety Enforcement | COMPLETE (backend) | `SafetyGate` pure function, 39 unit cases; `ClassifyServer` (one rung up, any distance down, typed name for destructive rung, row lock, reason); `ClearForReimage` / `RevokeReimageClearance` under separate permissions; DB CHECK `allow_reimage = false OR safety_class = 'reimage_allowed'`; connection test gated on `Read`; refusals are 409 carrying classification/attempted/would-permit. Ansible `safety_gate` role proves the same rule on the IaC side (10/10). |
 | Connection Framework | COMPLETE (backend) | `ConnectionTester` contract, `ConnectionTesterFactory` (bind, not singleton; verifies `driver()`), `FakeConnectionTester` with nine failure markers and a production guard; `TestConnection::{forServer,forProvider}`; `connection_tests` table with exactly-one-subject CHECK; audit `providers.connection.tested`. **Only the `fake` driver has a tester** — see F. |
 | Discovery Framework | PARTIAL | `server_facts` table with one-current-value partial unique index, `FactSource` enum, `ServerFact::scopeCurrent`. No discovery action writes facts yet. |
@@ -67,7 +67,7 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Provider Catalog | COMPLETE (backend) | `ProviderCatalogue` in source (12 drivers), `CatalogueEntryResource` with `testable` and `available_here`; `TheCatalogueOnlyClaimsWhatExistsTest` names the adapter class per driver. **No screen.** |
 | Requirement Engine | PARTIAL | Per-driver requirements (`needsEndpoint/Credential/Licence/Server`) live on `CatalogueEntry` and drive readiness. No cross-product requirement matrix. |
 | Licence Center | NOT STARTED | `licences` table, `Licence` model, `LicenceState`, `stateFromDates()` (no caller yet), factory. No actions, API, audit or screen. |
-| Credential References | PARTIAL | `credential_references` table, model with `backend_reference` hidden, `mayBeTried` vs `mayServe` (both with real callers), `ControllerEnvironmentSecretResolver` via `getenv()`, `TestTarget` self-redacting DTO. **No actions, API, audit or screen** — the end-to-end provider test attaches a credential directly and says so. |
+| Credential References | **COMPLETE** | `RecordCredentialReference` (reference shape enforced; a value-shaped reference is refused with "rotate it now"; any unexpected field such as `secret`/`password` is refused by name and never echoed), `AttachCredential` to provider or machine (revoked and cross-environment refused at attachment, not only at use), `RevokeCredential` (reason, row lock, every dependent provider reassessed, nothing switched off), `MarkCredentialRotated` (state drops to configured/missing, last test forgotten, dependents reassessed). `SecretResolver::exists()` answers presence without ever holding the value. 9 routes; `CredentialResource` never carries `backend_reference`; 5 audit actions; OpenAPI; 21 feature tests; **Credentials screen** at `/admin/control-center/credentials` (en/ar) with component tests and 5 browser tests. |
 | Capability Discovery | PARTIAL | Discovery runs inside `TestConnection::forProvider` and writes `provider_capabilities`; readiness refuses `ReadyForProduction` until capabilities exist. No standalone discovery action or surface. |
 | Software Profiles | NOT STARTED | Tables and models only. |
 | Desired State | NOT STARTED | Tables and models only. |
@@ -168,15 +168,15 @@ until the first real endpoint exists.
 
 ## H. Remaining blockers to closure, in order
 
-1. CI green on a pushed HEAD (this commit).
-2. Credential References: actions, API, audit, tests — closes the one named seam in the provider end-to-end test.
+1. ~~CI green on a pushed HEAD.~~ Done at `fb2dd68`, run 101.
+2. ~~Credential References.~~ Done; the provider end-to-end test still attaches directly and is updated in the Licence Center slice to go through the endpoint.
 3. Licence Center.
 4. Capability Discovery as its own surface; derive `driver` for server tests from the BMC provider instead of the request.
 5. Requirement Engine, product readiness, `READY_TO_SELL`, blocker propagation, dependency view.
 6. Profiles → desired state → plan (fingerprint) → approval (invalidated on plan change) → deployment jobs → controller bridge → IaC bridge, with timeout/indeterminate states under the Timeout Rule.
 7. SSRF and IaC-input guards; observability.
 8. Control Center frontend (en/ar, RTL/LTR) and browser E2E.
-9. Pre-existing, found while chasing CI: the invoice credit dialogue's confirm button is enabled before the quote has loaded and does nothing when pressed then. Not touched in this phase; should be disabled until the quote is present.
+9. ~~Pre-existing, found while chasing CI: the invoice credit dialogue's confirm button was enabled before the quote had loaded.~~ Fixed: `ConfirmDialog` takes `ready`, and the credit dialogue passes the same condition its handler checks. Component-tested.
 10. Clean room, both matrices, closing questions.
 
 ## I. Closing questions (to be answered at closure)

@@ -40,6 +40,13 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   void: 'danger',
   refused: 'danger',
   revoked: 'danger',
+  // Credential references. Configured is not proven, so it is informational.
+  missing: 'danger',
+  configured: 'info',
+  untested: 'info',
+  valid: 'success',
+  invalid: 'danger',
+  rotation_due: 'warning',
 }
 
 export function StatusBadge({ status }: { status: string }) {

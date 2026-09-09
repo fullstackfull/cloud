@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Providers\Infrastructure\Models;
 
+use Carbon\CarbonImmutable;
 use Database\Factories\CredentialReferenceFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 
@@ -26,7 +28,21 @@ use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
  * tell two credentials apart on a screen. It is never derived from the secret
  * half, because four characters of a secret is four characters of a secret.
  *
+ * @property string $id
  * @property string $name
+ * @property string $purpose
+ * @property string $backend
+ * @property string $backend_reference
+ * @property ?string $masked_hint
+ * @property ?string $notes
+ * @property ?string $revoked_reason
+ * @property ?CarbonImmutable $last_tested_at
+ * @property ?CarbonImmutable $rotates_at
+ * @property ?CarbonImmutable $rotated_at
+ * @property ?CarbonImmutable $revoked_at
+ * @property ?CarbonImmutable $created_at
+ * @property-read ?int $provider_instances_count
+ * @property-read ?int $servers_count
  * @property DeploymentEnvironment $environment
  * @property CredentialState $state
  * @property string $backend
@@ -78,6 +94,8 @@ class CredentialReference extends Model
             'last_tested_at' => 'immutable_datetime',
             'rotates_at' => 'immutable_datetime',
             'rotation_reminder_at' => 'immutable_datetime',
+            'rotated_at' => 'immutable_datetime',
+            'revoked_at' => 'immutable_datetime',
         ];
     }
 
@@ -98,6 +116,23 @@ class CredentialReference extends Model
      * Requires a credential somebody has proven, which is why it is not the
      * rule a connection test uses — see mayBeTried.
      */
+    /**
+     * @return HasMany<ManagedServer, $this>
+     */
+    public function servers(): HasMany
+    {
+        return $this->hasMany(ManagedServer::class, 'credential_reference_id');
+    }
+
+    /**
+     * Withdrawn: nothing may try it, nothing may serve with it, and the row
+     * stays so that everything pointing at it can say why it is blocked.
+     */
+    public function isRevoked(): bool
+    {
+        return $this->state === CredentialState::Revoked;
+    }
+
     public function mayServe(DeploymentEnvironment $environment): bool
     {
         return $this->environment->satisfies($environment) && $this->state->usable();

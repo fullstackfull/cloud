@@ -18,6 +18,9 @@ use Lynomia\Modules\Infrastructure\Http\Requests\ClearForReimageRequest;
 use Lynomia\Modules\Infrastructure\Http\Requests\RegisterServerRequest;
 use Lynomia\Modules\Infrastructure\Http\Resources\ServerResource;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Providers\Application\Actions\AttachCredential;
+use Lynomia\Modules\Providers\Domain\Exceptions\CredentialRefused;
+use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -139,6 +142,42 @@ final class ServerController
         $updated = $revoke->execute($found, $request->user());
 
         return response()->json(['data' => (new ServerResource($updated))->toArray($request)]);
+    }
+
+    /**
+     * Point this machine at the credential it is reached with.
+     *
+     * Lives here rather than in the Providers controller because the response
+     * is a machine, and a module rendering another module's resource is the
+     * boundary LayeringTest holds. The act itself — environment check, refusal
+     * of a revoked credential, the audit row — is Providers' AttachCredential,
+     * so both surfaces attach by one rule.
+     */
+    public function attachCredential(Request $request, string $server, AttachCredential $attach): JsonResponse
+    {
+        $request->validate(['credential_id' => ['required', 'string', 'exists:credential_references,id']]);
+
+        $found = ManagedServer::query()->findOrFail($server);
+        $credential = CredentialReference::query()->findOrFail($request->string('credential_id')->value());
+
+        try {
+            $attached = $attach->toServer($found, $credential, $request->user());
+        } catch (CredentialRefused $refusal) {
+            return response()->json([
+                'error' => ['code' => 'credential_refused', 'message' => $refusal->getMessage()],
+            ], Response::HTTP_CONFLICT);
+        }
+
+        return response()->json(['data' => (new ServerResource($attached->load('credential')))->toArray($request)]);
+    }
+
+    public function detachCredential(Request $request, string $server, AttachCredential $attach): JsonResponse
+    {
+        $found = ManagedServer::query()->with('credential')->findOrFail($server);
+
+        $detached = $attach->fromServer($found, $request->user());
+
+        return response()->json(['data' => (new ServerResource($detached->load('credential')))->toArray($request)]);
     }
 
     private function refused(string $message): JsonResponse

@@ -177,6 +177,361 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/credentials":
+    get:
+      operationId: "api_admin_credentials_index"
+      tags:
+        - "Operator"
+      summary: "Credential references"
+      description: |-
+        Missing and invalid first — the ones that need a person.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "environment"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CredentialPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_credentials_store"
+      tags:
+        - "Operator"
+      summary: "Record where a credential lives"
+      description: |-
+        The reference is the NAME of a variable on the deployment controller. Recorded as configured if the controller already holds a value behind it, missing otherwise; neither is valid until a connection test succeeds. 409 for a reference shaped like a value; 422 for any unexpected field, named.
+
+        Requires the `credential.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                purpose:
+                  description: "See the endpoint description; validated server-side."
+                environment:
+                  description: "See the endpoint description; validated server-side."
+                backend:
+                  description: "See the endpoint description; validated server-side."
+                backend_reference:
+                  description: "See the endpoint description; validated server-side."
+                masked_hint:
+                  description: "See the endpoint description; validated server-side."
+                rotates_at:
+                  description: "See the endpoint description; validated server-side."
+                notes:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CredentialResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/credentials/{credential}":
+    get:
+      operationId: "api_admin_credentials_show"
+      tags:
+        - "Operator"
+      summary: "One credential reference"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "credential"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CredentialResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/credentials/{credential}/revoke":
+    post:
+      operationId: "api_admin_credentials_revoke"
+      tags:
+        - "Operator"
+      summary: "Withdraw a credential from everything using it"
+      description: |-
+        Every provider pointing at it is reassessed and reports a credentials blocker. Nothing is switched off automatically — that is an operator decision — and the row stays so that what pointed at it can say why it is blocked. 409 if already revoked.
+
+        Requires the `credential.manage` permission.
+      parameters:
+        - name: "credential"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CredentialResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/credentials/{credential}/rotated":
+    post:
+      operationId: "api_admin_credentials_rotated"
+      tags:
+        - "Operator"
+      summary: "Record that the secret behind a reference was changed"
+      description: |-
+        Whatever was proven about the old value is forgotten: the state drops to configured (or missing, if the controller does not yet hold the new value) and every provider using it is reassessed. 409 for a revoked credential.
+
+        Requires the `credential.manage` permission.
+      parameters:
+        - name: "credential"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                rotates_at:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CredentialResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/customers":
     get:
       operationId: "api_admin_customers_index"
@@ -1677,6 +2032,136 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/credential":
+    post:
+      operationId: "api_admin_infrastructure_servers_attach_credential"
+      tags:
+        - "Operator"
+      summary: "Point a machine at the credential it is reached with"
+      description: |-
+        Opens no socket and is not subject to the safety classification; the connection test that uses the credential still is. Same environment and revocation rules as for a provider.
+
+        Requires the `credential.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                credential_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ServerResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      operationId: "api_admin_infrastructure_servers_detach_credential"
+      tags:
+        - "Operator"
+      summary: "Remove the credential from a machine"
+      description: "Requires the `credential.manage` permission."
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ServerResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/invoices":
     get:
       operationId: "api_admin_invoices_index"
@@ -2389,6 +2874,136 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/ConnectionTestResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/providers/{provider}/credential":
+    post:
+      operationId: "api_admin_providers_attach_credential"
+      tags:
+        - "Operator"
+      summary: "Point a provider at a credential"
+      description: |-
+        Refused at attachment for a revoked credential or one from another environment — not only at use, so two independent guards must fail before a token crosses an environment. Readiness is recomputed.
+
+        Requires the `credential.manage` permission.
+      parameters:
+        - name: "provider"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                credential_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProviderResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      operationId: "api_admin_providers_detach_credential"
+      tags:
+        - "Operator"
+      summary: "Remove the credential from a provider"
+      description: "Requires the `credential.manage` permission."
+      parameters:
+        - name: "provider"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProviderResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -11920,6 +12535,92 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ConsoleSession"
+    Credential:
+      type: "object"
+      additionalProperties: false
+      description: "A reference to a secret: where it lives and whether it works. Never the secret, and never its location in the store. `present` says whether the deployment controller currently holds a value behind the reference, which is the one question about a secret that may be answered over the network."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type: "string"
+        purpose:
+          type:
+            - "string"
+            - "null"
+        environment:
+          type: "string"
+          enum:
+            - "development"
+            - "staging"
+            - "production"
+        backend:
+          type: "string"
+        state:
+          type: "string"
+          enum:
+            - "missing"
+            - "configured"
+            - "untested"
+            - "valid"
+            - "invalid"
+            - "expired"
+            - "rotation_due"
+            - "revoked"
+          description: "Configured means recorded and present; Valid means somebody used it successfully. Only Valid serves."
+        usable:
+          type: "boolean"
+        present:
+          type: "boolean"
+        masked_hint:
+          type:
+            - "string"
+            - "null"
+          description: "At most four characters of a public identifier the operator chose. Never derived from the secret."
+        usage:
+          type: "object"
+          additionalProperties: true
+        providers:
+          type: "integer"
+        servers:
+          type: "integer"
+        last_tested_at:
+          "$ref": "#/components/schemas/Timestamp"
+        rotated_at:
+          "$ref": "#/components/schemas/Timestamp"
+        rotates_at:
+          "$ref": "#/components/schemas/Timestamp"
+        revoked_at:
+          "$ref": "#/components/schemas/Timestamp"
+        revoked_reason:
+          type:
+            - "string"
+            - "null"
+        notes:
+          type:
+            - "string"
+            - "null"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    CredentialPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Credential"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    CredentialResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Credential"
     Customer:
       type: "object"
       additionalProperties: false

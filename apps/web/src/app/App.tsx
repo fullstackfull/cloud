@@ -11,6 +11,7 @@ import { AdminInfrastructurePage } from '@/features/admin/AdminInfrastructurePag
 import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
 import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
 import { AdminProvisioningPage } from '@/features/admin/AdminProvisioningPage'
+import { CredentialsPage } from '@/features/controlCenter/CredentialsPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
 import { CataloguePage } from '@/features/catalog/CataloguePage'
@@ -141,6 +142,7 @@ export function App() {
                   <Route path="/admin/support" element={<AdminSupportPage />} />
                   <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
                   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+                  <Route path="/admin/control-center/credentials" element={<CredentialsPage />} />
                 </Route>
               </Route>
             </Route>

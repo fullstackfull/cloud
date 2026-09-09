@@ -26,4 +26,15 @@ interface SecretResolver
      * is exactly the state the control centre exists to display.
      */
     public function resolve(string $backend, string $reference): ?string;
+
+    /**
+     * Whether the backend holds anything behind a reference, without saying
+     * what.
+     *
+     * The question a credential screen asks — "is this configured or merely
+     * recorded" — and the one question about a secret that may be answered
+     * over the network. Separate from resolve() so that a screen checking
+     * presence never has the value in memory to leak.
+     */
+    public function exists(string $backend, string $reference): bool;
 }

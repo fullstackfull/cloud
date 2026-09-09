@@ -72,6 +72,15 @@ const OPERATOR_NAV: NavItem[] = [
   { to: '/admin/payments', labelKey: 'admin.nav.payments' },
 ]
 
+/**
+ * The Control Center: one navigation area over three bounded concerns —
+ * Infrastructure, Providers and Product Readiness. A composition of screens,
+ * not a module of its own; each screen's requests go to its own concern's API.
+ */
+const CONTROL_CENTER_NAV: NavItem[] = [
+  { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
+]
+
 export function AppLayout() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -112,6 +121,13 @@ export function AppLayout() {
                       {t('admin.nav.section')}
                     </p>
                     {OPERATOR_NAV.map((item) => (
+                      <NavItemLink key={item.to} item={item} />
+                    ))}
+                    <hr className="my-1 border-[var(--border-subtle)]" />
+                    <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
+                      {t('admin.controlCenter.section')}
+                    </p>
+                    {CONTROL_CENTER_NAV.map((item) => (
                       <NavItemLink key={item.to} item={item} />
                     ))}
                   </>

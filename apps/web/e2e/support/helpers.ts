@@ -32,6 +32,11 @@ export const fixtures = {
   ticketReference: 'LYN-E2E-000001',
   ticketSubject: 'Cannot reach my server over SSH',
   ticketInternalNote: 'do not mention the batch',
+  // Control Center. The first references a variable the E2E API process has;
+  // the second references one it does not, so the screen has both states.
+  credentialPresent: 'e2e-registrar-key',
+  credentialMissing: 'e2e-bmc-password',
+  credentialPresentReference: 'LYNOMIA_E2E_REGISTRAR_SECRET',
 } as const
 
 /**

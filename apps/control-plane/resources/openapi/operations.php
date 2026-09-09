@@ -1233,6 +1233,89 @@ return [
         'permission' => 'provider.manage',
         'response' => $one('ConnectionTest'),
     ],
+    /* ---------------------------------------------------------------------
+     | Credentials — references into the secret store, never values
+     |
+     | No operation here accepts a secret or returns one. `store` refuses a
+     | reference shaped like a value and refuses any field it does not know,
+     | by name, because a client sending `password` to this endpoint has a
+     | secret in a request body and needs to rotate it.
+     */
+
+    'api.admin.credentials.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Credential references',
+        'description' => 'Missing and invalid first — the ones that need a person.',
+        'permission' => 'infrastructure.view',
+        'query' => ['environment', 'state'],
+        'response' => $many('Credential'),
+    ],
+    'api.admin.credentials.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One credential reference',
+        'permission' => 'infrastructure.view',
+        'response' => $one('Credential'),
+    ],
+    'api.admin.credentials.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record where a credential lives',
+        'description' => 'The reference is the NAME of a variable on the deployment controller. Recorded as configured '
+            .'if the controller already holds a value behind it, missing otherwise; neither is valid until a connection '
+            .'test succeeds. 409 for a reference shaped like a value; 422 for any unexpected field, named.',
+        'permission' => 'credential.manage',
+        'body' => ['name', 'purpose', 'environment', 'backend', 'backend_reference', 'masked_hint', 'rotates_at', 'notes'],
+        'response' => $one('Credential', 201),
+    ],
+    'api.admin.credentials.revoke' => [
+        'tag' => 'Operator',
+        'summary' => 'Withdraw a credential from everything using it',
+        'description' => 'Every provider pointing at it is reassessed and reports a credentials blocker. Nothing is '
+            .'switched off automatically — that is an operator decision — and the row stays so that what pointed at it '
+            .'can say why it is blocked. 409 if already revoked.',
+        'permission' => 'credential.manage',
+        'body' => ['reason'],
+        'response' => $one('Credential'),
+    ],
+    'api.admin.credentials.rotated' => [
+        'tag' => 'Operator',
+        'summary' => 'Record that the secret behind a reference was changed',
+        'description' => 'Whatever was proven about the old value is forgotten: the state drops to configured (or '
+            .'missing, if the controller does not yet hold the new value) and every provider using it is reassessed. '
+            .'409 for a revoked credential.',
+        'permission' => 'credential.manage',
+        'body' => ['rotates_at'],
+        'response' => $one('Credential'),
+    ],
+    'api.admin.providers.attach_credential' => [
+        'tag' => 'Operator',
+        'summary' => 'Point a provider at a credential',
+        'description' => 'Refused at attachment for a revoked credential or one from another environment — not only at '
+            .'use, so two independent guards must fail before a token crosses an environment. Readiness is recomputed.',
+        'permission' => 'credential.manage',
+        'body' => ['credential_id'],
+        'response' => $one('Provider'),
+    ],
+    'api.admin.providers.detach_credential' => [
+        'tag' => 'Operator',
+        'summary' => 'Remove the credential from a provider',
+        'permission' => 'credential.manage',
+        'response' => $one('Provider'),
+    ],
+    'api.admin.infrastructure.servers.attach_credential' => [
+        'tag' => 'Operator',
+        'summary' => 'Point a machine at the credential it is reached with',
+        'description' => 'Opens no socket and is not subject to the safety classification; the connection test that '
+            .'uses the credential still is. Same environment and revocation rules as for a provider.',
+        'permission' => 'credential.manage',
+        'body' => ['credential_id'],
+        'response' => $one('Server'),
+    ],
+    'api.admin.infrastructure.servers.detach_credential' => [
+        'tag' => 'Operator',
+        'summary' => 'Remove the credential from a machine',
+        'permission' => 'credential.manage',
+        'response' => $one('Server'),
+    ],
     'api.admin.audit.index' => [
         'tag' => 'Operator',
         'summary' => 'The permanent record',

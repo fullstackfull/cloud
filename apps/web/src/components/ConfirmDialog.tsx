@@ -25,6 +25,19 @@ interface ConfirmDialogProps {
   evidenceHint?: string
   confirmLabel: string
   loading?: boolean
+  /**
+   * Whether confirming would do anything yet.
+   *
+   * A dialog whose body is still loading — a quote, a price, a list of what
+   * will be lost — has a confirm button that must not be pressable, because
+   * the handler behind it has nothing to act on and either fails or, worse,
+   * silently returns. The invoice credit dialogue did the second: pressed
+   * before its quote arrived, it did nothing at all, and a browser test that
+   * clicked at the wrong moment waited ten seconds for an outcome that was
+   * never requested. Defaults to true so a dialog with no asynchronous body
+   * needs no change.
+   */
+  ready?: boolean
   error?: ReactNode
   onConfirm: (phrase: string, evidence: string) => void
   onCancel: () => void
@@ -55,6 +68,7 @@ export function ConfirmDialog({
   evidenceHint,
   confirmLabel,
   loading = false,
+  ready = true,
   error,
   onConfirm,
   onCancel,
@@ -92,7 +106,7 @@ export function ConfirmDialog({
   // Three characters, the same floor the API enforces. "ok" is not a record of
   // what somebody looked at.
   const evidenceSatisfied = evidenceLabel === undefined || evidence.trim().length >= 3
-  const satisfied = phraseSatisfied && evidenceSatisfied
+  const satisfied = phraseSatisfied && evidenceSatisfied && ready
 
   return (
     <dialog

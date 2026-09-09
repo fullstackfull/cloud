@@ -49,4 +49,18 @@ final readonly class ControllerEnvironmentSecretResolver implements SecretResolv
 
         return is_string($value) && $value !== '' ? $value : null;
     }
+
+    public function exists(string $backend, string $reference): bool
+    {
+        // Deliberately not `resolve() !== null`: that would put the value in a
+        // local for the length of the comparison, and this method is the one
+        // called from request handling, where a stack trace is a response.
+        if ($backend !== 'controller_environment') {
+            return false;
+        }
+
+        $value = getenv($reference);
+
+        return is_string($value) && $value !== '';
+    }
 }

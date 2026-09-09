@@ -22,13 +22,15 @@ function adminPath(path: string, params: Record<string, string | number | undefi
   return `/api/admin${path}${serialised === '' ? '' : `?${serialised}`}`
 }
 
-const admin = {
+export const admin = {
   get: <T>(path: string, params?: Record<string, string | number | undefined>) =>
     request<T>(adminPath(path, params), { method: 'GET', absolute: true }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(adminPath(path), { method: 'POST', body, absolute: true }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(adminPath(path), { method: 'PUT', body, absolute: true }),
+  delete: <T>(path: string) =>
+    request<T>(adminPath(path), { method: 'DELETE', absolute: true }),
 }
 
 export interface AdminCustomer {

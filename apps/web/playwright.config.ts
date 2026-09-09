@@ -60,6 +60,16 @@ const apiEnvironment = {
   FRONTEND_URL: WEB_ORIGIN,
   SANCTUM_STATEFUL_DOMAINS: `localhost:${WEB_PORT},127.0.0.1:${WEB_PORT}`,
   SESSION_DOMAIN: 'localhost',
+
+  /*
+   * A credential the Control Center specs can see as "present". The value is
+   * nothing — it is never read by anything but the fake tester, and the point
+   * of the fixture is that the screen reports the variable EXISTS on the
+   * controller without ever showing what it holds. Its sibling,
+   * LYNOMIA_E2E_BMC_SECRET, is deliberately not set, so the seeded credential
+   * that references it renders as missing.
+   */
+  LYNOMIA_E2E_REGISTRAR_SECRET: 'not-a-real-secret',
 }
 
 export default defineConfig({

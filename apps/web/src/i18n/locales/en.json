@@ -171,7 +171,13 @@
     "validating": "Validating",
     "verified": "Verified",
     "verifying": "Verifying",
-    "void": "Void"
+    "void": "Void",
+    "missing": "Missing",
+    "configured": "Configured",
+    "untested": "Untested",
+    "valid": "Valid",
+    "invalid": "Invalid",
+    "rotation_due": "Rotation due"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -487,7 +493,9 @@
       "payments": "Payments",
       "operations": "Rebuilds",
       "drift": "Drift",
-      "support": "Support"
+      "support": "Support",
+      "controlCenter": "Control Center",
+      "credentials": "Credentials"
     },
     "customers": {
       "title": "Customers",
@@ -664,6 +672,52 @@
       "reopen": "Reopen",
       "close": "Close",
       "reopenedTimes": "This ticket has been reopened {{count}} time(s). It may not have been fixed."
+    },
+    "controlCenter": {
+      "section": "Control Center",
+      "allEnvironments": "All environments",
+      "environments": {
+        "development": "Development",
+        "staging": "Staging",
+        "production": "Production"
+      }
+    },
+    "credentials": {
+      "title": "Credentials",
+      "subtitle": "Where each secret lives, whether the controller has it, and whether it has ever worked. Never the secret itself.",
+      "record": "Record a credential",
+      "recordTitle": "Record where a credential lives",
+      "neverPaste": "Do not paste the secret. Enter the NAME of the variable that holds it on the deployment controller. If a value is sent here it is refused — and it has been in a request body, so rotate it.",
+      "name": "Name",
+      "purpose": "Purpose",
+      "environment": "Environment",
+      "reference": "Variable name on the controller",
+      "referenceHint": "Upper-case letters, digits and underscores, e.g. LYNOMIA_REGISTRAR_API_KEY.",
+      "maskedHint": "Public hint",
+      "maskedHintHint": "Up to four characters of a public identifier, such as the end of a token ID. Never part of the secret.",
+      "rotatesAt": "Rotation due",
+      "notes": "Notes",
+      "submit": "Record",
+      "state": "State",
+      "present": "On controller",
+      "absent": "Not on controller",
+      "usage": "Used by",
+      "usageProviders_one": "{{count}} provider",
+      "usageProviders_other": "{{count}} providers",
+      "usageServers_one": "{{count}} machine",
+      "usageServers_other": "{{count}} machines",
+      "lastTested": "Last tested",
+      "never": "Never",
+      "markRotated": "Mark rotated",
+      "markRotatedTitle": "{{name}} has been rotated",
+      "markRotatedBody": "Confirm that the value on the deployment controller has been replaced. Whatever was proven about the old value is forgotten: this drops back to configured, and every provider using it has to be tested again before it can be enabled.",
+      "revoke": "Revoke",
+      "revokeTitle": "Revoke {{name}}",
+      "revokeBody": "Nothing may try this credential again. Every provider and machine pointing at it will report a credentials blocker from now on. Nothing is switched off automatically — that decision stays with you. The row is kept so those blockers can say why.",
+      "revokeReason": "Why?",
+      "revokeReasonHint": "Recorded in the audit trail and shown beside every blocker this causes.",
+      "revokedOn": "Revoked {{when}}",
+      "empty": "No credentials recorded."
     }
   },
   "backups": {

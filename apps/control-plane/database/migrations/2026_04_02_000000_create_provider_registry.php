@@ -65,6 +65,17 @@ return new class extends Migration
             // such as a token id — never of the secret half.
             $table->string('masked_hint')->nullable();
 
+            // Who recorded it, when it was last rotated, and — if it has been
+            // withdrawn — who did that and why. A revoked credential keeps its
+            // row: the providers and machines that pointed at it still point
+            // at it, and "this is blocked because its credential was revoked
+            // on Tuesday by X" is the sentence an operator needs to read.
+            $table->foreignUlid('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('rotated_at')->nullable();
+            $table->timestamp('revoked_at')->nullable();
+            $table->foreignUlid('revoked_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('revoked_reason')->nullable();
+
             $table->text('notes')->nullable();
             $table->timestamps();
 

@@ -222,6 +222,11 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
             {
                 return 'a-secret-this-test-never-asserts-on';
             }
+
+            public function exists(string $backend, string $reference): bool
+            {
+                return $this->resolve($backend, $reference) !== null;
+            }
         });
 
         $test = app(TestConnection::class)->forServer($server, 'fake');
@@ -275,6 +280,14 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
                     $this->asked = true;
 
                     return 'should-never-be-reached';
+                }
+
+                public function exists(string $backend, string $reference): bool
+                {
+                    // Presence is not resolution: answering "yes, there is one" must
+                    // not count as having handed the value over, so this does not
+                    // route through resolve() and cannot flip the flag this test reads.
+                    return true;
                 }
             };
         });

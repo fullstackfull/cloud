@@ -37,6 +37,8 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
@@ -48,6 +50,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
@@ -192,6 +195,7 @@ class E2ESeeder extends Seeder
         $this->wordpressSites($customer);
         $this->team($customer);
         $this->ticket($customer);
+        $this->credentials();
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -917,6 +921,40 @@ class E2ESeeder extends Seeder
             // than an empty state, and a value with fils so the formatting is
             // actually exercised.
             ['balance_minor' => 12750],
+        );
+    }
+
+    /**
+     * Two credential references for the Control Center specs.
+     *
+     * The first names a variable the browser suite's API process is given
+     * (see playwright.config.ts), so the screen reports it present; the
+     * second names one it is not, so the screen reports it missing. Neither
+     * row holds a value — there is no column for one.
+     */
+    private function credentials(): void
+    {
+        CredentialReference::query()->updateOrCreate(
+            ['name' => 'e2e-registrar-key'],
+            [
+                'purpose' => 'Registrar API',
+                'environment' => DeploymentEnvironment::Staging,
+                'backend' => 'controller_environment',
+                'backend_reference' => 'LYNOMIA_E2E_REGISTRAR_SECRET',
+                'state' => CredentialState::Configured,
+                'masked_hint' => 'Q7X2',
+            ],
+        );
+
+        CredentialReference::query()->updateOrCreate(
+            ['name' => 'e2e-bmc-password'],
+            [
+                'purpose' => 'BMC of the rack A chassis',
+                'environment' => DeploymentEnvironment::Staging,
+                'backend' => 'controller_environment',
+                'backend_reference' => 'LYNOMIA_E2E_BMC_SECRET',
+                'state' => CredentialState::Missing,
+            ],
         );
     }
 }
