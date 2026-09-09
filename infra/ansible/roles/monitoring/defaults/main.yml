@@ -1,4 +1,0 @@
----
-monitoring_prometheus_retention: 30d
-monitoring_loki_retention: 30d
-monitoring_scrape_interval: 30s

@@ -1,0 +1,14 @@
+---
+# What the calling play needs permission to do:
+#
+#   read       any class except DO_NOT_TOUCH
+#   configure  CONFIGURATION_ALLOWED or REIMAGE_ALLOWED
+#   reimage    REIMAGE_ALLOWED, and the host's own allow_reimage must be true
+#
+# This complements the per-operation flags this tree already uses
+# (allow_reimage, pxe_allow_serve_dhcp, proxmox_cluster_join_enabled,
+# postgresql_allow_initdb) rather than replacing them. Those say "this specific
+# destructive thing is scheduled for this host today". safety_class says
+# whether we may connect to the machine and write to it at all — the question
+# that comes first, and the one the inventories did not answer.
+safety_gate_action: read

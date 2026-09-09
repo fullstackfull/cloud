@@ -97,7 +97,7 @@ There are no machines classified `DISCOVERY_ONLY`, `CONFIGURATION_ALLOWED` or
 `REIMAGE_ALLOWED`. That is not an oversight — those classifications are
 authorizations, and no authorization has been given.
 
-The Ansible inventories at `infra/ansible/inventories/staging/` and
+The Ansible inventories at `infrastructure/ansible/inventories/staging/` and
 `.../production/` therefore contain **no hosts**. Adding a host is the act that
 makes it a target, and it is done by whoever owns the machine.
 
@@ -106,7 +106,7 @@ makes it a target, and it is done by whoever owns the machine.
 ## E. Inventory schema
 
 When machines do become available, each is recorded with the fields below.
-`infra/scripts/validate-inventory.py` fails CI for any host that omits one, and
+`infrastructure/scripts/validate-inventory.py` fails CI for any host that omits one, and
 for any variable whose name or value reads like a credential.
 
 ```yaml
@@ -122,7 +122,7 @@ some-host:
 The full field list Phase 30B asks for — purpose, hostname, management address,
 provider/type, hardware, OS, firmware, network interfaces, storage, RAID/HBA,
 management method, current workloads, safe-to-change, safe-to-reimage,
-credentials available — is gathered by `infra/ansible/playbooks/discover.yml`,
+credentials available — is gathered by `infrastructure/ansible/playbooks/discover.yml`,
 which writes facts to the controller and never to the target. It has not been
 run, because it has nothing to run against.
 
@@ -152,7 +152,8 @@ What *was* produced in this phase is everything that does not require reaching a
 machine: the infrastructure source of truth, the safety gates that enforce
 classification mechanically, the monitoring configuration and its consistency
 check, the network flow matrix, the registrar selection decision, the runbooks,
-and the CI that validates all of it. Those are in `infra/`.
+and the CI that validates all of it. Those went into the existing
+`infrastructure/` tree and `docs/runbooks/`.
 
 ---
 

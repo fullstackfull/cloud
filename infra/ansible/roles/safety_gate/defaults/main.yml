@@ -1,6 +1,0 @@
----
-# What this play needs permission to do. One of:
-#   read      any class except DO_NOT_TOUCH
-#   configure CONFIGURATION_ALLOWED or REIMAGE_ALLOWED
-#   reimage   REIMAGE_ALLOWED, and allow_reimage must additionally be true
-safety_gate_action: read

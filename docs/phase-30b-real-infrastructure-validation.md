@@ -62,6 +62,56 @@ infrastructure configuration and documents, and deliberately no product code.
 
 ---
 
+## A2. A mistake this phase made, and what it produced
+
+The phase's opening rule is *do not create a second infrastructure system if one
+already exists*. It did, for several hours.
+
+The first survey listed `infra/`, `ansible/`, `opentofu/`, `terraform/`,
+`deploy/`, `scripts/` and `monitoring/`, found none of them, and concluded there
+was no infrastructure tree. It never listed `infrastructure/` — which holds 15
+Ansible roles, 11 playbooks, an OpenTofu tree with two environments, a monitoring
+stack with 55 alerts and 9 recording rules across six files, and three example
+inventories. A second tree at `infra/` was built beside it and committed.
+
+It was caught by reading `docs/deployment.md`, whose machine roles did not match
+the group names in the new inventories — the mismatch that was supposed to be
+impossible was itself the signal. The duplicate has been deleted; everything
+worth keeping was folded into `infrastructure/`, and the runbooks into
+`docs/runbooks/` beside the three that were already there.
+
+Working through the existing tree with the new checks then found four things
+that were already wrong:
+
+1. **Ten invented artisan commands in the three pre-existing runbooks.** The
+   worst of them is in `provisioning-stuck.md` §4 — the timeout-after-creation
+   case, the one that costs a customer two VMs — where all five commands for
+   finding and adopting an orphaned resource named binaries that do not exist.
+   The real surface is `compute:poll-tasks`, `infrastructure:reconcile`, and
+   three operator endpoints under `/admin/provisioning/`.
+
+2. **Seven directories `infrastructure/README.md` claimed to have** —
+   `proxmox/`, `pbs/`, `pxe/`, `networking/`, `security/`, `dedicated/`,
+   `hosting/` — none of which exist.
+
+3. **Six backup alerts that cannot fire.** `monitoring/README.md` declares a
+   textfile-collector contract for `lynomia_backup_*` and says the collector
+   belongs to `infrastructure/pbs`. Nothing implements it. Two of the six exist
+   to catch an unverified backup — the failure that looks exactly like success
+   until somebody tries to restore.
+
+4. **No safety classification anywhere.** The tree had per-operation flags
+   (`allow_reimage`, `pxe_allow_serve_dhcp`, `proxmox_cluster_join_enabled`,
+   `postgresql_allow_initdb`), all absent by default, which is a good design for
+   "is this destructive thing scheduled today". It had nothing for the question
+   that comes first: may we connect to this machine and write to it at all.
+
+All four are fixed or, where they cannot be fixed here, made loud — see G and
+the sections below. The mistake produced a better result than a clean run would
+have, which is not a defence of making it.
+
+---
+
 ## B. Actual infrastructure inventory
 
 Full detail in `docs/phase-30b-real-infrastructure-inventory.md`. Summary:
@@ -118,9 +168,10 @@ GitHub  →  CI (validate only)  →  deployment controller  →  Management net
 GitHub Actions reaches nothing on any Lynomia network. It validates: inventory
 schema, alert-rule consistency, Ansible syntax and lint, OpenTofu fmt and
 validate, and a check that no workflow applies infrastructure. The last is
-enforced by `infra/scripts/check-ci-cannot-apply.py`, which parses the workflow
+enforced by `infrastructure/scripts/check-ci-cannot-apply.py`, which parses the workflow
 and inspects what each step actually runs rather than grepping the file — the
-grep version mistook a syntax-check split across two lines for a real run.
+grep version mistook a syntax-check split across two lines for a real run. It
+inspects 37 run steps across the one workflow this repository has.
 
 The deployment controller is the only thing that crosses into Management, it
 holds the credentials, and a person operates it.
@@ -133,30 +184,29 @@ holds the credentials, and a person operates it.
 
 Not built. No controller exists.
 
-### The four verbs
+### Separated verbs, and the gate before them
 
-`deploy` is not a verb here, because a single word meaning "wipe, install,
-configure, migrate and delete the old state" hides the moment somebody could
-have said no.
+The existing tree already separates preflight from apply — `make infra-check`
+runs `playbooks/preflight.yml` in `--check --diff`, `make infra-plan` runs
+`tofu plan`, and every playbook is check-capable. That was not rebuilt.
 
-```
-infra/scripts/preflight.sh <env>   # reachability and classification; writes nothing
-infra/scripts/plan.sh      <env>   # --check --diff and tofu plan; writes nothing
-infra/scripts/apply.sh     <env>   # makes the change
-infra/scripts/verify.sh    <env>   # asks the machines what is actually true
-```
-
-`apply.sh` refuses unless preflight passed for that environment in the same
-shell, so a preflight from last week cannot authorise today's change. Both
-refusals were exercised:
+What was added is the question that comes before any of them. `safety_gate` is
+now the first role in all eleven playbooks, and it refuses a host whose
+`safety_class` does not permit what the play is about to do:
 
 ```
-$ infra/scripts/preflight.sh examples
-refusing environment 'examples'; deployable environments are: staging production   (exit 2)
-
-$ infra/scripts/apply.sh staging
-refusing to apply: preflight has not passed for staging in this shell.            (exit 3)
+DISCOVERY_ONLY          read facts, change nothing
+CONFIGURATION_ALLOWED   change configuration, never partitions or firmware
+REIMAGE_ALLOWED         may be wiped, and only with allow_reimage on that host
+DO_NOT_TOUCH            do not connect to it for any write   <- the default
 ```
+
+Every group in all three inventories now carries one. `dedicated` is
+`DISCOVERY_ONLY`, because those are customers' own machines and the platform
+only ever reads their BMC. The rest are `CONFIGURATION_ALLOWED`, with the
+destructive halves still behind the per-operation flags the tree already had —
+`safety_class` says whether we may touch the machine, `allow_reimage` says
+whether this particular wipe is scheduled.
 
 ---
 
@@ -183,7 +233,7 @@ Four mechanical defences:
 2. `validate-monitoring.py` fails on an inline credential in any monitoring
    config; receivers use `*_file` fields or environment placeholders.
 3. CI fails on any `.pem`, `.key`, `.p12`, `.pfx`, `.tfstate` or `id_rsa`
-   tracked under `infra/`, and on an inline credential in any tracked infra file.
+   tracked under `infrastructure/`.
 4. `.gitignore` refuses OpenTofu state, which contains every value a provider
    returned.
 
@@ -192,7 +242,7 @@ that records whether one is held. The validator rejects it if it is not a
 boolean, which is what stops somebody writing the credential into the field
 meant to avoid exactly that.
 
-Logs: `infra/monitoring/alloy/config.alloy` drops any line matching a credential
+Logs: `infrastructure/monitoring/alloy/config.alloy` drops any line matching a credential
 shape at the collector, and redacts registrant, admin and contact email
 addresses before shipping. Coarse on purpose — a dropped log line costs an
 investigation some detail; a leaked one costs a customer their domain.
@@ -205,7 +255,7 @@ investigation some detail; a leaked one costs a customer their domain.
 
 No staging host exists. The playbooks are written, syntax-clean, and pass
 `ansible-lint` at the production profile (0 failures, 0 warnings, 28 files), but
-they have never run against a machine. `infra/ansible/inventories/staging/` has
+they have never run against a machine. `infrastructure/ansible/inventories/staging/` has
 no hosts.
 
 The deployment proof the phase asks for — Git → CI → deploy → migrations →
@@ -221,42 +271,57 @@ enabled. It has run zero times.
 
 **Configuration written and validated. Not deployed.**
 
-`infra/monitoring/` carries Prometheus with file-based service discovery,
-17 alert rules across 6 groups, Alertmanager with severity routing and an
-inhibit rule, Loki with 30-day retention, and Alloy with the redaction stages
-described in section E.
+`infrastructure/monitoring/` was already substantial: Prometheus, Alertmanager,
+Grafana with five generated dashboards, Loki, Alloy, and 55 alert rules plus 9
+recording rules across six files, every image pinned to an exact tag, every port
+bound to localhost.
 
-The one thing here that is verified is the consistency check:
+What this phase added is a consistency check over it:
 
 ```
-$ python3 infra/scripts/validate-monitoring.py infra
-1 rule file(s), 17 rule(s), 41 exported metric families
+$ python3 infrastructure/scripts/validate-monitoring.py infrastructure
+6 rule file(s), 64 rule(s), 41 exported by the control plane,
+7 declared by a collector contract
+  NOTE the textfile collector for infrastructure/pbs is declared and not
+       implemented; alerts on its series cannot fire
 ```
 
-It compares every alert expression against the metric families the control plane
-actually exports, and every `runbook` annotation against a file that exists. On
-first run it failed with 17 findings — every alert pointed at a runbook nobody
-had written. That is how the runbooks came to be written, and it is the reason
-the check exists: an alert on a metric nobody emits reads as coverage in a
-review and is silence in an incident.
+It resolves every metric an alert names against one of the two places a
+`lynomia_*` series legitimately comes from — the control plane's own endpoint,
+read out of the PHP source, or a textfile-collector contract declared in
+`monitoring/README.md` for a machine that has no Prometheus endpoint of its own.
+It also requires every alert to carry a `runbook` path that exists or a
+`runbook_url`, and skips recording rules, which page nobody.
 
-No Prometheus has scraped anything. No alert has fired. No dashboard JSON is
-committed, because a dashboard built against a Prometheus that has never scraped
-a real target is a picture of nothing.
+The NOTE is the finding. Six alerts in `backups.yml` read `lynomia_backup_*`
+series that nothing writes, because the collector "belongs to
+`infrastructure/pbs`" and that directory does not exist. Two of the six —
+`BackupVerificationFailed` and `UnverifiedSnapshotsAccumulating` — exist
+precisely to catch an unverified backup, which looks identical to a good one
+right up until a restore.
+
+It is not fixed here. The collector parses `proxmox-backup-manager` output, and
+writing it against output nobody has seen is guesswork with a green tick on it —
+the same reason no registrar adapter was written. What was done instead is make
+the gap impossible to forget: the contract is marked `NOT IMPLEMENTED` with its
+blocker, the check prints the gap on every run, and the check *fails* if that
+paragraph is deleted while the directory is still missing.
+
+No Prometheus has scraped anything and no alert has ever fired.
 
 ---
 
 ## H. PostgreSQL
 
 **Not deployed.** The restore procedure is written
-(`infra/runbooks/database-restore.md`) and includes the two things that make a
+(`docs/runbooks/database-restore.md`) and includes the two things that make a
 restore survivable: restoring into a *new* database and verifying it before
 swapping, and renaming the broken database rather than dropping it. Never
 executed against a real deployment.
 
 ## I. Redis
 
-**Not deployed.** `infra/runbooks/redis-outage.md` covers it. The important
+**Not deployed.** `docs/runbooks/redis-outage.md` covers it. The important
 operational note is recorded there: Redis holds the locks that stop two workers
 acting on one order, so a Redis outage stopping work is the *correct* failure.
 
@@ -293,8 +358,8 @@ separately. Creating a VM does not verify destroying one.
 ## P. PBS
 ## Q. Backup / restore
 
-**Blocked. `BLOCKED_HARDWARE`.** No datastore exists. `infra/runbooks/pbs-unavailable.md`
-and `infra/runbooks/backup-failure.md` are written, including the rule that a
+**Blocked. `BLOCKED_HARDWARE`.** No datastore exists. `docs/runbooks/pbs-unavailable.md`
+and `docs/runbooks/backup-failure.md` are written, including the rule that a
 restore is always tested into a scratch VM and never over a customer's live one,
 and that a backup inside a customer's retention window is never deleted to make
 room.
@@ -400,7 +465,7 @@ It has probed no real site.
 
 **Blocked. `BLOCKED_HARDWARE` and `BLOCKED_NETWORK`.**
 
-No BMC is reachable. `infra/pxe/` contains no profile, and that is a decision
+No BMC is reachable. `infrastructure/pxe/` contains no profile, and that is a decision
 rather than an omission: PXE means a DHCP server answering boot requests, and on
 a shared or unknown network it answers *other people's* machines. Three things
 must be true and recorded before a profile lands there — an isolated install
@@ -612,7 +677,7 @@ outcome after checking the provider.
 **Yes in the software; unproven in a real deployment.** The operator surface
 lists indeterminate operations, `lynomia_provider_task_total{state="indeterminate"}`
 is exported, and the `ProviderTasksIndeterminate` alert fires on any that persist
-for 30 minutes, pointing at `infra/runbooks/provider-indeterminate.md`. The
+for 30 minutes, pointing at `docs/runbooks/provider-indeterminate.md`. The
 alert's metric is confirmed to exist by `validate-monitoring.py`.
 *Blocker: no Prometheus has scraped a real control plane, so the alert has never
 fired. `BLOCKED_HARDWARE`.*

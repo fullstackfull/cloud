@@ -36,7 +36,8 @@ reachable, port 8006 answers nowhere, and no Proxmox credential exists.
 
 ## What the gate does not block
 
-Everything that does not need a machine was completed and is in `infra/`: the
+Everything that does not need a machine was completed and is in the existing
+`infrastructure/` tree: the
 infrastructure source of truth, the safety classification and the gates that
 enforce it, the four separated verbs, the monitoring configuration and its
 consistency check, the network flow matrix, nineteen runbooks, and the CI job
@@ -46,9 +47,9 @@ that validates all of it and refuses to apply any of it.
 
 In this order, one at a time, each with its own evidence:
 
-1. Add the node to `infra/ansible/inventories/staging/hosts.yml` with
+1. Add the node to `infrastructure/ansible/inventories/staging/hosts.yml` with
    `safety_class: DISCOVERY_ONLY`. Not `CONFIGURATION_ALLOWED` — read first.
-2. `infra/scripts/preflight.sh staging`, then `playbooks/discover.yml`. Record
+2. `infrastructure/scripts/preflight.sh staging`, then `playbooks/discover.yml`. Record
    the facts in the inventory document.
 3. Create a Proxmox API token with `PVEAuditor` only. Lynomia does not use the
    root password for normal operations, and does not begin with write access.

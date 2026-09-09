@@ -391,7 +391,8 @@ Every capability's exact blocker is in
 [real-infrastructure-verification-matrix.md](real-infrastructure-verification-matrix.md),
 where no row is `REAL_INFRA_VERIFIED`.
 
-What 30B did deliver is the part that needs no machine: `infra/` holds the
+What 30B did deliver is the part that needs no machine, added to the existing
+`infrastructure/` tree, which already held the
 infrastructure source of truth, the safety classification that a gate enforces
 rather than a person remembers, the monitoring configuration, and nineteen
 runbooks. Every physical machine is classified `DO_NOT_TOUCH`, which is the

@@ -79,4 +79,8 @@
              'not armed — changes are written and shown in --diff but not applied') }}"
 
   roles:
+    # Refuse the machine before doing anything to it.
+    - role: safety_gate
+      vars:
+        safety_gate_action: configure
     - role: proxmox

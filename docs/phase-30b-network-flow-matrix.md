@@ -144,7 +144,7 @@ to Management, Public or Storage.
 ## How this is enforced
 
 Not by this document. The firewall rules are Ansible-managed and live in
-`infra/ansible/`, and the deployment controller's own reachability is fixed by
+`infrastructure/ansible/`, and the deployment controller's own reachability is fixed by
 which networks its interfaces are on. This table is what those rules are
 reviewed against.
 

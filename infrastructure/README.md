@@ -14,10 +14,26 @@ infrastructure/
 │   └── roles/                 one role per concern, idempotent
 ├── tofu/           OpenTofu for the platform's OWN VMs and DNS
 ├── monitoring/     the observability stack's configuration (deployed by Ansible)
-├── proxmox/ pbs/ pxe/ networking/ security/ dedicated/ hosting/
-                    subsystem-specific material owned by other parts of the platform
+├── scripts/        checks that keep the above honest, run by CI
 └── README.md
 ```
+
+### Subsystem directories that are named elsewhere and do not exist
+
+`proxmox/`, `pbs/`, `pxe/`, `networking/`, `security/`, `dedicated/` and
+`hosting/` are referred to in places around this repository as though they were
+here. They are not, and this listing no longer implies otherwise —
+`scripts/validate-monitoring.py` fails the build if this tree names a directory
+that is missing.
+
+One of those absences has teeth. `monitoring/README.md` declares a textfile
+collector contract for `lynomia_backup_*` and says the collector belongs to
+`infrastructure/pbs`. Nothing implements it, so the six alerts in
+`monitoring/prometheus/rules/backups.yml` — including the two that exist to
+catch an unverified backup, the failure that looks exactly like success until a
+restore — cannot fire. The same check names that gap on every run, so it stays
+visible until something writes those series. See
+`docs/phase-30b-real-infrastructure-validation.md` section Q.
 
 ---
 

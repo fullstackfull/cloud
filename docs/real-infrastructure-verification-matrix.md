@@ -46,6 +46,7 @@ be removed **first**.
 | Capability | Provider | Software state | Real provider result | Evidence | Status | Blocker |
 | --- | --- | --- | --- | --- | --- | --- |
 | Create backup | PBS | `RUNTIME_VERIFIED` | Not attempted | — | Blocked | `BLOCKED_HARDWARE` — no PBS datastore |
+| Alerting on backup failure | PBS | Rules written | **Cannot fire** | `monitoring/README.md` | Dead | The `lynomia_backup_*` textfile collector is declared and unimplemented; six alerts, both verification alerts among them, read series nothing writes |
 | Restore backup | PBS | `RUNTIME_VERIFIED` | Not attempted | — | Blocked | `BLOCKED_HARDWARE` |
 | Delete backup | PBS | `RUNTIME_VERIFIED` | Not attempted | — | Blocked | `BLOCKED_HARDWARE` |
 | Retention sweep | PBS | `RUNTIME_VERIFIED` | Not attempted | — | Blocked | `BLOCKED_HARDWARE` |
@@ -124,30 +125,39 @@ be removed **first**.
 
 | Capability | Provider | Software state | Real provider result | Evidence | Status | Blocker |
 | --- | --- | --- | --- | --- | --- | --- |
-| Staging deployment | Ansible | Playbooks written, syntax and lint clean | Not attempted | `infra/ansible/`, CI job `infrastructure` | Blocked | `BLOCKED_HARDWARE` — no staging host |
-| Monitoring stack | Prometheus/Loki/Alloy | Configuration written and validated | Not deployed | `infra/monitoring/`, `validate-monitoring.py` | Blocked | `BLOCKED_HARDWARE` — no monitoring host |
-| Alert rules match exported metrics | — | **Verified in CI** | n/a | `validate-monitoring.py`: 17 rules, 41 metric families, 0 mismatches | Verified (configuration, not a live alert) | — |
-| Inventory safety classification | — | **Verified in CI** | n/a | `validate-inventory.py` + `test_validate_inventory.py`, 11/11 | Verified (mechanism, not a real host) | — |
-| CI cannot apply infrastructure | — | **Verified in CI** | n/a | `check-ci-cannot-apply.py`, 36 run steps inspected | Verified | — |
-| Database backup and restore | PostgreSQL | Runbook written | Not attempted | `infra/runbooks/database-restore.md` | Blocked | `BLOCKED_HARDWARE` |
+| Staging deployment | Ansible | Playbooks written, syntax and lint clean | Not attempted | `infrastructure/ansible/`, CI job `infrastructure` | Blocked | `BLOCKED_HARDWARE` — no staging host |
+| Monitoring stack | Prometheus/Loki/Alloy | Configuration written and validated | Not deployed | `infrastructure/monitoring/`, `validate-monitoring.py` | Blocked | `BLOCKED_HARDWARE` — no monitoring host |
+| Alert rules resolve to real metrics | — | **Verified in CI** | n/a | `validate-monitoring.py`: 64 rules, 41 exported + 7 contracted families, 0 unresolved | Verified (configuration, not a live alert) | — |
+| Inventory safety classification | — | **Verified in CI** | n/a | `validate-inventory.py` over 32 hosts + `test_validate_inventory.py`, 15/15 | Verified (mechanism, not a real host) | — |
+| CI cannot apply infrastructure | — | **Verified in CI** | n/a | `check-ci-cannot-apply.py`, 37 run steps inspected | Verified | — |
+| Runbooks name real commands | — | **Verified in CI** | n/a | `validate-runbooks.py`: 57 invocations across 110 files, all resolving | Verified (mechanism, not a live incident) | — |
+| Database backup and restore | PostgreSQL | Runbook written | Not attempted | `docs/runbooks/database-restore.md` | Blocked | `BLOCKED_HARDWARE` |
 | Restore the platform itself | — | Runbook written | Not attempted | — | Blocked | `BLOCKED_HARDWARE` |
 
 ---
 
-## What the three "verified" rows mean, and what they do not
+## What the four "verified" rows mean, and what they do not
 
-Three rows above are verified, and all three are verifications of a *mechanism*
-in CI, not of a real machine:
+Four rows above are verified, and every one of them verifies a *mechanism* in
+CI rather than a real machine:
 
-- The alert rules name metrics the control plane genuinely exports, and every
-  runbook they reference exists. This means the alerts are wired to something
-  real. It does not mean an alert has ever fired.
-- The inventory validator rejects a host with no owner, no purpose, no
-  classification, or an embedded credential — proven by its own test suite. This
-  means the safety classification is enforced rather than documented. It does
-  not mean a machine has been classified.
+- Every metric an alert names resolves to something that emits it — the control
+  plane's own endpoint, or a declared textfile-collector contract — and every
+  alert says where the operator should look. This means the alerts are wired to
+  something real. It does not mean an alert has ever fired, and it does not
+  cover the six backup alerts whose collector is declared and unwritten: those
+  are listed as dead above, and the check prints that gap on every run.
+- The inventory validator rejects a host with no safety classification, an
+  `allow_reimage` its class does not permit, or an embedded credential — proven
+  by its own test suite, which covers group inheritance and per-host overrides.
+  This means the classification is enforced rather than documented. It does not
+  mean a real machine has been classified: all 32 hosts it passes are examples
+  with documentation-range addresses.
 - No workflow in this repository applies infrastructure. This is verified by
   parsing the workflow rather than grepping it.
+- Every `php artisan` line in the runbooks names a command the application
+  actually defines. This one caught ten invented commands on its first run,
+  five of them in the runbook for a timeout after a resource was created.
 
 Nothing here should be read as movement toward `REAL_INFRA_VERIFIED`. That
 column stays empty until a real provider answers.
