@@ -14,12 +14,24 @@ automatically. That is why this is a person's job.
 
 ## Check first
 
-```bash
-php artisan lynomia:operations --state=indeterminate
+The operator portal is where these live:
+
+```
+GET /admin/operations/reinstalls          # VPS and dedicated rebuilds in review
+GET /admin/domains/operations             # registrar operations
+GET /admin/drift                          # resources that disagree with a provider
 ```
 
-Each row names the provider, the resource and the provider's task reference,
-if one was returned before the timeout.
+Each row names the provider, the resource and the provider's task reference, if
+one was returned before the timeout. These are also what the poll commands
+refresh:
+
+```bash
+php artisan compute:poll-tasks       # did accepted hypervisor tasks finish
+php artisan domains:reconcile        # settle uncertain names against the registry
+php artisan backups:reconcile        # in-flight backups
+php artisan payments:reconcile --older-than=60
+```
 
 ## What to do — in this order
 
@@ -29,15 +41,19 @@ if one was returned before the timeout.
    - Registrar: is the domain registered, and to whom?
    - Payment gateway: is there a charge with that idempotency key?
 2. **Record what you found** against the operation.
-3. **Settle it** to match reality:
+3. **Settle it** to match reality, from the operator portal:
 
-```bash
-php artisan lynomia:operations:settle <id> --outcome=succeeded   # the provider did it
-php artisan lynomia:operations:settle <id> --outcome=failed      # the provider did not
+```
+POST /admin/operations/reinstalls/{type}/{operation}/resolve
 ```
 
-Settling as succeeded makes Lynomia adopt the resource the provider already has.
-Settling as failed releases the order to be retried cleanly.
+Settling as completed makes Lynomia adopt what the provider already has, and
+tells the customer. Settling as not-completed releases the order to be retried
+cleanly. The settlement is recorded as an audit entry in the same transaction as
+the state change.
+
+There is deliberately no CLI for this, and no bulk form of it. Settling is a
+person stating what they found at a provider, one operation at a time.
 
 ## What not to do
 

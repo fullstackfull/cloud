@@ -15,26 +15,24 @@ Quiet is not evidence of no trade. Check before concluding it is a slow evening.
 ## Check first
 
 ```bash
-php artisan lynomia:payments --state=pending --older-than=1h
+php artisan payments:reconcile --older-than=60
 ```
 
-Then, at the gateway's own dashboard: are there charges in the last hour that
-Lynomia has no record of? That comparison — gateway first, Lynomia second — is
-the whole diagnosis.
+That asks the provider about attempts that never produced a webhook, which is
+the exact shape of this failure. Then, at the gateway's own dashboard: are there
+charges in the last hour that Lynomia has no record of? That comparison —
+gateway first, Lynomia second — is the whole diagnosis.
 
 ## What to do
 
 1. If the gateway shows delivery failures, fix the endpoint: TLS, DNS, firewall.
    The gateway will usually redeliver on its own once it succeeds again.
-2. For charges that will not redeliver, replay them:
+2. For charges that will not redeliver, run `payments:reconcile` again once the
+   endpoint is healthy. It asks the provider directly rather than waiting for a
+   webhook, and it is safe to run repeatedly: settling an already-settled
+   attempt is a no-op.
 
-```bash
-php artisan lynomia:payments:replay --event=<gateway event id>
-```
-
-Replay is idempotent on the gateway's event id, so replaying one twice is safe.
-
-3. Every replayed payment then flows through the normal listener and provisions.
+3. Every settled payment then flows through the normal listener and provisions.
    Verify a sample actually reached a live service rather than assuming.
 
 ## What not to do

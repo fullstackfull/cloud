@@ -16,8 +16,14 @@ serious failure in the platform.
 ```bash
 systemctl status lynomia-scheduler.timer
 systemctl list-timers lynomia-scheduler.timer
-php artisan lynomia:scheduled-commands --json | jq '.[] | select(.consecutive_failures > 0)'
+php artisan schedule:list
 journalctl -u lynomia-scheduler --since '6 hours ago' | tail -60
+
+# Which command is failing, and for how long, comes from the metrics endpoint —
+# lynomia_scheduled_command_consecutive_failures and
+# lynomia_scheduled_command_last_success_timestamp_seconds, by command label.
+curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/secrets/metrics-token)" \
+     https://<control plane>/metrics | grep lynomia_scheduled_command
 ```
 
 The alert names the specific command. Start there rather than restarting
@@ -31,17 +37,28 @@ stopped once will stop again.
 If one command is failing repeatedly, run it by hand and read the error:
 
 ```bash
-php artisan <the command> --dry-run
+php artisan schedule:test        # pick the failing command from the list
+php artisan <the command>        # or run it directly and read the output
 ```
 
-Most repeat failures are a provider being unreachable, not a bug in the command.
-Check the provider's runbook before changing code.
+None of the platform's scheduled commands takes a `--dry-run`; most take a
+`--limit`, so run one against a small limit first if you want a smaller blast
+radius. Most repeat failures are a provider being unreachable rather than a bug
+in the command — check the provider's runbook before changing code.
 
 ## Catching up
 
 Commands are written to be safe to run again, and skip what they already did.
 Running a missed sweep by hand is fine. Running it four times because you were
 not sure is also fine.
+
+```bash
+php artisan domains:sweep          # renewals, expiry, grace, redemption
+php artisan subscriptions:renew
+php artisan services:end-expired
+php artisan backups:enforce-retention
+php artisan ipam:reclaim
+```
 
 ## What not to do
 

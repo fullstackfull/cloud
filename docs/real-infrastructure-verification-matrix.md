@@ -134,7 +134,7 @@ be removed **first**.
 
 ---
 
-## What the two "verified" rows mean, and what they do not
+## What the three "verified" rows mean, and what they do not
 
 Three rows above are verified, and all three are verifications of a *mechanism*
 in CI, not of a real machine:

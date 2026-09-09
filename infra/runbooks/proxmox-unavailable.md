@@ -14,7 +14,7 @@ outage, and saying so early prevents a panic that makes things worse.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' https://<node>:8006/api2/json/version
-php artisan lynomia:operations --state=running --provider=proxmox
+php artisan compute:poll-tasks    # ask the cluster whether accepted tasks finished
 ```
 
 Distinguish three cases:
@@ -33,11 +33,14 @@ Distinguish three cases:
 ## When it comes back
 
 ```bash
-php artisan lynomia:operations --state=indeterminate
+php artisan compute:poll-tasks
+php artisan provisioning:detect-stale
+php artisan infrastructure:reconcile --cluster=<id>
 ```
 
-Anything that timed out during the outage is now indeterminate, not failed.
-Work each one through `provider-indeterminate.md`.
+then read the operator portal's operations and drift queues. Anything that timed
+out during the outage is now indeterminate, not failed. Work each one through
+`provider-indeterminate.md`.
 
 ## What not to do
 

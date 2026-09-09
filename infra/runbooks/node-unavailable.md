@@ -14,7 +14,7 @@ outage and the clock is running.
 ```bash
 ping -c3 <node management address>
 ssh <node> uptime                       # is it the host or just the API
-php artisan lynomia:services --node=<node> --state=active | wc -l   # who is affected
+php artisan infrastructure:reconcile --cluster=<id>   # then read the drift queue
 ```
 
 ## What to do

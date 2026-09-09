@@ -13,10 +13,18 @@ This is precisely the case the Timeout Rule exists for.
 
 ## Check first
 
-```bash
-php artisan lynomia:domains:operations --state=running
-php artisan lynomia:domains:operations --state=indeterminate
 ```
+GET /admin/domains/operations
+```
+
+and, to make the platform ask the registry about the uncertain ones:
+
+```bash
+php artisan domains:reconcile --limit=10
+```
+
+It settles what the registry can answer for and records the rest as orphans for
+a person. It registers nothing.
 
 `awaiting_registry` is not a failure. Transfers legitimately sit there for days
 while the losing registrar's window runs. Check the operation's kind before

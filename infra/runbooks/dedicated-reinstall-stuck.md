@@ -14,8 +14,12 @@ or booted into the old system, or off.
 
 Ask the BMC, not Lynomia:
 
+```
+GET /admin/operations/reinstalls        # rebuilds waiting on a person
+```
+
 ```bash
-php artisan lynomia:dedicated:operations --state=running
+php artisan dedicated:sync-inventory --server=<id>
 # then, at the BMC's own console: power state, boot device, and the actual screen
 ```
 

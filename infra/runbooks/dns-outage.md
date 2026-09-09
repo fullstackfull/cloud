@@ -30,11 +30,12 @@ somewhere else — go and check the web server before touching DNS.
 - Records missing at the provider: reconcile the zone.
 
 ```bash
-php artisan lynomia:dns:reconcile --zone=<zone> --dry-run
+php artisan dns:reconcile
 ```
 
-Read the dry run. Reconciliation resolves toward Lynomia's view, and if a
-customer edited a record at the provider directly, this reverts them.
+This compares recorded records with what the provider is serving and reports the
+difference. It does not rewrite the provider — a customer who edited a record
+directly is not silently reverted. Work the result through `drift.md`.
 
 ## What not to do
 

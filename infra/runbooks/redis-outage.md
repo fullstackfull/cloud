@@ -36,11 +36,14 @@ systemctl restart lynomia-worker
 Then check for work that was in flight when it stopped:
 
 ```bash
-php artisan lynomia:operations --state=running --older-than=1h
+php artisan provisioning:detect-stale
+php artisan compute:poll-tasks
 ```
 
-Anything running for an hour with no worker is stranded. Treat each as
-indeterminate — see `provider-indeterminate.md`.
+`provisioning:detect-stale` quarantines jobs the platform has stopped waiting
+on; `compute:poll-tasks` asks the hypervisor whether accepted tasks actually
+finished. Whatever they surface is indeterminate, not failed — see
+`provider-indeterminate.md`.
 
 ## What not to do
 

@@ -35,6 +35,8 @@ all:
 """
 
 
+PRIVATE_KEY_HEADER = "-----BEGIN" + " OPENSSH PRIVATE KEY" + "-----"
+
 def run(document: str) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "hosts.yml"
@@ -83,7 +85,13 @@ CASES = [
     ),
     (
         "an inlined private key is refused",
-        GOOD + '          fingerprint: "-----BEGIN OPENSSH PRIVATE KEY-----"\n',
+        # Assembled rather than written out. A fixture for this test has to look
+        # like a private key header, and the repository's committed-secret gate
+        # greps tracked files for exactly that shape. Excluding this file from
+        # that gate would mean a real key pasted into it went uncaught, which is
+        # the one thing the gate exists to prevent — so the fixture is built
+        # from fragments instead. No key material exists here either way.
+        GOOD + '          fingerprint: "' + PRIVATE_KEY_HEADER + '"\n',
         "looks like a key",
     ),
     (

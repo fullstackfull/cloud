@@ -73,20 +73,26 @@
         fail_msg: "lynomia-scheduler.timer is {{ scheduler.status.ActiveState }}"
         quiet: true
 
-    - name: No fake provider is enabled
-      ansible.builtin.command:
-        cmd: php artisan lynomia:providers --json
-        chdir: "{{ lynomia_app_root }}/current/apps/control-plane"
-      register: providers
-      changed_when: false
+    # The control that actually protects a real environment is a boot-time
+    # refusal in ProviderRegistryServiceProvider: the application will not start
+    # with a fake provider outside local. So the health check answering above is
+    # already evidence. This is the second look — at the rendered environment
+    # itself, where a fake would have had to be configured in the first place.
+    - name: Read the provider settings from the rendered environment
+      ansible.builtin.slurp:
+        src: "{{ lynomia_app_root }}/shared/.env"
+      register: rendered
       become: true
-      become_user: "{{ lynomia_run_user }}"
+      no_log: true
 
-    - name: Fake providers stay out of a real environment
+    - name: No provider is set to a fake
       ansible.builtin.assert:
         that:
-          - "'fake' not in (providers.stdout | lower)"
+          - >-
+            (rendered.content | b64decode).splitlines()
+            | select('search', '(?i)^[A-Z_]*PROVIDER\\s*=\\s*fake')
+            | list | length == 0
         fail_msg: >-
-          a fake provider is enabled on {{ inventory_hostname }}: {{ providers.stdout }}
+          a provider is set to 'fake' in the environment on {{ inventory_hostname }}
         quiet: true
       when: lynomia_environment != 'local'

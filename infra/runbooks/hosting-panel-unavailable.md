@@ -15,7 +15,8 @@ the request path. What stops is provisioning, suspension, SSO and reconciliation
 ```bash
 ssh <node> 'df -h; uptime; systemctl is-active httpd nginx'
 curl -sS -o /dev/null -w '%{http_code}\n' https://<node>:2087/    # WHM
-php artisan lynomia:hosting:accounts --node=<node> --state=provisioning
+php artisan hosting:sync-nodes --node=<node>     # disk, load and licence state
+php artisan hosting:reconcile                    # accounts vs what the panel serves
 ```
 
 ## Disk

@@ -13,9 +13,12 @@ running is a promise the platform is not keeping.
 ## Check first
 
 ```bash
-php artisan lynomia:backups --state=failed --since=7d
-php artisan lynomia:backups --service=<id>        # is this one service or many
+php artisan backups:reconcile                # in-flight backups vs the provider
+php artisan backups:reconcile-inventory      # each datastore vs what we believe
 ```
+
+then the customer's backups screen, or the operator drift queue, for whether
+this is one service or many.
 
 One service failing points at that VM — a guest agent that is not answering,
 a disk the hypervisor cannot read. Many services failing points at PBS or the
@@ -23,13 +26,12 @@ network; go to `pbs-unavailable.md`.
 
 ## What to do
 
-Re-run the specific backup and watch it:
+Trigger the backup from the customer's backups screen, or the operator surface
+for that service, and watch it. There is no CLI that starts one — a backup is
+an operation against a customer's service, and it goes through the same path
+whether a person or the scheduler asks for it.
 
-```bash
-php artisan lynomia:backups:run --service=<id>
-```
-
-If it fails again with the same error, do not run it a third time. Read the
+If it fails again with the same error, do not try a third time. Read the
 hypervisor's task log for the actual reason.
 
 ## A restore that will not restore

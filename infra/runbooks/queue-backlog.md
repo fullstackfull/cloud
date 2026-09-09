@@ -17,11 +17,12 @@ Three different things wear the same symptom, and they need opposite responses:
 ```bash
 php artisan queue:monitor default,provisioning,notifications
 systemctl status lynomia-worker
-php artisan lynomia:operations --state=running | awk '{print $3}' | sort | uniq -c
+php artisan horizon:status
 ```
 
-That last line tells you case 3 apart from case 1: if every running operation
-names the same provider, the queue is fine and the provider is not.
+Then open the operator portal's operations queue. It tells case 3 apart from
+case 1: if everything still running names the same provider, the queue is fine
+and the provider is not.
 
 ## What to do
 

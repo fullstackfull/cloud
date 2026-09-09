@@ -13,15 +13,17 @@ at the first link that fails.
 ## Check first
 
 ```bash
-php artisan lynomia:wordpress --state=installing --older-than=30m
+php artisan wordpress:verify --limit=50
 ```
 
-For each, work forward along the chain and stop at the first `no`:
+It fetches each site and records whether it actually answers, so its output is
+the list of which link in the chain is broken. Then work forward and stop at the
+first `no`:
 
 ```bash
-php artisan lynomia:hosting:accounts --site=<id>      # does the account exist
-dig +short <domain>                                   # does DNS resolve
-curl -sSI https://<domain> | head -3                  # does TLS answer
+php artisan hosting:reconcile                  # does the hosting account exist
+dig +short <domain>                            # does DNS resolve
+curl -sSI https://<domain> | head -3           # does TLS answer
 ```
 
 ## The usual causes, in order of frequency
@@ -43,7 +45,7 @@ Once the blocking link is fixed, the site is re-verified by the scheduled
 verification pass; you do not need to push it. To check what that pass sees:
 
 ```bash
-php artisan lynomia:wordpress:verify --site=<id>
+php artisan wordpress:verify
 ```
 
 A site is only called live once the probe has actually seen it answer over

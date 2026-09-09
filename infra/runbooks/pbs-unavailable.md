@@ -14,7 +14,7 @@ now, and everything is worse if something breaks next.
 ```bash
 curl -sS -o /dev/null -w '%{http_code}\n' https://<pbs>:8007/api2/json/version
 ssh <pbs> 'df -h /mnt/datastore; zpool status'
-php artisan lynomia:backups --state=failed --since=24h
+php artisan backups:reconcile-inventory
 ```
 
 A full datastore and a failed disk look the same from Lynomia. They are not.

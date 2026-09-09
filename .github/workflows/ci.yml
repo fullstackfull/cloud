@@ -394,6 +394,13 @@ jobs:
       - name: Alert rules name metrics the control plane exports
         run: python3 infra/scripts/validate-monitoring.py infra
 
+      # A command in a runbook that does not exist costs the operator the
+      # minutes they have least of, and tells them the rest of the document is
+      # guesswork too. Every `php artisan` line in infra/ is checked against the
+      # signatures the application actually defines.
+      - name: Runbooks name commands that exist
+        run: python3 infra/scripts/validate-runbooks.py infra
+
       - name: Ansible syntax
         run: |
           set -euo pipefail

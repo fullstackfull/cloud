@@ -51,11 +51,16 @@ Restart services, run `infra/scripts/verify.sh`, then reconcile: the providers
 still hold resources the restored database may not know about.
 
 ```bash
-php artisan lynomia:reconcile --dry-run
+php artisan infrastructure:reconcile
+php artisan backups:reconcile-inventory
+php artisan domains:reconcile
 ```
 
-Read the dry run before executing it. It will propose changes based on a
-database that has travelled backwards in time.
+These *detect* differences and record them; none of them changes a provider.
+That is the platform's design — see `drift.md` — and it is what makes running
+them safe here. What they produce is a drift queue for a person to work,
+built from a database that has travelled backwards in time, so read every row
+before acting on it.
 
 ## What not to do
 

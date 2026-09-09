@@ -14,11 +14,16 @@ this may be the only alert you get during a real incident.
 ## Check first
 
 ```bash
-curl -sS -H "Authorization: Bearer $(cat /etc/prometheus/secrets/metrics-token)" \
-     https://<control plane>/metrics | head
-php artisan lynomia:metrics --json | jq '.duration_ms'
+curl -sS -w '\n%{time_total}s\n' \
+     -H "Authorization: Bearer $(cat /etc/prometheus/secrets/metrics-token)" \
+     https://<control plane>/metrics | tail -5
 journalctl -u prometheus --since '1 hour ago' | tail -40
 ```
+
+The endpoint reports its own collection time as
+`lynomia_metrics_collect_duration_seconds`, and `lynomia_metrics_collector_up`
+is the series this alert fires on. There is no separate command; the endpoint is
+the collector.
 
 ## What to do
 
@@ -36,9 +41,13 @@ Check the things the alerts would have told you, by hand:
 
 ```bash
 php artisan queue:monitor default,provisioning
-php artisan lynomia:operations --state=indeterminate
-php artisan lynomia:scheduled-commands --json | jq '.[] | select(.consecutive_failures > 0)'
+php artisan queue:failed
+php artisan schedule:list
+php artisan provisioning:detect-stale
 ```
+
+and open the operator portal's operations and drift queues, which do not depend
+on Prometheus being up.
 
 ## What not to do
 
