@@ -1150,6 +1150,89 @@ return [
         'permission' => 'infrastructure.manage',
         'response' => $one('ConnectionTest'),
     ],
+    /* ---------------------------------------------------------------------
+     | Providers — the accounts Lynomia holds with other people
+     |
+     | Registering and enabling are separate endpoints rather than one update
+     | carrying a state field, so each is one intention with one audit row. A
+     | PATCH that could set `state: enabled` alongside other edits would make
+     | "who turned on the payment provider" a question about a diff.
+     |
+     | Nothing here returns a credential value or its location in the secret
+     | store, on any endpoint, in any state.
+     */
+
+    'api.admin.providers.catalogue' => [
+        'tag' => 'Operator',
+        'summary' => 'What this build can be pointed at',
+        'description' => 'The drivers that exist, with what each needs before it will work. `testable` says '
+            .'whether a connection tester exists — several adapters can do real work and cannot yet be proven, '
+            .'and a screen that hides that offers a button which cannot succeed.',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'CatalogueEntry'],
+    ],
+    'api.admin.providers.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Provider accounts',
+        'description' => 'Ordered blocked first, then draft: the control centre exists to show what is stopping '
+            .'the platform selling something.',
+        'permission' => 'infrastructure.view',
+        'query' => ['category', 'environment', 'state'],
+        'response' => $many('Provider'),
+    ],
+    'api.admin.providers.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One provider account',
+        'permission' => 'infrastructure.view',
+        'response' => $one('Provider'),
+    ],
+    'api.admin.providers.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a provider',
+        'description' => 'Declares that a provider is meant to exist. Nothing is contacted. 409 for a driver with '
+            .'no adapter, a category that disagrees with the adapter, a missing machine for a provider that runs '
+            .'on one, or a machine in another environment.',
+        'permission' => 'provider.manage',
+        'body' => ['name', 'driver', 'category', 'environment', 'endpoint', 'managed_server_id', 'notes'],
+        'response' => $one('Provider', 201),
+    ],
+    'api.admin.providers.enable' => [
+        'tag' => 'Operator',
+        'summary' => 'Start routing real work here',
+        'description' => 'Readiness is reassessed inside the transaction rather than read from the stored column, '
+            .'so a credential revoked since the screen loaded is caught. 409 if anything is still missing, or if '
+            .'another provider of the same category is already enabled in this environment — two would be two '
+            .'answers to the same question.',
+        'permission' => 'provider.manage',
+        'response' => $one('Provider'),
+    ],
+    'api.admin.providers.disable' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop routing new work here',
+        'description' => 'Stops new work reaching this provider and touches nothing it already serves: existing '
+            .'services keep running, keep being backed up and keep being billed. A reason is required.',
+        'permission' => 'provider.manage',
+        'body' => ['reason'],
+        'response' => $one('Provider'),
+    ],
+    'api.admin.providers.assess' => [
+        'tag' => 'Operator',
+        'summary' => 'Recompute what is blocking a provider',
+        'description' => 'Contacts nobody. For the case an edit does not cover — a licence that lapsed by the '
+            .'calendar rather than by somebody changing it.',
+        'permission' => 'provider.manage',
+        'response' => $one('Provider'),
+    ],
+    'api.admin.providers.connection_test' => [
+        'tag' => 'Operator',
+        'summary' => 'Ask a provider whether it answers, and what it can do',
+        'description' => 'One round trip that proves the credential and discovers the account\'s capabilities, '
+            .'then recomputes readiness. A timeout is recorded as indeterminate, never as a failure and never as '
+            .'a success. 422 when no connection tester exists for the driver, which is the common case in this '
+            .'build; 409 when the machine it runs on is classified against being touched.',
+        'permission' => 'provider.manage',
+        'response' => $one('ConnectionTest'),
+    ],
     'api.admin.audit.index' => [
         'tag' => 'Operator',
         'summary' => 'The permanent record',

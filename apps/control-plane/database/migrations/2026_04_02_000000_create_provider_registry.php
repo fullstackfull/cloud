@@ -138,6 +138,17 @@ return new class extends Migration
             $table->string('readiness')->default('not_ready');
             $table->string('blocker')->nullable();
 
+            // Who decided this provider may take real work, and who decided it
+            // should stop. Kept as columns rather than left to the audit trail
+            // because an operator looking at a provider that is off needs the
+            // reason on the same screen, and "search the audit log" is what
+            // people do instead of nothing only when they have time.
+            $table->timestamp('enabled_at')->nullable();
+            $table->foreignUlid('enabled_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('disabled_at')->nullable();
+            $table->foreignUlid('disabled_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('disabled_reason')->nullable();
+
             $table->text('notes')->nullable();
             $table->timestamps();
 

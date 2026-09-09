@@ -50,20 +50,26 @@ class ManagedServer extends Model
     protected $guarded = ['id'];
 
     /**
-     * The state a row has before anything happens to it.
+     * The state a row has before anything happens to it — and here, the most
+     * important default in the module.
      *
-     * This duplicates the column default on purpose. A default declared only
-     * in the database applies during the INSERT and not to the model object
-     * that create() hands back, so a caller that renders its own result reads
-     * null for a column the table will happily report a value for one query
-     * later. Declared here, every creation path starts in the same state,
-     * including the ones written after this comment.
+     * A ManagedServer built in memory without going through RegisterServer had
+     * a null safety_class, which meant permits() and isTouchable() were being
+     * asked a question about a machine with no classification at all. The
+     * database has always defaulted this to do_not_touch; the object did not,
+     * and the object is what the safety gate reads.
      *
-     * @var array<string, string>
+     * allow_reimage is here for the same reason and not because null was
+     * dangerous — null is falsy, so that failure would have been safe. It is
+     * declared so the pair is set together, since they are one decision.
+     *
+     * @var array<string, string|bool>
      */
     protected $attributes = [
-        'connection_state' => 'not_tested',
+        'safety_class' => 'do_not_touch',
+        'allow_reimage' => false,
         'state' => 'registered',
+        'connection_state' => 'not_tested',
     ];
 
     /**

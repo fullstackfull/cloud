@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Providers\Infrastructure\Models;
 
 use Carbon\CarbonImmutable;
+use Database\Factories\LicenceFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
@@ -31,7 +33,8 @@ use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
  */
 class Licence extends Model
 {
-    use HasUlids;
+    /** @use HasFactory<LicenceFactory> */
+    use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
 

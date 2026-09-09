@@ -63,6 +63,7 @@ class ProviderInstance extends Model
     protected $attributes = [
         'connection_state' => 'not_tested',
         'state' => 'draft',
+        'readiness' => 'not_ready',
     ];
 
     /**
@@ -80,6 +81,8 @@ class ProviderInstance extends Model
             'last_connection_test_at' => 'immutable_datetime',
             'last_discovery_at' => 'immutable_datetime',
             'last_successful_operation_at' => 'immutable_datetime',
+            'enabled_at' => 'immutable_datetime',
+            'disabled_at' => 'immutable_datetime',
         ];
     }
 

@@ -15,6 +15,8 @@ use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
+use Lynomia\Modules\Providers\Http\Controllers\ProviderCatalogueController;
+use Lynomia\Modules\Providers\Http\Controllers\ProviderController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 
@@ -214,6 +216,53 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.connection_test');
+
+    /*
+     | Providers: the accounts Lynomia holds with other people.
+     |
+     | The catalogue is behind the view permission because it describes this
+     | build rather than any account — it is the list a registration screen is
+     | drawn from, and it names no endpoint, no credential and no customer.
+     |
+     | Enabling and disabling are separate endpoints rather than a state field
+     | on an update, so that each is one intention with one audit row. A PATCH
+     | that could carry `state: enabled` among other edits would make "who
+     | turned on the payment provider" a question about a diff.
+     */
+    Route::get('providers/catalogue', [ProviderCatalogueController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('providers.catalogue');
+
+    Route::get('providers', [ProviderController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('providers.index');
+
+    Route::get('providers/{provider}', [ProviderController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('providers.show');
+
+    Route::post('providers', [ProviderController::class, 'store'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.store');
+
+    Route::post('providers/{provider}/enable', [ProviderController::class, 'enable'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.enable');
+
+    Route::post('providers/{provider}/disable', [ProviderController::class, 'disable'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.disable');
+
+    // Recomputing what is blocking a provider changes nothing at the provider
+    // and contacts nobody, so it sits behind managing rather than anything
+    // sharper.
+    Route::post('providers/{provider}/assess', [ProviderController::class, 'assess'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.assess');
+
+    Route::post('providers/{provider}/connection-test', [ConnectionTestController::class, 'forProvider'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('providers.connection_test');
 
     Route::get('drift', [DriftController::class, 'index'])
         ->middleware('permission:'.Permission::DriftView->value)

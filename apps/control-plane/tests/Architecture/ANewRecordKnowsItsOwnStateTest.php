@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Architecture;
 
+use BackedEnum;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -71,6 +72,12 @@ final class ANewRecordKnowsItsOwnStateTest extends TestCase
      * ones a screen renders the moment it is created, and the ones whose null
      * has no sensible rendering. A nullable timestamp or a counter defaulting
      * to zero is not in this class: null genuinely means "not yet" there.
+     *
+     * Two ways of recognising one, because the first version of this test used
+     * only the name and missed `readiness` — a column that is a state by every
+     * property except its spelling. An enum cast is the better signal: it says
+     * the column's values are a closed set the code branches on, which is
+     * exactly the kind whose null reaches a `->value` and throws.
      */
     private const string STATE_SHAPED = '/^(state|status)$|_(state|status)$/';
 
@@ -191,7 +198,7 @@ final class ANewRecordKnowsItsOwnStateTest extends TestCase
 
     private function readable(mixed $value): mixed
     {
-        return $value instanceof \BackedEnum ? $value->value : $value;
+        return $value instanceof BackedEnum ? $value->value : $value;
     }
 
     /**
@@ -209,7 +216,9 @@ final class ANewRecordKnowsItsOwnStateTest extends TestCase
             $name = $table['name'];
 
             foreach (Schema::getColumns($name) as $column) {
-                if (preg_match(self::STATE_SHAPED, $column['name']) !== 1) {
+                $model = $models[$name] ?? null;
+
+                if (! $this->isStateLike($column['name'], $model)) {
                     continue;
                 }
 
@@ -224,11 +233,31 @@ final class ANewRecordKnowsItsOwnStateTest extends TestCase
                     continue;
                 }
 
-                $found[] = [$name, $column['name'], $m[1], $models[$name] ?? null];
+                $found[] = [$name, $column['name'], $m[1], $model];
             }
         }
 
         return $found;
+    }
+
+    /**
+     * Is this column one whose initial value a caller will render?
+     *
+     * @param  ?class-string<Model>  $model
+     */
+    private function isStateLike(string $column, ?string $model): bool
+    {
+        if (preg_match(self::STATE_SHAPED, $column) === 1) {
+            return true;
+        }
+
+        if ($model === null) {
+            return false;
+        }
+
+        $cast = (new $model)->getCasts()[$column] ?? null;
+
+        return is_string($cast) && enum_exists($cast) && is_a($cast, BackedEnum::class, true);
     }
 
     /**

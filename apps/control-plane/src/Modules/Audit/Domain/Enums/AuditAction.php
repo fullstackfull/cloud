@@ -206,6 +206,9 @@ enum AuditAction: string
     case ServerReimageClearanceRevoked = 'infrastructure.server.reimage_clearance_revoked';
 
     case ConnectionTested = 'providers.connection.tested';
+    case ProviderRegistered = 'providers.provider.registered';
+    case ProviderEnabled = 'providers.provider.enabled';
+    case ProviderDisabled = 'providers.provider.disabled';
 
     /**
      * Whether the act was a person asserting something the platform could not

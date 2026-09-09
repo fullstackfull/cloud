@@ -542,6 +542,95 @@ return [
             'tested_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'Provider' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'An account Lynomia holds with somebody else, and how far along its onboarding is. '
+            .'Enabled and serving are separate facts, and neither implies the other.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'name' => ['type' => ['string', 'null']],
+            'category' => ['type' => ['string', 'null'], 'description' => 'What the provider is for. Never who it is.'],
+            'driver' => ['type' => ['string', 'null'], 'description' => 'The adapter that speaks to this vendor.'],
+            'environment' => ['type' => ['string', 'null'], 'enum' => ['development', 'staging', 'production', null]],
+            'state' => [
+                'type' => ['string', 'null'],
+                'enum' => ['draft', 'ready', 'enabled', 'disabled', 'blocked', null],
+                'description' => 'Where an operator has put it. Enabled is always a decision, never a side effect of a credential arriving.',
+            ],
+            'is_serving' => [
+                'type' => 'boolean',
+                'description' => 'Enabled AND currently connectable. An instance enabled last week whose credential was revoked yesterday is not serving.',
+            ],
+            'can_test' => [
+                'type' => 'boolean',
+                'description' => 'Whether a connection tester exists for this driver in this build. Several adapters can do real work and cannot yet be proven.',
+            ],
+            'endpoint' => ['type' => ['string', 'null']],
+
+            'connection' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'reached' => ['type' => 'boolean'],
+            'usable' => ['type' => 'boolean'],
+            'detail' => ['type' => ['string', 'null']],
+            'last_tested_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'last_discovery_at' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            'readiness' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'blocker' => [
+                'type' => ['string', 'null'],
+                'description' => 'The first blocker in dependency order, not all of them. Fixing it reveals the next.',
+            ],
+            'next_action' => ['type' => ['string', 'null'], 'description' => 'A translation key. The API does not choose a language.'],
+
+            'credential' => [
+                'type' => ['object', 'null'],
+                'additionalProperties' => true,
+                'description' => 'Which credential is attached. Never its value and never its location in the secret store.',
+            ],
+            'credential_name' => ['type' => ['string', 'null']],
+            'credential_state' => ['type' => ['string', 'null']],
+            'credential_environment' => ['type' => ['string', 'null']],
+
+            'licence' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'product' => ['type' => ['string', 'null']],
+            'licence_state' => ['type' => ['string', 'null']],
+            'expires_on' => ['type' => ['string', 'null'], 'format' => 'date'],
+
+            'server' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'server_name' => ['type' => ['string', 'null']],
+            'classification' => ['type' => ['string', 'null']],
+
+            'capabilities' => [
+                'type' => 'array',
+                'items' => ['type' => 'object', 'additionalProperties' => true],
+                'description' => 'What this account was observed to be able to do. Empty means nobody has asked, which is not the same as unsupported.',
+            ],
+            'capability' => ['type' => ['string', 'null']],
+            'capability_state' => ['type' => ['string', 'null']],
+            'observed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            'enabled_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'disabled_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'disabled_reason' => ['type' => ['string', 'null']],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'CatalogueEntry' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One thing this build of Lynomia can be pointed at, with what it needs before it will work.',
+        'properties' => [
+            'driver' => ['type' => 'string'],
+            'category' => ['type' => 'string'],
+            'summary' => ['type' => 'string'],
+            'needs_endpoint' => ['type' => 'boolean'],
+            'needs_credential' => ['type' => 'boolean'],
+            'needs_licence' => ['type' => 'boolean'],
+            'needs_server' => ['type' => 'boolean', 'description' => 'Whether it runs on a machine Lynomia manages, which makes it subject to that machine\'s safety classification.'],
+            'testable' => ['type' => 'boolean', 'description' => 'Whether a connection tester exists. False means the adapter works and cannot yet be proven.'],
+            'available_here' => ['type' => 'boolean', 'description' => 'False for the controlled drivers on a production installation.'],
+        ],
+    ],
     'IpAssignment' => [
         'type' => 'object',
         'additionalProperties' => false,

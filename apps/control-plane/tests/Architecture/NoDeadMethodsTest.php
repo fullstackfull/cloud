@@ -68,8 +68,22 @@ final class NoDeadMethodsTest extends TestCase
          * and called by nothing, so an upgraded hosting customer kept their
          * old quota for ever. An adapter method with no caller is a provider
          * capability the platform advertises to itself and does not have.
+         *
+         * Written as the full directory rather than the bare word, because a
+         * module was later named Providers and the bare word matched every
+         * file in it. That pulled models, resources, requests and controllers
+         * into a gate whose whole premise is that those are excluded — their
+         * public surface is read by serialisers, casts, routers and the
+         * framework in ways no textual search can see. The visible symptom was
+         * ProviderController::enable being reported as dead while
+         * ServerController::classify, identical in every relevant way, was
+         * not: the only difference between them was which module they sat in.
+         *
+         * The layer being described is the adapter directory. Every vendor
+         * adapter in this codebase lives at Modules/<Module>/Infrastructure/
+         * Providers/, and that is what this now matches.
          */
-        'Providers',
+        'Infrastructure/Providers',
     ];
 
     /**

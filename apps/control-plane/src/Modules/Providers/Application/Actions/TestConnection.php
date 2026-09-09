@@ -8,21 +8,20 @@ use Carbon\CarbonImmutable;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
+use Lynomia\Modules\Infrastructure\Domain\Services\SafetyGate;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Domain\Contracts\SecretResolver;
 use Lynomia\Modules\Providers\Domain\DTOs\ConnectionResult;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
-use Lynomia\Modules\Providers\Domain\Enums\CapabilityState;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
-use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
-use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
-use Lynomia\Modules\Infrastructure\Domain\Services\SafetyGate;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest as ConnectionTestRecord;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
-use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderCapability;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
-use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 
 /**
  * Find out whether we can reach something, and write down what was found.
@@ -222,17 +221,5 @@ final readonly class TestConnection
                 ],
             );
         }
-    }
-
-    /** @return array<string, CapabilityState> */
-    public function capabilitiesOf(ProviderInstance $provider): array
-    {
-        $states = [];
-
-        foreach ($provider->capabilities as $capability) {
-            $states[$capability->capability] = $capability->state;
-        }
-
-        return $states;
     }
 }

@@ -60,6 +60,7 @@ class ResourceDrift extends Model
      * @var array<string, string>
      */
     protected $attributes = [
+        'severity' => 'warning',
         'status' => 'open',
     ];
 

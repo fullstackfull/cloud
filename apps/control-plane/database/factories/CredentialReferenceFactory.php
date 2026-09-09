@@ -41,4 +41,21 @@ class CredentialReferenceFactory extends Factory
     {
         return $this->state(fn (): array => ['state' => CredentialState::Missing]);
     }
+
+    public function in(CredentialState $state): self
+    {
+        return $this->state(fn (): array => ['state' => $state]);
+    }
+
+    /**
+     * A credential somebody has successfully used.
+     *
+     * Named for what it means rather than for the enum case, because the
+     * distinction this factory keeps having to express is "configured" versus
+     * "proven", and `valid()` reads like a judgement about the string.
+     */
+    public function proven(): self
+    {
+        return $this->state(fn (): array => ['state' => CredentialState::Valid]);
+    }
 }
