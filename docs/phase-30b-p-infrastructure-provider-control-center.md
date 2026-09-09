@@ -17,7 +17,7 @@ this report names in section I.
 | Branch | `claude/hv-t6hq1p` |
 | Last commit of code | `ba0f4ab` — the commits after it are this report, the two matrices and the clean-room record |
 | Backend tests | 2708 / 2708 passing locally, in CI and in the clean room |
-| PHPStan | 0 errors (locally, in CI and in the clean room) |
+| PHPStan | 0 errors locally and in CI's Static analysis job; **not executed in the clean room**, where the toolchain install (`composer install --working-dir=tools/phpstan`) was blocked by the proxy (section J) |
 | Frontend unit tests | 81 / 81 (18 files) |
 | Browser E2E | 133 tests in 23 files (28 cover the ten Control Center screens) |
 | OpenAPI operations | 211, generator and committed document in agreement |
@@ -93,7 +93,7 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Observability | **COMPLETE** | `ControlCenterCollector`: `lynomia_managed_servers{classification,state}`, `lynomia_provider_readiness{category,readiness}`, `lynomia_provider_state{state}`, `lynomia_providers_enabled_not_ready`, `lynomia_credentials{state}`, `lynomia_licences{state}`, `lynomia_product_readiness{product,state}`, `lynomia_deployments{state,kind}` — every combination at zero, no identifying label, one round trip (the query budget rose by exactly one, from 36 to 37). Every audited act already carries its context; the metrics are what pages. 4 feature tests including that every series the alert file names is one the collector emits. |
 | Browser E2E | **COMPLETE** | 28 Control Center browser tests across eight specs (overview+sites, credentials, licences, machines, providers, discovery, readiness, plans+deployments) in English and Arabic, on seeded fixtures, run in CI. |
 | Architecture Gates | COMPLETE | All green, including two new gates (`ANewRecordKnowsItsOwnState`, `TheModulesAreNamedForWhatTheyOwn`, which now also asserts `ProductReadiness` exists as its own module) and one corrected gate (`NoDeadMethods` layer scope). `EveryDomainEventIsConsumedTest` covers `ProviderReadinessChanged`. |
-| Clean Room | **COMPLETE** | Section J: a fresh clone, nothing reused, every gate the working copy runs, the same numbers. |
+| Clean Room | **COMPLETE** | Section J: a fresh clone, nothing reused, every gate the working copy runs except PHPStan, whose toolchain install the proxy blocked; the same numbers on everything that ran. |
 | CI | **GREEN** | Every run since 101 green on all jobs; runs 95–100 were red and each cause is in section K, none re-run into green without a code change. |
 
 **Closed: 38 of 40 exit conditions.** Every condition this build can close is
@@ -402,7 +402,8 @@ is listed with its cause; none was re-run into green without a code change.
 | 107 | `8932849` | green | endpoint policy and adversarial tests |
 | 108 | `ad8e179` | green | metrics, alerts, runbooks, dashboard, infrastructure drift |
 | 109 | `ba0f4ab` | green | overview and site registry — the last commit of code |
-| 110 | this report and the matrices | the run attached to this commit | documents only; no code changed after `ba0f4ab` |
+| 110 | `1c01aa5` | green | this report and the matrices; documents only, no code changed after `ba0f4ab` |
+| 111 | this correction | the run attached to this commit | the PHPStan wording in the summary and the Clean Room row; documents only |
 
 ## L. Verdict
 
