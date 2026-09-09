@@ -1,6 +1,6 @@
 # Phase 30B-P — scope addendum: product readiness expansion and deferred capability closure
 
-**Status: IN PROGRESS.**
+**Status: CLOSED.** Verdict in section AJ: the addendum's applicable software scope is complete to the closure standard; nothing is `REAL_INFRA_VERIFIED`; no product is `READY_TO_SELL`.
 
 The original Phase 30B-P report, `docs/phase-30b-p-infrastructure-provider-control-center.md`,
 is **CLOSED and unchanged**. This document is the authoritative record of the
@@ -29,7 +29,20 @@ existed; nothing was reset.
 
 ## B. Current HEAD
 
-Filled at closure. Every slice is pushed and its CI run recorded in section AC.
+| | |
+|---|---|
+| Last commit of code | `8d16255` — the browser-fixture fix after the addendum's eight slices (`5669d00`, `01a1eef`, `20a7186`, `8d503c2`, `d528255`, `67355e7`, `5844e37`, `24fddff`) |
+| After it | `09cbc23` (report draft), `9e86429` (the link from the closed report), and this closure commit — documents only |
+| Backend tests | 2 799 (+91) |
+| Frontend unit tests | 91 in 20 files (+10, +2) |
+| Browser E2E | 150 in 27 files (+17, +4) |
+| Migrations | 54 (+4) |
+| OpenAPI operations | 234 (+23) |
+| PHPStan | 0 errors locally and in CI's Static analysis job; not executed in the clean room (AB) |
+| `REAL_INFRA_VERIFIED` | none |
+| `READY_TO_SELL` | none |
+
+Every slice is pushed and its CI run recorded in AC.
 
 ## C. Delta map
 
@@ -501,8 +514,14 @@ New specs, all on the seeded fixtures, all in the full suite:
 | `account-changes.e2e.ts` | customer asks, operator approves, applied without touching anything issued, and back; Arabic |
 | `wordpress-copies.e2e.ts` | staging made, shown as its own site, pushed back only with the domain typed; a production site offers copies and not a push, a site with no panel offers the reason; Arabic |
 
-The full suite on the current HEAD in the working copy: **{{E2E_WORKING}}**.
-The clean room's run is in AB; CI's in AC.
+The full suite in the working copy at `8d16255`: **148 passed, 2 failed** of
+150 in 10.3 min — the two failures were two tests of
+`control-center-credentials.e2e.ts`, both at the sign-in step, both a 10 s
+wait for the welcome heading, while the clean room's `composer install` was
+running on the same machine. The spec alone, immediately after: 5 passed in
+20 s. The same 150 passed in the clean room under no other load (AB) and in
+CI (AC, run 126), so the two are recorded as load on this machine, not as a
+defect, and nothing was changed for them.
 
 ## Z. Whole-life tests
 
@@ -545,13 +564,60 @@ are unchanged and green.
 
 ## AB. Clean Room
 
-{{CLEANROOM}}
+Run from `git clone --branch claude/hv-t6hq1p` of the repository at
+`8d16255` into a directory of its own — no reuse of the working copy, no
+existing database, no untracked env file, no manual keys, no hidden
+fixtures. The commits after `8d16255` are this report and one link line.
+
+| Step | Command | Result |
+| --- | --- | --- |
+| PHP dependencies | `composer install --prefer-dist` | OK |
+| Keys | `php artisan key:generate` for `.env` and `--env=testing` | OK |
+| Node dependencies | `npm ci` at the workspace root, once | OK |
+| Databases | `lynomia_cradd`, `_test`, `_e2e` | created empty by `psql` |
+| Migrations | `php artisan migrate --force` | 54 migrations from an empty database, the addendum's four among them |
+| Seed | `php artisan db:seed --force` | roles and permissions, the software catalogue, products, plans, prices, nodes, addresses, servers — the development seed, 1.0 s |
+| Backend suite | `php vendor/bin/phpunit` | **2 799 passed, 125 608 assertions**, 358 s — the working copy's and CI's number exactly |
+| Style | `vendor/bin/pint --test` on the whole tree | passed |
+| Static analysis | `composer install --working-dir=tools/phpstan` | **not run**: the install fails with `Could not authenticate against github.com` (exit 100), as in every previous clean room here — the proxy will not serve two packages as dist. PHPStan passes with 0 errors in the working copy and in CI's Static analysis job on every green run in AC. The gap is in this environment's network, not in the repository. |
+| Typecheck | `npm run typecheck` | OK |
+| Lint | `npm run lint` | OK |
+| Frontend unit | `npx vitest run` | 91 passed in 20 files |
+| Production build | `npm run build` | OK (two chunk-size notes from the bundler) |
+| OpenAPI | `php artisan openapi:generate` then `git diff --exit-code docs/openapi.yaml` | up to date: 234 operations, no diff |
+| OpenAPI validation | `npm run openapi:lint` | valid, 4 warnings |
+| Scheduler | `php artisan schedule:list` | 24 commands registered, `customers:apply-country-currency-changes` among them |
+| Queue worker | `php artisan queue:work redis --stop-when-empty` | connected to Redis, found the default queue empty (the development seed queues nothing), exited 0 with "Worker STOPPED Queue empty" |
+| Infrastructure validators | `validate-inventory.py`, `test_validate_inventory.py`, `test_safety_gate.sh`, `validate-monitoring.py`, `validate-runbooks.py`, `check-ci-cannot-apply.py` | all pass: 12 hosts ok; 15/15; 10/10; 7 rule files, 73 rules over 54 exported and 7 declared series; 118 files, 62 artisan invocations all defined; 38 CI steps, none applies |
+| Architecture and security gates | inside the backend suite above | green |
+| Browser suite | `npx playwright test` against a fresh `lynomia_cradd_e2e` | **150 passed** (6.7 min), the 17 addendum tests and every Arabic test among them |
+
+Nothing in the clean room needed a fix. The one thing it could not run is
+the one thing it has never been able to run here, and it is named above
+rather than omitted.
 
 ## AC. CI
 
 Pushed and observed. Every red run is listed with its cause and its fix.
 
-{{CI}}
+| Run | Commit | Conclusion | Cause / note |
+|---|---|---|---|
+| 115 | `5669d00` | green | product readiness expansion |
+| 116 | `01a1eef` | green | domain redemption |
+| 117 | `01a1eef` | green | the same commit on the pull-request trigger |
+| 119 | `20a7186` | green | DNS zone import and export |
+| 120 | `8d503c2` | green | file-level backup restore |
+| 121 | `d528255` | **red** | Browser end-to-end only: `portal.e2e.ts` "the notification inbox shows what the platform has told this account" and "marking a notification read clears it from the unread count" — the new `account-changes.e2e.ts` runs earlier in the suite, applies two country changes, and each tells the customer; the seeded inbox then held three unread notifications where the seeder wrote one. Not seen locally because the spec had only been run on its own. Fixed in `8d16255`. Every other job green. |
+| 122 | `67355e7` | **red** | the same two failures, same cause; every other job green |
+| 123 | `5844e37` | **red** | the same two failures, same cause; every other job green |
+| 124 | `24fddff` | cancelled | superseded by the push of `8d16255` eight minutes later; the branch's concurrency group cancels the older run |
+| 125 | `8d16255` | cancelled | superseded by the push of `09cbc23` |
+| 126 | `09cbc23` | green | `8d16255` (the last commit of code) plus the report draft; all nine jobs green, 150 browser tests |
+| 127 | `9e86429` | in progress at the time of this commit | the link line in the closed report; documents only |
+| 128 | closure commit | observed after this commit | this report's closure; documents only. Recorded, with 127's final state, by the one commit after it. |
+
+No red run was re-run into green: each of 121 to 123 failed on the same
+defect, fixed once in `8d16255`.
 
 ## AD. Updated Infrastructure Capability Matrix
 
@@ -645,7 +711,7 @@ Status: CLOSED
 Unchanged
 
 Phase 30B-P Scope Addendum
-Status: {{STATUS}}
+Status: CLOSED
 
 Software:
 Every item of the addendum's applicable software scope is complete to the
@@ -661,10 +727,11 @@ RTL and LTR; browser E2E; architecture gates; whole-life tests; both
 matrices and the customer matrix; this report.
 
 Runtime:
-Backend {{BACKEND}} tests, frontend unit {{VITEST}}, browser {{E2E_CR}},
+Backend 2 799 tests, frontend unit 91, browser 150,
 PHPStan 0 locally and in CI, Pint clean, OpenAPI 234 operations in step,
 scheduler and a real Redis worker running, in the working copy, in CI and
-in a fresh clone (AB, AC). {{PHPSTAN_CR}}
+in a fresh clone (AB, AC) — except PHPStan in the clean room, where the
+toolchain install is blocked by the proxy, recorded as such in AB.
 
 Real infrastructure:
 NONE. No real endpoint was dialled and no real provider was tested during
