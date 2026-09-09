@@ -1429,7 +1429,61 @@
     "releaseExplainer": "Removes the zone and every record in it. Your registration is untouched — this only stops this platform answering for the domain.",
     "releaseWarning": "Every name under {{zone}} stops resolving: the website, the mail, and anything else set up under it. This cannot be undone, and there is no delay — it takes effect as soon as you confirm.",
     "releaseConfirmLabel": "Type {{zone}} to confirm",
-    "release": "Give up domain"
+    "release": "Give up domain",
+    "import": {
+      "title": "Import and export",
+      "explainer": "Bring records in from a BIND zone file, or take this zone out as one. Nothing is written until you have seen the plan and confirmed it.",
+      "file": "Zone file",
+      "fileHint": "A text file of up to 256 KB. Only A, AAAA, CNAME, MX, TXT and CAA records are read; the SOA and apex NS are set by the nameservers and are listed as ignored.",
+      "text": "Or paste the zone text",
+      "mode": "Mode",
+      "modeHint": {
+        "merge": "Adds and updates what the file names; records the file does not mention stay as they are.",
+        "replace": "Makes the zone match the file: records the file does not mention are removed."
+      },
+      "modes": {
+        "merge": "Merge into the zone",
+        "replace": "Replace the zone with the file"
+      },
+      "preview": "Preview changes",
+      "apply": "Apply this plan",
+      "applyTitle": "Apply the import to {{zone}}?",
+      "applyBody": "{{add}} to add, {{update}} to change, {{remove}} to remove. Every record goes through the same checks as one added by hand, and the plan is applied only if the zone has not changed since this preview.",
+      "applyConfirmLabel": "Type {{zone}} to confirm",
+      "applied": "Imported: {{added}} added, {{updated}} changed, {{removed}} removed, {{unchanged}} unchanged.",
+      "planTitle": "Plan",
+      "notApplicable": "Nothing will be applied while any line is refused. Fix the lines below and preview again.",
+      "empty": "The file holds nothing this zone does not already have.",
+      "counts": {
+        "add": "add",
+        "update": "change",
+        "remove": "remove",
+        "unchanged": "unchanged",
+        "refused": "refused",
+        "ignored": "ignored",
+        "kept": "kept as they are"
+      },
+      "kinds": {
+        "add": "Add",
+        "update": "Change",
+        "remove": "Remove",
+        "unchanged": "Unchanged",
+        "refused": "Refused",
+        "ignored": "Ignored"
+      },
+      "line": "Line",
+      "change": "Change",
+      "record": "Record",
+      "reason": "Reason",
+      "tooLarge": "That file is larger than 256 KB, which is more than a zone file is."
+    },
+    "export": {
+      "action": "Export zone file",
+      "ready": "{{count}} records, as a BIND zone file. Provider identifiers and this platform's own ids are not in it.",
+      "copy": "Copy",
+      "copied": "Copied.",
+      "download": "Download {{filename}}"
+    }
   },
   "domains": {
     "authCodeHint": "Copy it now. We do not store it, and asking again gives you a new one.",

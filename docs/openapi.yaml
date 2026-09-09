@@ -7477,6 +7477,212 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/export":
+    get:
+      operationId: "api_v1_dns_zones_export"
+      tags:
+        - "DNS"
+      summary: "Export the zone as a BIND-compatible file"
+      description: "The records this platform holds, as a file another provider can read: owners relative to the origin, TTLs where set, targets absolute, TXT quoted. No SOA, no apex NS, no provider identifiers, no credentials, no audit metadata; the current nameservers appear as a comment. A record the provider has not confirmed carries a comment saying so."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ZoneExportResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/import":
+    post:
+      operationId: "api_v1_dns_zones_import_apply"
+      tags:
+        - "DNS"
+      summary: "Apply a previewed zone import"
+      description: "Recomputes the plan from the same text and applies it only if its fingerprint equals the one the preview returned (409 `dns.import.plan_changed` otherwise) and no line is refused (409 `dns.import.refused`). Removals, then updates, then additions, each through the same action a single record goes through, each with its own publish and its own state. Audited once with the counts."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                text:
+                  description: "See the endpoint description; validated server-side."
+                mode:
+                  description: "See the endpoint description; validated server-side."
+                fingerprint:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ZoneImportResultResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/import/plan":
+    post:
+      operationId: "api_v1_dns_zones_import_plan"
+      tags:
+        - "DNS"
+      summary: "Preview what a zone file would do"
+      description: "Parses BIND-compatible text (comments, $ORIGIN, $TTL, parentheses, quoted strings, relative names; A, AAAA, CNAME, MX, TXT and CAA) and returns every line as ADD, UPDATE, REMOVE, UNCHANGED, REFUSED or IGNORED with the reason. Every rule a single record faces is applied to every line, plus CNAME-stands-alone on the zone as it would be and the zone ceiling on the final count. One refused line makes the whole plan not applicable; nothing is skipped. `merge` (default) leaves unmentioned records alone; `replace` lists each as REMOVE. Input over 256 KiB, 5000 lines, 4096 characters a line, not UTF-8 or carrying control characters is refused (422) before it is read. $INCLUDE and $GENERATE are refused lines."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                text:
+                  description: "See the endpoint description; validated server-side."
+                mode:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ZoneImportPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/dns/zones/{zone}/records":
     get:
       operationId: "api_v1_dns_records_index"
@@ -18964,3 +19170,125 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/WordPressSite"
+    ZoneExport:
+      type: "object"
+      additionalProperties: false
+      properties:
+        filename:
+          type: "string"
+        content:
+          type: "string"
+          description: "BIND-compatible zone text."
+        record_count:
+          type: "integer"
+    ZoneExportResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ZoneExport"
+    ZoneImportEntry:
+      type: "object"
+      additionalProperties: false
+      properties:
+        kind:
+          type: "string"
+          enum:
+            - "add"
+            - "update"
+            - "remove"
+            - "unchanged"
+            - "refused"
+            - "ignored"
+        line:
+          type:
+            - "integer"
+            - "null"
+          description: "The line of the file, where the entry came from one."
+        type:
+          type:
+            - "string"
+            - "null"
+        name:
+          type:
+            - "string"
+            - "null"
+        content:
+          type:
+            - "string"
+            - "null"
+          description: "The value, or for a refused or ignored line the line's text."
+        ttl:
+          type:
+            - "integer"
+            - "null"
+        priority:
+          type:
+            - "integer"
+            - "null"
+        existing_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        reason:
+          type:
+            - "string"
+            - "null"
+    ZoneImportPlan:
+      type: "object"
+      additionalProperties: false
+      properties:
+        zone_id:
+          "$ref": "#/components/schemas/Ulid"
+        zone:
+          type: "string"
+        mode:
+          type: "string"
+          enum:
+            - "merge"
+            - "replace"
+        applicable:
+          type: "boolean"
+          description: "False while any entry is refused."
+        fingerprint:
+          type: "string"
+          description: "sha256 over the changes and the zone's current records; send it back to apply."
+        counts:
+          type: "object"
+          additionalProperties:
+            type: "integer"
+        entries:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ZoneImportEntry"
+    ZoneImportPlanResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ZoneImportPlan"
+    ZoneImportResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        zone_id:
+          "$ref": "#/components/schemas/Ulid"
+        mode:
+          type: "string"
+        added:
+          type: "integer"
+        updated:
+          type: "integer"
+        removed:
+          type: "integer"
+        unchanged:
+          type: "integer"
+    ZoneImportResultResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ZoneImportResult"

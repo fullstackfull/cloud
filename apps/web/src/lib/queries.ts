@@ -28,6 +28,10 @@ import type {
   Subscription,
   TeamInvitation,
   TeamMember,
+  ZoneExport,
+  ZoneImportMode,
+  ZoneImportPlan,
+  ZoneImportResult,
   TeamRole,
   Ticket,
   TicketPriority,
@@ -1194,5 +1198,46 @@ export function useRemoveDnsRecord() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dns'] })
     },
+  })
+}
+
+/**
+ * A zone file read against the zone: what would change, line by line, and
+ * nothing written. Not cached — the plan is computed against the zone as it
+ * is at that moment, and a stale one is exactly what the fingerprint refuses.
+ */
+export function usePlanZoneImport() {
+  return useMutation({
+    mutationFn: (payload: { zoneId: string; text: string; mode: ZoneImportMode }) =>
+      api.post<Envelope<ZoneImportPlan>>(
+        `/dns/zones/${encodeURIComponent(payload.zoneId)}/import/plan`,
+        { text: payload.text, mode: payload.mode },
+      ),
+  })
+}
+
+export function useApplyZoneImport() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The same text and mode the preview was given, plus its fingerprint: the
+     * server recomputes the plan and applies it only if it is the one that was
+     * shown. */
+    mutationFn: (payload: { zoneId: string; text: string; mode: ZoneImportMode; fingerprint: string }) =>
+      api.post<Envelope<ZoneImportResult>>(`/dns/zones/${encodeURIComponent(payload.zoneId)}/import`, {
+        text: payload.text,
+        mode: payload.mode,
+        fingerprint: payload.fingerprint,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    },
+  })
+}
+
+export function useExportZone() {
+  return useMutation({
+    mutationFn: (zoneId: string) =>
+      api.get<Envelope<ZoneExport>>(`/dns/zones/${encodeURIComponent(zoneId)}/export`),
   })
 }

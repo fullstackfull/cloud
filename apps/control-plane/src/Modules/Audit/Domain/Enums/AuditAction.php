@@ -152,6 +152,8 @@ enum AuditAction: string
     case DnsRecordCreated = 'dns.record.created';
     case DnsRecordUpdated = 'dns.record.updated';
     case DnsRecordDeleted = 'dns.record.deleted';
+    case DnsZoneImported = 'dns.zone.imported';
+    case DnsZoneExported = 'dns.zone.exported';
 
     /*
      * Domains.

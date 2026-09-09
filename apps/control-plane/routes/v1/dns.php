@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Dns\Http\Controllers\DnsRecordController;
 use Lynomia\Modules\Dns\Http\Controllers\DnsZoneController;
+use Lynomia\Modules\Dns\Http\Controllers\DnsZoneTransferController;
 
 /*
  * dns — customer surface.
@@ -49,6 +50,21 @@ Route::prefix('dns')->as('dns.')->group(function (): void {
         ->whereUlid('zone')
         ->middleware('throttle:5,1,dns-zone-delete:')
         ->name('zones.destroy');
+
+    Route::get('zones/{zone}/export', [DnsZoneTransferController::class, 'export'])
+        ->whereUlid('zone')
+        ->middleware('throttle:20,1,dns-zone-export:')
+        ->name('zones.export');
+
+    Route::post('zones/{zone}/import/plan', [DnsZoneTransferController::class, 'plan'])
+        ->whereUlid('zone')
+        ->middleware('throttle:20,1,dns-zone-import:')
+        ->name('zones.import.plan');
+
+    Route::post('zones/{zone}/import', [DnsZoneTransferController::class, 'apply'])
+        ->whereUlid('zone')
+        ->middleware('throttle:10,1,dns-zone-import:')
+        ->name('zones.import.apply');
 
     Route::get('zones/{zone}/records', [DnsRecordController::class, 'index'])
         ->whereUlid('zone')

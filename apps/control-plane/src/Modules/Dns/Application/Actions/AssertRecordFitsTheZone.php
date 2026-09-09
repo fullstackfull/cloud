@@ -100,7 +100,12 @@ final readonly class AssertRecordFitsTheZone
      *
      * @throws DnsRefusedException
      */
-    private function assertAddressIsTheirs(DnsZone $zone, DnsRecordType $type, string $content): void
+    /**
+     * Public because a zone import applies the same rule to every incoming
+     * address before any of them is written, and a second copy of this
+     * check would be a second place for it to be missing.
+     */
+    public function assertAddressIsTheirs(DnsZone $zone, DnsRecordType $type, string $content): void
     {
         if ($type !== DnsRecordType::A && $type !== DnsRecordType::AAAA) {
             return;

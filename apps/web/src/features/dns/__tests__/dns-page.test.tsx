@@ -57,13 +57,39 @@ const RECORD = {
   created_at: '2026-03-01T00:00:00+00:00',
 }
 
+const PLAN = {
+  zone_id: '01JZONE',
+  zone: 'example.test',
+  mode: 'merge',
+  applicable: true,
+  fingerprint: 'a'.repeat(64),
+  counts: { add: 1, update: 0, remove: 0, unchanged: 1, refused: 0, ignored: 1, kept: 0 },
+  entries: [
+    { kind: 'add', line: 2, type: 'A', name: 'api.example.test', content: '203.0.113.20', ttl: 3600, priority: null, existing_id: null, reason: null },
+    { kind: 'unchanged', line: 1, type: 'A', name: 'www.example.test', content: '203.0.113.10', ttl: 1, priority: null, existing_id: '01JRECORD', reason: null },
+    { kind: 'ignored', line: 3, type: null, name: null, content: '@ IN NS a.ns.fake.test.', ttl: null, priority: null, existing_id: null, reason: 'the nameservers set the apex NS' },
+  ],
+}
+
+const REFUSED_PLAN = {
+  ...PLAN,
+  applicable: false,
+  counts: { ...PLAN.counts, refused: 1 },
+  entries: [
+    ...PLAN.entries,
+    { kind: 'refused', line: 4, type: null, name: null, content: '$INCLUDE /etc/passwd', ttl: null, priority: null, existing_id: null, reason: '$INCLUDE names a file on somebody\'s disk; a zone file may not do that here.' },
+  ],
+}
+
 interface Stubs {
   onAdd?: (body: unknown) => void
   onRelease?: (body: unknown) => void
+  onApply?: (body: unknown) => void
   zone?: Record<string, unknown>
+  plan?: Record<string, unknown>
 }
 
-function stubFetch({ onAdd, onRelease, zone }: Stubs = {}) {
+function stubFetch({ onAdd, onRelease, onApply, zone, plan }: Stubs = {}) {
   return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
     const path = url.split('?')[0] ?? url
@@ -73,6 +99,13 @@ function stubFetch({ onAdd, onRelease, zone }: Stubs = {}) {
 
     if (path.endsWith('/sanctum/csrf-cookie')) {
       body = null
+    } else if (path.endsWith('/import/plan')) {
+      body = { data: plan ?? PLAN }
+    } else if (path.endsWith('/import')) {
+      onApply?.(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
+      body = { data: { zone_id: '01JZONE', mode: 'merge', added: 1, updated: 0, removed: 0, unchanged: 1 } }
+    } else if (path.endsWith('/export')) {
+      body = { data: { filename: 'example.test.zone', content: '$ORIGIN example.test.\nwww 300 IN A 203.0.113.10\n', record_count: 1 } }
     } else if (path.endsWith('/records') && init?.method === 'POST') {
       onAdd?.(JSON.parse(typeof init.body === 'string' ? init.body : '{}'))
       body = { data: RECORD }
@@ -180,5 +213,68 @@ describe('dns page', () => {
     // that could make it worse, so the message says so.
     expect(await screen.findByText(/cannot say whether it took effect/i)).toBeInTheDocument()
     expect(screen.getByText(/could duplicate it/i)).toBeInTheDocument()
+  })
+
+  it('applies exactly the plan it previewed, and only after the zone name is typed back', async () => {
+    const applied = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onApply: applied }))
+    const user = userEvent.setup()
+
+    renderPage()
+
+    const text = "www IN A 203.0.113.10\napi IN A 203.0.113.20\n@ IN NS a.ns.fake.test.\n"
+    await user.type(await screen.findByLabelText(/or paste the zone text/i), text)
+    await user.click(screen.getByRole('button', { name: /preview changes/i }))
+
+    const planned = await screen.findByTestId('zone-import-plan')
+    expect(within(planned).getByText('api.example.test A 203.0.113.20')).toBeInTheDocument()
+    // The ignored line is listed with its reason, not dropped on the floor.
+    expect(within(planned).getByText(/nameservers set the apex NS/i)).toBeInTheDocument()
+
+    await user.click(within(planned).getByRole('button', { name: /apply this plan/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    const confirm = within(dialog).getByRole('button', { name: /apply this plan/i })
+    expect(confirm).toBeDisabled()
+    await user.type(within(dialog).getByRole('textbox'), 'example.test')
+    await user.click(confirm)
+
+    // The preview's fingerprint travels with the apply: the server applies
+    // what was shown or refuses, never a plan nobody saw.
+    await waitFor(() => {
+      expect(applied).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'merge', fingerprint: 'a'.repeat(64) }),
+      )
+    })
+    expect(await screen.findByText(/imported: 1 added/i)).toBeInTheDocument()
+  })
+
+  it('applies nothing while any line is refused, and says which line and why', async () => {
+    const applied = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onApply: applied, plan: REFUSED_PLAN }))
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.type(await screen.findByLabelText(/or paste the zone text/i), '$INCLUDE /etc/passwd')
+    await user.click(screen.getByRole('button', { name: /preview changes/i }))
+
+    const planned = await screen.findByTestId('zone-import-plan')
+    expect(within(planned).getByText(/nothing will be applied while any line is refused/i)).toBeInTheDocument()
+    expect(within(planned).getByText(/names a file on somebody/i)).toBeInTheDocument()
+    expect(within(planned).getByRole('button', { name: /apply this plan/i })).toBeDisabled()
+    expect(applied).not.toHaveBeenCalled()
+  })
+
+  it('exports the zone as text the customer can read and take away', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /export zone file/i }))
+
+    expect(await screen.findByTestId('zone-export')).toHaveTextContent('www 300 IN A 203.0.113.10')
+    expect(screen.getByRole('link', { name: /download example\.test\.zone/i })).toHaveAttribute('download', 'example.test.zone')
   })
 })

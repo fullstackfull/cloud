@@ -61,7 +61,8 @@ final class MetricsQueryBudgetTest extends TestCase
     // collector makes for all six of its tables.
     // 38: the scope addendum's domain-redemption series is one grouped query
     // over domain_operations, beside the disposition query that was there.
-    private const int BUDGET = 38;
+    // 39: zone imports by outcome, one grouped query over dns_zone_imports.
+    private const int BUDGET = 39;
 
     private MetricsRegistry $registry;
 

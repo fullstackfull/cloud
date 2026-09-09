@@ -696,6 +696,26 @@ return [
         'description' => 'What this platform has published, which is not the same as what the zone serves. Records added through the provider\'s own console are not here; reconciliation reports them and never removes them.',
         'response' => ['envelope' => 'list', 'schema' => 'DnsRecord'],
     ],
+    'api.v1.dns.zones.export' => [
+        'tag' => 'DNS',
+        'summary' => 'Export the zone as a BIND-compatible file',
+        'description' => 'The records this platform holds, as a file another provider can read: owners relative to the origin, TTLs where set, targets absolute, TXT quoted. No SOA, no apex NS, no provider identifiers, no credentials, no audit metadata; the current nameservers appear as a comment. A record the provider has not confirmed carries a comment saying so.',
+        'response' => $one('ZoneExport'),
+    ],
+    'api.v1.dns.zones.import.plan' => [
+        'tag' => 'DNS',
+        'summary' => 'Preview what a zone file would do',
+        'description' => 'Parses BIND-compatible text (comments, $ORIGIN, $TTL, parentheses, quoted strings, relative names; A, AAAA, CNAME, MX, TXT and CAA) and returns every line as ADD, UPDATE, REMOVE, UNCHANGED, REFUSED or IGNORED with the reason. Every rule a single record faces is applied to every line, plus CNAME-stands-alone on the zone as it would be and the zone ceiling on the final count. One refused line makes the whole plan not applicable; nothing is skipped. `merge` (default) leaves unmentioned records alone; `replace` lists each as REMOVE. Input over 256 KiB, 5000 lines, 4096 characters a line, not UTF-8 or carrying control characters is refused (422) before it is read. $INCLUDE and $GENERATE are refused lines.',
+        'body' => ['text', 'mode'],
+        'response' => $one('ZoneImportPlan'),
+    ],
+    'api.v1.dns.zones.import.apply' => [
+        'tag' => 'DNS',
+        'summary' => 'Apply a previewed zone import',
+        'description' => 'Recomputes the plan from the same text and applies it only if its fingerprint equals the one the preview returned (409 `dns.import.plan_changed` otherwise) and no line is refused (409 `dns.import.refused`). Removals, then updates, then additions, each through the same action a single record goes through, each with its own publish and its own state. Audited once with the counts.',
+        'body' => ['text', 'mode', 'fingerprint'],
+        'response' => $one('ZoneImportResult'),
+    ],
     'api.v1.dns.records.store' => [
         'tag' => 'DNS',
         'summary' => 'Add a record',

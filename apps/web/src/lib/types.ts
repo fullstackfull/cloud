@@ -618,6 +618,49 @@ export interface DnsZone {
   created_at: string
 }
 
+export type ZoneChangeKind = 'add' | 'update' | 'remove' | 'unchanged' | 'refused' | 'ignored'
+export type ZoneImportMode = 'merge' | 'replace'
+
+export interface ZoneImportEntry {
+  kind: ZoneChangeKind
+  line: number | null
+  type: DnsRecordType | null
+  name: string | null
+  /** The value, or for a refused or ignored line the line's text. */
+  content: string | null
+  ttl: number | null
+  priority: number | null
+  existing_id: string | null
+  reason: string | null
+}
+
+export interface ZoneImportPlan {
+  zone_id: string
+  zone: string
+  mode: ZoneImportMode
+  /** False while any entry is refused: nothing is applied then. */
+  applicable: boolean
+  /** Sent back on apply; a zone that changed since the preview makes it stale. */
+  fingerprint: string
+  counts: Record<'add' | 'update' | 'remove' | 'unchanged' | 'refused' | 'ignored' | 'kept', number>
+  entries: ZoneImportEntry[]
+}
+
+export interface ZoneImportResult {
+  zone_id: string
+  mode: ZoneImportMode
+  added: number
+  updated: number
+  removed: number
+  unchanged: number
+}
+
+export interface ZoneExport {
+  filename: string
+  content: string
+  record_count: number
+}
+
 export interface DnsRecord {
   id: string
   zone_id: string

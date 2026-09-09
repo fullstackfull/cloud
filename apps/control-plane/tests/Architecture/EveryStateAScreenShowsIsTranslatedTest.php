@@ -19,6 +19,8 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState as ChassisPowerState;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\ZoneChangeKind;
+use Lynomia\Modules\Dns\Domain\Enums\ZoneImportMode;
 use Lynomia\Modules\Domains\Domain\Enums\DomainAvailability;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
@@ -155,6 +157,8 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.controlCenter.blockers' => [BlockerReason::class],
         'admin.providers.categories' => [ProviderCategory::class],
         'admin.providers.capabilityStates' => [CapabilityState::class],
+        'dns.import.kinds' => [ZoneChangeKind::class],
+        'dns.import.modes' => [ZoneImportMode::class],
         'admin.readiness.products' => [Product::class],
         'admin.readiness.software' => [ProductSoftwareState::class],
         'admin.readiness.answerValues' => [ReadinessAnswer::class],
