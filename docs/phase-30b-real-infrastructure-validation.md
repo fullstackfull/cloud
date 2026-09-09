@@ -579,8 +579,10 @@ Every run on this branch during Phase 30B, including the red one.
 | 88 | `7e2214f` | Cancelled |
 | 89 | `b730ae1` | Cancelled |
 | 91 | `faa7539` | Cancelled |
+| 92 | `bdd5421` | Cancelled |
+| 93 | `fc88a34` | **Green**, all nine jobs — the first full pass on the consolidated tree |
 
-Four consecutive runs were cancelled, and that is worth stating plainly rather
+Five consecutive runs were cancelled, and that is worth stating plainly rather
 than leaving as a gap in the numbering. The workflow's concurrency group cancels
 an in-progress run when a new commit lands on the same ref, and pushes went out
 faster than CI could finish. So the last run to complete on its own merits was
@@ -588,13 +590,19 @@ faster than CI could finish. So the last run to complete on its own merits was
 duplicate tree rather than this one.
 
 The fix was to stop pushing and wait, which is the discipline the concurrency
-setting assumes and which this phase did not show until it had wasted four runs.
+setting assumes and which this phase did not show until it had wasted five runs.
+Run 93 is what waiting produced: green on all nine jobs, and the first run to
+test the consolidated tree at all.
 
-Measured locally on the consolidated tree in the meantime: 2,446 backend tests
-green with 69,585 assertions; `ansible-lint` clean at the production profile
-across 126 files; both OpenTofu environments valid; and all the static checks
-passing, including the two that test the gates themselves — 15/15 for the
-inventory validator and 10/10 for the safety gate.
+Its Infrastructure validation job passed all fifteen steps, including the two
+that test the gates rather than the configuration — `test_validate_inventory.py`
+at 15/15 and `test_safety_gate.sh` at 10/10 — and the check that no workflow
+applies infrastructure, across 38 run steps.
+
+Measured locally on the same tree: 2,446 backend tests green with 69,585
+assertions; `ansible-lint` clean at the production profile across 126 files;
+both OpenTofu environments valid; frontend typecheck clean; and
+`docs/openapi.yaml` up to date at 150 operations.
 
 A report that lists only green runs is not a record of what happened.
 
