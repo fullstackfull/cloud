@@ -7,10 +7,10 @@ namespace Lynomia\Modules\Infrastructure\Application\Actions;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\ClassificationRefused;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
-use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 /**
  * Clear one machine for one piece of destructive work.

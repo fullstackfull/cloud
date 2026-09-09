@@ -7,8 +7,8 @@ namespace Lynomia\Modules\Infrastructure\Application\Actions;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
-use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 
 /**
  * Take back a clearance once the work it was for is done.

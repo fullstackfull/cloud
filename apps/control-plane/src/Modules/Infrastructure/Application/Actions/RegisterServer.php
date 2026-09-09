@@ -9,9 +9,9 @@ use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Infrastructure\Domain\DTOs\ServerRegistration;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
-use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
 
 /**
  * Write down that a machine exists.

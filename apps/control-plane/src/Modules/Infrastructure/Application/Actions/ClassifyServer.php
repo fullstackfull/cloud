@@ -8,10 +8,10 @@ use Carbon\CarbonImmutable;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\ClassificationRefused;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
-use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 /**
  * Change what an operator has agreed we may do to a machine.
