@@ -48,6 +48,8 @@ it, and where nothing does, the row says so.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Register and verify an email | `/register` | `POST /register`, `GET /email/verify/{id}/{hash}` | `RegisterCustomer` | `notifications` (the mail) | `DeliverNotification` | SMTP | `auth.e2e.ts` | `RUNTIME_VERIFIED` | No — mail is not sent from here |
 | Sign in, including a second factor | `/sign-in` | `POST /login`, `POST /login/two-factor` | `AttemptLogin` | sync | — | — | `auth.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Ask for the account's country or currency to change, see what it would touch, check again, withdraw | `/` | `GET|POST /account/country-currency-changes`, `POST …/{id}/reanalyse`, `POST …/{id}/withdraw` | `RequestCountryCurrencyChange`, `AnalyseCountryCurrencyChange`, `ReanalyseCountryCurrencyChange`, `WithdrawCountryCurrencyChange` | sync | — | — | `account-changes.e2e.ts` | `RUNTIME_VERIFIED` | n/a — nothing already issued is ever converted |
+| Have the change decided by a person and applied, now or at a scheduled moment | `/admin/account-changes` | `GET /admin/customers/country-currency-changes`, `POST …/{id}/approve|reject` | `DecideCountryCurrencyChange`, `ApplyCountryCurrencyChange`; `customers:apply-country-currency-changes` every 5 min | scheduler | — | — | `account-changes.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Sign out | any page | `POST /logout` | — | sync | — | — | `auth.e2e.ts`, `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Reset a forgotten password | `/forgot-password` | `POST /password/forgot`, `POST /password/reset` | Laravel's password broker | `notifications` | `DeliverNotification` | SMTP | — | `TESTED` | No |
 | Change password, edit profile | `/profile` | `PUT /me/password`, `PATCH /me` | — | sync | — | — | `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
@@ -118,6 +120,9 @@ it, and where nothing does, the row says so.
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | See backups and their state | `/backups` | `GET /vps/{vm}/backups` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Browse a backup folder by folder, with symlinks shown and never followed | `/backups` | `GET /vps/{vm}/backups/{backup}/files?path=` | `BrowseBackupFiles`; `BackupPath` refuses traversal | sync | — | `FileLevelBackupProvider::listFiles` | `backup-files.e2e.ts` | `RUNTIME_VERIFIED` (fake) | `BLOCKED_HARDWARE` — the Proxmox provider does not implement the interface; PBS file-restore was never called |
+| Download one file through a short-lived single-use link | `/backups` | `POST …/files/downloads`, `GET /backups/downloads/{token}` | `IssueBackupFileDownload`, `ServeBackupFileDownload` | sync | — | `readFile` | `backup-files.e2e.ts` | `RUNTIME_VERIFIED` (fake) | same |
+| Put named files back on the server, with the hostname typed | `/backups` | `POST …/files/restore`, `GET …/file-restores` | `RestoreBackupFiles`; `ReconcileFileRestores` on `backups:reconcile` | scheduler | — | `startFileRestore`, `taskState` | `backup-files.e2e.ts` | `RUNTIME_VERIFIED` (fake) | same; `needs_review` on a timeout, never retried |
 | Take a backup | `/backups` | `POST /vps/{vm}/backups` | `RequestServiceBackup` | sync + `ReconcileRunningBackups` | — | `startBackup` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no Proxmox Backup Server |
 | Restore over the machine | `/backups` | `POST /vps/{vm}/backups/{backup}/restore` | `RestoreServiceBackup` | sync | — | `startRestore` | `portal.e2e.ts` (three specs, including Escape) | `TESTED` | No |
 | Be refused a restore from a backup nobody can vouch for | `/backups` | as above | `RestoreServiceBackup` | — | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
@@ -180,6 +185,8 @@ asks the registrar only when the money has arrived.
 
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Make a staging copy, or clone to another domain | `/wordpress` | `POST /wordpress/sites/{id}/staging`, `POST …/clones` | `CopyWordPressSite` | `copy_wordpress_site` | `CopyWordPressSiteHandler` | `WordPressStagingProvider::copyWordPress` | `wordpress-copies.e2e.ts` | `RUNTIME_VERIFIED` (fake) | `NOT_IMPLEMENTED` for cPanel and DirectAdmin — no toolkit endpoint has been called |
+| See what a push would overwrite, then push the copy over production with the domain typed | `/wordpress` | `GET …/push/impact`, `POST …/push`, `GET …/operations` | `PushWordPressToProduction` | `push_wordpress_to_production` | `PushWordPressToProductionHandler` | `pushWordPressToProduction` | `wordpress-copies.e2e.ts` | `RUNTIME_VERIFIED` (fake) | same; production `needs_review` on a timeout, never retried; the platform holds no backup of a shared-hosting site and says so |
 | Order a site, with any of the four domain options | `/wordpress` | `POST /wordpress/sites` | `OrderWordPressSite` → `PlaceOrder` | sync | — | — | `wordpress.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Have the hosting account built when it is paid for | — | — | `ProvisionOrderedService` | `create_hosting_account` | `CreateHostingAccountHandler` | `createAccount` | — | `TESTED` | `BLOCKED_LICENSE` |
 | Have WordPress installed into it | — | — | `InstallWordPressOnceTheAccountExists` | `install_wordpress` | `InstallWordPressHandler` | `installWordPress` | — | `TESTED` | `NOT_IMPLEMENTED` for cPanel and DirectAdmin — see below |
@@ -193,6 +200,7 @@ asks the registrar only when the money has arrived.
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | See assigned addresses | `/ips` | `GET /ips`, `GET /ips/{assignment}` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Preview a BIND zone file as a diff, apply exactly the previewed plan, export the zone | `/dns` | `POST /dns/zones/{id}/import/plan`, `POST …/import`, `GET …/export` | `PlanZoneImport`, `ApplyZoneImport` (through `AddRecord`/`ChangeRecord`/`RemoveRecord`), `ExportZone`; `ZoneFileParser` with bounds | sync | — | the zone's DNS provider, one record at a time | `dns-import.e2e.ts` | `RUNTIME_VERIFIED` (fake) | as DNS |
 | Set reverse DNS | `/ips` | `PUT /ips/{assignment}/rdns` | `SetReverseDns` | `PublishReverseDnsRecord` | — | `DnsProvider::publish` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no Cloudflare token |
 | Have a released address quarantined before reuse | — | — | `IpAllocator::releaseAssignment` | `destroy_vps` | `DestroyVpsHandler` | — | — | `TESTED` | n/a |
 | Have a released address come back into circulation | — | — | `ReleaseQuarantinedAddresses` | scheduler | — | — | — | `TESTED` | n/a |

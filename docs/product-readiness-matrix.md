@@ -35,7 +35,35 @@ requirements that selling anything needs.
 | WordPress (`wordpress`) | `shared_hosting` | wordpress_installer: install, uninstall, ssl | same |
 | Domains (`domains`) | — | registrar: search, availability, register, renew, transfer, nameservers, contacts, lock, auth_code | same |
 | DNS (`dns`) | — | dns: create_zone, delete_zone, records, reconcile | same |
-| Backups (`backups`) | `vps` | backup: create, restore, delete, retention | same |
+| Backups (`backups`) | `vps` | backup: create, restore, delete, verify, retention · optional: file_browse, file_restore | same |
+| CDN (`cdn`) — *prepared* | `dns` | cdn: enable, disable, purge_all, purge_urls, cache_rules, development_mode, tls_status · dns: records | same |
+| Object storage (`object_storage`) — *prepared* | — | object_storage: create_bucket, delete_bucket, list_buckets, quota, usage, issue_access_key, revoke_access_key, endpoint, versioning, lifecycle | same |
+| GPU compute (`gpu_compute`) — *prepared*, hardware | `vps` | compute: the VPS set plus gpu_passthrough · reverse_dns: set_ptr, clear_ptr | same |
+| Email hosting (`email_hosting`) — *prepared* | `dns` | email_hosting: the sixteen mailbox and domain capabilities incl. dkim · dns: records | same |
+| Managed Kubernetes (`managed_kubernetes`) — *readiness only* | `vps`, `dns`, `backups`, `object_storage` | cluster_lifecycle: create_cluster, delete_cluster, node_pools, upgrade · load_balancer: create, delete, members, health_checks · certificates: issue, renew, revoke · monitoring: scrape, alerting | same |
+
+(Since the scope addendum. The requirement rows above were also made faithful
+to what the product code calls: VPS gained `resize`, `console`, `templates`;
+dedicated `inventory`, `firmware`; shared hosting `sso`, `usage`; WordPress
+`version` and the optional `staging`, `clone`, `push_to_production`; domains
+`premium`, `held_names` and the optional `redemption`; payment `refund`,
+`currencies`. An optional capability is one the product uses only where the
+provider reports it, and its absence never blocks a rung.)
+
+### The software cap
+
+A product carries a declared software state. `complete` products (the seven
+above) may climb the whole ladder. `prepared` products (CDN, object storage,
+GPU compute, email hosting) have a product model, a requirement row and a
+provider contract, and no sale path: the engine caps them at
+`ready_for_real_validation` with the blocker `not_implemented`, whatever their
+providers say, and a declaration on them is refused by name. A
+`readiness_only` product (managed Kubernetes) is the same cap with no
+contract behind it either. GPU compute is additionally blocked on hardware
+until a GPU device is recorded on a machine the platform may configure. In
+production, every new sale of a product below `ready_to_sell` is refused at
+the four actions that create one; existing services and renewals are never
+touched.
 
 A dependency caps its dependent: WordPress can never be readier than shared
 hosting, backups never readier than VPS. A declaration on the dependency does
@@ -60,6 +88,11 @@ can climb past `ready_for_test` even in principle, and none reaches that.
 | Domains | `not_ready` | `blocked_dependency` — no registrar provider registered | A registrar selected (Phase 30B forbade selecting one from memory) and a `sy_registry` or other tester against a sandbox |
 | DNS | `not_ready` | `blocked_dependency` — no DNS provider registered (the browser seed has a `fake` DNS provider blocked on credentials) | A `cloudflare` provider with a credential the controller holds and a tester against a real account |
 | Backups | `not_ready` | `blocked_dependency` — depends on VPS, which is `not_ready` | VPS first; then a `proxmox_backup` provider |
+| CDN — prepared | `not_ready` | `blocked_dependency` — depends on DNS | DNS first; then the cap `not_implemented` at `ready_for_real_validation`: no CDN adapter exists and none is catalogued |
+| Object storage — prepared | `not_ready` | `blocked_dependency` — no object storage provider registered (none can be: no driver) | An adapter written against a real store, then the same cap |
+| GPU compute — prepared | `not_ready` | `blocked_hardware` — no GPU device recorded on a machine the platform may configure | A GPU recorded on a `configuration_allowed` machine; then VPS; then the cap |
+| Email hosting — prepared | `not_ready` | `blocked_dependency` — depends on DNS | DNS first; then an adapter; then the cap |
+| Managed Kubernetes — readiness only | `not_ready` | `blocked_dependency` — depends on VPS, DNS, backups and object storage | Every dependency first; then the cap, which no adapter lifts — this product is readiness by decree |
 
 And the shared requirements are unmet for every product: no payment provider
 (`stripe` is catalogued, untestable) and no email provider (`smtp` is

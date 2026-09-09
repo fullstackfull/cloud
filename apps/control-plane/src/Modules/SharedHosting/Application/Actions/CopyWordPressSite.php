@@ -68,10 +68,6 @@ final readonly class CopyWordPressSite
             throw WordPressRefusedException::becauseTheDomainIsUnusable($targetDomain);
         }
 
-        if (WordPressSite::query()->where('domain', $targetDomain)->whereNotIn('state', [WordPressSiteState::Removed->value, WordPressSiteState::Failed->value])->exists()) {
-            throw WordPressRefusedException::becauseTheDomainIsAlreadyUsed($targetDomain);
-        }
-
         return $this->copy($site, $targetDomain, WordPressSiteKind::Clone, WordPressOperationKind::Clone, $userId);
     }
 
@@ -84,6 +80,13 @@ final readonly class CopyWordPressSite
 
         if ($this->support->operationInFlight($site)) {
             throw WordPressRefusedException::becauseAnOperationIsInFlight($site->domain);
+        }
+
+        // A name any account already serves — a clone target typed by hand
+        // or the `staging.` name of this site — is refused by name, never
+        // left to the unique index.
+        if (WordPressSite::query()->where('domain', $targetDomain)->whereNotIn('state', [WordPressSiteState::Removed->value, WordPressSiteState::Failed->value])->exists()) {
+            throw WordPressRefusedException::becauseTheDomainIsAlreadyUsed($targetDomain);
         }
 
         $target = WordPressSite::query()->create([
