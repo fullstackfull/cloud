@@ -315,3 +315,27 @@ controlled local socket. Specifically, and to be repeated in every report:
   sweep are proven against a fake datastore that answers `listBackups`
   honestly; a real Proxmox Backup Server has never been asked to prune
   anything.
+
+---
+
+## Phase 30B: none of the above changed
+
+Phase 30B set out to move rows in this document from "real provider: no" to
+`REAL_INFRA_VERIFIED`, one capability at a time and only with evidence.
+
+**Not one cell changed**, because no evidence of that kind was produced. The
+environment running the phase had no route to any management network, no
+credential for any provider, no hardware, and an outbound proxy that refuses
+every third-party API this platform integrates with.
+
+The list above is therefore still exact. Every capability's specific blocker —
+which of `BLOCKED_NETWORK`, `BLOCKED_CREDENTIALS`, `BLOCKED_HARDWARE` or
+`BLOCKED_LICENCE` has to be removed first — is recorded in
+[real-infrastructure-verification-matrix.md](real-infrastructure-verification-matrix.md),
+and the probes behind those blockers are in
+[phase-30b-real-infrastructure-inventory.md](phase-30b-real-infrastructure-inventory.md).
+
+The rule this document has followed since it was written still holds: a cell
+changes when one specific action has been performed against one real provider
+and independently confirmed. Not when a provider is connected, and never for a
+whole provider at once.

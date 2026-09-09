@@ -374,13 +374,29 @@ closure report says so and its CI run is green — not when its code exists.
 | 30A | Final product closure | Complete |
 | 30A+ | Core product completeness — team, wallet, support, backup retention and deletion, forward DNS, customer termination, hosting reconciliation, provider task polling | Complete; see [phase-30a-plus-core-product-completeness.md](phase-30a-plus-core-product-completeness.md) |
 | 30A++ | Lynomia Domains and Lynomia WordPress Hosting | Complete; see [phase-30a-plusplus-domains-wordpress-final.md](phase-30a-plusplus-domains-wordpress-final.md) |
-| 30B | Real infrastructure validation | After 30A++. Product expansion stops; the adapters below start talking to real systems |
+| 30B | Real infrastructure validation | Attempted; **NO GO**. Nothing real was reachable — see [phase-30b-real-infrastructure-validation.md](phase-30b-real-infrastructure-validation.md) |
 | — | Production validation | |
 | — | Go live | |
 
 Phase 30A++ is a product phase and 30B is an infrastructure one. Nothing in
 30A++ may be described as verified against a real registry, registrar or
 control panel: that is precisely what 30B is for.
+
+Phase 30B ran and could not do it. The environment has no route to any
+management network, no credential for any provider, no hardware, and an
+outbound proxy that refuses every third-party API this platform integrates
+with — recorded probe by probe in
+[phase-30b-real-infrastructure-inventory.md](phase-30b-real-infrastructure-inventory.md).
+Every capability's exact blocker is in
+[real-infrastructure-verification-matrix.md](real-infrastructure-verification-matrix.md),
+where no row is `REAL_INFRA_VERIFIED`.
+
+What 30B did deliver is the part that needs no machine: `infra/` holds the
+infrastructure source of truth, the safety classification that a gate enforces
+rather than a person remembers, the monitoring configuration, and nineteen
+runbooks. Every physical machine is classified `DO_NOT_TOUCH`, which is the
+default and the only defensible classification for a machine whose owner has
+not spoken.
 
 ## What would have to happen next, and in what order
 
