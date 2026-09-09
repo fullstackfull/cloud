@@ -70,7 +70,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
         // open a socket to it.
         $this->expectException(SafetyRefusal::class);
 
-        app(TestConnection::class)->forServer($server, 'fake');
+        app(TestConnection::class)->forServer($server);
     }
 
     #[Test]
@@ -120,6 +120,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
     public function reaching_the_destructive_rung_requires_typing_the_machines_name(): void
     {
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::ConfigurationAllowed)
             ->create(['name' => 'pve-typed']);
 
@@ -168,6 +169,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
     public function a_clearance_can_be_given_and_taken_back(): void
     {
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::ReimageAllowed)
             ->create(['name' => 'pve-clear']);
         $operator = $this->operator();
@@ -186,6 +188,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
     public function a_clearance_cannot_be_given_to_a_machine_of_the_wrong_class(): void
     {
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::ConfigurationAllowed)
             ->create(['name' => 'pve-wrong']);
 
@@ -200,7 +203,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
         // The application refuses this above. This proves the row cannot exist
         // even when written around the application — by a seeder, a fixture or
         // somebody's psql session.
-        $server = ManagedServer::factory()->classified(SafetyClass::ConfigurationAllowed)->create();
+        $server = ManagedServer::factory()->withBmc()->classified(SafetyClass::ConfigurationAllowed)->create();
 
         $this->expectException(QueryException::class);
 
@@ -213,6 +216,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
     public function a_discovery_only_machine_can_be_reached_and_still_not_changed(): void
     {
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::DiscoveryOnly)
             ->create(['credential_reference_id' => CredentialReference::factory()->create()->getKey()]);
 
@@ -229,7 +233,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
             }
         });
 
-        $test = app(TestConnection::class)->forServer($server, 'fake');
+        $test = app(TestConnection::class)->forServer($server);
 
         $this->assertSame(ConnectionState::Connected, $test->result);
         $this->assertSame(ConnectionState::Connected, $server->fresh()->connection_state);
@@ -243,10 +247,11 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
         // reached it and have nothing to authenticate with" sends an operator
         // to the credential centre; "Error" sends them nowhere.
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::DiscoveryOnly)
             ->create();
 
-        $test = app(TestConnection::class)->forServer($server, 'fake');
+        $test = app(TestConnection::class)->forServer($server);
 
         $this->assertSame(ConnectionState::AuthFailed, $test->result);
         $this->assertSame(BlockerReason::Credentials, $test->result->blocker());
@@ -260,6 +265,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
     public function a_credential_from_another_environment_is_never_even_resolved(): void
     {
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::DiscoveryOnly)
             ->inProduction()
             ->create([
@@ -292,7 +298,7 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
             };
         });
 
-        $test = app(TestConnection::class)->forServer($server, 'fake');
+        $test = app(TestConnection::class)->forServer($server);
 
         // Refusing to resolve is stronger than refusing to use what was
         // resolved: a staging token never enters memory, so nothing downstream

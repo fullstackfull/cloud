@@ -1979,7 +1979,7 @@ paths:
         - "Operator"
       summary: "Try to reach a machine"
       description: |-
-        Reading only, and refused outright for a do_not_touch machine — an unclassified machine is not probed to find out what it is. A test that times out is recorded as indeterminate, not as a failure, and never as a success. 409 when the classification forbids it; 422 when no credential is configured to try.
+        Reading only, and refused outright for a do_not_touch machine — an unclassified machine is not probed to find out what it is. The adapter used is the BMC provider bound to the machine; it is never taken from the request, and a machine with none bound answers 409 `bmc_missing`. A test that times out is recorded as indeterminate, not as a failure, and never as a success. 409 when the classification forbids it.
 
         Requires the `infrastructure.manage` permission.
       parameters:
@@ -2130,6 +2130,129 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/ServerResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/discover":
+    post:
+      operationId: "api_admin_infrastructure_servers_discover"
+      tags:
+        - "Operator"
+      summary: "Look at a machine and record what it says about itself"
+      description: |-
+        A connection test with an inventory attached: gated as a read, through the bound BMC, and only if the machine answered usefully is it asked for facts. Facts are versioned — a value that changed supersedes the old row and keeps it; a key no longer reported stops being current. Declared facts are never touched by discovery. Nothing on the machine changes.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ServerDiscoveryResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/facts":
+    get:
+      operationId: "api_admin_infrastructure_servers_facts"
+      tags:
+        - "Operator"
+      summary: "What is currently known about a machine"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ServerFact"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -15310,6 +15433,48 @@ components:
             - "null"
         needs_attention:
           type: "boolean"
+    ServerDiscovery:
+      type: "object"
+      additionalProperties: false
+      description: "What one look at a machine produced."
+      properties:
+        result:
+          type: "string"
+        usable:
+          type: "boolean"
+        facts:
+          type: "integer"
+          description: "How many facts the machine reported. Zero when it did not answer usefully — never invented."
+        server:
+          "$ref": "#/components/schemas/Server"
+    ServerDiscoveryResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ServerDiscovery"
+    ServerFact:
+      type: "object"
+      additionalProperties: false
+      description: "One thing known about a machine, and how it came to be known. A serial the machine reported and one an operator typed are different kinds of knowledge."
+      properties:
+        key:
+          type: "string"
+        value:
+          type:
+            - "string"
+            - "null"
+        source:
+          type: "string"
+          enum:
+            - "declared"
+            - "discovered"
+            - "derived"
+        observed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        superseded_at:
+          "$ref": "#/components/schemas/Timestamp"
     ServerPage:
       type: "object"
       required:

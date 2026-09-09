@@ -10,6 +10,7 @@ use Lynomia\Modules\Infrastructure\Domain\Exceptions\SafetyRefusal;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Application\Actions\AssessProvider;
 use Lynomia\Modules\Providers\Application\Actions\TestConnection;
+use Lynomia\Modules\Providers\Domain\Exceptions\NoBmcProvider;
 use Lynomia\Modules\Providers\Domain\Exceptions\NoSuchTester;
 use Lynomia\Modules\Providers\Http\Resources\ConnectionTestResource;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
@@ -37,10 +38,15 @@ final class ConnectionTestController
     {
         $found = ManagedServer::query()->findOrFail($server);
 
-        $driver = $request->string('driver', 'fake')->value();
-
         try {
-            $result = $test->forServer($found, $driver, $request->user());
+            $result = $test->forServer($found, $request->user());
+        } catch (NoBmcProvider $missing) {
+            // Not the machine's fault and not a credential's: nothing is bound
+            // to it that could reach it. 409, because the request was fine
+            // and the machine is not in a state where a test is possible.
+            return response()->json([
+                'error' => ['code' => 'bmc_missing', 'message' => $missing->getMessage()],
+            ], Response::HTTP_CONFLICT);
         } catch (SafetyRefusal $refused) {
             /*
              * 409, not 403. The operator's permissions were fine; the machine

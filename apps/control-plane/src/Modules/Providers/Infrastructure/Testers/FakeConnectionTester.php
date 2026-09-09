@@ -52,7 +52,14 @@ use RuntimeException;
  */
 final class FakeConnectionTester implements ConnectionTester
 {
-    public function __construct(private readonly string $environment)
+    /**
+     * @param  string  $driver  Which catalogued driver this instance answers for. The
+     *                          same fake stands in for a remote account (`fake`) and
+     *                          for a machine's BMC (`fake_bmc`), so the whole
+     *                          onboarding path — machine and provider — can be
+     *                          rehearsed without either existing.
+     */
+    public function __construct(private readonly string $environment, private readonly string $driver = 'fake')
     {
         if ($this->environment === 'production') {
             throw new RuntimeException(
@@ -65,7 +72,38 @@ final class FakeConnectionTester implements ConnectionTester
 
     public function driver(): string
     {
-        return 'fake';
+        return $this->driver;
+    }
+
+    /**
+     * A fixed hardware inventory, or nothing.
+     *
+     * Nothing when the target is unreachable or refuses the credential — the
+     * same markers that fail test() — because a discovery that reports a
+     * serial number for a machine it never authenticated to has invented one.
+     *
+     * @return array<string, string>
+     */
+    public function discover(TestTarget $target): array
+    {
+        $marker = $this->markerIn($target->endpoint);
+
+        if (in_array($marker, ['network-failed', 'tls-failed', 'timeout', 'unavailable', 'auth-failed'], true) || ! $target->hasSecret()) {
+            return [];
+        }
+
+        return [
+            'vendor' => 'Fabrikam',
+            'model' => 'FX-2200',
+            'serial' => 'FX2200-'.strtoupper(substr(md5($target->identity ?? 'anonymous'), 0, 8)),
+            'bmc.firmware' => '2.14.0',
+            'cpu.model' => 'Contoso 32-core',
+            'cpu.sockets' => '2',
+            'memory.total_mib' => '262144',
+            'disk.0' => 'nvme 3840 GiB',
+            'disk.1' => 'nvme 3840 GiB',
+            'power.state' => 'on',
+        ];
     }
 
     public function test(TestTarget $target): ConnectionResult

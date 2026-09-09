@@ -67,7 +67,7 @@ final class TheServerSurfaceSeparatesTwoDecisionsTest extends TestCase
     public function an_infrastructure_admin_may_reclassify_and_may_not_make_a_machine_wipeable(): void
     {
         $operator = $this->operator(Role::InfrastructureAdmin);
-        $server = ManagedServer::factory()->classified(SafetyClass::ConfigurationAllowed)->create(['name' => 'pve-rbac']);
+        $server = ManagedServer::factory()->withBmc()->classified(SafetyClass::ConfigurationAllowed)->create(['name' => 'pve-rbac']);
 
         // Lowering and raising within the safe range: allowed.
         $this->actingAs($operator)
@@ -150,7 +150,7 @@ final class TheServerSurfaceSeparatesTwoDecisionsTest extends TestCase
         // sends somebody to the RBAC screen when they should be talking to
         // whoever owns the hardware.
         $this->actingAs($this->operator())
-            ->postJson("/api/admin/infrastructure/servers/{$server->id}/connection-test", ['driver' => 'fake'])
+            ->postJson("/api/admin/infrastructure/servers/{$server->id}/connection-test")
             ->assertConflict()
             ->assertJsonPath('error.code', 'safety_refused')
             ->assertJsonPath('error.details.classification', 'do_not_touch')
@@ -164,12 +164,13 @@ final class TheServerSurfaceSeparatesTwoDecisionsTest extends TestCase
     public function a_connection_test_reports_the_blocker_and_the_next_action(): void
     {
         $server = ManagedServer::factory()
+            ->withBmc()
             ->classified(SafetyClass::DiscoveryOnly)
             ->reachableAs('network-failed')
             ->create();
 
         $this->actingAs($this->operator())
-            ->postJson("/api/admin/infrastructure/servers/{$server->id}/connection-test", ['driver' => 'fake'])
+            ->postJson("/api/admin/infrastructure/servers/{$server->id}/connection-test")
             ->assertOk()
             ->assertJsonPath('data.result', 'network_failed')
             ->assertJsonPath('data.reached', false)

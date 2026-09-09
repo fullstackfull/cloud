@@ -50,4 +50,15 @@ interface ConnectionTester
      * impossible, such as a target this tester does not handle.
      */
     public function test(TestTarget $target): ConnectionResult;
+
+    /**
+     * What the target says about itself, as key => value.
+     *
+     * Read-only by construction: a discovery asks and records, and a tester
+     * that changed anything while answering would make DISCOVERY_ONLY a lie.
+     * Empty when the target cannot be reached — never invented.
+     *
+     * @return array<string, string>
+     */
+    public function discover(TestTarget $target): array;
 }

@@ -58,6 +58,7 @@ final class TheCatalogueOnlyClaimsWhatExistsTest extends TestCase
         'redfish' => RedfishDedicatedProvider::class,
         'ilo' => IloDedicatedProvider::class,
         'fake' => FakeConnectionTester::class,
+        'fake_bmc' => FakeConnectionTester::class,
     ];
 
     private ProviderCatalogue $catalogue;

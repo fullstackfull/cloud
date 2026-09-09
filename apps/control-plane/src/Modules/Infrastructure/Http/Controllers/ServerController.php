@@ -9,17 +9,22 @@ use Illuminate\Http\Request;
 use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Infrastructure\Application\Actions\ClassifyServer;
 use Lynomia\Modules\Infrastructure\Application\Actions\ClearForReimage;
+use Lynomia\Modules\Infrastructure\Application\Actions\DiscoverServer;
 use Lynomia\Modules\Infrastructure\Application\Actions\RegisterServer;
 use Lynomia\Modules\Infrastructure\Application\Actions\RevokeReimageClearance;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\ClassificationRefused;
+use Lynomia\Modules\Infrastructure\Domain\Exceptions\SafetyRefusal;
 use Lynomia\Modules\Infrastructure\Http\Requests\ClassifyServerRequest;
 use Lynomia\Modules\Infrastructure\Http\Requests\ClearForReimageRequest;
 use Lynomia\Modules\Infrastructure\Http\Requests\RegisterServerRequest;
+use Lynomia\Modules\Infrastructure\Http\Resources\ServerFactResource;
 use Lynomia\Modules\Infrastructure\Http\Resources\ServerResource;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Application\Actions\AttachCredential;
 use Lynomia\Modules\Providers\Domain\Exceptions\CredentialRefused;
+use Lynomia\Modules\Providers\Domain\Exceptions\NoBmcProvider;
+use Lynomia\Modules\Providers\Domain\Exceptions\NoSuchTester;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -178,6 +183,65 @@ final class ServerController
         $detached = $attach->fromServer($found, $request->user());
 
         return response()->json(['data' => (new ServerResource($detached->load('credential')))->toArray($request)]);
+    }
+
+    /**
+     * Look at a machine through its BMC and record what it says about itself.
+     *
+     * Read, and only read. Refused for a do_not_touch machine exactly as a
+     * connection test is, because it is one — with an inventory attached.
+     */
+    public function discover(Request $request, string $server, DiscoverServer $discover): JsonResponse
+    {
+        $found = ManagedServer::query()->findOrFail($server);
+
+        try {
+            $discovery = $discover->execute($found, $request->user());
+        } catch (SafetyRefusal $refused) {
+            return response()->json([
+                'error' => [
+                    'code' => 'safety_refused',
+                    'message' => $refused->getMessage(),
+                    'details' => [
+                        'classification' => $refused->classification->value,
+                        'attempted' => $refused->attempted->value,
+                        'would_permit' => $refused->wouldPermit?->value,
+                    ],
+                ],
+            ], Response::HTTP_CONFLICT);
+        } catch (NoBmcProvider $missing) {
+            return response()->json([
+                'error' => ['code' => 'bmc_missing', 'message' => $missing->getMessage()],
+            ], Response::HTTP_CONFLICT);
+        } catch (NoSuchTester $unknown) {
+            return response()->json([
+                'error' => ['code' => 'unknown_driver', 'message' => $unknown->getMessage()],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return response()->json([
+            'data' => [
+                'result' => $discovery->test->result->value,
+                'usable' => $discovery->test->result->usable(),
+                'facts' => count($discovery->facts),
+                'server' => (new ServerResource($found->refresh()->load('credential')))->toArray($request),
+            ],
+        ]);
+    }
+
+    /**
+     * What is currently known about a machine. Current facts only; the
+     * superseded history is on the row and not on this screen.
+     */
+    public function facts(Request $request, string $server): JsonResponse
+    {
+        $found = ManagedServer::query()->findOrFail($server);
+
+        $facts = $found->facts()->current()->orderBy('key')->get();
+
+        return response()->json([
+            'data' => $facts->map(fn ($fact): array => (new ServerFactResource($fact))->toArray($request))->all(),
+        ]);
     }
 
     private function refused(string $message): JsonResponse

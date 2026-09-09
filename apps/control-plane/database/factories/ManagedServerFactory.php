@@ -10,6 +10,8 @@ use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
+use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 
 /**
@@ -65,6 +67,27 @@ class ManagedServerFactory extends Factory
     public function reachableAs(string $marker): self
     {
         return $this->state(fn (): array => ['management_address' => 'fake://'.$marker]);
+    }
+
+    /**
+     * Bind a controlled BMC to the machine, so it can be reached.
+     *
+     * Every test of the machine path needs one: the driver a test speaks is
+     * the one bound to the machine, and a machine with nothing bound is
+     * refused before any adapter is chosen.
+     */
+    public function withBmc(): self
+    {
+        return $this->afterCreating(function (ManagedServer $server): void {
+            ProviderInstance::factory()->create([
+                'name' => 'bmc-'.$server->name,
+                'category' => ProviderCategory::Bmc,
+                'driver' => 'fake_bmc',
+                'environment' => $server->environment,
+                'endpoint' => $server->bmc_address ?? $server->management_address,
+                'managed_server_id' => $server->getKey(),
+            ]);
+        });
     }
 
     public function inProduction(): self

@@ -14,8 +14,10 @@ use Lynomia\Modules\Infrastructure\Domain\Services\SafetyGate;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Domain\Contracts\SecretResolver;
 use Lynomia\Modules\Providers\Domain\DTOs\ConnectionResult;
+use Lynomia\Modules\Providers\Domain\DTOs\ServerDiscovery;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Domain\Exceptions\NoBmcProvider;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest as ConnectionTestRecord;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
@@ -59,22 +61,69 @@ final readonly class TestConnection
      * Uses the BMC address when there is one and the management address
      * otherwise: during onboarding the BMC is usually reachable before the
      * operating system exists, which is the point of having one.
+     *
+     * The driver is the one bound to the machine as its BMC provider. It is
+     * not a parameter, and that is a security property rather than a
+     * convenience: a caller that could name the driver could point a test —
+     * and the credential resolved for it — at any adapter the platform has.
      */
-    public function forServer(ManagedServer $server, string $driver, ?User $operator = null): ConnectionTestRecord
+    public function forServer(ManagedServer $server, ?User $operator = null): ConnectionTestRecord
     {
         $this->gate->assert($server->name, $server->safety_class, $server->allow_reimage, InfrastructureAction::Read);
 
-        $endpoint = $server->bmc_address ?? $server->management_address;
+        $target = $this->targetFor($server);
+        $result = $this->run($target->driver, $target);
 
-        $result = $this->run($driver, new TestTarget(
-            driver: $driver,
+        return $this->recordServerTest($server, $target->driver, $result);
+    }
+
+    /**
+     * Look at a machine, and bring back what it says about itself.
+     *
+     * The same gate as a test — a read is a read — and the same tester, in
+     * one session: test first, and only if the machine actually answered
+     * usefully, ask it for its inventory. A machine that refused the
+     * credential has no facts to give, and the discovery says so by returning
+     * none rather than by reporting whatever the last person typed.
+     */
+    public function discoverServer(ManagedServer $server, ?User $operator = null): ServerDiscovery
+    {
+        $this->gate->assert($server->name, $server->safety_class, $server->allow_reimage, InfrastructureAction::Read);
+
+        $target = $this->targetFor($server);
+        $tester = $this->testers->for($target->driver);
+        $result = $tester->test($target);
+
+        $test = $this->recordServerTest($server, $target->driver, $result);
+
+        $facts = $result->state->usable() ? $tester->discover($target) : [];
+
+        return new ServerDiscovery($test, $facts);
+    }
+
+    /**
+     * @throws NoBmcProvider
+     */
+    private function targetFor(ManagedServer $server): TestTarget
+    {
+        $bmc = $server->bmc();
+
+        if ($bmc === null) {
+            throw NoBmcProvider::forServer($server->name);
+        }
+
+        return new TestTarget(
+            driver: $bmc->driver,
             environment: $server->environment,
-            endpoint: $endpoint,
+            endpoint: $server->bmc_address ?? $server->management_address,
             secret: $this->secretFor($server->credential, $server->environment),
             probeCapabilities: [],
             identity: $server->name,
-        ));
+        );
+    }
 
+    private function recordServerTest(ManagedServer $server, string $driver, ConnectionResult $result): ConnectionTestRecord
+    {
         return $this->record->execute(
             act: function () use ($server, $result): ConnectionTestRecord {
                 $server->forceFill([

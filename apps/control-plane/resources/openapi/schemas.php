@@ -708,6 +708,30 @@ return [
             'providers_reassessed' => ['type' => 'integer'],
         ],
     ],
+    'ServerFact' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One thing known about a machine, and how it came to be known. A serial the machine reported '
+            .'and one an operator typed are different kinds of knowledge.',
+        'properties' => [
+            'key' => ['type' => 'string'],
+            'value' => ['type' => ['string', 'null']],
+            'source' => ['type' => 'string', 'enum' => ['declared', 'discovered', 'derived']],
+            'observed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'superseded_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'ServerDiscovery' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'What one look at a machine produced.',
+        'properties' => [
+            'result' => ['type' => 'string'],
+            'usable' => ['type' => 'boolean'],
+            'facts' => ['type' => 'integer', 'description' => 'How many facts the machine reported. Zero when it did not answer usefully — never invented.'],
+            'server' => ['$ref' => '#/components/schemas/Server'],
+        ],
+    ],
     'IpAssignment' => [
         'type' => 'object',
         'additionalProperties' => false,

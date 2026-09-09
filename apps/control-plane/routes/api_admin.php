@@ -223,6 +223,14 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::CredentialManage->value)
         ->name('infrastructure.servers.detach_credential');
 
+    Route::post('infrastructure/servers/{server}/discover', [ServerController::class, 'discover'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.discover');
+
+    Route::get('infrastructure/servers/{server}/facts', [ServerController::class, 'facts'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.facts');
+
     Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.connection_test');

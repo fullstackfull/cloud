@@ -50,6 +50,33 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   // Licences.
   expiring: 'warning',
   not_required: 'neutral',
+  // Connections. Read-only is a success the operator must notice is partial.
+  not_tested: 'neutral',
+  testing: 'info',
+  connected: 'success',
+  connected_read_only: 'warning',
+  auth_failed: 'danger',
+  network_failed: 'danger',
+  tls_failed: 'danger',
+  licence_missing: 'danger',
+  permission_insufficient: 'danger',
+  provider_unavailable: 'danger',
+  // Providers and readiness. Ready is not enabled; only enabled is green.
+  ready: 'info',
+  enabled: 'success',
+  disabled: 'warning',
+  blocked: 'danger',
+  not_ready: 'neutral',
+  ready_for_discovery: 'info',
+  ready_for_configuration: 'info',
+  ready_for_test: 'info',
+  ready_for_production: 'success',
+  // Machines.
+  registered: 'neutral',
+  discovered: 'info',
+  profiled: 'info',
+  managed: 'success',
+  retired: 'neutral',
 }
 
 export function StatusBadge({ status }: { status: string }) {

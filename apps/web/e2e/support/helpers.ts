@@ -37,6 +37,13 @@ export const fixtures = {
   credentialPresent: 'e2e-registrar-key',
   credentialMissing: 'e2e-bmc-password',
   credentialPresentReference: 'LYNOMIA_E2E_REGISTRAR_SECRET',
+  // Machines and providers. The reachable machine has a fake BMC provider
+  // with a credential the controller holds; the untouched one has nothing,
+  // and no spec changes it. The blocked provider has no credential.
+  machineReachable: 'e2e-node-01',
+  machineUntouched: 'e2e-node-02',
+  providerTestable: 'e2e-bmc-node-01',
+  providerBlocked: 'e2e-dns',
 } as const
 
 /**

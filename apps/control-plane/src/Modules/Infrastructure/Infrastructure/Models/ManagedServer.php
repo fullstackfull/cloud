@@ -19,6 +19,7 @@ use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
 use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
@@ -48,6 +49,25 @@ class ManagedServer extends Model
     use HasFactory, HasUlids;
 
     protected $guarded = ['id'];
+
+    /**
+     * The BMC provider bound to this machine, if any.
+     *
+     * A machine is reached through its baseboard management controller, and
+     * which driver speaks to that controller is a fact about the provider
+     * bound to the machine — never something a request may supply. A caller
+     * that could name the driver could point a test at any adapter.
+     */
+    public function bmc(): ?ProviderInstance
+    {
+        /** @var ?ProviderInstance $bmc */
+        $bmc = $this->providerInstances()
+            ->where('category', ProviderCategory::Bmc->value)
+            ->orderBy('created_at')
+            ->first();
+
+        return $bmc;
+    }
 
     /**
      * The state a row has before anything happens to it — and here, the most

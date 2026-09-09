@@ -24,18 +24,26 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
+use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
+use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
 use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
+use Lynomia\Modules\Providers\Domain\Enums\CapabilityState;
+use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
 use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderState;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
+use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
 use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
@@ -120,7 +128,22 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             // commit that gives them a screen, not before.
             CredentialState::class,
             LicenceState::class,
+            ConnectionState::class,
+            ProviderState::class,
+            ReadinessState::class,
+            ServerState::class,
         ],
+
+        /*
+         * The Control Center's own vocabularies. A classification is not a
+         * status; a blocker is a reason, shown beside a status; and a
+         * capability's "unsupported" means the provider said no, which must
+         * not read as the catalogue's "not sold".
+         */
+        'admin.controlCenter.safety' => [SafetyClass::class],
+        'admin.controlCenter.blockers' => [BlockerReason::class],
+        'admin.providers.categories' => [ProviderCategory::class],
+        'admin.providers.capabilityStates' => [CapabilityState::class],
 
         /*
          * Availability has its own vocabulary rather than sharing the status
@@ -201,6 +224,38 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             $locale,
             implode("\n  ", array_unique($missing)),
             $file,
+        ));
+    }
+
+    /**
+     * A blocker names what to do next as a translation key, so the screen
+     * never decides what "blocked_credentials" means. That key must exist in
+     * every language, or the operator reads `controlCenter.guidance.licence`
+     * where the instruction should be.
+     */
+    #[Test]
+    #[DataProvider('locales')]
+    public function every_next_action_a_blocker_names_is_a_string_in_this_language(
+        string $locale,
+        string $file,
+    ): void {
+        $catalogue = $this->catalogue($file);
+        $missing = [];
+
+        foreach (BlockerReason::cases() as $reason) {
+            $key = $reason->nextAction();
+            $namespace = substr($key, 0, (int) strrpos($key, '.'));
+            $leaf = substr($key, (int) strrpos($key, '.') + 1);
+
+            if (! array_key_exists($leaf, $this->at($catalogue, $namespace))) {
+                $missing[] = $key;
+            }
+        }
+
+        $this->assertSame([], $missing, sprintf(
+            "The %s catalogue has no string for these next actions:\n  %s",
+            $locale,
+            implode("\n  ", $missing),
         ));
     }
 

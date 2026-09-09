@@ -204,6 +204,7 @@ enum AuditAction: string
     case ServerSafetyChanged = 'infrastructure.server.safety_changed';
     case ServerReimageCleared = 'infrastructure.server.reimage_cleared';
     case ServerReimageClearanceRevoked = 'infrastructure.server.reimage_clearance_revoked';
+    case ServerDiscovered = 'infrastructure.server.discovered';
 
     case ConnectionTested = 'providers.connection.tested';
     case ProviderRegistered = 'providers.provider.registered';

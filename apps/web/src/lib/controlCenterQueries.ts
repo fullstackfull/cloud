@@ -196,3 +196,329 @@ export function useRefreshLicences() {
     onSuccess: () => { invalidateLicenceViews(queryClient) },
   })
 }
+
+/* -------------------------------------------------------------------------
+ | Machines
+ */
+
+export type SafetyClass = 'do_not_touch' | 'discovery_only' | 'configuration_allowed' | 'reimage_allowed'
+
+export const SAFETY_CLASSES: SafetyClass[] = ['do_not_touch', 'discovery_only', 'configuration_allowed', 'reimage_allowed']
+
+export interface Server {
+  id: string
+  name: string
+  environment: Environment
+  state: string
+  safety: {
+    classification: SafetyClass
+    allow_reimage: boolean
+    reason: string | null
+    changed_at: string | null
+    permits: { read: boolean; configure: boolean; reimage: boolean }
+  }
+  location: { datacenter_id: string | null; rack_id: string | null; rack_unit: number | null; height_units: number | null }
+  hardware: { vendor: string | null; model: string | null; serial: string | null; asset_tag: string | null; operating_system: string | null }
+  connection: {
+    state: string
+    blocker: string | null
+    management_address: string | null
+    bmc_address: string | null
+    credential?: { id: string; name: string; state: string } | null
+    last_tested_at: string | null
+  }
+  last_discovery_at: string | null
+  last_deployment_at: string | null
+  last_verification_at: string | null
+  notes: string | null
+  created_at: string | null
+}
+
+export interface ServerFact {
+  key: string
+  value: string | null
+  source: 'declared' | 'discovered' | 'derived'
+  observed_at: string
+  superseded_at: string | null
+}
+
+export function useServers(page: number, environment?: Environment | '') {
+  return useQuery({
+    queryKey: ['admin', 'servers', page, environment],
+    queryFn: () => admin.get<Paginated<Server>>('/infrastructure/servers', { page, environment }),
+  })
+}
+
+export function useServer(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'servers', 'one', id],
+    queryFn: () => admin.get<Envelope<Server>>(`/infrastructure/servers/${encodeURIComponent(id ?? '')}`),
+    enabled: id !== null,
+  })
+}
+
+export function useServerFacts(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'servers', 'facts', id],
+    queryFn: () => admin.get<{ data: ServerFact[] }>(`/infrastructure/servers/${encodeURIComponent(id ?? '')}/facts`),
+    enabled: id !== null,
+  })
+}
+
+export interface RegisterServerInput {
+  name: string
+  environment: Environment
+  management_address?: string
+  bmc_address?: string
+  vendor?: string
+  model?: string
+  serial?: string
+  notes?: string
+}
+
+function invalidateServerViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'servers'] })
+  // A machine's classification is a readiness input for the providers on it.
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] })
+}
+
+export function useRegisterServer() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RegisterServerInput) => admin.post<Envelope<Server>>('/infrastructure/servers', input),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+export function useClassifyServer() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, safety_class, reason, confirm_name }: { id: string; safety_class: SafetyClass; reason: string; confirm_name?: string }) =>
+      admin.post<Envelope<Server>>(`/infrastructure/servers/${encodeURIComponent(id)}/classify`, {
+        safety_class,
+        reason,
+        ...(confirm_name === undefined ? {} : { confirm_name }),
+      }),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+export function useClearForReimage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, confirm_name, reason }: { id: string; confirm_name: string; reason: string }) =>
+      admin.post<Envelope<Server>>(`/infrastructure/servers/${encodeURIComponent(id)}/clear-for-reimage`, { confirm_name, reason }),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+export function useRevokeReimageClearance() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<Server>>(`/infrastructure/servers/${encodeURIComponent(id)}/clear-for-reimage`),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+export function useAttachServerCredential() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, credential_id }: { id: string; credential_id: string | null }) =>
+      credential_id === null
+        ? admin.delete<Envelope<Server>>(`/infrastructure/servers/${encodeURIComponent(id)}/credential`)
+        : admin.post<Envelope<Server>>(`/infrastructure/servers/${encodeURIComponent(id)}/credential`, { credential_id }),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+export interface ConnectionTestResult {
+  id: string
+  result: string
+  reached: boolean
+  usable: boolean
+  blocker: string | null
+  next_action: string | null
+  steps: Array<{ name: string; outcome: string; detail?: string }>
+  detail: string | null
+  tested_at: string | null
+}
+
+export function useTestServerConnection() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.post<Envelope<ConnectionTestResult>>(`/infrastructure/servers/${encodeURIComponent(id)}/connection-test`, {}),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+export interface ServerDiscovery {
+  result: string
+  usable: boolean
+  facts: number
+  server: Server
+}
+
+export function useDiscoverServer() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.post<Envelope<ServerDiscovery>>(`/infrastructure/servers/${encodeURIComponent(id)}/discover`, {}),
+    onSuccess: () => { invalidateServerViews(queryClient) },
+  })
+}
+
+/* -------------------------------------------------------------------------
+ | Providers and the catalogue
+ */
+
+export interface CatalogueEntry {
+  driver: string
+  category: string
+  summary: string
+  needs_endpoint: boolean
+  needs_credential: boolean
+  needs_licence: boolean
+  needs_server: boolean
+  testable: boolean
+  available_here: boolean
+}
+
+export function useCatalogue() {
+  return useQuery({
+    queryKey: ['admin', 'providers', 'catalogue'],
+    queryFn: () => admin.get<{ data: CatalogueEntry[] }>('/providers/catalogue'),
+    staleTime: 5 * 60_000,
+  })
+}
+
+export interface ProviderCapability {
+  capability: string
+  capability_state: string
+  observed_at: string | null
+}
+
+export interface Provider {
+  id: string
+  name: string
+  category: string
+  driver: string
+  environment: Environment
+  state: string
+  is_serving: boolean
+  can_test: boolean
+  endpoint: string | null
+  connection: { state: string; reached: boolean; usable: boolean; detail: string | null; last_tested_at: string | null; last_discovery_at: string | null }
+  readiness: { state: string; blocker: string | null; next_action: string | null }
+  credential?: { id: string; credential_name: string; credential_state: string; credential_environment: string } | null
+  licence?: { id: string; product: string; licence_state: string; expires_on: string | null } | null
+  server?: { id: string; server_name: string; classification: string } | null
+  capabilities?: ProviderCapability[]
+  enabled_at: string | null
+  disabled_at: string | null
+  disabled_reason: string | null
+  created_at: string | null
+}
+
+export function useProviders(page: number, filters: { environment?: Environment | ''; category?: string } = {}) {
+  return useQuery({
+    queryKey: ['admin', 'providers', page, filters.environment, filters.category],
+    queryFn: () => admin.get<Paginated<Provider>>('/providers', { page, environment: filters.environment, category: filters.category }),
+  })
+}
+
+export interface RegisterProviderInput {
+  name: string
+  driver: string
+  category: string
+  environment: Environment
+  endpoint?: string
+  managed_server_id?: string
+  notes?: string
+}
+
+function invalidateProviderViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] })
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'credentials'] })
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'licences'] })
+}
+
+export function useRegisterProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RegisterProviderInput) => admin.post<Envelope<Provider>>('/providers', input),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}
+
+export function useEnableProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => admin.post<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/enable`, {}),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}
+
+export function useDisableProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      admin.post<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/disable`, { reason }),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}
+
+export function useAssessProvider() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => admin.post<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/assess`, {}),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}
+
+/** One round trip that proves the credential and discovers what the account can do. */
+export function useTestProviderConnection() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.post<Envelope<ConnectionTestResult>>(`/providers/${encodeURIComponent(id)}/connection-test`, {}),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}
+
+export function useAttachProviderCredential() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, credential_id }: { id: string; credential_id: string | null }) =>
+      credential_id === null
+        ? admin.delete<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/credential`)
+        : admin.post<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/credential`, { credential_id }),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}
+
+export function useAttachProviderLicence() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, licence_id }: { id: string; licence_id: string | null }) =>
+      licence_id === null
+        ? admin.delete<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/licence`)
+        : admin.post<Envelope<Provider>>(`/providers/${encodeURIComponent(id)}/licence`, { licence_id }),
+    onSuccess: () => { invalidateProviderViews(queryClient) },
+  })
+}

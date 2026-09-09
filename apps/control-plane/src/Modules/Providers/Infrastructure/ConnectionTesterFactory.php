@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Providers\Infrastructure;
 
+use Closure;
 use Illuminate\Contracts\Container\Container;
 use Lynomia\Modules\Providers\Domain\Contracts\ConnectionTester;
 use Lynomia\Modules\Providers\Domain\Exceptions\NoSuchTester;
@@ -20,7 +21,10 @@ use Lynomia\Modules\Providers\Domain\Exceptions\NoSuchTester;
 final readonly class ConnectionTesterFactory
 {
     /**
-     * @param  array<string, class-string<ConnectionTester>>  $drivers
+     * @param  array<string, class-string<ConnectionTester>|Closure(): ConnectionTester>  $drivers
+     *                                                                                              A class to build through the container, or a closure that builds
+     *                                                                                              one — the latter for a tester that answers for more than one
+     *                                                                                              driver name and has to be told which.
      */
     public function __construct(
         private Container $container,
@@ -35,7 +39,7 @@ final readonly class ConnectionTesterFactory
             throw NoSuchTester::forDriver($driver, array_keys($this->drivers));
         }
 
-        $tester = $this->container->make($class);
+        $tester = is_string($class) ? $this->container->make($class) : $class();
 
         // A tester registered under the wrong key would test the wrong thing
         // and report a confident answer about it. Cheap to check, and the

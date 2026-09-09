@@ -1140,13 +1140,30 @@ return [
         'permission' => 'safety.change',
         'response' => $one('Server'),
     ],
+    'api.admin.infrastructure.servers.discover' => [
+        'tag' => 'Operator',
+        'summary' => 'Look at a machine and record what it says about itself',
+        'description' => 'A connection test with an inventory attached: gated as a read, through the bound BMC, '
+            .'and only if the machine answered usefully is it asked for facts. Facts are versioned — a value that '
+            .'changed supersedes the old row and keeps it; a key no longer reported stops being current. Declared '
+            .'facts are never touched by discovery. Nothing on the machine changes.',
+        'permission' => 'infrastructure.manage',
+        'response' => $one('ServerDiscovery'),
+    ],
+    'api.admin.infrastructure.servers.facts' => [
+        'tag' => 'Operator',
+        'summary' => 'What is currently known about a machine',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'ServerFact'],
+    ],
     'api.admin.infrastructure.servers.connection_test' => [
         'tag' => 'Operator',
         'summary' => 'Try to reach a machine',
         'description' => 'Reading only, and refused outright for a do_not_touch machine — an unclassified machine '
-            .'is not probed to find out what it is. A test that times out is recorded as indeterminate, not as a '
-            .'failure, and never as a success. 409 when the classification forbids it; 422 when no credential is '
-            .'configured to try.',
+            .'is not probed to find out what it is. The adapter used is the BMC provider bound to the machine; it is '
+            .'never taken from the request, and a machine with none bound answers 409 `bmc_missing`. A test that '
+            .'times out is recorded as indeterminate, not as a failure, and never as a success. 409 when the '
+            .'classification forbids it.',
         'permission' => 'infrastructure.manage',
         'response' => $one('ConnectionTest'),
     ],

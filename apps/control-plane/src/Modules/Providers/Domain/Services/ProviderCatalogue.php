@@ -161,6 +161,18 @@ final readonly class ProviderCatalogue
                 needsLicence: false,
                 summary: 'A controlled provider for rehearsing the onboarding path. Never available in production.',
             ),
+            new CatalogueEntry(
+                driver: 'fake_bmc',
+                // The machine half of the rehearsal: a BMC that answers a
+                // connection test and a discovery for a machine that does not
+                // exist. Bound to a managed server like any BMC, gated by that
+                // server's classification like any BMC.
+                category: ProviderCategory::Bmc,
+                needsEndpoint: true,
+                needsCredential: true,
+                needsLicence: false,
+                summary: 'A controlled BMC for rehearsing machine onboarding and discovery. Never available in production.',
+            ),
         ];
     }
 
@@ -186,6 +198,6 @@ final readonly class ProviderCatalogue
      */
     public function controlledDrivers(): array
     {
-        return ['fake'];
+        return ['fake', 'fake_bmc'];
     }
 }

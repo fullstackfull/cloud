@@ -40,14 +40,19 @@ final class ProvidersServiceProvider extends ServiceProvider
     }
 
     /**
-     * @return array<string, class-string<ConnectionTester>>
+     * @return array<string, class-string<ConnectionTester>|\Closure(): ConnectionTester>
      */
     private function testers(): array
     {
         $testers = [];
 
         if (! $this->app->environment('production')) {
-            $testers['fake'] = FakeConnectionTester::class;
+            $environment = (string) $this->app->environment();
+
+            // One fake, two driver names: a remote account and a machine's
+            // BMC. Both refuse to be built in production.
+            $testers['fake'] = fn (): ConnectionTester => new FakeConnectionTester($environment, 'fake');
+            $testers['fake_bmc'] = fn (): ConnectionTester => new FakeConnectionTester($environment, 'fake_bmc');
         }
 
         return $testers;

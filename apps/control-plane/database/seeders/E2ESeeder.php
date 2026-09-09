@@ -29,6 +29,8 @@ use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
@@ -37,10 +39,13 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Providers\Application\Actions\AssessProvider;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
 use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Lynomia\Modules\Providers\Infrastructure\Models\Licence;
+use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
@@ -199,6 +204,7 @@ class E2ESeeder extends Seeder
         $this->ticket($customer);
         $this->credentials();
         $this->licences();
+        $this->machinesAndProviders();
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -979,5 +985,75 @@ class E2ESeeder extends Seeder
                 $licence + ['environment' => DeploymentEnvironment::Staging, 'starts_on' => now()->subMonths(6), 'seats' => 50],
             );
         }
+    }
+
+    /**
+     * Two machines and two providers for the Control Center specs.
+     *
+     * The first machine is classified discovery_only with a controlled BMC
+     * bound to it and the present credential attached, so a spec can test and
+     * discover it. The second is untouched — do_not_touch, nothing bound —
+     * which is what every machine looks like on the day it arrives, and what
+     * the refusals are proven against. The DNS provider is registered and
+     * nothing more, so the screen shows what it is waiting for.
+     */
+    private function machinesAndProviders(): void
+    {
+        $present = CredentialReference::query()->where('name', 'e2e-registrar-key')->firstOrFail();
+
+        $reachable = ManagedServer::query()->updateOrCreate(
+            ['name' => 'e2e-node-01'],
+            [
+                'environment' => DeploymentEnvironment::Staging,
+                'safety_class' => SafetyClass::DiscoveryOnly,
+                'safety_reason' => 'Seeded for the browser suite.',
+                'allow_reimage' => false,
+                'vendor' => 'Fabrikam',
+                'model' => 'FX-2200',
+                'management_address' => 'fake://connected',
+                'bmc_address' => 'fake://connected',
+                'credential_reference_id' => $present->getKey(),
+            ],
+        );
+
+        $bmc = ProviderInstance::query()->updateOrCreate(
+            ['name' => 'e2e-bmc-node-01'],
+            [
+                'category' => ProviderCategory::Bmc,
+                'driver' => 'fake_bmc',
+                'environment' => DeploymentEnvironment::Staging,
+                'endpoint' => 'fake://connected',
+                'managed_server_id' => $reachable->getKey(),
+                'credential_reference_id' => $present->getKey(),
+            ],
+        );
+
+        ManagedServer::query()->updateOrCreate(
+            ['name' => 'e2e-node-02'],
+            [
+                'environment' => DeploymentEnvironment::Staging,
+                'safety_class' => SafetyClass::DoNotTouch,
+                'allow_reimage' => false,
+                'management_address' => '10.66.0.2',
+            ],
+        );
+
+        $dns = ProviderInstance::query()->updateOrCreate(
+            ['name' => 'e2e-dns'],
+            [
+                'category' => ProviderCategory::Dns,
+                'driver' => 'fake',
+                'environment' => DeploymentEnvironment::Staging,
+                'endpoint' => 'fake://connected',
+            ],
+        );
+
+        // Assessed the way registration assesses, so the rows carry the
+        // blocker the screen is expected to name. A provider written straight
+        // to the table has no verdict at all, which is a state the API never
+        // produces and the browser suite must not be built against.
+        $assess = app(AssessProvider::class);
+        $assess->execute($bmc);
+        $assess->execute($dns);
     }
 }

@@ -12,11 +12,11 @@ reserved for Phase 30B resuming against real systems.
 |---|---|
 | Branch | `claude/hv-t6hq1p` |
 | HEAD at time of writing | see the commit that introduced this revision of the file |
-| Backend tests | 2605 / 2605 passing locally |
+| Backend tests | 2617 / 2617 passing locally |
 | PHPStan | 0 errors |
-| Frontend unit tests | 64 / 64 (12 files) |
-| Browser E2E | 115 tests in 17 files (10 cover Control Center screens) |
-| OpenAPI operations | 182, generator and committed document in agreement |
+| Frontend unit tests | 72 / 72 (14 files) |
+| Browser E2E | 125 tests in 20 files (20 cover Control Center screens) |
+| OpenAPI operations | 184, generator and committed document in agreement |
 
 ---
 
@@ -57,18 +57,18 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 |---|---|---|
 | Infrastructure Overview | NOT STARTED | No overview screen or aggregate endpoint. |
 | Datacenter/Rack Registry | PARTIAL | Tables pre-existed (`datacenters`, `racks`); `racks` extended with `power_notes`/`network_notes`. No registry actions, API or screen for this phase. |
-| Server Registry | COMPLETE (backend) | `RegisterServer`, `ServerController::{index,show,store}`, `ServerResource`, OpenAPI, audit `infrastructure.server.registered`, 13 + 8 feature tests. **No operator screen yet.** |
-| Server Detail | PARTIAL | `show` endpoint carries `safety.permits.*` so a screen can disable controls. No screen. |
-| Server Onboarding | PARTIAL | Register → classify → attach credential → connection-test works over HTTP, all with screens still to come except credentials. No wizard screen. |
-| Safety Enforcement | COMPLETE (backend) | `SafetyGate` pure function, 39 unit cases; `ClassifyServer` (one rung up, any distance down, typed name for destructive rung, row lock, reason); `ClearForReimage` / `RevokeReimageClearance` under separate permissions; DB CHECK `allow_reimage = false OR safety_class = 'reimage_allowed'`; connection test gated on `Read`; refusals are 409 carrying classification/attempted/would-permit. Ansible `safety_gate` role proves the same rule on the IaC side (10/10). |
-| Connection Framework | COMPLETE (backend) | `ConnectionTester` contract, `ConnectionTesterFactory` (bind, not singleton; verifies `driver()`), `FakeConnectionTester` with nine failure markers and a production guard; `TestConnection::{forServer,forProvider}`; `connection_tests` table with exactly-one-subject CHECK; audit `providers.connection.tested`. **Only the `fake` driver has a tester** — see F. |
-| Discovery Framework | PARTIAL | `server_facts` table with one-current-value partial unique index, `FactSource` enum, `ServerFact::scopeCurrent`. No discovery action writes facts yet. |
-| Provider Registry | COMPLETE (backend) | `RegisterProvider` / `EnableProvider` / `DisableProvider` / `AssessProvider`; 8 routes; `ProviderResource`; enable reassesses readiness inside the transaction under a row lock; partial unique index one-enabled-per-(category, environment) translated to a 409; disable writes one column and cascades to nothing; audit `providers.provider.{registered,enabled,disabled}`; 20 feature tests including the end-to-end walk. **No screen.** |
-| Provider Catalog | COMPLETE (backend) | `ProviderCatalogue` in source (12 drivers), `CatalogueEntryResource` with `testable` and `available_here`; `TheCatalogueOnlyClaimsWhatExistsTest` names the adapter class per driver. **No screen.** |
+| Server Registry | **COMPLETE** | `RegisterServer`, `ServerController::{index,show,store}`, `ServerResource`, OpenAPI, audit `infrastructure.server.registered`, 13 + 8 feature tests; **Machines screen** at `/admin/control-center/machines` (en/ar): list with classification and connection in words, register form that says the machine arrives do-not-touch. |
+| Server Detail | **COMPLETE** | The Machines screen's detail panel: classification and its reason (or "never classified"), reimage clearance, credential, connection test with its steps, discovery, and the current facts with their source. Controls are disabled by `safety.permits.*` and the refusal is written on the panel before the click. |
+| Server Onboarding | **COMPLETE** | Register → classify (one rung up, typed name for the destructive rung, reason) → attach credential → test → discover, all from the Machines screen; the browser suite walks register → classify and test → discover on the seeded machines. No wizard: the ladder is the wizard, one rung per decision. |
+| Safety Enforcement | COMPLETE (backend) | `SafetyGate` pure function, 39 unit cases; `ClassifyServer` (one rung up, any distance down, typed name for destructive rung, row lock, reason); `ClearForReimage` / `RevokeReimageClearance` under separate permissions; DB CHECK `allow_reimage = false OR safety_class = 'reimage_allowed'`; connection test gated on `Read`; refusals are 409 carrying classification/attempted/would-permit. Ansible `safety_gate` role proves the same rule on the IaC side (10/10). The screen offers only the rungs the API would accept and disables test/discover on a do-not-touch machine (component- and browser-tested). |
+| Connection Framework | COMPLETE (backend) | `ConnectionTester` contract, `ConnectionTesterFactory` (bind, not singleton; verifies `driver()`), `FakeConnectionTester` with nine failure markers and a production guard; `TestConnection::{forServer,forProvider}`; `connection_tests` table with exactly-one-subject CHECK; audit `providers.connection.tested`. **A machine's driver is now derived from its own BMC provider** (`ManagedServer::bmc()`), never from the request; a machine with no BMC provider is refused with `bmc_missing`. Surfaced on the Machines and Providers screens with the steps walked. **Only the `fake`/`fake_bmc` drivers have a tester** — see F. |
+| Discovery Framework | **COMPLETE** | `ConnectionTester::discover()`; `DiscoverServer` writes `server_facts` (supersedes changed values, supersedes discovered keys no longer reported, never touches declared facts, writes nothing on an unusable connection), sets `last_discovery_at`, audit `infrastructure.server.discovered`; `POST servers/{id}/discover`, `GET servers/{id}/facts`; 9 feature tests (`AMachineIsReachedThroughItsOwnBmcTest`); facts with source on the Machines screen; browser-tested. |
+| Provider Registry | COMPLETE (backend) | `RegisterProvider` / `EnableProvider` / `DisableProvider` / `AssessProvider`; 8 routes; `ProviderResource`; enable reassesses readiness inside the transaction under a row lock; partial unique index one-enabled-per-(category, environment) translated to a 409; disable writes one column and cascades to nothing; audit `providers.provider.{registered,enabled,disabled}`; 20 feature tests including the end-to-end walk; **Providers screen** at `/admin/control-center/providers` (en/ar): readiness with the blocker and its next action in words, credential and licence attachment, test-and-discover with steps, capabilities, enable only when ready-for-production, disable with a reason; component tests and 4 browser tests. |
+| Provider Catalog | COMPLETE (backend) | `ProviderCatalogue` in source (12 drivers), `CatalogueEntryResource` with `testable` and `available_here`; `TheCatalogueOnlyClaimsWhatExistsTest` names the adapter class per driver; the register form on the Providers screen offers only `available_here` drivers, shows the summary, and asks for endpoint/machine only where the entry needs them. |
 | Requirement Engine | PARTIAL | Per-driver requirements (`needsEndpoint/Credential/Licence/Server`) live on `CatalogueEntry` and drive readiness. No cross-product requirement matrix. |
 | Licence Center | **COMPLETE** | `RecordLicence` (state from the calendar: pending before start, active, expiring ≤30 days, expired; a key posted under any name is refused and pointed at the credential centre), `AttachLicence` (invalid and cross-environment refused at attachment), `RenewLicence` (clears an invalidation, recomputes, reassesses dependents at once; an expired renewal is refused), `InvalidateLicence` (the operator's only override, one direction only), `RefreshLicenceStates` (nightly at 00:10 and on demand; each transition audited; invalid/not-required never touched). 8 routes, 6 audit actions, `licences:refresh` command, OpenAPI; 16 feature tests including time-travel through expiring→expired with the provider blocked at the right step; **Licences screen** (en/ar), component tests, 5 browser tests. |
 | Credential References | **COMPLETE** | `RecordCredentialReference` (reference shape enforced; a value-shaped reference is refused with "rotate it now"; any unexpected field such as `secret`/`password` is refused by name and never echoed), `AttachCredential` to provider or machine (revoked and cross-environment refused at attachment, not only at use), `RevokeCredential` (reason, row lock, every dependent provider reassessed, nothing switched off), `MarkCredentialRotated` (state drops to configured/missing, last test forgotten, dependents reassessed). `SecretResolver::exists()` answers presence without ever holding the value. 9 routes; `CredentialResource` never carries `backend_reference`; 5 audit actions; OpenAPI; 21 feature tests; **Credentials screen** at `/admin/control-center/credentials` (en/ar) with component tests and 5 browser tests. |
-| Capability Discovery | PARTIAL | Discovery runs inside `TestConnection::forProvider` and writes `provider_capabilities`; readiness refuses `ReadyForProduction` until capabilities exist. No standalone discovery action or surface. |
+| Capability Discovery | **COMPLETE** | Provider discovery inside `TestConnection::forProvider` writes `provider_capabilities`; machine discovery is its own action (`DiscoverServer`); readiness refuses `ReadyForProduction` until capabilities exist. **Discovery screen** at `/admin/control-center/discovery` (read-only, en/ar): every provider with its observed capabilities or "never asked", every machine with its last look or "never looked at". Capability states have their own vocabulary (`admin.providers.capabilityStates`) so a provider's "unsupported" cannot read as the catalogue's "not sold". Real caller paths: the Machines screen (BMC), the Providers screen (test-and-discover). |
 | Software Profiles | NOT STARTED | Tables and models only. |
 | Desired State | NOT STARTED | Tables and models only. |
 | Plan Engine | NOT STARTED | Table has `fingerprint`; nothing computes one. |
@@ -85,14 +85,16 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Audit | COMPLETE for what exists | Eight new actions, each written by exactly one act via `RecordActAtomically`; `EveryAuditActionIsRecordedSomewhereTest` green. |
 | Security | PARTIAL | No endpoint returns a secret (tested); cross-environment credential never resolved (tested); fake driver refused in production (tested). Not yet done: SSRF guard on provider endpoints, IaC input injection guards. |
 | Observability | NOT STARTED | No metrics for the control centre. |
-| Browser E2E | NOT STARTED | 105 existing E2E tests, none for the control centre. |
+| Browser E2E | PARTIAL | 20 Control Center browser tests across five specs (credentials, licences, machines, providers, discovery) in English and Arabic; the plans/deployments/readiness screens do not exist yet. |
 | Architecture Gates | COMPLETE | All green, including two new gates (`ANewRecordKnowsItsOwnState`, `TheModulesAreNamedForWhatTheyOwn`) and one corrected gate (`NoDeadMethods` layer scope). |
 | Clean Room | NOT STARTED (for this phase) | |
 | CI | **RED through run 99; fixed in the commit carrying this revision** | Runs 95–98 failed at "Check code style" in both backend jobs (five files from the rename commit with reordered imports; `pint --dirty` never re-checks committed files). Run 99 (`5c1a2a2`) got past style and failed one test: `TheModulesAreNamedForWhatTheyOwnTest` asserted `src/Modules/ProductReadiness` exists — it existed locally as three empty, untracked directories, so the gate passed on one machine and failed in CI. The scaffold is deleted and the test now asserts only modules that have code, plus that readiness is not folded into Infrastructure or Providers. All other seven jobs green on run 99. Run 100 (`38a2a45`): both backend jobs green (2570 tests), one browser E2E failure — `wallet-credit.e2e.ts:23`, reproduced on a re-run, not reproducible locally in isolation or in full-suite order. Root cause in the spec: the credit dialogue's confirm button is enabled while the quote is loading and its handler silently does nothing without a quote; the spec asserted `toHaveCount(0)` on a warning (true of an empty dialogue) and clicked, so on a slow runner the click was swallowed. Spec now waits for the quote to render and scopes the button to the dialog. The silently inert button is itself a small UI defect, recorded in H. |
 
-**Closed: 0 of 40 exit conditions in the brief's sense.** Eight are complete at
-the backend level and lack their operator surface; the rest are partial or not
-started.
+**Closed: 11 of 40 exit conditions in the brief's sense** (Server Registry,
+Server Detail, Server Onboarding, Safety Enforcement, Connection Framework,
+Discovery Framework, Provider Registry, Provider Catalog, Licence Center,
+Credential References, Capability Discovery, plus the architecture gates). The
+rest are partial or not started.
 
 ## D. Findings — fixed, and kept under regression test
 
@@ -146,7 +148,7 @@ started.
 
 ## F. The honest constraint
 
-Eleven catalogued drivers have adapters. One (`fake`) has a connection tester.
+Eleven catalogued drivers have adapters. Two controlled ones (`fake`, `fake_bmc`) have a connection tester.
 A tester is written against a real endpoint and Phase 30B closed NO GO with no
 real endpoint. Consequences, all deliberate and all on the surface:
 
@@ -171,11 +173,11 @@ until the first real endpoint exists.
 1. ~~CI green on a pushed HEAD.~~ Done at `fb2dd68`, run 101.
 2. ~~Credential References.~~ Done (CI run 102 green); the provider end-to-end walk now attaches through the endpoint.
 3. ~~Licence Center.~~ Done.
-4. Capability Discovery as its own surface; derive `driver` for server tests from the BMC provider instead of the request.
+4. ~~Capability Discovery as its own surface; derive `driver` for server tests from the BMC provider instead of the request.~~ Done (Licence Center CI run 103 green); Machines, Providers and Discovery screens shipped with it.
 5. Requirement Engine, product readiness, `READY_TO_SELL`, blocker propagation, dependency view.
 6. Profiles → desired state → plan (fingerprint) → approval (invalidated on plan change) → deployment jobs → controller bridge → IaC bridge, with timeout/indeterminate states under the Timeout Rule.
 7. SSRF and IaC-input guards; observability.
-8. Control Center frontend (en/ar, RTL/LTR) and browser E2E.
+8. Control Center frontend (en/ar, RTL/LTR) and browser E2E for the surfaces still to come: infrastructure overview, plans, deployments, readiness.
 9. ~~Pre-existing, found while chasing CI: the invoice credit dialogue's confirm button was enabled before the quote had loaded.~~ Fixed: `ConfirmDialog` takes `ready`, and the credit dialogue passes the same condition its handler checks. Component-tested.
 10. Clean room, both matrices, closing questions.
 
