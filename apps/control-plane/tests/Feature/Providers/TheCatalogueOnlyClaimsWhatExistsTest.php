@@ -12,6 +12,7 @@ use Lynomia\Modules\Dedicated\Infrastructure\Providers\RedfishDedicatedProvider;
 use Lynomia\Modules\Dns\Infrastructure\Providers\CloudflareDnsProvider;
 use Lynomia\Modules\Domains\Infrastructure\Providers\SyRegistryProvider;
 use Lynomia\Modules\Ipam\Infrastructure\Providers\CloudflareReverseDnsProvider;
+use Lynomia\Modules\Notifications\Infrastructure\Providers\LaravelMailTransport;
 use Lynomia\Modules\Payments\Infrastructure\Providers\StripePaymentProvider;
 use Lynomia\Modules\Providers\Domain\DTOs\CatalogueEntry;
 use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
@@ -54,6 +55,7 @@ final class TheCatalogueOnlyClaimsWhatExistsTest extends TestCase
         'cloudflare_rdns' => CloudflareReverseDnsProvider::class,
         'sy_registry' => SyRegistryProvider::class,
         'stripe' => StripePaymentProvider::class,
+        'smtp' => LaravelMailTransport::class,
         'ipmi' => IpmiDedicatedProvider::class,
         'redfish' => RedfishDedicatedProvider::class,
         'ilo' => IloDedicatedProvider::class,

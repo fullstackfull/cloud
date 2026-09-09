@@ -115,6 +115,21 @@ final readonly class ProviderCatalogue
                 summary: 'Stripe card payments and refunds.',
             ),
             new CatalogueEntry(
+                driver: 'smtp',
+                category: ProviderCategory::Email,
+                // The relay is a deployment setting (MAIL_HOST), not an
+                // address the Control Center dials — the endpoint policy
+                // speaks HTTPS to providers and a relay speaks SMTP. The row
+                // exists so readiness has something to point at. No
+                // connection tester exists and none can be written honestly
+                // against a mailer that may be `log`, so the driver is
+                // untestable and a row for it stays blocked on credentials.
+                needsEndpoint: false,
+                needsCredential: true,
+                needsLicence: false,
+                summary: 'Transactional mail through the deployment\'s own mail transport. Untestable from here.',
+            ),
+            new CatalogueEntry(
                 driver: 'ipmi',
                 category: ProviderCategory::Bmc,
                 needsEndpoint: true,

@@ -62,8 +62,9 @@ can climb past `ready_for_test` even in principle, and none reaches that.
 | Backups | `not_ready` | `blocked_dependency` — depends on VPS, which is `not_ready` | VPS first; then a `proxmox_backup` provider |
 
 And the shared requirements are unmet for every product: no payment provider
-(`stripe` is catalogued, untestable) and no email provider (SMTP has neither a
-catalogue entry nor an adapter) is registered.
+(`stripe` is catalogued, untestable) and no email provider (`smtp` is
+catalogued since the scope addendum, with the deployment's own mail transport
+as its adapter, untestable) is registered.
 
 ## What each rung costs, for a real provider
 
