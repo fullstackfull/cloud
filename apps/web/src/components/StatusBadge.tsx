@@ -74,6 +74,13 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   // Product readiness. Only a person's declaration is green.
   ready_for_real_validation: 'info',
   ready_to_sell: 'success',
+  // Deployments. Indeterminate is the loudest state on the screen.
+  preflight: 'info',
+  planning: 'info',
+  awaiting_approval: 'warning',
+  applying: 'info',
+  verifying: 'info',
+  indeterminate: 'danger',
   // Machines.
   registered: 'neutral',
   discovered: 'info',

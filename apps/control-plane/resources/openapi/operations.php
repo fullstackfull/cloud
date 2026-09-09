@@ -1156,6 +1156,127 @@ return [
         'permission' => 'infrastructure.view',
         'response' => ['envelope' => 'list', 'schema' => 'ServerFact'],
     ],
+    /* ---------------------------------------------------------------------
+     | The execution chain
+     |
+     | profile → desired state → plan (fingerprint) → approval (of that
+     | fingerprint) → run → verify. Every step is its own endpoint and its own
+     | audit row. Nothing here runs anything in CI, and nothing runs against a
+     | machine whose classification does not permit the plan's risk.
+     */
+
+    'api.admin.infrastructure.profiles.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The software profiles this build can put on a machine',
+        'description' => 'In source, reviewed like code. Each component names the Ansible role that installs it and '
+            .'the override keys it accepts; there is no endpoint that writes one.',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'SoftwareProfile'],
+    ],
+    'api.admin.infrastructure.servers.desired_state' => [
+        'tag' => 'Operator',
+        'summary' => 'What a machine is meant to be',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'single', 'schema' => 'DesiredState', 'status' => 200, 'nullable' => true],
+    ],
+    'api.admin.infrastructure.servers.assign_desired_state' => [
+        'tag' => 'Operator',
+        'summary' => 'State what a machine should be',
+        'description' => 'Changes nothing on the machine. Overrides are refused (409) unless every key is one a component '
+            .'in the profile declares and every value is a short printable string free of shell and template syntax.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['profile', 'overrides'],
+        'response' => $one('DesiredState'),
+    ],
+    'api.admin.infrastructure.servers.clear_desired_state' => [
+        'tag' => 'Operator',
+        'summary' => 'Withdraw the intention',
+        'description' => 'Nothing is uninstalled. Standing approvals on the machine\'s plans are revoked, audited as automatic.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['reason'],
+        'response' => $empty(),
+    ],
+    'api.admin.infrastructure.servers.plan' => [
+        'tag' => 'Operator',
+        'summary' => 'The machine\'s current plan',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'single', 'schema' => 'DeploymentPlan', 'status' => 200, 'nullable' => true],
+    ],
+    'api.admin.infrastructure.servers.compute_plan' => [
+        'tag' => 'Operator',
+        'summary' => 'Compute what it would take',
+        'description' => 'Desired state minus current facts, each change with its risk, the worst deciding the safety '
+            .'classification the plan requires, and a fingerprint over the work. The same work keeps the same '
+            .'fingerprint and its approval; different work is a new plan, and every standing approval on the '
+            .'machine is revoked. Contacts nothing.',
+        'permission' => 'infrastructure.manage',
+        'response' => $one('DeploymentPlan'),
+    ],
+    'api.admin.infrastructure.plans.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One plan',
+        'permission' => 'infrastructure.view',
+        'response' => $one('DeploymentPlan'),
+    ],
+    'api.admin.infrastructure.plans.approve' => [
+        'tag' => 'Operator',
+        'summary' => 'Say yes to exactly this plan',
+        'description' => 'Records the fingerprint as it stands; the run compares it again. Refused (409) for a plan with '
+            .'blockers, a superseded plan, or by the person who planned it. A destructive plan needs the '
+            .'machine\'s name typed (422 without).',
+        'permission' => 'deployment.approve',
+        'body' => ['reason', 'confirm_name'],
+        'response' => $one('DeploymentPlan'),
+    ],
+    'api.admin.infrastructure.plans.revoke_approval' => [
+        'tag' => 'Operator',
+        'summary' => 'Take the yes back',
+        'permission' => 'deployment.approve',
+        'body' => ['reason'],
+        'response' => $one('DeploymentPlan'),
+    ],
+    'api.admin.infrastructure.deployments.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Every deployment, the ones waiting for a person first',
+        'permission' => 'infrastructure.view',
+        'query' => ['state', 'server'],
+        'response' => $many('DeploymentJob'),
+    ],
+    'api.admin.infrastructure.deployments.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One deployment with its steps',
+        'permission' => 'infrastructure.view',
+        'response' => $one('DeploymentJob'),
+    ],
+    'api.admin.infrastructure.servers.request_deployment' => [
+        'tag' => 'Operator',
+        'summary' => 'Queue a run',
+        'description' => 'An apply needs a current applicable plan and a standing approval whose fingerprint is that '
+            .'plan\'s; a verify needs neither and changes nothing. 409 when the machine\'s classification does not '
+            .'permit the plan\'s risk, when there is no approval, or when a run is already in flight. The worker '
+            .'re-checks all of it before touching the machine. A run that outlives its deadline is indeterminate '
+            .'and is never retried.',
+        'permission' => 'deployment.run',
+        'body' => ['kind'],
+        'response' => $one('DeploymentJob', 202),
+    ],
+    'api.admin.infrastructure.deployments.resolve' => [
+        'tag' => 'Operator',
+        'summary' => 'A person states what they found',
+        'description' => 'The only way an indeterminate or needs-review deployment ends. The platform records the '
+            .'statement and never guesses.',
+        'permission' => 'deployment.run',
+        'body' => ['outcome', 'reason'],
+        'response' => $one('DeploymentJob'),
+    ],
+    'api.admin.infrastructure.deployments.cancel' => [
+        'tag' => 'Operator',
+        'summary' => 'Cancel a run that has not started',
+        'description' => 'A run that is applying cannot be cancelled into a known state; it finishes or goes indeterminate.',
+        'permission' => 'deployment.run',
+        'body' => ['reason'],
+        'response' => $one('DeploymentJob'),
+    ],
     'api.admin.infrastructure.servers.connection_test' => [
         'tag' => 'Operator',
         'summary' => 'Try to reach a machine',

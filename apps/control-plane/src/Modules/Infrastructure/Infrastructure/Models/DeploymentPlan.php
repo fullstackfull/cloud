@@ -20,9 +20,9 @@ use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
  * machine drifted — and the fingerprint moves, and the old approval no longer
  * matches. Nobody has to remember to invalidate anything.
  *
- * @property list<array{action: string, target: string, risk: string, destructive: bool, detail?: string}> $changes
- * @property list<string> $unchanged
- * @property list<array{reason: string, detail: string}> $blockers
+ * @property list<array<string, mixed>> $changes
+ * @property list<array{component: string, reason: string}> $unchanged
+ * @property list<array{code: string, detail: string}> $blockers
  * @property PlanRisk $risk
  * @property SafetyClass $required_safety_class
  * @property string $fingerprint

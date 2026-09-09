@@ -13,7 +13,11 @@ use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\SoftwareProfileController;
 use Lynomia\Modules\ProductReadiness\Http\Controllers\ProductReadinessController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
 use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
@@ -235,6 +239,72 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.connection_test');
+
+    /*
+     | The execution chain: profile → desired state → plan → approval → run.
+     |
+     | Reading is the operator-view permission. Stating what a machine should
+     | be and computing what that would take is infrastructure.manage; saying
+     | yes to a specific plan is deployment.approve, which the
+     | infrastructure-admin role does not hold; starting the run and settling
+     | one that stopped is deployment.run. Three decisions, three permissions,
+     | and the four-eyes rule inside the approval on top.
+     */
+    Route::get('infrastructure/profiles', [SoftwareProfileController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.profiles.index');
+
+    Route::get('infrastructure/servers/{server}/desired-state', [DesiredStateController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.desired_state');
+
+    Route::put('infrastructure/servers/{server}/desired-state', [DesiredStateController::class, 'assign'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.assign_desired_state');
+
+    Route::delete('infrastructure/servers/{server}/desired-state', [DesiredStateController::class, 'clear'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.clear_desired_state');
+
+    Route::get('infrastructure/servers/{server}/plan', [DeploymentPlanController::class, 'current'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.plan');
+
+    Route::post('infrastructure/servers/{server}/plan', [DeploymentPlanController::class, 'plan'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.compute_plan');
+
+    Route::get('infrastructure/plans/{plan}', [DeploymentPlanController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.plans.show');
+
+    Route::post('infrastructure/plans/{plan}/approve', [DeploymentPlanController::class, 'approve'])
+        ->middleware('permission:'.Permission::DeploymentApprove->value)
+        ->name('infrastructure.plans.approve');
+
+    Route::delete('infrastructure/plans/{plan}/approval', [DeploymentPlanController::class, 'revokeApproval'])
+        ->middleware('permission:'.Permission::DeploymentApprove->value)
+        ->name('infrastructure.plans.revoke_approval');
+
+    Route::get('infrastructure/deployments', [DeploymentJobController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.deployments.index');
+
+    Route::get('infrastructure/deployments/{deployment}', [DeploymentJobController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.deployments.show');
+
+    Route::post('infrastructure/servers/{server}/deployments', [DeploymentJobController::class, 'request'])
+        ->middleware('permission:'.Permission::DeploymentRun->value)
+        ->name('infrastructure.servers.request_deployment');
+
+    Route::post('infrastructure/deployments/{deployment}/resolve', [DeploymentJobController::class, 'resolve'])
+        ->middleware('permission:'.Permission::DeploymentRun->value)
+        ->name('infrastructure.deployments.resolve');
+
+    Route::post('infrastructure/deployments/{deployment}/cancel', [DeploymentJobController::class, 'cancel'])
+        ->middleware('permission:'.Permission::DeploymentRun->value)
+        ->name('infrastructure.deployments.cancel');
 
     /*
      | Providers: the accounts Lynomia holds with other people.

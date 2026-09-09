@@ -12,8 +12,10 @@ import { AdminOperationsPage } from '@/features/admin/AdminOperationsPage'
 import { AdminPaymentsPage } from '@/features/admin/AdminPaymentsPage'
 import { AdminProvisioningPage } from '@/features/admin/AdminProvisioningPage'
 import { CredentialsPage } from '@/features/controlCenter/CredentialsPage'
+import { DeploymentsPage } from '@/features/controlCenter/DeploymentsPage'
 import { DiscoveryPage } from '@/features/controlCenter/DiscoveryPage'
 import { LicencesPage } from '@/features/controlCenter/LicencesPage'
+import { PlansPage } from '@/features/controlCenter/PlansPage'
 import { ProvidersPage } from '@/features/controlCenter/ProvidersPage'
 import { ReadinessPage } from '@/features/controlCenter/ReadinessPage'
 import { ServersPage } from '@/features/controlCenter/ServersPage'
@@ -153,6 +155,8 @@ export function App() {
                   <Route path="/admin/control-center/providers" element={<ProvidersPage />} />
                   <Route path="/admin/control-center/discovery" element={<DiscoveryPage />} />
                   <Route path="/admin/control-center/readiness" element={<ReadinessPage />} />
+                  <Route path="/admin/control-center/plans" element={<PlansPage />} />
+                  <Route path="/admin/control-center/deployments" element={<DeploymentsPage />} />
                 </Route>
               </Route>
             </Route>

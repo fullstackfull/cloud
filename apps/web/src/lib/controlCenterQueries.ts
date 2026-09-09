@@ -626,3 +626,198 @@ export function useWithdrawSellability() {
     onSuccess: () => { invalidateReadinessViews(queryClient) },
   })
 }
+
+/* -------------------------------------------------------------------------
+ | The execution chain: profiles, desired state, plans, approvals, runs
+ */
+
+export interface SoftwareComponent {
+  key: string
+  name: string
+  category: string
+  ansible_role: string
+  risk: string
+  requires_reboot: boolean
+  verification: string | null
+  accepts: string[]
+  description: string | null
+}
+
+export interface SoftwareProfile {
+  key: string
+  name: string
+  intended_role: string
+  playbook: string
+  description: string | null
+  components: SoftwareComponent[]
+}
+
+export interface DesiredState {
+  id: string
+  server_id: string
+  profile: string | null
+  profile_name: string | null
+  overrides: Record<string, string>
+  assigned_at: string | null
+}
+
+export interface PlannedChange {
+  component: string
+  action: string
+  role: string
+  risk: string
+  requires_reboot: boolean
+  configuration: Record<string, string>
+  reason: string
+}
+
+export interface DeploymentPlan {
+  id: string
+  server_id: string
+  fingerprint: string
+  changes: PlannedChange[]
+  unchanged: Array<{ component: string; reason: string }>
+  blockers: Array<{ code: string; detail: string }>
+  risk: string
+  required_safety_class: SafetyClass
+  requires_reboot: boolean
+  is_destructive: boolean
+  is_applicable: boolean
+  approval: { id: string; approved_fingerprint: string; approved_at: string | null; approved_by: string; reason: string | null } | null
+  planned_by: string | null
+  planned_at: string | null
+  refreshed_at: string | null
+}
+
+export interface DeploymentJob {
+  id: string
+  server_id: string
+  server_name?: string | null
+  kind: 'apply' | 'verify'
+  state: string
+  waits_for_somebody: boolean
+  plan_id: string | null
+  approval_id: string | null
+  steps: Array<{ name: string; outcome: string; detail?: string }>
+  failure_class: string | null
+  failure_detail: string | null
+  requested_by: string | null
+  requested_at: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+function invalidateChainViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'chain'] })
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'servers'] })
+}
+
+export function useSoftwareProfiles() {
+  return useQuery({
+    queryKey: ['admin', 'chain', 'profiles'],
+    queryFn: () => admin.get<{ data: SoftwareProfile[] }>('/infrastructure/profiles'),
+  })
+}
+
+export function useDesiredState(serverId: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'chain', 'desired-state', serverId],
+    enabled: serverId !== null,
+    queryFn: () => admin.get<{ data: DesiredState | null }>(`/infrastructure/servers/${encodeURIComponent(serverId ?? '')}/desired-state`),
+  })
+}
+
+export function useAssignDesiredState() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ serverId, profile, overrides }: { serverId: string; profile: string; overrides: Record<string, string> }) =>
+      admin.put<Envelope<DesiredState>>(`/infrastructure/servers/${encodeURIComponent(serverId)}/desired-state`, { profile, overrides }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useClearDesiredState() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ serverId, reason }: { serverId: string; reason: string }) =>
+      admin.delete<unknown>(`/infrastructure/servers/${encodeURIComponent(serverId)}/desired-state`, { reason }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useCurrentPlan(serverId: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'chain', 'plan', serverId],
+    enabled: serverId !== null,
+    queryFn: () => admin.get<{ data: DeploymentPlan | null }>(`/infrastructure/servers/${encodeURIComponent(serverId ?? '')}/plan`),
+  })
+}
+
+export function useComputePlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ serverId }: { serverId: string }) =>
+      admin.post<Envelope<DeploymentPlan>>(`/infrastructure/servers/${encodeURIComponent(serverId)}/plan`, {}),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useApprovePlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ planId, reason, confirm_name }: { planId: string; reason: string; confirm_name?: string }) =>
+      admin.post<Envelope<DeploymentPlan>>(`/infrastructure/plans/${encodeURIComponent(planId)}/approve`, { reason, ...(confirm_name === undefined ? {} : { confirm_name }) }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useRevokeApproval() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ planId, reason }: { planId: string; reason: string }) =>
+      admin.delete<Envelope<DeploymentPlan>>(`/infrastructure/plans/${encodeURIComponent(planId)}/approval`, { reason }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useDeployments(page: number, filters: { state?: string; server?: string } = {}) {
+  return useQuery({
+    queryKey: ['admin', 'chain', 'deployments', page, filters.state, filters.server],
+    queryFn: () => admin.get<Paginated<DeploymentJob>>('/infrastructure/deployments', { page, state: filters.state, server: filters.server }),
+  })
+}
+
+export function useRequestDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ serverId, kind }: { serverId: string; kind: 'apply' | 'verify' }) =>
+      admin.post<Envelope<DeploymentJob>>(`/infrastructure/servers/${encodeURIComponent(serverId)}/deployments`, { kind }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useResolveDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, outcome, reason }: { id: string; outcome: 'completed' | 'failed'; reason: string }) =>
+      admin.post<Envelope<DeploymentJob>>(`/infrastructure/deployments/${encodeURIComponent(id)}/resolve`, { outcome, reason }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+export function useCancelDeployment() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      admin.post<Envelope<DeploymentJob>>(`/infrastructure/deployments/${encodeURIComponent(id)}/cancel`, { reason }),
+    onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}

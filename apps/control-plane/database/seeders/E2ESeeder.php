@@ -7,6 +7,7 @@ namespace Database\Seeders;
 use Carbon\CarbonImmutable;
 use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Date;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
@@ -205,6 +206,7 @@ class E2ESeeder extends Seeder
         $this->credentials();
         $this->licences();
         $this->machinesAndProviders();
+        $this->secondOperator();
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -997,6 +999,24 @@ class E2ESeeder extends Seeder
      * the refusals are proven against. The DNS provider is registered and
      * nothing more, so the screen shows what it is waiting for.
      */
+    /**
+     * A second super-admin. A plan is not approved by the person who planned
+     * it, so the browser suite needs two people who may approve.
+     */
+    private function secondOperator(): void
+    {
+        $second = User::firstOrCreate(
+            ['email' => 'ops2@lynomia.local'],
+            [
+                'name' => 'Second Operator',
+                'password' => 'password',
+                'email_verified_at' => Date::now(),
+                'password_changed_at' => Date::now(),
+            ],
+        );
+        $second->syncRoles([Role::SuperAdmin->value]);
+    }
+
     private function machinesAndProviders(): void
     {
         $present = CredentialReference::query()->where('name', 'e2e-registrar-key')->firstOrFail();
@@ -1035,6 +1055,21 @@ class E2ESeeder extends Seeder
                 'safety_class' => SafetyClass::DoNotTouch,
                 'allow_reimage' => false,
                 'management_address' => '10.66.0.2',
+            ],
+        );
+
+        // A machine the execution chain may be walked on: configurable,
+        // reachable through the fake controller, nothing installed yet.
+        ManagedServer::query()->updateOrCreate(
+            ['name' => 'e2e-node-03'],
+            [
+                'environment' => DeploymentEnvironment::Staging,
+                'safety_class' => SafetyClass::ConfigurationAllowed,
+                'safety_reason' => 'Seeded for the browser suite: a lab machine the chain may be rehearsed on.',
+                'allow_reimage' => false,
+                'vendor' => 'Fabrikam',
+                'model' => 'FX-1100',
+                'management_address' => 'fake://connected',
             ],
         );
 

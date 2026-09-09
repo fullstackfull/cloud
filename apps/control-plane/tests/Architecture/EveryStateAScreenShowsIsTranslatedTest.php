@@ -24,6 +24,9 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
+use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentKind;
+use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentState;
+use Lynomia\Modules\Infrastructure\Domain\Enums\PlanRisk;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
 use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
@@ -135,6 +138,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             ReadinessState::class,
             ServerState::class,
             ProductReadinessState::class,
+            DeploymentState::class,
         ],
 
         /*
@@ -148,6 +152,8 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.providers.categories' => [ProviderCategory::class],
         'admin.providers.capabilityStates' => [CapabilityState::class],
         'admin.readiness.products' => [Product::class],
+        'admin.plans.risks' => [PlanRisk::class],
+        'admin.deployments.kinds' => [DeploymentKind::class],
 
         /*
          * Availability has its own vocabulary rather than sharing the status

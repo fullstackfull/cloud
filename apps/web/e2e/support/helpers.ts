@@ -14,6 +14,9 @@ export const users = {
   // since every check passes for a super admin.
   billingAdmin: { email: 'billing@lynomia.local', password: 'password' },
   noc: { email: 'noc@lynomia.local', password: 'password' },
+  // A second super-admin, because a plan is not approved by the person who
+  // planned it and the chain spec needs two people.
+  secondOperator: { email: 'ops2@lynomia.local', password: 'password' },
 } as const
 
 /** Fixtures the specs assert on by name. Mirrors E2ESeeder's constants. */
@@ -44,6 +47,7 @@ export const fixtures = {
   machineUntouched: 'e2e-node-02',
   providerTestable: 'e2e-bmc-node-01',
   providerBlocked: 'e2e-dns',
+  machineConfigurable: 'e2e-node-03',
 } as const
 
 /**

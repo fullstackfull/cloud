@@ -39,11 +39,12 @@ class SoftwareProfile extends Model
     }
 
     /**
-     * @return BelongsToMany<SoftwareComponent, $this>
+     * @return BelongsToMany<SoftwareComponent, $this, ProfileComponent>
      */
     public function components(): BelongsToMany
     {
         return $this->belongsToMany(SoftwareComponent::class, 'profile_components')
+            ->using(ProfileComponent::class)
             ->withPivot(['is_required', 'configuration', 'position'])
             ->withTimestamps()
             ->orderByPivot('position');

@@ -62,6 +62,13 @@ Schedule::command('subscriptions:sweep')
  * early enough that the morning's first screen is right. Each change is
  * audited and the providers under it reassessed.
  */
+// A deployment whose worker died would otherwise hold the machine's
+// one-in-flight slot for ever. Marked indeterminate, never restarted.
+Schedule::command('deployments:detect-stale')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('licences:refresh')
     ->dailyAt('00:10')
     ->withoutOverlapping()

@@ -1367,6 +1367,277 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/deployments":
+    get:
+      operationId: "api_admin_infrastructure_deployments_index"
+      tags:
+        - "Operator"
+      summary: "Every deployment, the ones waiting for a person first"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "server"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentJobPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/deployments/{deployment}":
+    get:
+      operationId: "api_admin_infrastructure_deployments_show"
+      tags:
+        - "Operator"
+      summary: "One deployment with its steps"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "deployment"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/deployments/{deployment}/cancel":
+    post:
+      operationId: "api_admin_infrastructure_deployments_cancel"
+      tags:
+        - "Operator"
+      summary: "Cancel a run that has not started"
+      description: |-
+        A run that is applying cannot be cancelled into a known state; it finishes or goes indeterminate.
+
+        Requires the `deployment.run` permission.
+      parameters:
+        - name: "deployment"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/deployments/{deployment}/resolve":
+    post:
+      operationId: "api_admin_infrastructure_deployments_resolve"
+      tags:
+        - "Operator"
+      summary: "A person states what they found"
+      description: |-
+        The only way an indeterminate or needs-review deployment ends. The platform records the statement and never guesses.
+
+        Requires the `deployment.run` permission.
+      parameters:
+        - name: "deployment"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                outcome:
+                  description: "See the endpoint description; validated server-side."
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/hosting-nodes":
     get:
       operationId: "api_admin_infrastructure_hosting_nodes"
@@ -1497,6 +1768,271 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/AdminNodePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/plans/{plan}":
+    get:
+      operationId: "api_admin_infrastructure_plans_show"
+      tags:
+        - "Operator"
+      summary: "One plan"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/plans/{plan}/approval":
+    delete:
+      operationId: "api_admin_infrastructure_plans_revoke_approval"
+      tags:
+        - "Operator"
+      summary: "Take the yes back"
+      description: "Requires the `deployment.approve` permission."
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/plans/{plan}/approve":
+    post:
+      operationId: "api_admin_infrastructure_plans_approve"
+      tags:
+        - "Operator"
+      summary: "Say yes to exactly this plan"
+      description: |-
+        Records the fingerprint as it stands; the run compares it again. Refused (409) for a plan with blockers, a superseded plan, or by the person who planned it. A destructive plan needs the machine's name typed (422 without).
+
+        Requires the `deployment.approve` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+                confirm_name:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/profiles":
+    get:
+      operationId: "api_admin_infrastructure_profiles_index"
+      tags:
+        - "Operator"
+      summary: "The software profiles this build can put on a machine"
+      description: |-
+        In source, reviewed like code. Each component names the Ansible role that installs it and the override keys it accepts; there is no endpoint that writes one.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/SoftwareProfile"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -2162,6 +2698,282 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/deployments":
+    post:
+      operationId: "api_admin_infrastructure_servers_request_deployment"
+      tags:
+        - "Operator"
+      summary: "Queue a run"
+      description: |-
+        An apply needs a current applicable plan and a standing approval whose fingerprint is that plan's; a verify needs neither and changes nothing. 409 when the machine's classification does not permit the plan's risk, when there is no approval, or when a run is already in flight. The worker re-checks all of it before touching the machine. A run that outlives its deadline is indeterminate and is never retried.
+
+        Requires the `deployment.run` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                kind:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/desired-state":
+    put:
+      operationId: "api_admin_infrastructure_servers_assign_desired_state"
+      tags:
+        - "Operator"
+      summary: "State what a machine should be"
+      description: |-
+        Changes nothing on the machine. Overrides are refused (409) unless every key is one a component in the profile declares and every value is a short printable string free of shell and template syntax.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                profile:
+                  description: "See the endpoint description; validated server-side."
+                overrides:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DesiredStateResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      operationId: "api_admin_infrastructure_servers_clear_desired_state"
+      tags:
+        - "Operator"
+      summary: "Withdraw the intention"
+      description: |-
+        Nothing is uninstalled. Standing approvals on the machine's plans are revoked, audited as automatic.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        204:
+          description: "No content."
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    get:
+      operationId: "api_admin_infrastructure_servers_desired_state"
+      tags:
+        - "Operator"
+      summary: "What a machine is meant to be"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DesiredStateResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/servers/{server}/discover":
     post:
       operationId: "api_admin_infrastructure_servers_discover"
@@ -2253,6 +3065,121 @@ paths:
                     type: "array"
                     items:
                       "$ref": "#/components/schemas/ServerFact"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/plan":
+    post:
+      operationId: "api_admin_infrastructure_servers_compute_plan"
+      tags:
+        - "Operator"
+      summary: "Compute what it would take"
+      description: |-
+        Desired state minus current facts, each change with its risk, the worst deciding the safety classification the plan requires, and a fingerprint over the work. The same work keeps the same fingerprint and its approval; different work is a new plan, and every standing approval on the machine is revoked. Contacts nothing.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    get:
+      operationId: "api_admin_infrastructure_servers_plan"
+      tags:
+        - "Operator"
+      summary: "The machine's current plan"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DeploymentPlanResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -13860,6 +14787,199 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DedicatedServer"
+    DeploymentJob:
+      type: "object"
+      additionalProperties: false
+      description: "One run of the chain's last links. Indeterminate and needs_review wait for a person and are never retried."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        server_id:
+          "$ref": "#/components/schemas/Ulid"
+        server_name:
+          type:
+            - "string"
+            - "null"
+        kind:
+          type: "string"
+          enum:
+            - "apply"
+            - "verify"
+        state:
+          type: "string"
+          enum:
+            - "requested"
+            - "preflight"
+            - "planning"
+            - "awaiting_approval"
+            - "queued"
+            - "applying"
+            - "verifying"
+            - "completed"
+            - "failed"
+            - "indeterminate"
+            - "needs_review"
+            - "cancelled"
+        waits_for_somebody:
+          type: "boolean"
+        plan_id:
+          type:
+            - "string"
+            - "null"
+        approval_id:
+          type:
+            - "string"
+            - "null"
+        steps:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        failure_class:
+          type:
+            - "string"
+            - "null"
+        failure_detail:
+          type:
+            - "string"
+            - "null"
+        requested_by:
+          type:
+            - "string"
+            - "null"
+        requested_at:
+          "$ref": "#/components/schemas/Timestamp"
+        started_at:
+          "$ref": "#/components/schemas/Timestamp"
+        finished_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DeploymentJobPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/DeploymentJob"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    DeploymentJobResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DeploymentJob"
+    DeploymentPlan:
+      type: "object"
+      additionalProperties: false
+      description: "What would be done to a machine, priced by risk, with a fingerprint an approval is for."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        server_id:
+          "$ref": "#/components/schemas/Ulid"
+        fingerprint:
+          type: "string"
+          description: "SHA-256 over the profile and the ordered changes with their configuration. Nothing else."
+        changes:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        unchanged:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        blockers:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        risk:
+          type: "string"
+          enum:
+            - "none"
+            - "low"
+            - "moderate"
+            - "high"
+            - "destructive"
+        required_safety_class:
+          type: "string"
+        requires_reboot:
+          type: "boolean"
+        is_destructive:
+          type: "boolean"
+        is_applicable:
+          type: "boolean"
+          description: "No blockers and at least one change."
+        approval:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The standing approval for this exact fingerprint, or null."
+        approved_fingerprint:
+          type:
+            - "string"
+            - "null"
+        approved_at:
+          "$ref": "#/components/schemas/Timestamp"
+        approved_by:
+          type:
+            - "string"
+            - "null"
+        reason:
+          type:
+            - "string"
+            - "null"
+        planned_by:
+          type:
+            - "string"
+            - "null"
+        planned_at:
+          "$ref": "#/components/schemas/Timestamp"
+        refreshed_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DeploymentPlanResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DeploymentPlan"
+    DesiredState:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        server_id:
+          "$ref": "#/components/schemas/Ulid"
+        profile:
+          type:
+            - "string"
+            - "null"
+        profile_name:
+          type:
+            - "string"
+            - "null"
+        overrides:
+          type: "object"
+          additionalProperties:
+            type: "string"
+        assigned_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DesiredStateResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DesiredState"
     DnsRecord:
       type: "object"
       additionalProperties: false
@@ -16228,6 +17348,63 @@ components:
             "$ref": "#/components/schemas/Session"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    SoftwareComponent:
+      type: "object"
+      additionalProperties: false
+      properties:
+        key:
+          type: "string"
+        name:
+          type: "string"
+        category:
+          type: "string"
+        ansible_role:
+          type: "string"
+          description: "Checked against the tree by an architecture test."
+        risk:
+          type: "string"
+          enum:
+            - "none"
+            - "low"
+            - "moderate"
+            - "high"
+            - "destructive"
+        requires_reboot:
+          type: "boolean"
+        verification:
+          type:
+            - "string"
+            - "null"
+        accepts:
+          type: "array"
+          items:
+            type: "string"
+          description: "The only override keys this component takes."
+        description:
+          type:
+            - "string"
+            - "null"
+    SoftwareProfile:
+      type: "object"
+      additionalProperties: false
+      description: "A named set of components for a machine role, in install order, bound to a playbook in infrastructure/ansible."
+      properties:
+        key:
+          type: "string"
+        name:
+          type: "string"
+        intended_role:
+          type: "string"
+        playbook:
+          type: "string"
+        description:
+          type:
+            - "string"
+            - "null"
+        components:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/SoftwareComponent"
     StartedPayment:
       type: "object"
       additionalProperties: false

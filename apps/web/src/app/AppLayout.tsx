@@ -81,6 +81,8 @@ const CONTROL_CENTER_NAV: NavItem[] = [
   { to: '/admin/control-center/machines', labelKey: 'admin.nav.machines' },
   { to: '/admin/control-center/providers', labelKey: 'admin.nav.providers' },
   { to: '/admin/control-center/discovery', labelKey: 'admin.nav.discovery' },
+  { to: '/admin/control-center/plans', labelKey: 'admin.nav.plans' },
+  { to: '/admin/control-center/deployments', labelKey: 'admin.nav.deployments' },
   { to: '/admin/control-center/readiness', labelKey: 'admin.nav.readiness' },
   { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
   { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },

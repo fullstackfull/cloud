@@ -12,6 +12,8 @@ use Lynomia\Modules\Dedicated\Application\Handlers\ReinstallDedicatedHandler;
 use Lynomia\Modules\Dedicated\Domain\Contracts\HostReachability;
 use Lynomia\Modules\Dedicated\Infrastructure\DedicatedReinstallLedger;
 use Lynomia\Modules\Dedicated\Infrastructure\Reachability\TcpHostReachability;
+use Lynomia\Modules\Infrastructure\Domain\Contracts\DeploymentController;
+use Lynomia\Modules\Infrastructure\Infrastructure\Deployment\DeploymentControllerFactory;
 use Lynomia\Modules\Provisioning\Domain\Contracts\DestructiveOperationLedger;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
@@ -53,6 +55,16 @@ final class InfrastructureServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // The bridge to the machines. Bound, not singleton: the fake reads
+        // the environment at construction and refuses production there, and
+        // that refusal must happen on every resolution.
+        $this->app->bind(DeploymentController::class, static fn ($app): DeploymentController => (new DeploymentControllerFactory(
+            (string) config('infrastructure.controller.driver', 'fake'),
+            (string) $app->environment(),
+            config('infrastructure.controller.iac_path'),
+            getenv('CI') !== false && getenv('CI') !== '',
+        ))->make());
+
         /*
          * How the platform checks that a rebuilt physical machine came back.
          *
