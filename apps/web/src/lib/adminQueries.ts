@@ -29,8 +29,10 @@ export const admin = {
     request<T>(adminPath(path), { method: 'POST', body, absolute: true }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(adminPath(path), { method: 'PUT', body, absolute: true }),
-  delete: <T>(path: string) =>
-    request<T>(adminPath(path), { method: 'DELETE', absolute: true }),
+  // A body on DELETE carries the reason for an undo — a withdrawn
+  // declaration, a detached licence — so the audit row has one.
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(adminPath(path), { method: 'DELETE', absolute: true, ...(body === undefined ? {} : { body }) }),
 }
 
 export interface AdminCustomer {

@@ -222,6 +222,12 @@ enum AuditAction: string
     case LicenceInvalidated = 'providers.licence.invalidated';
     case LicenceStateChanged = 'providers.licence.state_changed';
 
+    // Product readiness: conclusions the engine reached, and the one
+    // declaration a person makes on top of them.
+    case ProductReadinessChanged = 'product_readiness.changed';
+    case ProductDeclaredSellable = 'product_readiness.declared_sellable';
+    case ProductSellabilityWithdrawn = 'product_readiness.sellability_withdrawn';
+
     /**
      * Whether the act was a person asserting something the platform could not
      * check for itself.

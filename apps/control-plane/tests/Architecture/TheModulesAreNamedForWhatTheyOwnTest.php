@@ -101,7 +101,7 @@ final class TheModulesAreNamedForWhatTheyOwnTest extends TestCase
          * the gate itself. ProductReadiness joins this list in the commit
          * that gives it something to own.
          */
-        foreach (['Infrastructure', 'Providers'] as $module) {
+        foreach (['Infrastructure', 'Providers', 'ProductReadiness'] as $module) {
             $this->assertDirectoryExists(
                 self::ROOT.'/src/Modules/'.$module,
                 "{$module} is one of the control centre's bounded concerns and is missing.",

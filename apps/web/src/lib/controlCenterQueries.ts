@@ -522,3 +522,107 @@ export function useAttachProviderLicence() {
     onSuccess: () => { invalidateProviderViews(queryClient) },
   })
 }
+
+/* -------------------------------------------------------------------------
+ | Product readiness
+ */
+
+export type ProductName = 'vps' | 'dedicated' | 'shared_hosting' | 'wordpress' | 'domains' | 'dns' | 'backups'
+
+export type ProductReadinessState = 'not_ready' | 'ready_for_test' | 'ready_for_real_validation' | 'ready_for_production' | 'ready_to_sell'
+
+export const READINESS_LADDER: ProductReadinessState[] = ['not_ready', 'ready_for_test', 'ready_for_real_validation', 'ready_for_production', 'ready_to_sell']
+
+export interface RequirementRow {
+  category: string
+  capabilities: string[]
+  shared: boolean
+  satisfied_up_to: ProductReadinessState
+  provider_id: string | null
+  provider_name: string | null
+  blocker: string | null
+  next_action: string | null
+  detail: string
+}
+
+export interface ProductReadiness {
+  product: ProductName
+  state: ProductReadinessState
+  next_state: ProductReadinessState | null
+  blocker: string | null
+  next_action: string | null
+  detail: string | null
+  depends_on: ProductName[]
+  dependencies: Record<string, ProductReadinessState>
+  requirements: RequirementRow[]
+  sellable: {
+    declared: boolean
+    declared_at: string | null
+    reason: string | null
+    validation_reference: string | null
+    withdrawn_at: string | null
+    withdrawn_reason: string | null
+  }
+  assessed_at: string | null
+  state_changed_at: string | null
+}
+
+export interface ProductDependency {
+  product: ProductName
+  state: ProductReadinessState
+  depends_on: ProductName[]
+  providers: Array<{ category: string; shared: boolean; provider_id: string | null; provider_name: string | null; satisfied_up_to: ProductReadinessState }>
+}
+
+export interface ReadinessSweep {
+  examined: number
+  changed: number
+  products: Record<string, ProductReadinessState>
+}
+
+function invalidateReadinessViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'readiness'] })
+}
+
+export function useProductReadiness() {
+  return useQuery({
+    queryKey: ['admin', 'readiness', 'products'],
+    queryFn: () => admin.get<{ data: ProductReadiness[] }>('/readiness/products'),
+  })
+}
+
+export function useProductDependencies() {
+  return useQuery({
+    queryKey: ['admin', 'readiness', 'dependencies'],
+    queryFn: () => admin.get<{ data: ProductDependency[] }>('/readiness/dependencies'),
+  })
+}
+
+export function useAssessAllProducts() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () => admin.post<Envelope<ReadinessSweep>>('/readiness/products/assess', {}),
+    onSuccess: () => { invalidateReadinessViews(queryClient) },
+  })
+}
+
+export function useDeclareSellable() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ product, reason, validation_reference }: { product: ProductName; reason: string; validation_reference: string }) =>
+      admin.post<Envelope<ProductReadiness>>(`/readiness/products/${encodeURIComponent(product)}/sellable`, { reason, validation_reference }),
+    onSuccess: () => { invalidateReadinessViews(queryClient) },
+  })
+}
+
+export function useWithdrawSellability() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ product, reason }: { product: ProductName; reason: string }) =>
+      admin.delete<Envelope<ProductReadiness>>(`/readiness/products/${encodeURIComponent(product)}/sellable`, { reason }),
+    onSuccess: () => { invalidateReadinessViews(queryClient) },
+  })
+}

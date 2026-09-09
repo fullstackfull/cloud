@@ -21,6 +21,8 @@ use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\ProductReadiness\Application\Listeners\ReassessProductsWhenAProviderChanges;
+use Lynomia\Modules\Providers\Domain\Events\ProviderReadinessChanged;
 use Lynomia\Modules\Provisioning\Application\Listeners\AlertOnCriticalDrift;
 use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
@@ -114,6 +116,12 @@ final class EventServiceProvider extends BaseEventServiceProvider
 
         DriftRecorded::class => [
             AlertOnCriticalDrift::class,
+        ],
+
+        ProviderReadinessChanged::class => [
+            // A provider that stopped being ready takes every product that
+            // needs it down with it, in the same transaction.
+            ReassessProductsWhenAProviderChanges::class,
         ],
 
     ];

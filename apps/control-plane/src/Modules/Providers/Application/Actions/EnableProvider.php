@@ -11,6 +11,7 @@ use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Providers\Domain\Enums\ProviderState;
+use Lynomia\Modules\Providers\Domain\Events\ProviderReadinessChanged;
 use Lynomia\Modules\Providers\Domain\Exceptions\ProviderRefused;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 
@@ -77,6 +78,16 @@ final readonly class EnableProvider
                         'enabled_by' => $operator->getKey(),
                         'disabled_reason' => null,
                     ])->save();
+
+                    event(new ProviderReadinessChanged(
+                        $locked->id,
+                        $locked->name,
+                        $locked->category,
+                        $locked->environment,
+                        $locked->state,
+                        $locked->readiness,
+                        $locked->blocker,
+                    ));
 
                     return $locked;
                 },

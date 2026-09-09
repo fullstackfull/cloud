@@ -63,6 +63,10 @@ enum Permission: string
     case LicenceManage = 'licence.manage';
     case DeploymentApprove = 'deployment.approve';
     case DeploymentRun = 'deployment.run';
+    // Declaring a product sellable is a commercial decision on top of a
+    // technical fact, and no operator role holds it by default: only the
+    // super-admin gate grants it, so the declaration is always somebody's.
+    case ReadinessDeclare = 'readiness.declare';
     case SafetyChange = 'safety.change';
     case AllowReimage = 'safety.allow_reimage';
     case NodeMaintenance = 'node.maintenance';

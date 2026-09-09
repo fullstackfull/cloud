@@ -14,6 +14,7 @@ use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
+use Lynomia\Modules\ProductReadiness\Http\Controllers\ProductReadinessController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
 use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
 use Lynomia\Modules\Providers\Http\Controllers\LicenceController;
@@ -356,6 +357,44 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('providers/{provider}/connection-test', [ConnectionTestController::class, 'forProvider'])
         ->middleware('permission:'.Permission::ProviderManage->value)
         ->name('providers.connection_test');
+
+    /*
+     | Product readiness: whether the platform may sell a thing.
+     |
+     | Reading is the operator-view permission. Reassessing contacts nobody and
+     | changes nothing at any provider, so it sits behind provider.manage like
+     | a provider reassessment does. Declaring a product sellable is its own
+     | permission that no operator role holds by default: it is a commercial
+     | decision on top of a technical fact, and the audit row must name the
+     | person who made it.
+     */
+    Route::get('readiness/products', [ProductReadinessController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('readiness.products.index');
+
+    Route::get('readiness/dependencies', [ProductReadinessController::class, 'dependencies'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('readiness.dependencies');
+
+    Route::post('readiness/products/assess', [ProductReadinessController::class, 'assessAll'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('readiness.products.assess_all');
+
+    Route::get('readiness/products/{product}', [ProductReadinessController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('readiness.products.show');
+
+    Route::post('readiness/products/{product}/assess', [ProductReadinessController::class, 'assess'])
+        ->middleware('permission:'.Permission::ProviderManage->value)
+        ->name('readiness.products.assess');
+
+    Route::post('readiness/products/{product}/sellable', [ProductReadinessController::class, 'declareSellable'])
+        ->middleware('permission:'.Permission::ReadinessDeclare->value)
+        ->name('readiness.products.declare_sellable');
+
+    Route::delete('readiness/products/{product}/sellable', [ProductReadinessController::class, 'withdrawSellability'])
+        ->middleware('permission:'.Permission::ReadinessDeclare->value)
+        ->name('readiness.products.withdraw_sellability');
 
     Route::get('drift', [DriftController::class, 'index'])
         ->middleware('permission:'.Permission::DriftView->value)

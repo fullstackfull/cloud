@@ -71,6 +71,9 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   ready_for_configuration: 'info',
   ready_for_test: 'info',
   ready_for_production: 'success',
+  // Product readiness. Only a person's declaration is green.
+  ready_for_real_validation: 'info',
+  ready_to_sell: 'success',
   // Machines.
   registered: 'neutral',
   discovered: 'info',

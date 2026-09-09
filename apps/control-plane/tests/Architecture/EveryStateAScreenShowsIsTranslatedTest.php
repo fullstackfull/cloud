@@ -30,6 +30,8 @@ use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductReadinessState;
 use Lynomia\Modules\Providers\Domain\Enums\CapabilityState;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
@@ -132,6 +134,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             ProviderState::class,
             ReadinessState::class,
             ServerState::class,
+            ProductReadinessState::class,
         ],
 
         /*
@@ -144,6 +147,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.controlCenter.blockers' => [BlockerReason::class],
         'admin.providers.categories' => [ProviderCategory::class],
         'admin.providers.capabilityStates' => [CapabilityState::class],
+        'admin.readiness.products' => [Product::class],
 
         /*
          * Availability has its own vocabulary rather than sharing the status

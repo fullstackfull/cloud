@@ -15,6 +15,7 @@ import { CredentialsPage } from '@/features/controlCenter/CredentialsPage'
 import { DiscoveryPage } from '@/features/controlCenter/DiscoveryPage'
 import { LicencesPage } from '@/features/controlCenter/LicencesPage'
 import { ProvidersPage } from '@/features/controlCenter/ProvidersPage'
+import { ReadinessPage } from '@/features/controlCenter/ReadinessPage'
 import { ServersPage } from '@/features/controlCenter/ServersPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
@@ -151,6 +152,7 @@ export function App() {
                   <Route path="/admin/control-center/machines" element={<ServersPage />} />
                   <Route path="/admin/control-center/providers" element={<ProvidersPage />} />
                   <Route path="/admin/control-center/discovery" element={<DiscoveryPage />} />
+                  <Route path="/admin/control-center/readiness" element={<ReadinessPage />} />
                 </Route>
               </Route>
             </Route>

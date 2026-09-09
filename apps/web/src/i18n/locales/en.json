@@ -165,7 +165,9 @@
     "ready_for_configuration": "Ready for configuration",
     "ready_for_discovery": "Ready for discovery",
     "ready_for_production": "Ready for production",
+    "ready_for_real_validation": "Ready for real validation",
     "ready_for_test": "Ready for test",
+    "ready_to_sell": "Ready to sell",
     "redeem": "Redemption",
     "redemption": "Redemption",
     "refunded": "Refunded",
@@ -524,7 +526,8 @@
       "licences": "Licences",
       "machines": "Machines",
       "providers": "Providers",
-      "discovery": "Discovery"
+      "discovery": "Discovery",
+      "readiness": "Readiness"
     },
     "customers": {
       "title": "Customers",
@@ -926,6 +929,47 @@
       "noMachines": "No machines registered.",
       "neverLookedAt": "Never looked at",
       "lastLookedAt": "Looked at {{when}}"
+    },
+    "readiness": {
+      "title": "Product readiness",
+      "subtitle": "Whether the platform may sell each thing, how far it has been proven, and the one thing in the way of the next step.",
+      "assessAll": "Reassess everything",
+      "assessed": "Assessed {{examined}} products; {{changed}} changed.",
+      "ladderNote": "A product climbs one rung at a time from what its providers have proven. A controlled (fake) provider carries it to ready-for-test and no further. Ready-to-sell is not something the platform can reach: a person declares it, with a reference to what they validated, and the declaration is withdrawn automatically the moment the evidence goes.",
+      "ladder": "Readiness ladder",
+      "assessedAt": "Assessed {{when}}",
+      "blockerTo": "To reach {{rung}}:",
+      "requirementsHeading": "{{count}} requirements",
+      "requirement": "Requirement",
+      "reaches": "Reaches",
+      "carriedBy": "Carried by",
+      "shared": "every product",
+      "nobody": "nobody",
+      "declare": "Declare sellable",
+      "declareNeedsProduction": "Offered once the product is ready for production.",
+      "declareTitle": "Declare {{product}} sellable",
+      "declareBody": "This records that a person validated the product against the real, enabled providers it runs on. The platform checks that it is ready for production right now and refuses otherwise; it cannot check that the validation happened, so say where the evidence is.",
+      "validationReference": "Where the validation is recorded",
+      "validationReferenceHint": "A report path, a ticket, a runbook run. Required.",
+      "reason": "What was validated?",
+      "reasonHint": "What was done, against which account, with what result.",
+      "declaredOn": "Declared sellable {{when}} —",
+      "withdraw": "Withdraw",
+      "withdrawTitle": "Withdraw the sellability declaration for {{product}}",
+      "withdrawBody": "The product returns to what its providers currently support. Nothing else changes.",
+      "withdrawnBecause": "Declaration withdrawn: {{reason}}",
+      "dependenciesHeading": "What each product leans on",
+      "dependenciesNote": "The same evidence, by edge: which provider carries each requirement, and which products lean on which.",
+      "leansOn": "leans on {{products}}",
+      "products": {
+        "vps": "Cloud VPS",
+        "dedicated": "Dedicated servers",
+        "shared_hosting": "Shared hosting",
+        "wordpress": "WordPress",
+        "domains": "Domains",
+        "dns": "DNS",
+        "backups": "Backups"
+      }
     }
   },
   "backups": {

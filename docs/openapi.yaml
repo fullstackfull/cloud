@@ -4117,6 +4117,449 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/readiness/dependencies":
+    get:
+      operationId: "api_admin_readiness_dependencies"
+      tags:
+        - "Operator"
+      summary: "What each product leans on"
+      description: |-
+        The same evidence as the ladder, arranged by edge: product to product, and product to the provider currently carrying each requirement.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ProductDependency"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/readiness/products":
+    get:
+      operationId: "api_admin_readiness_products_index"
+      tags:
+        - "Operator"
+      summary: "Every product and how far it may be trusted"
+      description: |-
+        Dependencies first. Each row carries the one blocker in the way of the next rung, the requirement it comes from and the provider that would meet it. A fresh install is assessed on first read.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ProductReadiness"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/readiness/products/assess":
+    post:
+      operationId: "api_admin_readiness_products_assess_all"
+      tags:
+        - "Operator"
+      summary: "Recompute every product from one look at the providers"
+      description: |-
+        The same sweep that runs whenever a provider's readiness moves.
+
+        Requires the `provider.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ReadinessSweepResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/readiness/products/{product}":
+    get:
+      operationId: "api_admin_readiness_products_show"
+      tags:
+        - "Operator"
+      summary: "One product, with every requirement judged"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "product"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProductReadinessResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/readiness/products/{product}/assess":
+    post:
+      operationId: "api_admin_readiness_products_assess"
+      tags:
+        - "Operator"
+      summary: "Recompute where one product stands"
+      description: |-
+        Contacts nobody: reads what the providers have already proven. A standing sellability declaration is withdrawn, audited, if the product has fallen below ready_for_production.
+
+        Requires the `provider.manage` permission.
+      parameters:
+        - name: "product"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProductReadinessResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/readiness/products/{product}/sellable":
+    post:
+      operationId: "api_admin_readiness_products_declare_sellable"
+      tags:
+        - "Operator"
+      summary: "Record that a person validated a product against its live providers"
+      description: |-
+        The only way to ready_to_sell. Refused (409) unless the product is ready_for_production right now — reassessed under a lock first — which a controlled provider can never make it. The reference points at the validation evidence and is required; the platform records the declaration and never makes it.
+
+        Requires the `readiness.declare` permission.
+      parameters:
+        - name: "product"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+                validation_reference:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProductReadinessResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      operationId: "api_admin_readiness_products_withdraw_sellability"
+      tags:
+        - "Operator"
+      summary: "Take a sellability declaration back"
+      description: |-
+        The product returns to what its providers support, reassessed rather than remembered.
+
+        Requires the `readiness.declare` permission.
+      parameters:
+        - name: "product"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProductReadinessResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/services/{service}":
     delete:
       operationId: "api_admin_services_terminate"
@@ -14932,6 +15375,42 @@ components:
           items:
             type: "object"
             additionalProperties: true
+    ProductDependency:
+      type: "object"
+      additionalProperties: false
+      description: "One product's place in the dependency view."
+      properties:
+        product:
+          type: "string"
+        state:
+          type: "string"
+        depends_on:
+          type: "array"
+          items:
+            type: "string"
+        providers:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        category:
+          type:
+            - "string"
+            - "null"
+        shared:
+          type: "boolean"
+        provider_id:
+          type:
+            - "string"
+            - "null"
+        provider_name:
+          type:
+            - "string"
+            - "null"
+        satisfied_up_to:
+          type:
+            - "string"
+            - "null"
     ProductPage:
       type: "object"
       required:
@@ -14944,6 +15423,133 @@ components:
             "$ref": "#/components/schemas/Product"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    ProductReadiness:
+      type: "object"
+      additionalProperties: false
+      description: "How far one product may be trusted, with the evidence. The engine never says ready_to_sell; that rung is a person's declaration, and it is withdrawn automatically when the evidence goes."
+      properties:
+        product:
+          type: "string"
+          enum:
+            - "vps"
+            - "dedicated"
+            - "shared_hosting"
+            - "wordpress"
+            - "domains"
+            - "dns"
+            - "backups"
+        state:
+          type: "string"
+          enum:
+            - "not_ready"
+            - "ready_for_test"
+            - "ready_for_real_validation"
+            - "ready_for_production"
+            - "ready_to_sell"
+        next_state:
+          type:
+            - "string"
+            - "null"
+          description: "The rung the blocker is a blocker to."
+        blocker:
+          type:
+            - "string"
+            - "null"
+        next_action:
+          type:
+            - "string"
+            - "null"
+          description: "A translation key."
+        detail:
+          type:
+            - "string"
+            - "null"
+        depends_on:
+          type: "array"
+          items:
+            type: "string"
+        dependencies:
+          type: "object"
+          additionalProperties:
+            type: "string"
+          description: "Each dependency and the state it was at when this was assessed."
+        requirements:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ProductRequirement"
+          description: "Own requirements first, then the shared ones every product carries (payment, email). Each names the rung it reaches and the provider that carries it."
+        sellable:
+          type: "object"
+          additionalProperties: true
+        declared:
+          type: "boolean"
+        declared_at:
+          "$ref": "#/components/schemas/Timestamp"
+        reason:
+          type:
+            - "string"
+            - "null"
+        validation_reference:
+          type:
+            - "string"
+            - "null"
+        withdrawn_at:
+          "$ref": "#/components/schemas/Timestamp"
+        withdrawn_reason:
+          type:
+            - "string"
+            - "null"
+        assessed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        state_changed_at:
+          "$ref": "#/components/schemas/Timestamp"
+    ProductReadinessResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ProductReadiness"
+    ProductRequirement:
+      type: "object"
+      additionalProperties: false
+      description: "One thing a product needs from a provider, and how far it is met."
+      properties:
+        category:
+          type: "string"
+        capabilities:
+          type: "array"
+          items:
+            type: "string"
+          description: "The capabilities the product's own code calls — narrower than the category's whole question set."
+        shared:
+          type: "boolean"
+          description: "Carried by every product (payment, email) rather than asked for by this one."
+        satisfied_up_to:
+          type: "string"
+          enum:
+            - "not_ready"
+            - "ready_for_test"
+            - "ready_for_real_validation"
+            - "ready_for_production"
+        provider_id:
+          type:
+            - "string"
+            - "null"
+        provider_name:
+          type:
+            - "string"
+            - "null"
+        blocker:
+          type:
+            - "string"
+            - "null"
+        next_action:
+          type:
+            - "string"
+            - "null"
+        detail:
+          type: "string"
     ProductResponse:
       type: "object"
       required:
@@ -15204,6 +15810,26 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ProvisioningOperation"
+    ReadinessSweep:
+      type: "object"
+      additionalProperties: false
+      description: "What one sweep over every product did."
+      properties:
+        examined:
+          type: "integer"
+        changed:
+          type: "integer"
+        products:
+          type: "object"
+          additionalProperties:
+            type: "string"
+    ReadinessSweepResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ReadinessSweep"
     RecoveryCodes:
       type: "object"
       additionalProperties: false

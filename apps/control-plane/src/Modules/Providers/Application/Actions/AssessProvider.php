@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Providers\Application\Actions;
 
 use Lynomia\Modules\Providers\Domain\DTOs\ReadinessVerdict;
 use Lynomia\Modules\Providers\Domain\Enums\ProviderState;
+use Lynomia\Modules\Providers\Domain\Events\ProviderReadinessChanged;
 use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
 use Lynomia\Modules\Providers\Domain\Services\ProviderReadiness;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
@@ -78,6 +79,8 @@ final readonly class AssessProvider
             );
         }
 
+        $before = [$provider->readiness, $provider->blocker, $provider->state];
+
         $provider->forceFill([
             'readiness' => $verdict->state,
             'blocker' => $verdict->blocker,
@@ -91,6 +94,20 @@ final readonly class AssessProvider
                 default => ProviderState::Draft,
             },
         ])->save();
+
+        // Whatever leans on this provider being ready is told in the same
+        // transaction, and only when something actually moved.
+        if ($before !== [$provider->readiness, $provider->blocker, $provider->state]) {
+            event(new ProviderReadinessChanged(
+                $provider->id,
+                $provider->name,
+                $provider->category,
+                $provider->environment,
+                $provider->state,
+                $provider->readiness,
+                $provider->blocker,
+            ));
+        }
 
         return $verdict;
     }

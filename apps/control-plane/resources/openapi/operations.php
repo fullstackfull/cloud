@@ -1251,6 +1251,71 @@ return [
         'response' => $one('ConnectionTest'),
     ],
     /* ---------------------------------------------------------------------
+     | Product readiness — whether the platform may sell a thing
+     |
+     | A ladder the platform climbs one rung at a time from what its providers
+     | have proven, and one rung (ready_to_sell) that only a person can add.
+     | A controlled (fake) provider counts for ready_for_test and for nothing
+     | above it, whatever environment it was registered in.
+     */
+
+    'api.admin.readiness.products.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Every product and how far it may be trusted',
+        'description' => 'Dependencies first. Each row carries the one blocker in the way of the next rung, the '
+            .'requirement it comes from and the provider that would meet it. A fresh install is assessed on first read.',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'ProductReadiness'],
+    ],
+    'api.admin.readiness.products.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One product, with every requirement judged',
+        'permission' => 'infrastructure.view',
+        'response' => $one('ProductReadiness'),
+    ],
+    'api.admin.readiness.products.assess' => [
+        'tag' => 'Operator',
+        'summary' => 'Recompute where one product stands',
+        'description' => 'Contacts nobody: reads what the providers have already proven. A standing sellability '
+            .'declaration is withdrawn, audited, if the product has fallen below ready_for_production.',
+        'permission' => 'provider.manage',
+        'response' => $one('ProductReadiness'),
+    ],
+    'api.admin.readiness.products.assess_all' => [
+        'tag' => 'Operator',
+        'summary' => 'Recompute every product from one look at the providers',
+        'description' => 'The same sweep that runs whenever a provider\'s readiness moves.',
+        'permission' => 'provider.manage',
+        'response' => $one('ReadinessSweep'),
+    ],
+    'api.admin.readiness.products.declare_sellable' => [
+        'tag' => 'Operator',
+        'summary' => 'Record that a person validated a product against its live providers',
+        'description' => 'The only way to ready_to_sell. Refused (409) unless the product is ready_for_production '
+            .'right now — reassessed under a lock first — which a controlled provider can never make it. The '
+            .'reference points at the validation evidence and is required; the platform records the declaration '
+            .'and never makes it.',
+        'permission' => 'readiness.declare',
+        'body' => ['reason', 'validation_reference'],
+        'response' => $one('ProductReadiness'),
+    ],
+    'api.admin.readiness.products.withdraw_sellability' => [
+        'tag' => 'Operator',
+        'summary' => 'Take a sellability declaration back',
+        'description' => 'The product returns to what its providers support, reassessed rather than remembered.',
+        'permission' => 'readiness.declare',
+        'body' => ['reason'],
+        'response' => $one('ProductReadiness'),
+    ],
+    'api.admin.readiness.dependencies' => [
+        'tag' => 'Operator',
+        'summary' => 'What each product leans on',
+        'description' => 'The same evidence as the ladder, arranged by edge: product to product, and product to the '
+            .'provider currently carrying each requirement.',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'ProductDependency'],
+    ],
+    /* ---------------------------------------------------------------------
      | Credentials — references into the secret store, never values
      |
      | No operation here accepts a secret or returns one. `store` refuses a
