@@ -1473,7 +1473,30 @@
     "subtitle": "Search for a name, buy it, and look after the ones you hold.",
     "transferLock": "Transfer lock",
     "unknownHint": "The registry did not answer. Try again in a moment.",
-    "unlock": "Unlock this name"
+    "unlock": "Unlock this name",
+    "redemption": {
+      "heading": "Recovering this name",
+      "lapsed": "This name expired on {{date}} and is in the registry's redemption window. It is not working, and it cannot be renewed at the ordinary price.",
+      "available": "It can be recovered for the registry's redemption penalty of {{price}}. That covers the restore and a year's term.",
+      "unavailable": {
+        "unsupported": "The registrar for this namespace cannot recover names from redemption.",
+        "unknown": "The registry for this namespace has not published whether, or how, a lapsed name can be recovered. We will not guess at a price or a deadline; when the registry says, this screen will.",
+        "blocked_configuration": "We cannot offer recovery for this namespace yet: the registry's penalty or its windows have not been recorded here, and we will not quote a guess."
+      },
+      "recover": "Recover this name",
+      "quoteTitle": "Recover {{domain}}",
+      "quoteBody": "The registry charges a penalty to restore a lapsed name. This quote is the exact amount, and it stands for a few minutes.",
+      "quoteExpires": "Quote valid until {{when}}",
+      "quotePrice": "Redemption penalty",
+      "confirm": "Order the recovery",
+      "paymentExplainer": "An invoice is issued now. The registry is asked to restore the name once it is paid — a redemption penalty cannot be refunded by the registry, so nothing is sent before your payment arrives.",
+      "awaitingPayment": "The recovery is ordered and waiting for payment. The registry is asked once the invoice is paid.",
+      "openInvoice": "Open the invoice",
+      "processing": "The registry has been asked to restore the name. This usually takes minutes; the page updates on its own.",
+      "needsReview": "The registry did not confirm the recovery. Do not order it again — the penalty may already have been paid and the name restored. We are checking with the registry and will tell you where it stands.",
+      "failed": "The registry refused to restore the name. You have been charged the penalty and are owed a refund; our team is arranging it. You may try again while the redemption window is open.",
+      "recovered": "The name has been recovered."
+    }
   },
   "wordpress": {
     "adminEmail": "WordPress email",

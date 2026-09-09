@@ -9,6 +9,7 @@ use Lynomia\Modules\Domains\Domain\DTOs\ContactDetails;
 use Lynomia\Modules\Domains\Domain\DTOs\RegisteredDomain;
 use Lynomia\Modules\Domains\Domain\DTOs\RegistrationRequest;
 use Lynomia\Modules\Domains\Domain\DTOs\TransferStatus;
+use Lynomia\Modules\Domains\Domain\Enums\RedemptionSupport;
 use Lynomia\Modules\Domains\Domain\Enums\RegistrarCapability;
 use Lynomia\Modules\Domains\Domain\Exceptions\RegistrarNotAvailableException;
 
@@ -71,6 +72,17 @@ final class SyRegistryProvider implements DomainRegistrarProvider
     public function supports(RegistrarCapability $capability): bool
     {
         return false;
+    }
+
+    /**
+     * Unknown, not unsupported. No published `.sy` policy states whether a
+     * lapsed name has a grace period, a redemption period, a fee or a
+     * restore command, and the platform will not invent one. This is the
+     * answer the addendum asked for, and it stays until the registry says.
+     */
+    public function redemptionSupport(): RedemptionSupport
+    {
+        return RedemptionSupport::Unknown;
     }
 
     /**

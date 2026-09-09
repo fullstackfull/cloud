@@ -648,6 +648,13 @@ return [
         'body' => ['quote_id'],
         'response' => $one('DomainOperation', 201),
     ],
+    'api.v1.domains.redemptions.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Recover a name from redemption',
+        'description' => 'Money first, registry second: issues an invoice for the registry\'s penalty from a quote written for this name, and asks the registrar to restore it when the invoice is paid. Refused (409) unless the name is in `redemption` and the namespace\'s registrar can recover names — a registrar that has never said (`.sy`) answers `unknown` and nothing is offered. A second recovery while one is requested, queued, running or indeterminate answers 409: a redemption that timed out may have been performed and charged. A registrar timeout leaves the operation and the name `indeterminate`, never retried; reconciliation settles it against the registry.',
+        'body' => ['quote_id'],
+        'response' => $one('DomainOperation', 201),
+    ],
     'api.v1.domains.transfers.store' => [
         'tag' => 'Domains',
         'summary' => 'Transfer a name in',

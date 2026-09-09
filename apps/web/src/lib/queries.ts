@@ -1048,6 +1048,22 @@ export function useRenewDomain(domainId: string) {
   })
 }
 
+export function useRedeemDomain(domainId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { quote_id: string }) =>
+      api.post<Envelope<DomainOperation>>(
+        `/domains/${encodeURIComponent(domainId)}/redemptions`,
+        payload,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
+
 export function useSetDomainNameservers(domainId: string) {
   const queryClient = useQueryClient()
 

@@ -11,6 +11,7 @@ use Lynomia\Modules\Domains\Domain\DTOs\ContactDetails;
 use Lynomia\Modules\Domains\Domain\DTOs\RegisteredDomain;
 use Lynomia\Modules\Domains\Domain\DTOs\RegistrationRequest;
 use Lynomia\Modules\Domains\Domain\DTOs\TransferStatus;
+use Lynomia\Modules\Domains\Domain\Enums\RedemptionSupport;
 use Lynomia\Modules\Domains\Domain\Enums\RegistrarCapability;
 use Lynomia\Modules\Domains\Domain\Exceptions\DomainRegistrarException;
 use Lynomia\Modules\Domains\Domain\Services\FakeRegistrarGuard;
@@ -120,6 +121,11 @@ final class FakeDomainRegistrarProvider implements DomainRegistrarProvider
      * A real adapter says no to several of these, and the code paths that
      * handle a no are proven by tests that swap in a provider which does.
      */
+    public function redemptionSupport(): RedemptionSupport
+    {
+        return RedemptionSupport::Supported;
+    }
+
     public function supports(RegistrarCapability $capability): bool
     {
         return true;
@@ -410,12 +416,32 @@ final class FakeDomainRegistrarProvider implements DomainRegistrarProvider
         return new TransferStatus($name, 'completed', $expiry);
     }
 
+    /**
+     * Recover a lapsed name.
+     *
+     * The same two failures the registration models, because they are the
+     * two that cost money: a timeout after the request was sent (the name
+     * may have been restored and the fee charged, so the caller must not
+     * try again), and a refusal that leaves the name where it was.
+     */
     public function redeem(string $name): RegisteredDomain
     {
         $this->read();
 
         $name = strtolower($name);
         $this->assertHeld($name);
+
+        if (str_contains($name, self::TIMEOUT_MARKER)) {
+            // Restored at the registry, and the answer lost on the way back.
+            $this->held[$name]['expires_at'] = CarbonImmutable::now()->addYear()->startOfSecond()->toIso8601String();
+            $this->write();
+
+            throw DomainRegistrarException::indeterminate(sprintf('The registry did not answer the redemption of %s before the deadline.', $name));
+        }
+
+        if (str_contains($name, self::REFUSED_MARKER)) {
+            throw DomainRegistrarException::refused(sprintf('The registry refused to restore %s: the redemption window has closed.', $name));
+        }
 
         $this->held[$name]['expires_at'] = CarbonImmutable::now()->addYear()->startOfSecond()->toIso8601String();
         $this->write();

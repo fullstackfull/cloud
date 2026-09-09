@@ -521,7 +521,9 @@ export interface Domain {
   is_held: boolean
   is_manageable: boolean
   is_renewable: boolean
+  is_redeemable: boolean
   needs_attention: boolean
+  redemption: DomainRedemption | null
   term_years: number
   auto_renew: boolean
   transfer_locked: boolean | null
@@ -531,6 +533,26 @@ export interface Domain {
   expires_at: string | null
   is_expiring: boolean
   created_at: string
+}
+
+/**
+ * Whether a lapsed name can be recovered here, why not if not, the
+ * catalogue price, and where the last attempt stands. `unknown` is the .sy
+ * answer: no published policy, and the platform will not invent one.
+ */
+export interface DomainRedemption {
+  support: 'supported' | 'unsupported' | 'unknown' | 'blocked_configuration'
+  reason: string
+  currency: string | null
+  price_minor: number | null
+  attempt: {
+    id: string
+    state: string
+    invoice_id: string | null
+    needs_attention: boolean
+    failure_message: string | null
+    completed_at: string | null
+  } | null
 }
 
 export interface DomainOperation {

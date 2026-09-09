@@ -177,6 +177,14 @@ return [
             'title' => 'We are checking on :domain',
             'body' => 'The registry did not confirm the last action on :domain, so we are checking what actually happened. Please do not try again — we will tell you where it stands.',
         ],
+        'domain_redeemed' => [
+            'title' => ':domain has been recovered',
+            'body' => ':domain is back in your account and registered until :date. The redemption penalty you paid covered the registry\'s restore and the term.',
+        ],
+        'domain_redemption_failed' => [
+            'title' => 'We could not recover :domain',
+            'body' => 'The registry refused to restore :domain. You have been charged the redemption penalty and are owed a refund; our team is arranging it. The registry will release the name when its redemption window closes.',
+        ],
         'ticket_opened' => [
             'title' => 'We have your request :reference',
             'body' => 'Your support request ":subject" has reached us. Somebody will reply on the ticket; you do not need to send it again.',

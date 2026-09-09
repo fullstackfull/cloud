@@ -101,7 +101,9 @@ return [
             'is_held' => ['type' => 'boolean'],
             'is_manageable' => ['type' => 'boolean', 'description' => 'Whether nameservers, contacts and the lock can be changed. False while a registration is unconfirmed.'],
             'is_renewable' => ['type' => 'boolean'],
+            'is_redeemable' => ['type' => 'boolean', 'description' => 'True only in `redemption`. A renewal is refused there; recovery is its own operation with the registry\'s penalty on it.'],
             'needs_attention' => ['type' => 'boolean'],
+            'redemption' => ['oneOf' => [['$ref' => '#/components/schemas/DomainRedemption'], ['type' => 'null']], 'description' => 'Present for a name in redemption or one with a recovery attempt on record; null otherwise.'],
             'term_years' => ['type' => ['integer', 'null']],
             'auto_renew' => ['type' => 'boolean', 'description' => 'On by default. A lapsed domain is not recoverable at the ordinary price, and it takes the customer\'s mail with it.'],
             'transfer_locked' => ['type' => ['boolean', 'null']],
@@ -111,6 +113,19 @@ return [
             'expires_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'is_expiring' => ['type' => 'boolean', 'description' => 'Computed from the expiry date at read time rather than stored, so it cannot be stale.'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'DomainRedemption' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'Whether a lapsed name can be recovered here, why not if not, the catalogue price, and where the last attempt stands. '
+            .'`unknown` is the .sy answer: no published policy, and the platform will not invent one.',
+        'properties' => [
+            'support' => ['type' => 'string', 'enum' => ['supported', 'unsupported', 'unknown', 'blocked_configuration']],
+            'reason' => ['type' => 'string'],
+            'currency' => ['type' => ['string', 'null']],
+            'price_minor' => ['type' => ['integer', 'null'], 'description' => 'The catalogue\'s list price in minor units. The number the customer pays is the quote\'s.'],
+            'attempt' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => 'The latest recovery attempt: id, state, invoice_id, needs_attention, failure_message, completed_at.'],
         ],
     ],
     'DomainOperation' => [

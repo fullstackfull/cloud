@@ -8353,6 +8353,78 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/redemptions":
+    post:
+      operationId: "api_v1_domains_redemptions_store"
+      tags:
+        - "Domains"
+      summary: "Recover a name from redemption"
+      description: "Money first, registry second: issues an invoice for the registry's penalty from a quote written for this name, and asks the registrar to restore it when the invoice is paid. Refused (409) unless the name is in `redemption` and the namespace's registrar can recover names — a registrar that has never said (`.sy`) answers `unknown` and nothing is offered. A second recovery while one is requested, queued, running or indeterminate answers 409: a redemption that timed out may have been performed and charged. A registrar timeout leaves the operation and the name `indeterminate`, never retried; reconciliation settles it against the registry."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                quote_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/domains/{domain}/renewals":
     post:
       operationId: "api_v1_domains_renewals_store"
@@ -15688,8 +15760,16 @@ components:
           description: "Whether nameservers, contacts and the lock can be changed. False while a registration is unconfirmed."
         is_renewable:
           type: "boolean"
+        is_redeemable:
+          type: "boolean"
+          description: "True only in `redemption`. A renewal is refused there; recovery is its own operation with the registry's penalty on it."
         needs_attention:
           type: "boolean"
+        redemption:
+          oneOf:
+            - "$ref": "#/components/schemas/DomainRedemption"
+            - type: "null"
+          description: "Present for a name in redemption or one with a recovery attempt on record; null otherwise."
         term_years:
           type:
             - "integer"
@@ -15837,6 +15917,35 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DomainQuote"
+    DomainRedemption:
+      type: "object"
+      additionalProperties: false
+      description: "Whether a lapsed name can be recovered here, why not if not, the catalogue price, and where the last attempt stands. `unknown` is the .sy answer: no published policy, and the platform will not invent one."
+      properties:
+        support:
+          type: "string"
+          enum:
+            - "supported"
+            - "unsupported"
+            - "unknown"
+            - "blocked_configuration"
+        reason:
+          type: "string"
+        currency:
+          type:
+            - "string"
+            - "null"
+        price_minor:
+          type:
+            - "integer"
+            - "null"
+          description: "The catalogue's list price in minor units. The number the customer pays is the quote's."
+        attempt:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The latest recovery attempt: id, state, invoice_id, needs_attention, failure_message, completed_at."
     DomainResponse:
       type: "object"
       required:

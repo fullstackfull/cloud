@@ -9,6 +9,7 @@ use Lynomia\Modules\Domains\Domain\DTOs\AvailabilityAnswer;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Exceptions\DomainRefusedException;
 use Lynomia\Modules\Domains\Domain\Services\DomainPricing;
+use Lynomia\Modules\Domains\Domain\Services\RedemptionAvailability;
 use Lynomia\Modules\Domains\Domain\ValueObjects\RegistrableDomain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainQuote;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
@@ -44,6 +45,7 @@ final readonly class QuoteDomain
 {
     public function __construct(
         private DomainPricing $pricing,
+        private RedemptionAvailability $redemption,
     ) {}
 
     /**
@@ -67,6 +69,16 @@ final readonly class QuoteDomain
 
         if (! $tld instanceof DomainTld) {
             throw DomainRefusedException::becauseTheTldIsNotSold($domain->tld);
+        }
+
+        if ($kind === DomainOperationKind::Redeem) {
+            // Refused with the reason, before a price: a quote for a recovery
+            // the registrar cannot perform is an invoice for nothing.
+            $availability = $this->redemption->forTld($tld);
+
+            if (! $availability->support->isAvailable()) {
+                throw DomainRefusedException::becauseRedemptionIsUnavailable($tld->tld, $availability->support, $availability->reason);
+            }
         }
 
         $priced = $this->pricing->forTerm($tld, $kind, $termYears, $answer);

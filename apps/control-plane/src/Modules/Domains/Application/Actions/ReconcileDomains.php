@@ -233,9 +233,14 @@ final readonly class ReconcileDomains
          * The registry holds it. Whatever the platform believed, this is now
          * the fact: an indeterminate registration completed after all, and the
          * customer has the name they paid for.
+         *
+         * Unless the registry's own expiry is already past — which is what an
+         * indeterminate REDEMPTION that did not happen looks like: the name is
+         * still held, still lapsed. Then it is `expired`, not `active`, and
+         * the lifecycle sweep walks it on by the registry's clock as before.
          */
         $domain->forceFill([
-            'state' => DomainState::Active,
+            'state' => $held->expiresAt->isPast() ? DomainState::Expired : DomainState::Active,
             'provider_reference' => $held->providerReference ?? $domain->provider_reference,
             'registered_at' => $held->registeredAt ?? $domain->registered_at ?? CarbonImmutable::now(),
             'expires_at' => $held->expiresAt,

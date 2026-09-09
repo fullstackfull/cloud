@@ -317,6 +317,18 @@ final readonly class SweepDomainLifecycle
                 continue;
             }
 
+            /*
+             * A name whose recovery has been paid for and not yet answered
+             * is not marched to deleted on the platform's clock. The
+             * registry decides whether it was restored; until it says, the
+             * row stays where it is and the operator queue shows why.
+             */
+            if ($next === DomainState::Deleted && $this->recoveryInFlight($domain)) {
+                $skipped++;
+
+                continue;
+            }
+
             $domain->forceFill(['state' => $next])->save();
 
             match ($next) {
@@ -328,6 +340,21 @@ final readonly class SweepDomainLifecycle
         }
 
         return ['expired' => $expired, 'redemption' => $redemption, 'deleted' => $deleted, 'skipped' => $skipped];
+    }
+
+    private function recoveryInFlight(Domain $domain): bool
+    {
+        return DomainOperation::query()
+            ->where('domain_id', $domain->getKey())
+            ->where('kind', DomainOperationKind::Redeem->value)
+            ->whereIn('state', [
+                DomainOperationState::Requested->value,
+                DomainOperationState::Queued->value,
+                DomainOperationState::Running->value,
+                DomainOperationState::AwaitingRegistry->value,
+                DomainOperationState::Indeterminate->value,
+            ])
+            ->exists();
     }
 
     /**

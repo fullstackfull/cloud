@@ -171,6 +171,12 @@ class E2ESeeder extends Seeder
 
     private const string UNSURE_DOMAIN = 'e2e-unsure.test';
 
+    /** A name that lapsed past its grace window: recoverable, for a penalty. */
+    private const string LAPSED_DOMAIN = 'e2e-lapsed.test';
+
+    /** A lapsed name in a namespace whose registry has published no policy. */
+    private const string LOST_DOMAIN = 'e2e-lost.example';
+
     /** A site that works, one waiting on its customer, one waiting on a person. */
     private const string LIVE_SITE = 'e2e-live-site.test';
 
@@ -659,6 +665,68 @@ class E2ESeeder extends Seeder
                 'nameservers' => ['ns1.lynomia.test', 'ns2.lynomia.test'],
                 'registered_at' => now()->subMonths(6),
                 'expires_at' => now()->addMonths(6),
+            ],
+        );
+
+        // A namespace the fake registrar sells whose lifecycle nobody has
+        // recorded: no windows, no penalty. Recovery is refused with the
+        // reason, never quoted from a guess.
+        DomainTld::query()->updateOrCreate(
+            ['tld' => 'example'],
+            [
+                'enabled' => true,
+                'provider' => 'fake',
+                'allows_registration' => true,
+                'allows_transfer' => false,
+                'allows_renewal' => true,
+                'supports_premium' => false,
+                'minimum_term_years' => 1,
+                'maximum_term_years' => 5,
+                'currency' => 'KWD',
+                'registration_price_minor' => 3_000,
+                'renewal_price_minor' => 3_000,
+                'transfer_price_minor' => 3_000,
+                'redemption_price_minor' => null,
+                'registration_cost_minor' => 2_000,
+                'renewal_cost_minor' => 2_000,
+                'transfer_cost_minor' => 2_000,
+                'redemption_cost_minor' => null,
+                'grace_days' => null,
+                'redemption_days' => null,
+            ],
+        );
+
+        Domain::query()->updateOrCreate(
+            ['name' => self::LAPSED_DOMAIN],
+            [
+                'customer_id' => $customer->getKey(),
+                'tld' => 'test',
+                'state' => DomainState::Redemption,
+                'provider' => 'fake',
+                'provider_reference' => 'fake-e2e-lapsed',
+                'term_years' => 1,
+                'auto_renew' => false,
+                'transfer_locked' => true,
+                'nameservers' => ['ns1.lynomia.test', 'ns2.lynomia.test'],
+                'registered_at' => now()->subYear()->subDays(45),
+                'expires_at' => now()->subDays(45),
+            ],
+        );
+
+        Domain::query()->updateOrCreate(
+            ['name' => self::LOST_DOMAIN],
+            [
+                'customer_id' => $customer->getKey(),
+                'tld' => 'example',
+                'state' => DomainState::Redemption,
+                'provider' => 'fake',
+                'provider_reference' => 'fake-e2e-lost',
+                'term_years' => 1,
+                'auto_renew' => false,
+                'transfer_locked' => true,
+                'nameservers' => [],
+                'registered_at' => now()->subYear()->subDays(45),
+                'expires_at' => now()->subDays(45),
             ],
         );
 

@@ -90,6 +90,8 @@ enum NotificationType: string
     case DomainRegistrationFailed = 'service.domain_registration_failed';
     case DomainExpiring = 'service.domain_expiring';
     case DomainNeedsReview = 'service.domain_needs_review';
+    case DomainRedeemed = 'service.domain_redeemed';
+    case DomainRedemptionFailed = 'service.domain_redemption_failed';
 
     case TicketOpened = 'service.ticket_opened';
     case TicketReplied = 'service.ticket_replied';
@@ -176,6 +178,7 @@ enum NotificationType: string
             self::ReinstallFailed,
             self::BackupFailed,
             self::RestoreFailed,
+            self::DomainRedemptionFailed,
             self::IncidentAffectingService => true,
             default => false,
         };

@@ -11,6 +11,7 @@ use Lynomia\Modules\Domains\Domain\DTOs\RegisteredDomain;
 use Lynomia\Modules\Domains\Domain\DTOs\RegistrationRequest;
 use Lynomia\Modules\Domains\Domain\DTOs\TransferStatus;
 use Lynomia\Modules\Domains\Domain\Enums\DomainAvailability;
+use Lynomia\Modules\Domains\Domain\Enums\RedemptionSupport;
 use Lynomia\Modules\Domains\Domain\Enums\RegistrarCapability;
 use Lynomia\Modules\Domains\Domain\Exceptions\DomainRegistrarException;
 use Lynomia\Modules\Domains\Domain\Exceptions\RegistrarNotAvailableException;
@@ -93,6 +94,13 @@ interface DomainRegistrarProvider
      * Whether this provider can be asked to do something.
      */
     public function supports(RegistrarCapability $capability): bool;
+
+    /**
+     * Whether this registrar can recover a name from redemption, as a typed
+     * answer rather than a boolean: a registrar that has never said is
+     * `unknown`, and the platform does not read silence as yes.
+     */
+    public function redemptionSupport(): RedemptionSupport;
 
     /**
      * The namespaces this provider serves, without leading dots.

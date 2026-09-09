@@ -11,6 +11,7 @@ use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Domains\Application\Actions\IssueAuthorisationCode;
+use Lynomia\Modules\Domains\Application\Actions\OrderDomainRedemption;
 use Lynomia\Modules\Domains\Application\Actions\OrderDomainRegistration;
 use Lynomia\Modules\Domains\Application\Actions\OrderDomainRenewal;
 use Lynomia\Modules\Domains\Application\Actions\OrderDomainTransfer;
@@ -20,6 +21,7 @@ use Lynomia\Modules\Domains\Application\Actions\UpdateDomainContacts;
 use Lynomia\Modules\Domains\Domain\DTOs\ContactDetails;
 use Lynomia\Modules\Domains\Domain\Enums\DomainContactRole;
 use Lynomia\Modules\Domains\Http\Requests\OrderDomainRequest;
+use Lynomia\Modules\Domains\Http\Requests\RedeemDomainRequest;
 use Lynomia\Modules\Domains\Http\Requests\RenewDomainRequest;
 use Lynomia\Modules\Domains\Http\Requests\SetNameserversRequest;
 use Lynomia\Modules\Domains\Http\Requests\SetTransferLockRequest;
@@ -51,6 +53,7 @@ final class DomainController
         private readonly ActingCustomer $actingCustomer,
         private readonly OrderDomainRegistration $orders,
         private readonly OrderDomainRenewal $renewals,
+        private readonly OrderDomainRedemption $redemptions,
         private readonly OrderDomainTransfer $transfers,
         private readonly SetDomainNameservers $nameservers,
         private readonly UpdateDomainContacts $contacts,
@@ -137,6 +140,29 @@ final class DomainController
                 subject: $placed,
                 customerId: (string) $placed->customer_id,
                 context: ['domain' => $placed->name, 'term_years' => $placed->term_years],
+            ),
+        );
+
+        return (new DomainOperationResource($operation))->response()->setStatusCode(201);
+    }
+
+    public function redeem(RedeemDomainRequest $request, string $domain): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.manage');
+
+        $found = $this->scoped($domain);
+
+        $operation = app(RecordActAtomically::class)->execute(
+            fn (): DomainOperation => $this->redemptions->execute(
+                $this->actingCustomer->get(),
+                $found,
+                (string) $request->validated('quote_id'),
+            ),
+            fn (DomainOperation $placed) => new AuditedAct(
+                action: AuditAction::DomainRedemptionOrdered,
+                subject: $placed,
+                customerId: (string) $placed->customer_id,
+                context: ['domain' => $placed->name, 'price_minor' => $placed->price_minor, 'currency' => $placed->currency],
             ),
         );
 
