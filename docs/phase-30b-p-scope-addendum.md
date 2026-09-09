@@ -613,8 +613,9 @@ Pushed and observed. Every red run is listed with its cause and its fix.
 | 124 | `24fddff` | cancelled | superseded by the push of `8d16255` eight minutes later; the branch's concurrency group cancels the older run |
 | 125 | `8d16255` | cancelled | superseded by the push of `09cbc23` |
 | 126 | `09cbc23` | green | `8d16255` (the last commit of code) plus the report draft; all nine jobs green, 150 browser tests |
-| 127 | `9e86429` | in progress at the time of this commit | the link line in the closed report; documents only |
-| 128 | closure commit | observed after this commit | this report's closure; documents only. Recorded, with 127's final state, by the one commit after it. |
+| 127 | `9e86429` | green | the link line in the closed report; documents only |
+| 128 | `82e9c76` | green | this report's closure; documents only; all nine jobs green |
+| 129 | this commit | not recorded | rows 127 and 128 above; documents only |
 
 No red run was re-run into green: each of 121 to 123 failed on the same
 defect, fixed once in `8d16255`.
