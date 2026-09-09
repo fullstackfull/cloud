@@ -765,13 +765,36 @@ the code looks right. Every one of those would have passed review and none would
 have been true, and the whole point of `REAL_INFRA_VERIFIED` as a status is that
 it cannot be reached by writing.
 
-What was delivered is what could be delivered honestly: an infrastructure source
-of truth in Git, safety classification that a machine enforces rather than a
-person remembers, four separated verbs with two refusals demonstrated, a
-monitoring configuration whose alerts are checked against the metrics that exist,
-a network design with its refusals written down, nineteen new runbooks and ten
-corrections to the three that existed, and a CI job
-that validates all of it and is mechanically prevented from applying any of it.
+What was delivered is what could be delivered honestly, and almost all of it is
+a check rather than a document:
+
+- A four-way safety classification on every group in every inventory, enforced
+  by `safety_gate` at the head of all eleven playbooks, and proven to refuse by
+  a test that runs it against ten class-and-action pairs.
+- Five static checks over the infrastructure tree, all in CI and behind one
+  `make infra-validate`. Between them they found ten invented artisan commands,
+  seven directories a README claimed and did not have, six backup alerts that
+  cannot fire, a component with no deployment path, and 37 alerts that now point
+  at a runbook this repository can verify exists.
+- Nineteen new runbooks, ten corrections to the three that were already there,
+  and a list of the eighteen alerts that still have no page.
+- A network design with its refusals written down, and a CI job mechanically
+  prevented from applying any of it.
+- Four documents that say NO, capability by capability, with the exact blocker
+  for each.
+
+Three gaps could not be closed here — the PBS textfile collector, the seven
+subsystem directories, and the console gateway's deployment path. None is
+hidden. Each is acknowledged in writing beside the thing it affects, and the
+check that found it fails the build if that acknowledgement is deleted while the
+gap remains. That is the pattern this phase settled on: a gap may stand, silence
+about it may not.
+
+The phase also built a second infrastructure system beside the one that already
+existed, which is the one thing it was told not to do. That is recorded in
+section A2 rather than quietly corrected, because five of the findings above
+came out of undoing it, and a report that only describes the work that went well
+is the same kind of document as a matrix shaded green.
 
 Phase 30B resumes the moment one machine and one credential exist.
 `docs/phase-30b-first-node-verdict.md` says exactly what to do with them, in

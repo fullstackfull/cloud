@@ -36,13 +36,17 @@ reachable, port 8006 answers nowhere, and no Proxmox credential exists.
 
 ## What the gate does not block
 
-Everything that does not need a machine was completed and is in the existing
-`infrastructure/` tree: the
-infrastructure source of truth, the safety classification and the gates that
-enforce it, the four separated verbs, the monitoring configuration and its
-consistency check, the network flow matrix, nineteen new runbooks beside the
-three that were already there, and the CI job
-that validates all of it and refuses to apply any of it.
+Everything that does not need a machine was completed, in the `infrastructure/`
+tree that already existed rather than a new one beside it: the four-way safety
+classification on every group, `safety_gate` enforcing it at the head of all
+eleven playbooks and proven to refuse across ten class-and-action pairs, five
+static checks in CI behind one `make infra-validate`, the network flow matrix,
+nineteen new runbooks beside the three that were already there, and a CI job
+that validates all of it and is mechanically prevented from applying any of it.
+
+Those checks found five things wrong with the tree they were pointed at — see
+`docs/phase-30b-real-infrastructure-validation.md` section A2. None of them
+changes this verdict, because none of them is about a machine.
 
 ## What happens when a node exists
 
