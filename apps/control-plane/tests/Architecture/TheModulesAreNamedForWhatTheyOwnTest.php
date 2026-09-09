@@ -89,13 +89,41 @@ final class TheModulesAreNamedForWhatTheyOwnTest extends TestCase
     }
 
     #[Test]
-    public function the_three_concerns_are_separate_modules(): void
+    public function the_concerns_that_exist_are_separate_modules(): void
     {
-        foreach (['Infrastructure', 'Providers', 'ProductReadiness'] as $module) {
+        /*
+         * Only the modules that have code are asserted to exist. The first
+         * version of this test also demanded ProductReadiness, which at the
+         * time was three empty directories on one machine — so it passed
+         * there and failed in CI, where git had never seen them. A gate
+         * asserting that a module exists before it has any code is exactly
+         * the claim-without-substance this phase is meant to catch, made by
+         * the gate itself. ProductReadiness joins this list in the commit
+         * that gives it something to own.
+         */
+        foreach (['Infrastructure', 'Providers'] as $module) {
             $this->assertDirectoryExists(
                 self::ROOT.'/src/Modules/'.$module,
-                "The control centre's three concerns are separate modules; {$module} is missing.",
+                "{$module} is one of the control centre's bounded concerns and is missing.",
             );
+        }
+    }
+
+    #[Test]
+    public function product_readiness_is_not_folded_into_another_concern(): void
+    {
+        // The rule that matters while the third module does not exist yet:
+        // whoever builds it must not build it inside one of the other two.
+        // "Whether the platform may sell a thing" is neither a machine nor an
+        // account, and a Readiness directory under Providers is how a module
+        // split becomes a directory naming convention.
+        foreach (['Infrastructure', 'Providers'] as $module) {
+            foreach (['ProductReadiness', 'Readiness', 'Products'] as $folded) {
+                $this->assertDirectoryDoesNotExist(
+                    self::ROOT.'/src/Modules/'.$module.'/'.$folded,
+                    "Product readiness belongs in its own module, not under {$module}.",
+                );
+            }
         }
     }
 

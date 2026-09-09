@@ -12,7 +12,7 @@ reserved for Phase 30B resuming against real systems.
 |---|---|
 | Branch | `claude/hv-t6hq1p` |
 | HEAD at time of writing | see the commit that introduced this revision of the file |
-| Backend tests | 2569 / 2569 passing locally |
+| Backend tests | 2570 / 2570 passing locally (run 99 in CI: 2568 passed, 1 failed — the gate fixed here) |
 | PHPStan | 0 errors |
 | Frontend unit tests | 54 / 54 (9 files) |
 | Browser E2E | 105 tests in 15 files (none yet cover the Control Center — no Control Center screens exist) |
@@ -88,7 +88,7 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Browser E2E | NOT STARTED | 105 existing E2E tests, none for the control centre. |
 | Architecture Gates | COMPLETE | All green, including two new gates (`ANewRecordKnowsItsOwnState`, `TheModulesAreNamedForWhatTheyOwn`) and one corrected gate (`NoDeadMethods` layer scope). |
 | Clean Room | NOT STARTED (for this phase) | |
-| CI | **RED at 4901404, fixed in the commit carrying this file** | Runs 95–98 failed at "Check code style" in both backend jobs; the tests never ran in CI. Cause: five files from the rename commit were left with reordered imports, and `pint --dirty` does not re-check committed files. All other seven jobs green on 4901404. |
+| CI | **RED through run 99; fixed in the commit carrying this revision** | Runs 95–98 failed at "Check code style" in both backend jobs (five files from the rename commit with reordered imports; `pint --dirty` never re-checks committed files). Run 99 (`5c1a2a2`) got past style and failed one test: `TheModulesAreNamedForWhatTheyOwnTest` asserted `src/Modules/ProductReadiness` exists — it existed locally as three empty, untracked directories, so the gate passed on one machine and failed in CI. The scaffold is deleted and the test now asserts only modules that have code, plus that readiness is not folded into Infrastructure or Providers. All other seven jobs green on run 99. |
 
 **Closed: 0 of 40 exit conditions in the brief's sense.** Eight are complete at
 the backend level and lack their operator surface; the rest are partial or not
