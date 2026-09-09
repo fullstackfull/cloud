@@ -420,6 +420,10 @@ ansible-playbook -i inventories/staging playbooks/<name>.yml --diff
 ## Checking this repository
 
 ```bash
+# Everything below in one go, which is also what CI's "Infrastructure
+# validation" job runs. No network, no hosts touched.
+make infra-validate
+
 cd infrastructure/ansible
 ansible-playbook --syntax-check -i inventories/production playbooks/*.yml
 ansible-lint                      # profile and offline mode pinned in .ansible-lint
@@ -428,3 +432,14 @@ cd ../tofu
 tofu fmt -check -recursive
 tofu init -backend=false && tofu validate    # needs registry.opentofu.org
 ```
+
+`scripts/` holds the checks that keep the rest of this tree honest, and each
+exists because of a specific thing that went wrong:
+
+| Script | Refuses |
+| --- | --- |
+| `validate-inventory.py` | A host with no `safety_class`, an `allow_reimage` its class does not permit, or a variable that reads like a credential |
+| `test_validate_inventory.py` | The above validator quietly stopping to reject any of those |
+| `validate-monitoring.py` | An alert naming a metric nothing emits, an alert with nowhere for the operator to look, a `runbook` path that does not exist, a directory this README claims and does not have, or a collector contract with no implementation and no acknowledgement of that |
+| `validate-runbooks.py` | A `php artisan` line in a runbook or playbook that names a command the application does not define |
+| `check-ci-cannot-apply.py` | A workflow step that applies infrastructure. CI validates; a person applies |
