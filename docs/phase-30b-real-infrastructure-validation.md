@@ -106,9 +106,22 @@ that were already wrong:
    "is this destructive thing scheduled today". It had nothing for the question
    that comes first: may we connect to this machine and write to it at all.
 
-All four are fixed or, where they cannot be fixed here, made loud — see G and
-the sections below. The mistake produced a better result than a clean run would
-have, which is not a defence of making it.
+5. **A component with no deployment path.** `docs/deployment.md` lists eleven
+   machine roles. Ten have an inventory group; `console_gateway` has none, and
+   no Ansible role and no playbook either. `console-gateway:serve` exists and
+   runs — nothing puts it on a machine. It is the one component that
+   deliberately bridges the public and management networks, which makes it the
+   worst one to have no deployment story.
+
+All five are fixed or, where they cannot be fixed here, made loud — see G and
+the sections below. Each of the three that cannot be fixed here is now
+acknowledged in writing next to the thing it affects, and the check that found
+it fails the build if that acknowledgement is deleted while the gap remains.
+That is the pattern this phase settled on for a gap it cannot close: the gap may
+stand, silence about it may not.
+
+The mistake produced a better result than a clean run would have, which is not a
+defence of making it.
 
 ---
 
@@ -535,6 +548,26 @@ unreachable, and that is currently an assertion rather than an observation.
 **Not measurable.** Drift is the difference between declared state and observed
 state, and there is no observed state. The mechanism — `plan.sh` running Ansible
 in `--check --diff` and OpenTofu in `plan` — is in place and writes nothing.
+
+---
+
+## AH2. Observed CI
+
+Every run on this branch during Phase 30B, including the red one.
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| 84 | `f755083` | Green — the Phase 30A++ baseline, re-measured here |
+| 85 | `dd1cd59` | **Red**, then cancelled. Security checks failed: the committed-secret gate matched this phase's own test fixture, the case proving the inventory validator rejects an inlined private key. Fixed by assembling the header from fragments rather than adding a third exclusion to the gate — an exclusion would mean a real key pasted into that file went uncaught |
+| 86 | `c2f7007` | Green. First run of the Infrastructure validation job to pass in full |
+| 87 | `5cd3893` | The consolidation: `infra/` deleted, everything folded into `infrastructure/` |
+| 88 | `7e2214f` | `make infra-validate` and the README table |
+
+The Infrastructure validation job's first complete run was on 85, where all
+thirteen of its own steps passed while the security job failed beside it. It has
+not been red since.
+
+A report that lists only green runs is not a record of what happened.
 
 ---
 

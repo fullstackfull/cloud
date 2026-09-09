@@ -15,6 +15,7 @@ Exit status 0 when every inventory passes, 1 otherwise.
 from __future__ import annotations
 
 import sys
+import re
 from pathlib import Path
 
 try:
@@ -116,6 +117,40 @@ def check_host(name: str, hostvars: dict, group: str, where: Path) -> list[str]:
     return problems
 
 
+def documented_roles(repo_root: Path) -> list[str]:
+    """Machine roles docs/deployment.md's topology block names."""
+    doc = repo_root / "docs" / "deployment.md"
+    if not doc.exists():
+        return []
+    text = doc.read_text()
+    start = text.find("## Topology")
+    if start < 0:
+        return []
+    block = re.search(r"```text\n(.*?)```", text[start:], re.DOTALL)
+    if not block:
+        return []
+    return sorted({
+        m.group(1)
+        for line in block.group(1).splitlines()
+        if (m := re.match(r"^([a-z_]+)\s+\S", line))
+    })
+
+
+def groups_in(path: Path) -> set[str]:
+    """Every group name an inventory defines, at any depth."""
+    def walk(node: dict) -> set[str]:
+        names: set[str] = set()
+        for group, body in (node or {}).items():
+            if not isinstance(body, dict):
+                continue
+            names.add(group)
+            names |= walk(body.get("children") or {})
+        return names
+
+    document = yaml.safe_load(path.read_text()) or {}
+    return walk((document.get("all") or {}).get("children") or {})
+
+
 def check_file(path: Path) -> list[str]:
     document = yaml.safe_load(path.read_text()) or {}
     root = document.get("all")
@@ -144,6 +179,30 @@ def main(argv: list[str]) -> int:
         status = "ok" if not problems else f"{len(problems)} problem(s)"
         print(f"{path.relative_to(root)}: {hosts} host(s), {status}")
         failures.extend(problems)
+
+    # A machine role the deployment document describes and no inventory has is
+    # a component with nowhere to be deployed. The gap may stand — but not
+    # silently: docs/deployment.md has to say so beside the role.
+    repo_root = root.parent
+    defined: set[str] = set()
+    for path in files:
+        defined |= groups_in(path)
+    doc = (repo_root / "docs" / "deployment.md")
+    doc_text = doc.read_text() if doc.exists() else ""
+    for role in documented_roles(repo_root):
+        if role in defined:
+            continue
+        if re.search(rf"NOT DEPLOYABLE[^\n]*`?{role}`?|`?{role}`?[^\n]*NOT DEPLOYABLE", doc_text):
+            print(
+                f"  NOTE docs/deployment.md names the machine role '{role}', which no "
+                f"inventory defines; it has no deployment path"
+            )
+            continue
+        failures.append(
+            f"docs/deployment.md names the machine role '{role}', which no "
+            f"inventory defines and nothing can deploy. Mark it NOT DEPLOYABLE "
+            f"there, with the reason, or give it a group."
+        )
 
     for problem in failures:
         print(f"  FAIL {problem}", file=sys.stderr)

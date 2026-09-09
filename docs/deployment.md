@@ -19,6 +19,21 @@ pxe             iPXE/DHCP, provisioning VLAN only
 firewall        OPNsense, only where explicitly declared re-imageable
 ```
 
+**`console_gateway` is NOT DEPLOYABLE.** It is the only role in that list with no
+inventory group, no Ansible role and no playbook — so the component that brokers
+customer VNC sessions, and the only one that deliberately bridges the public and
+management networks, has no deployment path at all. `console-gateway:serve`
+exists and runs; nothing puts it on a machine. Discovered in Phase 30B by
+`infrastructure/scripts/validate-inventory.py`, which compares this list against
+the inventories and fails the build for any other role that goes missing.
+
+It is not written here on speculation. Every other role in this tree is
+untested against real hardware too, but each was written against a machine
+somebody had in mind; this one needs the console gateway's network position
+settled first — see `docs/phase-30b-network-flow-matrix.md`, where it is the
+single flow crossing from Public into Management — and that is a decision, not
+a template.
+
 Never install the control plane on a hypervisor, a hosting node or the firewall. A
 control plane that lives on a hypervisor cannot be used to recover that hypervisor, and a
 control plane on a hosting node shares a blast radius with customer PHP.
