@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * The estate: the machines Lynomia runs on, and where they physically are.
+ * The machines Lynomia runs on, and where they physically are.
  *
  * ===========================================================================
  * WHY A SERVER TABLE WHEN COMPUTE NODES ALREADY EXIST

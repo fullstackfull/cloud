@@ -176,7 +176,7 @@ final class TheServerSurfaceSeparatesTwoDecisionsTest extends TestCase
             ->assertJsonPath('data.blocker', 'blocked_network')
             // The screen never decides what a blocker means; the enum knows,
             // one place, and the API and the UI both read it from there.
-            ->assertJsonPath('data.next_action', 'estate.guidance.network');
+            ->assertJsonPath('data.next_action', 'controlCenter.guidance.network');
     }
 
     #[Test]

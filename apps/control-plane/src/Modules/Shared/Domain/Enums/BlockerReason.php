@@ -42,13 +42,24 @@ enum BlockerReason: string
      */
     public function nextAction(): string
     {
+        /*
+         * A translation key, not a sentence. The API returns it and the
+         * frontend renders it in the operator's language, so the words an
+         * operator reads at 4am are the same words in Arabic and English and
+         * neither is a string baked into PHP.
+         *
+         * Namespaced under controlCenter because that is the navigation area
+         * these appear in — Infrastructure, Providers and Product Readiness all
+         * surface the same six blockers, and a key named after any one of them
+         * would be wrong on the other two screens.
+         */
         return match ($this) {
-            self::Hardware => 'estate.guidance.hardware',
-            self::Credentials => 'estate.guidance.credentials',
-            self::Licence => 'estate.guidance.licence',
-            self::Network => 'estate.guidance.network',
-            self::Configuration => 'estate.guidance.configuration',
-            self::Dependency => 'estate.guidance.dependency',
+            self::Hardware => 'controlCenter.guidance.hardware',
+            self::Credentials => 'controlCenter.guidance.credentials',
+            self::Licence => 'controlCenter.guidance.licence',
+            self::Network => 'controlCenter.guidance.network',
+            self::Configuration => 'controlCenter.guidance.configuration',
+            self::Dependency => 'controlCenter.guidance.dependency',
         };
     }
 

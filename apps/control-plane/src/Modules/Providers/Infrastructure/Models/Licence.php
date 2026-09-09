@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
-use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 
 /**
  * A commercial licence Lynomia holds, and when it stops being true.
@@ -34,6 +34,22 @@ class Licence extends Model
     use HasUlids;
 
     protected $guarded = ['id'];
+
+    /**
+     * The state a row has before anything happens to it.
+     *
+     * This duplicates the column default on purpose. A default declared only
+     * in the database applies during the INSERT and not to the model object
+     * that create() hands back, so a caller that renders its own result reads
+     * null for a column the table will happily report a value for one query
+     * later. Declared here, every creation path starts in the same state,
+     * including the ones written after this comment.
+     *
+     * @var array<string, string>
+     */
+    protected $attributes = [
+        'state' => 'unknown',
+    ];
 
     /**
      * @return array<string, string>

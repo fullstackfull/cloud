@@ -457,6 +457,91 @@ return [
             'customers' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/Customer']],
         ],
     ],
+    'Server' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A machine Lynomia manages, and — separately — what Lynomia is permitted to do to it. '
+            .'The safety classification is never inferred from the machine looking idle or unused.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'name' => ['type' => ['string', 'null']],
+            'environment' => ['type' => ['string', 'null'], 'enum' => ['development', 'staging', 'production', null]],
+            'state' => ['type' => ['string', 'null']],
+
+            'safety' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'classification' => [
+                'type' => ['string', 'null'],
+                'enum' => ['do_not_touch', 'discovery_only', 'configuration_allowed', 'reimage_allowed', null],
+                'description' => 'Every machine starts do_not_touch. Nothing raises this except an operator, one rung at a time.',
+            ],
+            'allow_reimage' => [
+                'type' => 'boolean',
+                'description' => 'Separate from the classification on purpose: reimage_allowed says a machine MAY be '
+                    .'reimaged, this says one specific machine has been cleared for it. Both are required.',
+            ],
+            'reason' => ['type' => ['string', 'null']],
+            'changed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'permits' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'read' => ['type' => 'boolean'],
+            'configure' => ['type' => 'boolean'],
+            'reimage' => ['type' => 'boolean'],
+
+            'location' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'datacenter_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'rack_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'rack_unit' => ['type' => ['integer', 'null']],
+            'height_units' => ['type' => ['integer', 'null']],
+
+            'hardware' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'vendor' => ['type' => ['string', 'null']],
+            'model' => ['type' => ['string', 'null']],
+            'serial' => ['type' => ['string', 'null']],
+            'asset_tag' => ['type' => ['string', 'null']],
+            'operating_system' => ['type' => ['string', 'null']],
+
+            'connection' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'blocker' => ['type' => ['string', 'null']],
+            'management_address' => ['type' => ['string', 'null']],
+            'bmc_address' => ['type' => ['string', 'null']],
+            'credential' => [
+                'type' => ['object', 'null'],
+                'additionalProperties' => true,
+                'description' => 'Which credential is used, never the credential. No endpoint on this API returns a secret.',
+            ],
+            'last_tested_at' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            'last_discovery_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'last_deployment_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'last_verification_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'notes' => ['type' => ['string', 'null']],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'ConnectionTest' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'The outcome of one attempt to reach something. Records what happened, including that '
+            .'nothing conclusive happened: an indeterminate result is never reported as a failure.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'result' => ['type' => ['string', 'null']],
+            'reached' => ['type' => 'boolean', 'description' => 'Whether the endpoint answered at all, regardless of what it said.'],
+            'usable' => ['type' => 'boolean', 'description' => 'Whether it answered well enough to be used for real work.'],
+            'blocker' => ['type' => ['string', 'null'], 'enum' => ['hardware', 'credentials', 'licence', 'network', 'configuration', 'dependency', null]],
+            'next_action' => [
+                'type' => ['string', 'null'],
+                'description' => 'A translation key naming what an operator should do next, not a sentence. The '
+                    .'Control Center screens render it; the API does not choose a language.',
+            ],
+            'steps' => [
+                'type' => 'array',
+                'items' => ['type' => 'object', 'additionalProperties' => true],
+                'description' => 'What was attempted, in order. Carries no secret, no auth code and no credential value.',
+            ],
+            'detail' => ['type' => ['string', 'null']],
+            'tested_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
     'IpAssignment' => [
         'type' => 'object',
         'additionalProperties' => false,

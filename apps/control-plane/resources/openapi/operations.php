@@ -1065,6 +1065,91 @@ return [
         'permission' => 'infrastructure.manage',
         'response' => $one('AdminReconciliationRequest', 202),
     ],
+    /* ---------------------------------------------------------------------
+     | Infrastructure — the machines, and what Lynomia may do to them
+     |
+     | Two decisions live here and are deliberately not one endpoint. The
+     | classification says what KIND of thing a machine is; the reimage
+     | clearance says that one specific machine has been signed off for a
+     | destructive action. An operator can hold the permission to do the first
+     | without holding the permission to do the second, and the routes are
+     | separated so that stays true.
+     |
+     | Nothing here returns a credential. A machine names the credential it
+     | uses; the value is resolved inside the deployment controller's process
+     | environment and never crosses this API.
+     */
+
+    'api.admin.infrastructure.servers.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Managed machines',
+        'description' => 'Ordered so the machines nobody has decided about come first: unclassified and '
+            .'unreachable hardware is what an onboarding screen needs to show, not what already works.',
+        'permission' => 'infrastructure.view',
+        'query' => ['environment', 'state', 'safety_class'],
+        'response' => $many('Server'),
+    ],
+    'api.admin.infrastructure.servers.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One machine',
+        'description' => 'Includes what the current classification permits, so a screen can disable an action '
+            .'rather than offer it and have it refused.',
+        'permission' => 'infrastructure.view',
+        'response' => $one('Server'),
+    ],
+    'api.admin.infrastructure.servers.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a machine',
+        'description' => 'Registration records that a machine exists. It never classifies it: everything arrives '
+            .'do_not_touch and untested, and is raised by a separate, separately-permissioned decision.',
+        'permission' => 'infrastructure.manage',
+        'body' => [
+            'name', 'environment', 'datacenter_id', 'rack_id', 'rack_unit', 'height_units',
+            'vendor', 'model', 'serial', 'asset_tag',
+            'management_address', 'management_port', 'bmc_address', 'bmc_port',
+            'operating_system', 'notes',
+        ],
+        'response' => $one('Server', 201),
+    ],
+    'api.admin.infrastructure.servers.classify' => [
+        'tag' => 'Operator',
+        'summary' => 'Change what may be done to a machine',
+        'description' => 'Raises one rung at a time and lowers freely — the safe direction needs no ceremony, '
+            .'the unsafe one does. Reaching reimage_allowed additionally requires confirm_name to match the '
+            .'machine. Lowering the classification drops any existing reimage clearance with it. '
+            .'409 if the requested classification is not reachable from the current one.',
+        'permission' => 'safety.change',
+        'body' => ['safety_class', 'reason', 'confirm_name'],
+        'response' => $one('Server'),
+    ],
+    'api.admin.infrastructure.servers.clear_for_reimage' => [
+        'tag' => 'Operator',
+        'summary' => 'Clear one machine for reimaging',
+        'description' => 'The second of the two decisions, and the destructive one: a machine already classified '
+            .'reimage_allowed is signed off for an actual wipe. Requires the machine name typed back. '
+            .'409 if the classification does not permit it — the clearance cannot supply its own permission.',
+        'permission' => 'allow.reimage',
+        'body' => ['confirm_name', 'reason'],
+        'response' => $one('Server'),
+    ],
+    'api.admin.infrastructure.servers.revoke_reimage_clearance' => [
+        'tag' => 'Operator',
+        'summary' => 'Withdraw a reimage clearance',
+        'description' => 'Deliberately cheaper to hold than to grant, and behind the lesser permission: taking a '
+            .'destructive clearance away must never be the harder of the two things to do.',
+        'permission' => 'safety.change',
+        'response' => $one('Server'),
+    ],
+    'api.admin.infrastructure.servers.connection_test' => [
+        'tag' => 'Operator',
+        'summary' => 'Try to reach a machine',
+        'description' => 'Reading only, and refused outright for a do_not_touch machine — an unclassified machine '
+            .'is not probed to find out what it is. A test that times out is recorded as indeterminate, not as a '
+            .'failure, and never as a success. 409 when the classification forbids it; 422 when no credential is '
+            .'configured to try.',
+        'permission' => 'infrastructure.manage',
+        'response' => $one('ConnectionTest'),
+    ],
     'api.admin.audit.index' => [
         'tag' => 'Operator',
         'summary' => 'The permanent record',

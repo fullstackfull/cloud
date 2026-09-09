@@ -188,31 +188,31 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
      | knows which classification was asked for.
      */
     Route::get('infrastructure/servers', [ServerController::class, 'index'])
-        ->middleware('can:'.Permission::InfrastructureView->value)
+        ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.servers.index');
 
     Route::get('infrastructure/servers/{server}', [ServerController::class, 'show'])
-        ->middleware('can:'.Permission::InfrastructureView->value)
+        ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.servers.show');
 
     Route::post('infrastructure/servers', [ServerController::class, 'store'])
-        ->middleware('can:'.Permission::InfrastructureManage->value)
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.store');
 
     Route::post('infrastructure/servers/{server}/classify', [ServerController::class, 'classify'])
-        ->middleware('can:'.Permission::SafetyChange->value)
+        ->middleware('permission:'.Permission::SafetyChange->value)
         ->name('infrastructure.servers.classify');
 
     Route::post('infrastructure/servers/{server}/clear-for-reimage', [ServerController::class, 'clearForReimage'])
-        ->middleware('can:'.Permission::AllowReimage->value)
+        ->middleware('permission:'.Permission::AllowReimage->value)
         ->name('infrastructure.servers.clear_for_reimage');
 
     Route::delete('infrastructure/servers/{server}/clear-for-reimage', [ServerController::class, 'revokeReimageClearance'])
-        ->middleware('can:'.Permission::SafetyChange->value)
+        ->middleware('permission:'.Permission::SafetyChange->value)
         ->name('infrastructure.servers.revoke_reimage_clearance');
 
     Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
-        ->middleware('can:'.Permission::InfrastructureManage->value)
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.connection_test');
 
     Route::get('drift', [DriftController::class, 'index'])
