@@ -51,6 +51,14 @@ enum ProvisioningJobKind: string
      * runs against an account that is already somewhere.
      */
     case InstallWordPress = 'install_wordpress';
+
+    /*
+     * Copies of a WordPress site — a staging copy or a clone — and the push
+     * of a staging copy back over production. Neither creates a service;
+     * both live under the hosting account the site is on.
+     */
+    case CopyWordPressSite = 'copy_wordpress_site';
+    case PushWordPressToProduction = 'push_wordpress_to_production';
     case ProvisionDedicated = 'provision_dedicated';
 
     /**
@@ -99,7 +107,8 @@ enum ProvisioningJobKind: string
              * answered would suspend a customer's hosting over a toolkit.
              */
             self::Start, self::Stop, self::Restart, self::Resize,
-            self::ChangeHostingPackage, self::InstallWordPress => null,
+            self::ChangeHostingPackage, self::InstallWordPress,
+            self::CopyWordPressSite, self::PushWordPressToProduction => null,
             self::ReinstallVps, self::ReinstallDedicated => null,
         };
     }

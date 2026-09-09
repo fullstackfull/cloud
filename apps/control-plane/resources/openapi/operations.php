@@ -396,6 +396,40 @@ return [
         'response' => $one('HostingPanelSession', 201),
     ],
 
+    'api.v1.wordpress.sites.staging' => [
+        'tag' => 'WordPress',
+        'summary' => 'Make a staging copy',
+        'description' => 'Copies the site to `staging.<domain>` on the same account through the panel\'s toolkit, for the panels whose toolkit can (the site\'s `copies` block says; 409 `wordpress.panel_cannot_copy` otherwise). One staging copy per site. Answers 202 with the operation; the copy is a site row of kind `staging` that starts `installing` and is verified like any other. A toolkit that does not answer leaves both `indeterminate`, never retried.',
+        'response' => $one('WordPressSiteOperation', 202),
+    ],
+    'api.v1.wordpress.sites.clones' => [
+        'tag' => 'WordPress',
+        'summary' => 'Clone to another domain',
+        'description' => 'The same copy, to a domain the customer names. The result is a production site of kind `clone` in its own right; its name is the customer\'s to point, like any external one.',
+        'body' => ['domain'],
+        'response' => $one('WordPressSiteOperation', 202),
+    ],
+    'api.v1.wordpress.sites.push_impact' => [
+        'tag' => 'WordPress',
+        'summary' => 'What a push to production would overwrite',
+        'description' => 'For a staging copy: the production domain, the scope, when the copy was made, and the warnings in words — including that this platform holds no backup of a shared-hosting site. The same words the confirmation shows.',
+        'query' => ['scope'],
+        'response' => $one('WordPressPushImpact'),
+    ],
+    'api.v1.wordpress.sites.push' => [
+        'tag' => 'WordPress',
+        'summary' => 'Push a staging copy over production',
+        'description' => 'The one act on this surface that overwrites something the customer wrote. Only a staging copy can be pushed; `confirmation` must equal the production domain exactly; `scope` is `files`, `database` or `both` (default), and a database push loses every post, comment and order production received since the copy. Refused while any copy or push involving either site is running or indeterminate. Answers 202. A toolkit that does not answer leaves production `needs_review` and the operation `indeterminate`; the customer is told not to push again, and nothing retries.',
+        'body' => ['scope', 'confirmation'],
+        'response' => $one('WordPressSiteOperation', 202),
+    ],
+    'api.v1.wordpress.sites.operations' => [
+        'tag' => 'WordPress',
+        'summary' => 'Copies and pushes involving a site',
+        'description' => 'The last fifty, newest first, whether the site was the source or the target.',
+        'response' => $many('WordPressSiteOperation'),
+    ],
+
     /* ---------------------------------------------------------------------
      | IP addresses
      */

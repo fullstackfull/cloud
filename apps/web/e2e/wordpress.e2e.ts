@@ -25,7 +25,7 @@ test.describe('in English', () => {
   test('a finished site says all four steps are done', async ({ page }) => {
     const card = page.locator('section', { hasText: LIVE }).first()
 
-    await expect(page.getByRole('heading', { name: LIVE })).toBeVisible()
+    await expect(page.getByRole('heading', { name: LIVE, exact: true })).toBeVisible()
 
     // The last step is the only one that is this platform's own observation.
     await expect(card.getByText(/we loaded the site and it answered/i)).toBeVisible()
@@ -81,7 +81,7 @@ test.describe('in Arabic', () => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
     await page.goto('/wordpress')
 
-    const heading = page.getByRole('heading', { name: LIVE })
+    const heading = page.getByRole('heading', { name: LIVE, exact: true })
     await expect(heading).toBeVisible()
 
     // A domain name is technical and must not be mirrored.

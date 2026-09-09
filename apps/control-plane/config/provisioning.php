@@ -15,6 +15,9 @@ return [
         'reinstall' => 1800,
         'provision_dedicated' => 5400,
         'create_hosting_account' => 300,
+        // A toolkit copies files and a database; a large site is minutes.
+        'copy_wordpress_site' => 1200,
+        'push_wordpress_to_production' => 1200,
     ],
 
     'retry' => [

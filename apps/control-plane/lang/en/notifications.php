@@ -209,6 +209,18 @@ return [
             'title' => 'We could not recover :domain',
             'body' => 'The registry refused to restore :domain. You have been charged the redemption penalty and are owed a refund; our team is arranging it. The registry will release the name when its redemption window closes.',
         ],
+        'wordpress_push_completed' => [
+            'title' => ':domain is now the staging copy',
+            'body' => 'The staging copy was pushed over :domain (:scope). Whatever the live site held at those parts before has been replaced.',
+        ],
+        'wordpress_push_failed' => [
+            'title' => 'The push to :domain did not complete',
+            'body' => 'The toolkit refused to push the staging copy over :domain. The live site is as it was.',
+        ],
+        'wordpress_push_needs_review' => [
+            'title' => 'We are checking a push to :domain',
+            'body' => 'The toolkit did not confirm the push of the staging copy over :domain. The live site may be partly updated. Please do not push again — our team is looking at it.',
+        ],
         'ticket_opened' => [
             'title' => 'We have your request :reference',
             'body' => 'Your support request ":subject" has reached us. Somebody will reply on the ticket; you do not need to send it again.',

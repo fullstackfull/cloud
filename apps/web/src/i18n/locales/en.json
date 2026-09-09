@@ -614,7 +614,9 @@
         "resize": "Resize machine",
         "restart": "Restart machine",
         "start": "Start machine",
-        "stop": "Stop machine"
+        "stop": "Stop machine",
+        "copy_wordpress_site": "WordPress copy",
+        "push_wordpress_to_production": "WordPress push to production"
       },
       "needsReviewTitle_one": "{{count}} job needs a human",
       "retry": "Run it again",
@@ -1668,7 +1670,45 @@
       "verified": "We loaded the site and it answered"
     },
     "subtitle": "Managed WordPress on shared hosting, with the name and the certificate handled.",
-    "verifiedExplainer": "A site is only marked live once we have loaded it ourselves and WordPress answered."
+    "verifiedExplainer": "A site is only marked live once we have loaded it ourselves and WordPress answered.",
+    "kinds": {
+      "production": "Production",
+      "staging": "Staging copy",
+      "clone": "Clone"
+    },
+    "copies": {
+      "staging": "Create a staging copy",
+      "stagingHint": "A copy of this site at staging.{{domain}}, on the same account, to try changes on. It is verified like any other site.",
+      "clone": "Clone to another domain",
+      "cloneDomain": "Domain for the clone",
+      "cloneSubmit": "Clone",
+      "unavailable": "{{reason}}",
+      "requested": "Asked for. The toolkit is copying the site; this page updates as it goes.",
+      "copiedFrom": "Copied from {{domain}}"
+    },
+    "push": {
+      "action": "Push to production",
+      "title": "Push {{staging}} over {{production}}?",
+      "scope": "What to push",
+      "scopes": {
+        "files": "Files only",
+        "database": "Database only",
+        "both": "Files and database"
+      },
+      "confirmLabel": "Type {{production}} to confirm",
+      "confirm": "Push to production",
+      "loadingImpact": "Working out what this would overwrite…",
+      "needsReview": "The toolkit did not confirm this push. The live site may be partly updated. Please do not push again; our team is looking at it."
+    },
+    "operations": {
+      "title": "Copies and pushes",
+      "none": "Nothing has been copied or pushed yet.",
+      "kinds": {
+        "create_staging": "Staging copy",
+        "clone": "Clone",
+        "push_to_production": "Push to production"
+      }
+    }
   },
   "controlCenter": {
     "guidance": {

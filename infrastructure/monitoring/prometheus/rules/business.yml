@@ -281,6 +281,29 @@ groups:
           runbook: docs/runbooks/currency-change-needs-review.md
           runbook_url: https://docs.lynomia.internal/runbooks/currency-change-needs-review
 
+  - name: business.wordpress
+    rules:
+      - alert: WordPressPushIndeterminate
+        # A push of a staging copy over a live WordPress site that the
+        # toolkit never confirmed. The live site may be half-overwritten.
+        # The platform will not push again: a second push over a first that
+        # is still running cannot be reasoned about. Somebody looks at the
+        # panel and settles it.
+        expr: >-
+          sum(lynomia_wordpress_site_operations_total{kind="push_to_production",state="indeterminate"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: wordpress
+        annotations:
+          summary: "A push to production has no confirmed outcome"
+          description: >-
+            {{ $value }} push(es) of a staging copy over a live site are
+            indeterminate. The live site is marked needs_review and the
+            customer has been told not to push again.
+          runbook: docs/runbooks/wordpress-push-indeterminate.md
+          runbook_url: https://docs.lynomia.internal/runbooks/wordpress-push-indeterminate
+
   - name: business.domains
     rules:
       - alert: DomainRedemptionNeedsReview

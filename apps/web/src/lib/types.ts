@@ -676,6 +676,38 @@ export interface WordPressSite {
   hosting_account_id: string | null
   verified_at: string | null
   created_at: string
+  /** A staging copy belongs to its parent and is the only kind that can be pushed back. */
+  kind: 'production' | 'staging' | 'clone'
+  parent_site_id: string | null
+  /** What this site's panel toolkit can do with it right now, and the reason when nothing. */
+  copies: { staging: boolean; clone: boolean; push_to_production: boolean; reason: string | null }
+}
+
+export interface WordPressPushImpact {
+  staging_domain: string
+  production_domain: string
+  scope: string
+  copy_made_at: string
+  production_verified_at: string | null
+  /** Always null: this platform holds no backup of a shared-hosting site. */
+  platform_backup: null
+  warnings: string[]
+}
+
+export interface WordPressSiteOperation {
+  id: string
+  site_id: string
+  target_site_id: string | null
+  kind: 'create_staging' | 'clone' | 'push_to_production'
+  state: string
+  is_in_flight: boolean
+  needs_attention: boolean
+  scope: string | null
+  impact: WordPressPushImpact | null
+  failure_reason: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
 }
 
 export interface DnsZone {

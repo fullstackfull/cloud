@@ -20,6 +20,8 @@ use Lynomia\Modules\Monitoring\Domain\ValueObjects\MetricSample;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
 use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 
@@ -73,6 +75,7 @@ final readonly class ProductCollector implements MetricsCollector
             $this->domainOperations(),
             $this->domainRedemptions(),
             $this->wordPressSites(),
+            $this->wordPressCopies(),
             $this->termination(),
             $this->drift(),
             $this->providerTasks(),
@@ -483,6 +486,37 @@ final readonly class ProductCollector implements MetricsCollector
                 MetricSample::of(['disposition' => 'waiting_on_dns'], (float) $row->waiting_on_dns),
                 MetricSample::of(['disposition' => 'stuck'], (float) $row->stuck),
             ],
+        );
+    }
+
+    /**
+     * Copies and pushes of WordPress sites, by kind and state. An
+     * `indeterminate` push is the one worth an alert: production may be
+     * half-overwritten and nobody has confirmed either way.
+     */
+    private function wordPressCopies(): Metric
+    {
+        $counts = DB::table('wordpress_site_operations')
+            ->selectRaw('kind, state, count(*) as total')
+            ->groupBy('kind', 'state')
+            ->get()
+            ->keyBy(static fn (object $row): string => $row->kind.'|'.$row->state);
+
+        $samples = [];
+
+        foreach (WordPressOperationKind::cases() as $kind) {
+            foreach (WordPressOperationState::cases() as $state) {
+                $samples[] = MetricSample::of(
+                    ['kind' => $kind->value, 'state' => $state->value],
+                    (float) ($counts[$kind->value.'|'.$state->value]->total ?? 0),
+                );
+            }
+        }
+
+        return Metric::gauge(
+            'lynomia_wordpress_site_operations_total',
+            'Copies and pushes of WordPress sites by kind and state. An indeterminate push_to_production is a live site that may be half-overwritten; it is never retried.',
+            $samples,
         );
     }
 

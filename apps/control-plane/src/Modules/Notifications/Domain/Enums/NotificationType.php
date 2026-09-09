@@ -113,6 +113,16 @@ enum NotificationType: string
     case DomainRedeemed = 'service.domain_redeemed';
     case DomainRedemptionFailed = 'service.domain_redemption_failed';
 
+    /*
+     * A push of a staging copy over production. Completed says the live
+     * site is now the copy; failed says production is as it was; on hold
+     * says the toolkit never answered and production may be half-written,
+     * and asks the customer not to push again.
+     */
+    case WordPressPushCompleted = 'service.wordpress_push_completed';
+    case WordPressPushFailed = 'service.wordpress_push_failed';
+    case WordPressPushNeedsReview = 'service.wordpress_push_needs_review';
+
     case TicketOpened = 'service.ticket_opened';
     case TicketReplied = 'service.ticket_replied';
     case TicketResolved = 'service.ticket_resolved';
@@ -204,6 +214,8 @@ enum NotificationType: string
             self::RestoreFailed,
             self::FileRestoreFailed,
             self::FileRestoreNeedsReview,
+            self::WordPressPushFailed,
+            self::WordPressPushNeedsReview,
             self::DomainRedemptionFailed,
             self::IncidentAffectingService => true,
             default => false,

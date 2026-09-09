@@ -212,6 +212,15 @@ enum AuditAction: string
      */
     case WordPressSiteOrdered = 'wordpress.site.ordered';
 
+    /*
+     * Copies and pushes. The push is the one that overwrites something a
+     * customer wrote, and its row carries what was overwritten and what the
+     * platform held no backup of.
+     */
+    case WordPressStagingRequested = 'wordpress.staging.requested';
+    case WordPressCloneRequested = 'wordpress.clone.requested';
+    case WordPressPushRequested = 'wordpress.push.requested';
+
     // ---------------------------------------------------------------------
     // Infrastructure: the machines, and what an operator may do to them
     // ---------------------------------------------------------------------

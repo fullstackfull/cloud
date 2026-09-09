@@ -42,7 +42,9 @@ import type {
   VirtualMachine,
   WalletBalances,
   WalletCreditQuote,
+  WordPressPushImpact,
   WordPressSite,
+  WordPressSiteOperation,
 } from '@/lib/types'
 
 /**
@@ -1347,6 +1349,68 @@ export function useWithdrawCountryCurrencyChange() {
       api.post<Envelope<CountryCurrencyChange>>(`/account/country-currency-changes/${encodeURIComponent(id)}/withdraw`, {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['account'] })
+    },
+  })
+}
+
+/* ----------------------------------------------- WordPress copies and pushes */
+
+export function useWordPressSiteOperations(siteId: string) {
+  return useQuery({
+    queryKey: ['wordpress', 'operations', siteId],
+    queryFn: () =>
+      api.get<{ data: WordPressSiteOperation[] }>(`/wordpress/sites/${encodeURIComponent(siteId)}/operations`),
+  })
+}
+
+export function useCreateWordPressStaging() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (siteId: string) =>
+      api.post<Envelope<WordPressSiteOperation>>(`/wordpress/sites/${encodeURIComponent(siteId)}/staging`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+    },
+  })
+}
+
+export function useCloneWordPressSite() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { siteId: string; domain: string }) =>
+      api.post<Envelope<WordPressSiteOperation>>(`/wordpress/sites/${encodeURIComponent(payload.siteId)}/clones`, {
+        domain: payload.domain,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+    },
+  })
+}
+
+/** Fetched on demand, when the customer opens the push confirmation: the words it shows. */
+export function useWordPressPushImpact() {
+  return useMutation({
+    mutationFn: (payload: { siteId: string; scope: string }) =>
+      api.get<Envelope<WordPressPushImpact>>(
+        `/wordpress/sites/${encodeURIComponent(payload.siteId)}/push/impact?scope=${encodeURIComponent(payload.scope)}`,
+      ),
+  })
+}
+
+export function usePushWordPressToProduction() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The typed domain travels as typed: the server compares it and decides. */
+    mutationFn: (payload: { siteId: string; scope: string; confirmation: string }) =>
+      api.post<Envelope<WordPressSiteOperation>>(`/wordpress/sites/${encodeURIComponent(payload.siteId)}/push`, {
+        scope: payload.scope,
+        confirmation: payload.confirmation,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
     },
   })
 }

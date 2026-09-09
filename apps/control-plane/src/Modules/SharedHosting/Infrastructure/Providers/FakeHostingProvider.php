@@ -7,6 +7,7 @@ namespace Lynomia\Modules\SharedHosting\Infrastructure\Providers;
 use Carbon\CarbonImmutable;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressInstaller;
+use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressStagingProvider;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\AccountUsage;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\CreateAccountRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\HostingAccountResult;
@@ -14,8 +15,10 @@ use Lynomia\Modules\SharedHosting\Domain\DTOs\LicenceStatus;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\NodeHealth;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\RemoteAccount;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\SsoSession;
+use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressCopyRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressInstallation;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressInstallRequest;
+use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressPushRequest;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
@@ -49,8 +52,18 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
  *    without creating them, so in production it would mark services active and
  *    send login details for hosting that is not there.
  */
-final class FakeHostingProvider implements HostingProvider, WordPressInstaller
+final class FakeHostingProvider implements HostingProvider, WordPressInstaller, WordPressStagingProvider
 {
+    /** A copy whose target name carries this stops answering after the copy exists. */
+    public const string COPY_TIMEOUT_MARKER = 'copy-timeout';
+
+    public const string COPY_REFUSED_MARKER = 'copy-refused';
+
+    /** A push over a production name carrying this stops answering halfway. */
+    public const string PUSH_TIMEOUT_MARKER = 'push-timeout';
+
+    public const string PUSH_REFUSED_MARKER = 'push-refused';
+
     public const string NAME = 'fake';
 
     /** A username carrying this is refused outright, as a node with no room would refuse it. */
@@ -407,6 +420,84 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller
         }
 
         return $installation;
+    }
+
+    public function copyWordPress(HostingNode $node, WordPressCopyRequest $request): WordPressInstallation
+    {
+        // Markers only, not the in-memory account: see the note below.
+        $this->assertNoMarkers($node, $request->username, 'copy_wordpress');
+
+        $key = $this->nodeKey($node);
+        $source = strtolower($request->sourceDomain);
+        $target = strtolower($request->targetDomain);
+
+        if (str_contains($target, self::COPY_REFUSED_MARKER)) {
+            throw HostingProviderException::requestFailed(self::NAME, 'copy_wordpress', [
+                'node' => $node->hostname,
+                'domain' => $target,
+                'provider_message' => 'the toolkit refused this copy',
+            ]);
+        }
+
+        /*
+         * The source is not required to be in this process's memory: a real
+         * toolkit copies whatever is at the document root, and a fake that
+         * only copied what it had itself installed would refuse every copy
+         * made from a second PHP process — which is every copy a browser
+         * asks for. The markers, not the memory, are what make failure
+         * paths reachable.
+         */
+        $copy = new WordPressInstallation(
+            domain: $target,
+            siteUrl: 'https://'.$target,
+            adminUrl: 'https://'.$target.'/wp-admin/',
+            version: $this->installations[$key][$source]->version ?? '6.7.1',
+        );
+
+        // Recorded before the timeout, as the install is: a toolkit that
+        // stopped answering has usually finished the copy.
+        $this->installations[$key][$target] = $copy;
+
+        if (str_contains($target, self::COPY_TIMEOUT_MARKER)) {
+            throw HostingProviderException::requestFailed(self::NAME, 'copy_wordpress', [
+                'node' => $node->hostname,
+                'domain' => $target,
+                'provider_message' => 'the toolkit stopped answering by design',
+            ], indeterminate: true);
+        }
+
+        return $copy;
+    }
+
+    public function pushWordPressToProduction(HostingNode $node, WordPressPushRequest $request): WordPressInstallation
+    {
+        $this->assertNoMarkers($node, $request->username, 'push_wordpress');
+
+        $key = $this->nodeKey($node);
+        $production = strtolower($request->productionDomain);
+
+        if (str_contains($production, self::PUSH_REFUSED_MARKER)) {
+            throw HostingProviderException::requestFailed(self::NAME, 'push_wordpress', [
+                'node' => $node->hostname,
+                'domain' => $production,
+                'provider_message' => 'the toolkit refused this push',
+            ]);
+        }
+
+        if (str_contains($production, self::PUSH_TIMEOUT_MARKER)) {
+            throw HostingProviderException::requestFailed(self::NAME, 'push_wordpress', [
+                'node' => $node->hostname,
+                'domain' => $production,
+                'provider_message' => 'the toolkit stopped answering halfway through the push, by design',
+            ], indeterminate: true);
+        }
+
+        return $this->installations[$key][$production] ??= new WordPressInstallation(
+            domain: $production,
+            siteUrl: 'https://'.$production,
+            adminUrl: 'https://'.$production.'/wp-admin/',
+            version: '6.7.1',
+        );
     }
 
     public function wordPressInstallation(

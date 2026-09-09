@@ -756,10 +756,15 @@ class E2ESeeder extends Seeder
      */
     private function wordpressSites(Customer $customer): void
     {
+        $account = HostingAccount::query()->where('username', self::HOSTING_USERNAME)->first();
+
         WordPressSite::query()->updateOrCreate(
             ['domain' => self::LIVE_SITE],
             [
                 'customer_id' => $customer->getKey(),
+                // On the seeded account, on a fake node: the one site the
+                // browser suite can copy and push.
+                'hosting_account_id' => $account?->getKey(),
                 'domain_source' => WordPressDomainSource::External,
                 'state' => WordPressSiteState::Ready,
                 'dns_ready' => true,

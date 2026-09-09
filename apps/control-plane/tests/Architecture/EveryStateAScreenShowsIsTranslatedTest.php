@@ -59,6 +59,10 @@ use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
 use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressPushScope;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteKind;
 use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -107,6 +111,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             BackupState::class,
             FileRestoreState::class,
             CountryCurrencyChangeState::class,
+            WordPressOperationState::class,
             DnsState::class,
             HostingAccountStatus::class,
             InvoiceStatus::class,
@@ -162,6 +167,9 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.providers.categories' => [ProviderCategory::class],
         'admin.providers.capabilityStates' => [CapabilityState::class],
         'dns.import.kinds' => [ZoneChangeKind::class],
+        'wordpress.kinds' => [WordPressSiteKind::class],
+        'wordpress.operations.kinds' => [WordPressOperationKind::class],
+        'wordpress.push.scopes' => [WordPressPushScope::class],
         'dns.import.modes' => [ZoneImportMode::class],
         'admin.readiness.products' => [Product::class],
         'admin.readiness.software' => [ProductSoftwareState::class],
