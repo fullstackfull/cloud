@@ -33,6 +33,7 @@ groups:
             has failed every scrape for 2 minutes. If this is a hypervisor, the guests
             on it are affected right now; if it is a hosting node, every account on it
             is offline.
+          runbook: docs/runbooks/node-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/node-down
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
 
@@ -52,6 +53,7 @@ groups:
             relocated if HA is configured; guests that are not HA-managed are down.
             Check quorum before touching anything — restarting a node in a cluster
             that has lost quorum can fence the survivors.
+          runbook: docs/runbooks/node-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/node-down
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
 
@@ -72,6 +74,7 @@ groups:
             Mark the node as not accepting new accounts in the control plane before
             starting recovery, so provisioning does not place fresh accounts onto a
             machine that is being rebuilt.
+          runbook: docs/runbooks/hosting-panel-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/hosting-node-down
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
 
@@ -90,6 +93,7 @@ groups:
             {{ $labels.instance }} is unreachable. The customer controls this operating
             system, so this is only actionable once network and power are ruled out:
             check the switch port and the BMC before contacting the customer.
+          runbook: docs/runbooks/dedicated-reinstall-stuck.md
           runbook_url: https://docs.lynomia.internal/runbooks/dedicated-unreachable
 
   - name: nodes.saturation
@@ -167,6 +171,7 @@ groups:
             {{ $labels.mountpoint }} on {{ $labels.instance }} is nearly full. Running
             guests stop when a thin volume cannot grow, and snapshots and backups fail
             first. Free space or migrate guests now; do not delete a backup to make room.
+          runbook: docs/runbooks/node-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
 
@@ -189,6 +194,7 @@ groups:
             {{ $labels.mountpoint }} on {{ $labels.instance }} is filling. Stop placing
             new accounts here, then find the account responsible — it is almost always
             one mailbox or one unrotated log, not gradual growth.
+          runbook: docs/runbooks/hosting-panel-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
 
@@ -279,6 +285,7 @@ groups:
             PVE cannot reach {{ $labels.id }}. Guests with disks on it will stall on the
             next write, backups to it will fail, and provisioning onto it will fail after
             the customer has already paid.
+          runbook: docs/runbooks/proxmox-unavailable.md
           runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
 

@@ -306,6 +306,11 @@ read out of the PHP source, or a textfile-collector contract declared in
 It also requires every alert to carry a `runbook` path that exists or a
 `runbook_url`, and skips recording rules, which page nobody.
 
+37 of the 55 alerts now also carry a `runbook` — a path in this repository that
+CI resolves — alongside the `runbook_url` they already had. The other eighteen
+have no page here, and `docs/runbooks/README.md` lists which and why, so the gap
+is a known one rather than a discovery made at 4am.
+
 The NOTE is the finding. Six alerts in `backups.yml` read `lynomia_backup_*`
 series that nothing writes, because the collector "belongs to
 `infrastructure/pbs`" and that directory does not exist. Two of the six —
@@ -740,7 +745,8 @@ What was delivered is what could be delivered honestly: an infrastructure source
 of truth in Git, safety classification that a machine enforces rather than a
 person remembers, four separated verbs with two refusals demonstrated, a
 monitoring configuration whose alerts are checked against the metrics that exist,
-a network design with its refusals written down, nineteen runbooks, and a CI job
+a network design with its refusals written down, nineteen new runbooks and ten
+corrections to the three that existed, and a CI job
 that validates all of it and is mechanically prevented from applying any of it.
 
 Phase 30B resumes the moment one machine and one credential exist.

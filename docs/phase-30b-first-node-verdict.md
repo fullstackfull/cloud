@@ -40,7 +40,8 @@ Everything that does not need a machine was completed and is in the existing
 `infrastructure/` tree: the
 infrastructure source of truth, the safety classification and the gates that
 enforce it, the four separated verbs, the monitoring configuration and its
-consistency check, the network flow matrix, nineteen runbooks, and the CI job
+consistency check, the network flow matrix, nineteen new runbooks beside the
+three that were already there, and the CI job
 that validates all of it and refuses to apply any of it.
 
 ## What happens when a node exists
