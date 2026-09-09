@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Infrastructure\Application\Actions;
 
+use Illuminate\Contracts\Foundation\Application;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
@@ -12,6 +13,7 @@ use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
 
 /**
  * Write down that a machine exists.
@@ -29,10 +31,18 @@ final readonly class RegisterServer
 {
     public function __construct(
         private RecordActAtomically $record,
+        private EndpointPolicy $endpoints,
+        private Application $app,
     ) {}
 
     public function execute(ServerRegistration $registration): ManagedServer
     {
+        foreach ([$registration->managementAddress, $registration->bmcAddress] as $address) {
+            if ($address !== null && trim($address) !== '') {
+                $this->endpoints->assertMachineAddress($address, $this->app->environment('production'));
+            }
+        }
+
         return $this->record->execute(
             act: fn (): ManagedServer => ManagedServer::create([
                 'name' => $registration->name,

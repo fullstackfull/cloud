@@ -18,6 +18,7 @@ use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
+use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
 
 /**
  * Declare that we intend to talk to something.
@@ -44,6 +45,7 @@ final readonly class RegisterProvider
         private AssessProvider $assess,
         private RecordActAtomically $record,
         private Application $app,
+        private EndpointPolicy $endpoints,
     ) {}
 
     /**
@@ -89,6 +91,17 @@ final readonly class RegisterProvider
 
         if ($server !== null && ! $server->environment->satisfies($environment)) {
             throw ProviderRefused::serverIsElsewhere($server->name, $server->environment, $environment);
+        }
+
+        // Last of the refusals, so the more specific ones (no such driver, wrong
+        // category, machine elsewhere) are what an operator reads first.
+        if ($endpoint !== null && trim($endpoint) !== '') {
+            $this->endpoints->assertProviderEndpoint(
+                $endpoint,
+                controlledDriver: in_array($driver, $this->catalogue->controlledDrivers(), true),
+                onOurHardware: $category->needsServer(),
+                production: $this->app->environment('production'),
+            );
         }
 
         $provider = $this->record->execute(

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Providers\Application\Actions;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Foundation\Application;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
@@ -18,12 +19,14 @@ use Lynomia\Modules\Providers\Domain\DTOs\ServerDiscovery;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
 use Lynomia\Modules\Providers\Domain\Exceptions\NoBmcProvider;
+use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest as ConnectionTestRecord;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderCapability;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
+use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
 
 /**
  * Find out whether we can reach something, and write down what was found.
@@ -53,6 +56,9 @@ final readonly class TestConnection
         private SecretResolver $secrets,
         private SafetyGate $gate,
         private RecordActAtomically $record,
+        private ProviderCatalogue $catalogue,
+        private EndpointPolicy $endpoints,
+        private Application $app,
     ) {}
 
     /**
@@ -112,10 +118,18 @@ final readonly class TestConnection
             throw NoBmcProvider::forServer($server->name);
         }
 
+        $address = $server->bmc_address ?? $server->management_address;
+
+        // Checked again here, not only at registration: a row can arrive by
+        // a seeder or an import, and the socket is what has to be guarded.
+        if ($address !== null) {
+            $this->endpoints->assertMachineAddress($address, $this->app->environment('production'));
+        }
+
         return new TestTarget(
             driver: $bmc->driver,
             environment: $server->environment,
-            endpoint: $server->bmc_address ?? $server->management_address,
+            endpoint: $address,
             secret: $this->secretFor($server->credential, $server->environment),
             probeCapabilities: [],
             identity: $server->name,
@@ -160,6 +174,15 @@ final readonly class TestConnection
      */
     public function forProvider(ProviderInstance $provider, ?User $operator = null): ConnectionTestRecord
     {
+        if ($provider->endpoint !== null && trim($provider->endpoint) !== '') {
+            $this->endpoints->assertProviderEndpoint(
+                $provider->endpoint,
+                controlledDriver: in_array($provider->driver, $this->catalogue->controlledDrivers(), true),
+                onOurHardware: $provider->category->needsServer(),
+                production: $this->app->environment('production'),
+            );
+        }
+
         $secret = $this->secretFor($provider->credential, $provider->environment);
 
         $result = $this->run($provider->driver, new TestTarget(
