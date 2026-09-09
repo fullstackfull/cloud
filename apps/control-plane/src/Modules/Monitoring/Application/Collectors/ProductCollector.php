@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Monitoring\Application\Collectors;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
@@ -65,6 +66,7 @@ final readonly class ProductCollector implements MetricsCollector
             $this->ticketAge(),
             $this->backupDeletion(),
             $this->backupRetention(),
+            $this->fileRestores(),
             $this->domains(),
             $this->domainOperations(),
             $this->domainRedemptions(),
@@ -246,6 +248,31 @@ final readonly class ProductCollector implements MetricsCollector
         return Metric::gauge(
             'lynomia_backup_deletion_total',
             'Backups in each stage of removal. A `deleting` count that does not fall is a datastore that accepts deletes and keeps the archive.',
+            $samples,
+        );
+    }
+
+    /**
+     * File-level restores by state. `needs_review` is a restore the provider
+     * never answered for: the files may or may not have been written, the
+     * platform will not try again, and a person settles it.
+     */
+    private function fileRestores(): Metric
+    {
+        $counts = DB::table('backup_file_restores')
+            ->selectRaw('state, count(*) as total')
+            ->groupBy('state')
+            ->pluck('total', 'state');
+
+        $samples = [];
+
+        foreach (FileRestoreState::cases() as $state) {
+            $samples[] = MetricSample::of(['state' => $state->value], (float) ($counts[$state->value] ?? 0));
+        }
+
+        return Metric::gauge(
+            'lynomia_backup_file_restores_total',
+            'File-level restores by state. `needs_review` is one the provider did not confirm; it is never retried and waits for a person.',
             $samples,
         );
     }

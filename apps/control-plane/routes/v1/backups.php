@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Backups\Http\Controllers\BackupController;
+use Lynomia\Modules\Backups\Http\Controllers\BackupFileController;
 
 /*
  * backups — customer surface.
@@ -86,4 +87,31 @@ Route::prefix('vps/{vm}/backups')->as('backups.')->group(function (): void {
      * for nothing.
      */
     Route::post('{backup}/keep', [BackupController::class, 'keep'])->name('keep');
+
+    /*
+     * Files out of a backup, for the providers that can open one. Every
+     * route here answers 409 `backup.file_level_unsupported` for the others,
+     * and the backup row says which it is before anything is clicked.
+     */
+    Route::get('{backup}/files', [BackupFileController::class, 'index'])->name('files.index');
+
+    Route::post('{backup}/files/downloads', [BackupFileController::class, 'download'])
+        ->middleware('throttle:30,1,backup-file-download:')
+        ->name('files.downloads.store');
+
+    Route::post('{backup}/files/restore', [BackupFileController::class, 'restore'])
+        ->middleware('throttle:5,1,backup-file-restore:')
+        ->name('files.restore');
+
+    Route::get('{backup}/file-restores', [BackupFileController::class, 'restores'])->name('files.restores');
 });
+
+/*
+ * Following a download link. Not under the machine: the link already names
+ * exactly one file of one backup, and carries a token that is spent on the
+ * first request. The session and the account are still required.
+ */
+Route::get('backups/downloads/{token}', [BackupFileController::class, 'fetch'])
+    ->where('token', '[0-9a-f]{64}')
+    ->middleware('throttle:30,1,backup-file-fetch:')
+    ->name('backups.downloads.show');

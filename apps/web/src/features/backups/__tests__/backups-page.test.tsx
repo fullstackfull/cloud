@@ -52,6 +52,18 @@ const BACKUP = {
   finished_at: '2026-03-01T00:20:00+00:00',
   created_at: '2026-03-01T00:00:00+00:00',
   failure_reason: null,
+  files: { supported: true, reason: null },
+}
+
+const LISTING = {
+  path: '/etc',
+  parent: '/',
+  truncated: false,
+  entries: [
+    { path: '/etc/hostname', name: 'hostname', kind: 'file', size_bytes: 12, modified_at: null, downloadable: true, browsable: false, restorable: true },
+    { path: '/etc/localtime', name: 'localtime', kind: 'symlink', size_bytes: null, modified_at: null, downloadable: false, browsable: false, restorable: false },
+    { path: '/etc/nginx', name: 'nginx', kind: 'directory', size_bytes: null, modified_at: null, downloadable: false, browsable: true, restorable: true },
+  ],
 }
 
 const PAGE_META = { page: 1, per_page: 25, total: 1, last_page: 1 }
@@ -60,11 +72,13 @@ interface Stubs {
   onRestore?: (body: unknown) => void
   onDelete?: (body: unknown) => void
   onKeep?: () => void
+  onFileRestore?: (body: unknown) => void
+  onDownload?: (body: unknown) => void
   /** What the list endpoint answers with, when the default row is not the case under test. */
   listed?: Record<string, unknown>
 }
 
-function stubFetch({ onRestore, onDelete, onKeep, listed }: Stubs = {}) {
+function stubFetch({ onRestore, onDelete, onKeep, onFileRestore, onDownload, listed }: Stubs = {}) {
   return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
     const path = url.split('?')[0] ?? url
@@ -76,6 +90,16 @@ function stubFetch({ onRestore, onDelete, onKeep, listed }: Stubs = {}) {
       // Every write goes through this first. Leaving it unstubbed made the
       // mutation fail before it ever reached the endpoint under test.
       body = null
+    } else if (path.endsWith('/files/restore')) {
+      onFileRestore?.(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
+      body = { data: { id: '01JFR', backup_id: BACKUP.id, state: 'running', is_in_flight: true, needs_attention: false, paths: ['/etc/hostname'], path_count: 1, started_at: null, finished_at: null, created_at: '2026-03-02T00:00:00+00:00', failure_reason: null } }
+    } else if (path.endsWith('/files/downloads')) {
+      onDownload?.(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
+      body = { data: { id: '01JDL', path: '/etc/hostname', expires_at: '2026-03-02T00:05:00+00:00', url: '/api/v1/backups/downloads/' + 'a'.repeat(64) } }
+    } else if (path.endsWith('/files')) {
+      body = { data: LISTING }
+    } else if (path.endsWith('/file-restores')) {
+      body = { data: [] }
     } else if (path.endsWith('/restore')) {
       // The client sends a JSON string; typing it as such keeps the lint
       // rule honest about what is being parsed.
@@ -243,5 +267,62 @@ describe('backups page', () => {
       within(dialog).getByText(/anything written since the backup was taken is lost/i),
     ).toBeInTheDocument()
     expect(within(dialog).getByText(/cannot be undone/i)).toBeInTheDocument()
+  })
+
+  it('opens a backup file by file, never offers a symlink, and restores only after the hostname is typed', async () => {
+    const restored = vi.fn()
+    const downloaded = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onFileRestore: restored, onDownload: downloaded }))
+    const opened = vi.fn()
+    vi.stubGlobal('open', opened)
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /^files$/i }))
+
+    // The listing, with the symlink marked and offered for nothing.
+    expect(await screen.findByText('hostname')).toBeInTheDocument()
+    expect(screen.getByText(/^link$/i)).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /select localtime/i })).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: /^download$/i })).toHaveLength(1)
+
+    // A download link is opened, never rendered.
+    await user.click(screen.getByRole('button', { name: /^download$/i }))
+    await waitFor(() => {
+      expect(downloaded).toHaveBeenCalledWith({ path: '/etc/hostname' })
+    })
+    await waitFor(() => {
+      expect(opened).toHaveBeenCalledWith('/api/v1/backups/downloads/' + 'a'.repeat(64), '_blank', 'noopener,noreferrer')
+    })
+    expect(screen.queryByText(/backups\/downloads/)).not.toBeInTheDocument()
+
+    // Restore: choose, confirm with the hostname, and the typed value travels.
+    await user.click(screen.getByRole('checkbox', { name: /select hostname/i }))
+    await user.click(screen.getByRole('button', { name: /restore selected/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/replaced with the copy in the backup/i)).toBeInTheDocument()
+    const confirm = within(dialog).getByRole('button', { name: /^restore files$/i })
+    expect(confirm).toBeDisabled()
+    await user.type(within(dialog).getByRole('textbox'), 'web-kw-01')
+    await user.click(confirm)
+
+    await waitFor(() => {
+      expect(restored).toHaveBeenCalledWith({ paths: ['/etc/hostname'], confirmation: 'web-kw-01' })
+    })
+  })
+
+  it('says why a backup cannot be opened file by file instead of hiding the button', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({ listed: { ...BACKUP, files: { supported: false, reason: 'This backup\'s provider cannot open archives file by file.' } } }),
+    )
+
+    renderPage()
+
+    const files = await screen.findByRole('button', { name: /^files$/i })
+    expect(files).toBeDisabled()
+    expect(files).toHaveAttribute('title', expect.stringMatching(/cannot open archives/i))
   })
 })

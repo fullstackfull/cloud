@@ -1214,7 +1214,39 @@
     "deleteTitle": "Delete this backup?",
     "deleteWarning": "This removes this copy of {{hostname}}'s disks from the datastore. It cannot be undone, and it does not affect the server itself. If this is the only backup you have, you will have nothing to restore from.",
     "deleteConfirmLabel": "Type the backup reference below to confirm",
-    "deletionRequestedOn": "Deletion asked for {{date}}"
+    "deletionRequestedOn": "Deletion asked for {{date}}",
+    "files": "Files",
+    "filesUnsupported": "This backup's provider cannot open archives file by file. The whole server can still be restored.",
+    "browser": {
+      "title": "Files in the backup taken {{date}}",
+      "explainer": "Browse the backup, download a single file, or choose files and folders to put back on the server. A link (symlink) is shown and never followed.",
+      "up": "Up one level",
+      "name": "Name",
+      "kind": "Kind",
+      "size": "Size",
+      "kinds": {
+        "file": "File",
+        "directory": "Folder",
+        "symlink": "Link",
+        "other": "Other"
+      },
+      "select": "Select {{name}} to restore",
+      "download": "Download",
+      "downloadHint": "The link is single-use and lives for five minutes.",
+      "empty": "This folder is empty.",
+      "truncated": "Only the first thousand entries are shown. Open a folder to narrow the list.",
+      "close": "Close",
+      "selected": "{{count}} selected",
+      "restoreSelected": "Restore selected to the server",
+      "restoreTitle": "Put these files back on {{hostname}}?",
+      "restoreWarning": "Whatever {{hostname}} holds at these paths is replaced with the copy in the backup. Anything written to them since the backup was taken is lost. The rest of the server is untouched. This cannot be undone.",
+      "restoreConfirmLabel": "Type {{hostname}} to confirm",
+      "restore": "Restore files",
+      "restores": "File restores from this backup",
+      "noRestores": "No files have been restored from this backup.",
+      "restoreRow": "{{count}} path(s), asked for {{date}}",
+      "needsReview": "The provider did not confirm this restore. It may still be running, so no other restore can start into this server until our team has checked. Nothing needs doing on your side."
+    }
   },
   "confirm": {
     "typeToConfirm": "Type {{phrase}} to confirm"

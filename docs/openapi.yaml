@@ -6804,6 +6804,58 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/backups/downloads/{token}":
+    get:
+      operationId: "api_v1_backups_downloads_show"
+      tags:
+        - "Backups"
+      summary: "Follow a download link"
+      description: "Streamed as `application/octet-stream` with Content-Disposition: attachment, nosniff and a sandboxing CSP, so a browser saves the file rather than rendering it. A link that is unknown, expired, already used or another account's is 404 `backup.download_unavailable` — one answer for all four. Audited as `backup.file.downloaded`."
+      parameters:
+        - name: "token"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "No content."
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/catalog/plans/{plan}":
     get:
       operationId: "api_v1_catalog_plans_show"
@@ -13312,6 +13364,291 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/file-restores":
+    get:
+      operationId: "api_v1_backups_files_restores"
+      tags:
+        - "Backups"
+      summary: "File restores from this backup"
+      description: "The last fifty, newest first."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileRestorePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/files":
+    get:
+      operationId: "api_v1_backups_files_index"
+      tags:
+        - "Backups"
+      summary: "List one directory of a backup"
+      description: "Read straight from the provider, never cached. `path` defaults to `/`. A path with `..`, `.`, an empty segment, a backslash, a control character or over 4096 characters is refused (422 `backup.file_path_invalid`) before anything is asked. A symlink is listed and never followed: browsing into one is refused. At most 1000 entries; `truncated` says there were more. Requires `service.manage`: a backup's contents are the customer's data at rest."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "path"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileListingResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/files/downloads":
+    post:
+      operationId: "api_v1_backups_files_downloads_store"
+      tags:
+        - "Backups"
+      summary: "Mint a short-lived link to one file"
+      description: "The file is looked up in its directory first: a directory, a symlink, a device or a file over the download limit is refused here with the reason, not at the moment the browser follows the link. The link lives for five minutes, is spent on its first use, still requires the session and the account, and its token appears only in this response — the platform stores the hash."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                path:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileDownloadResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/files/restore":
+    post:
+      operationId: "api_v1_backups_files_restore"
+      tags:
+        - "Backups"
+      summary: "Put named files back on the machine"
+      description: "Replaces what the machine holds at those paths. Clears the same bar as a whole-machine restore — the hostname typed exactly as `confirmation`, a completed backup from this machine, an active service, nothing else restoring into the machine — and one more: every path is looked up in the archive and a symlink is refused by name (422 `backup.symlink_refused`). At most 50 paths; a directory counts as one and brings back everything under it; `/` is refused (that is a whole-machine restore). Answers 202 with the restore row; a provider that does not answer leaves it `needs_review`, never retried."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                paths:
+                  description: "See the endpoint description; validated server-side."
+                confirmation:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileRestoreResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/vps/{vm}/backups/{backup}/keep":
     post:
       operationId: "api_v1_backups_keep"
@@ -15249,6 +15586,143 @@ components:
         created_at:
           "$ref": "#/components/schemas/Timestamp"
         failure_reason:
+          type:
+            - "string"
+            - "null"
+        files:
+          "$ref": "#/components/schemas/BackupFileSupport"
+    BackupFileDownload:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        path:
+          type: "string"
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+        url:
+          type: "string"
+          description: "Relative to the API origin. Carries the single-use token; shown once."
+    BackupFileDownloadResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/BackupFileDownload"
+    BackupFileEntry:
+      type: "object"
+      additionalProperties: false
+      properties:
+        path:
+          type: "string"
+          description: "Absolute inside the archive."
+        name:
+          type: "string"
+        kind:
+          type: "string"
+          enum:
+            - "file"
+            - "directory"
+            - "symlink"
+            - "other"
+        size_bytes:
+          type:
+            - "integer"
+            - "null"
+        modified_at:
+          "$ref": "#/components/schemas/Timestamp"
+        downloadable:
+          type: "boolean"
+        browsable:
+          type: "boolean"
+        restorable:
+          type: "boolean"
+          description: "False for a symlink, always: links are never followed out of a backup."
+    BackupFileListing:
+      type: "object"
+      additionalProperties: false
+      properties:
+        path:
+          type: "string"
+        parent:
+          type:
+            - "string"
+            - "null"
+        truncated:
+          type: "boolean"
+        entries:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/BackupFileEntry"
+    BackupFileListingResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/BackupFileListing"
+    BackupFileRestore:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        backup_id:
+          "$ref": "#/components/schemas/Ulid"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "requested, running, succeeded, failed or needs_review. `needs_review` is a restore the provider did not confirm: the files may or may not have been written, and it is never retried."
+        is_in_flight:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        paths:
+          type: "array"
+          items:
+            type: "string"
+        path_count:
+          type: "integer"
+        started_at:
+          "$ref": "#/components/schemas/Timestamp"
+        finished_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+    BackupFileRestorePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/BackupFileRestore"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    BackupFileRestoreResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/BackupFileRestore"
+    BackupFileSupport:
+      type: "object"
+      additionalProperties: false
+      description: "Whether this backup can be opened file by file, and if not, why not — the same reason the file routes refuse with."
+      properties:
+        supported:
+          type: "boolean"
+        reason:
           type:
             - "string"
             - "null"

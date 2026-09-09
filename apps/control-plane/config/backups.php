@@ -91,4 +91,26 @@ return [
 
     'deletion_grace_hours' => (int) env('BACKUP_DELETION_GRACE_HOURS', 1),
 
+    /*
+    |--------------------------------------------------------------------------
+    | File-level access
+    |--------------------------------------------------------------------------
+    |
+    | A download link lives for `file_download_ttl_seconds` and is used once:
+    | long enough for the browser that asked for it to follow it, and not
+    | long enough to be worth forwarding. `file_download_max_bytes` bounds
+    | what one link streams; anything larger is restored to the machine,
+    | where it belongs, rather than pulled through the control plane.
+    |
+    | `file_restore_max_paths` bounds one restore request. A directory counts
+    | as one path and brings back everything under it.
+    |
+    */
+
+    'file_download_ttl_seconds' => (int) env('BACKUP_FILE_DOWNLOAD_TTL_SECONDS', 300),
+
+    'file_download_max_bytes' => (int) env('BACKUP_FILE_DOWNLOAD_MAX_BYTES', 64 * 1024 * 1024),
+
+    'file_restore_max_paths' => (int) env('BACKUP_FILE_RESTORE_MAX_PATHS', 50),
+
 ];

@@ -161,6 +161,18 @@ return [
             'title' => 'Restore of :service did not complete',
             'body' => 'The restore of :service did not finish. Our team has been alerted.',
         ],
+        'file_restore_completed' => [
+            'title' => 'Files restored to :service',
+            'body' => ':count path(s) from the backup have been put back on :service. Whatever was at those paths before has been replaced.',
+        ],
+        'file_restore_failed' => [
+            'title' => 'Files could not be restored to :service',
+            'body' => 'The restore of :count path(s) to :service did not complete. The backup itself is unaffected, and the machine is as it was.',
+        ],
+        'file_restore_needs_review' => [
+            'title' => 'We are checking a file restore on :service',
+            'body' => 'The provider did not confirm the restore of :count path(s) to :service, so we are checking what actually happened. Please do not start another restore — the first may still be writing.',
+        ],
         'domain_registered' => [
             'title' => ':domain is yours',
             'body' => ':domain is registered until :date. It will renew automatically unless you turn that off.',

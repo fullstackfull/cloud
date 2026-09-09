@@ -76,6 +76,15 @@ enum NotificationType: string
     case RestoreCompleted = 'service.restore_completed';
     case RestoreFailed = 'service.restore_failed';
 
+    /*
+     * Files put back from a backup. Three outcomes, and the third is the
+     * one that must not be dressed as either of the others: a restore the
+     * provider never answered for may or may not have written the files.
+     */
+    case FileRestoreCompleted = 'service.file_restore_completed';
+    case FileRestoreFailed = 'service.file_restore_failed';
+    case FileRestoreNeedsReview = 'service.file_restore_needs_review';
+
     // ------------------------------------------------------------- operational
     /*
      * Domains.
@@ -178,6 +187,8 @@ enum NotificationType: string
             self::ReinstallFailed,
             self::BackupFailed,
             self::RestoreFailed,
+            self::FileRestoreFailed,
+            self::FileRestoreNeedsReview,
             self::DomainRedemptionFailed,
             self::IncidentAffectingService => true,
             default => false,

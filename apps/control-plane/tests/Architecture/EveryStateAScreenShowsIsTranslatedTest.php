@@ -8,6 +8,7 @@ use BackedEnum;
 use JsonException;
 use Lynomia\Modules\ApiKeys\Domain\Enums\ApiTokenStatus;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
@@ -103,6 +104,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'status' => [
             // StatusBadge, on the customer's screens.
             BackupState::class,
+            FileRestoreState::class,
             DnsState::class,
             HostingAccountStatus::class,
             InvoiceStatus::class,

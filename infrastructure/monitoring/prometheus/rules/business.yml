@@ -235,6 +235,30 @@ groups:
           runbook: docs/runbooks/provider-indeterminate.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
 
+  - name: business.backups
+    rules:
+      - alert: FileRestoreIndeterminate
+        # A file-level restore the provider never answered for. The files
+        # may or may not have been written into the customer's machine, and
+        # the platform will not try again: a second restore over a first
+        # that is still running is the one outcome nobody can reason about
+        # afterwards. Somebody looks at the provider's task list and settles
+        # the row.
+        expr: >-
+          sum(lynomia_backup_file_restores_total{state="needs_review"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: backups
+        annotations:
+          summary: "A file restore has no confirmed outcome"
+          description: >-
+            {{ $value }} file-level restore(s) are in needs_review. The
+            platform stopped tracking them and will not retry; the customer
+            has been told not to start another.
+          runbook: docs/runbooks/file-restore-indeterminate.md
+          runbook_url: https://docs.lynomia.internal/runbooks/file-restore-indeterminate
+
   - name: business.domains
     rules:
       - alert: DomainRedemptionNeedsReview

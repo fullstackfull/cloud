@@ -262,6 +262,52 @@ export interface Backup {
   finished_at: string | null
   created_at: string
   failure_reason: string | null
+  /** Whether this backup can be opened file by file, and if not, why not. */
+  files: { supported: boolean; reason: string | null }
+}
+
+export type BackupFileKind = 'file' | 'directory' | 'symlink' | 'other'
+
+export interface BackupFileEntry {
+  /** Absolute inside the archive. Nothing about where the archive lives. */
+  path: string
+  name: string
+  kind: BackupFileKind
+  size_bytes: number | null
+  modified_at: string | null
+  downloadable: boolean
+  browsable: boolean
+  /** False for a symlink, always: links are never followed out of a backup. */
+  restorable: boolean
+}
+
+export interface BackupFileListing {
+  path: string
+  parent: string | null
+  truncated: boolean
+  entries: BackupFileEntry[]
+}
+
+export interface BackupFileDownload {
+  id: string
+  path: string
+  expires_at: string
+  /** Relative to the API origin; carries the single-use token. */
+  url: string
+}
+
+export interface BackupFileRestore {
+  id: string
+  backup_id: string
+  state: string
+  is_in_flight: boolean
+  needs_attention: boolean
+  paths: string[]
+  path_count: number
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+  failure_reason: string | null
 }
 
 export interface DedicatedServer {

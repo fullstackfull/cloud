@@ -5,6 +5,9 @@ import type {
   ApiToken,
   AppNotification,
   Backup,
+  BackupFileDownload,
+  BackupFileListing,
+  BackupFileRestore,
   DedicatedServer,
   DnsRecord as DnsRecordRow,
   DnsZone,
@@ -482,6 +485,60 @@ export function useCreateBackup() {
       api.post<unknown>(`/vps/${encodeURIComponent(vmId)}/backups`, {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backups'] })
+    },
+  })
+}
+
+/**
+ * One directory of one backup, read from the provider each time it is
+ * asked for. Keyed on the backup and the path: a listing must never be
+ * shown under another archive's name.
+ */
+export function useBackupFiles(vmId: string | null, backupId: string | null, path: string) {
+  return useQuery({
+    queryKey: ['backups', 'files', vmId, backupId, path],
+    enabled: vmId !== null && backupId !== null,
+    queryFn: () =>
+      api.get<Envelope<BackupFileListing>>(
+        `/vps/${encodeURIComponent(vmId ?? '')}/backups/${encodeURIComponent(backupId ?? '')}/files?path=${encodeURIComponent(path)}`,
+      ),
+  })
+}
+
+export function useBackupFileRestores(vmId: string | null, backupId: string | null) {
+  return useQuery({
+    queryKey: ['backups', 'file-restores', vmId, backupId],
+    enabled: vmId !== null && backupId !== null,
+    queryFn: () =>
+      api.get<{ data: BackupFileRestore[] }>(
+        `/vps/${encodeURIComponent(vmId ?? '')}/backups/${encodeURIComponent(backupId ?? '')}/file-restores`,
+      ),
+  })
+}
+
+export function useIssueBackupFileDownload() {
+  return useMutation({
+    mutationFn: (payload: { vmId: string; backupId: string; path: string }) =>
+      api.post<Envelope<BackupFileDownload>>(
+        `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}/files/downloads`,
+        { path: payload.path },
+      ),
+  })
+}
+
+export function useRestoreBackupFiles() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The typed hostname is forwarded, never filled in: the server compares it
+     * and is what decides. */
+    mutationFn: (payload: { vmId: string; backupId: string; paths: string[]; confirmation: string }) =>
+      api.post<Envelope<BackupFileRestore>>(
+        `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}/files/restore`,
+        { paths: payload.paths, confirmation: payload.confirmation },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backups', 'file-restores'] })
     },
   })
 }

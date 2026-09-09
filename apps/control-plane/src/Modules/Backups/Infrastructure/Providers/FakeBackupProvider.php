@@ -5,11 +5,18 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Backups\Infrastructure\Providers;
 
 use Lynomia\Modules\Backups\Domain\Contracts\BackupProvider;
+use Lynomia\Modules\Backups\Domain\Contracts\FileLevelBackupProvider;
+use Lynomia\Modules\Backups\Domain\DTOs\BackupFileContent;
+use Lynomia\Modules\Backups\Domain\DTOs\BackupFileEntry;
+use Lynomia\Modules\Backups\Domain\DTOs\BackupFileListing;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupOperation;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupRequest;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupTaskState;
 use Lynomia\Modules\Backups\Domain\DTOs\RemoteBackup;
+use Lynomia\Modules\Backups\Domain\Enums\BackupFileKind;
+use Lynomia\Modules\Backups\Domain\Exceptions\BackupFileRefusedException;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\ValueObjects\BackupPath;
 use RuntimeException;
 
 /**
@@ -28,9 +35,41 @@ use RuntimeException;
  * as taken and verified, and the discovery happens on the one day the customer
  * needs the data.
  */
-final class FakeBackupProvider implements BackupProvider
+final class FakeBackupProvider implements BackupProvider, FileLevelBackupProvider
 {
     public const string NAME = 'fake';
+
+    /**
+     * What every archive holds, for the file-level paths.
+     *
+     * One tree for every archive, because the platform must handle every
+     * kind of entry and the tests must reach every kind: a nested
+     * directory, regular files of known sizes, a symlink (never followed),
+     * a device node (never anything), a file too large to download, and the
+     * three markers that make a restore time out, be refused, or fail
+     * after starting.
+     *
+     * @var array<string, array{kind: BackupFileKind, size: ?int}>
+     */
+    private const array TREE = [
+        '/etc' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/etc/hostname' => ['kind' => BackupFileKind::File, 'size' => 12],
+        '/etc/localtime' => ['kind' => BackupFileKind::Symlink, 'size' => null],
+        '/etc/nginx' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/etc/nginx/nginx.conf' => ['kind' => BackupFileKind::File, 'size' => 1_432],
+        '/etc/nginx/sites-enabled' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/etc/nginx/sites-enabled/default' => ['kind' => BackupFileKind::Symlink, 'size' => null],
+        '/var' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/var/www' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/var/www/index.html' => ['kind' => BackupFileKind::File, 'size' => 612],
+        '/var/www/archive.tar' => ['kind' => BackupFileKind::File, 'size' => 4 * 1024 * 1024 * 1024],
+        '/dev' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/dev/null' => ['kind' => BackupFileKind::Other, 'size' => null],
+        '/marker' => ['kind' => BackupFileKind::Directory, 'size' => null],
+        '/marker/'.self::TIMEOUT_MARKER => ['kind' => BackupFileKind::File, 'size' => 1],
+        '/marker/'.self::REFUSAL_MARKER => ['kind' => BackupFileKind::File, 'size' => 1],
+        '/marker/'.self::FAILING_MARKER => ['kind' => BackupFileKind::File, 'size' => 1],
+    ];
 
     public const string REFUSAL_MARKER = 'backup-refused';
 
@@ -158,6 +197,89 @@ final class FakeBackupProvider implements BackupProvider
                 static fn (RemoteBackup $backup): bool => $backup->archiveId !== $archiveId,
             ));
         }
+    }
+
+    public function listFiles(string $nodeName, string $datastore, string $archiveId, BackupPath $path): BackupFileListing
+    {
+        if (! $path->isRoot()) {
+            $entry = self::TREE[$path->value] ?? null;
+
+            if ($entry === null) {
+                throw BackupFileRefusedException::notFound($path->value);
+            }
+
+            if ($entry['kind'] === BackupFileKind::Symlink) {
+                throw BackupFileRefusedException::symlink($path->value);
+            }
+
+            if ($entry['kind'] !== BackupFileKind::Directory) {
+                throw BackupFileRefusedException::notADirectory($path->value);
+            }
+        }
+
+        $entries = [];
+
+        foreach (self::TREE as $candidate => $entry) {
+            $child = BackupPath::of($candidate);
+
+            if ($child->parent()->equals($path)) {
+                $entries[] = new BackupFileEntry($child, $entry['kind'], $entry['size'], 1_700_000_000);
+            }
+        }
+
+        return new BackupFileListing($path, $entries);
+    }
+
+    public function readFile(string $nodeName, string $datastore, string $archiveId, BackupPath $path, int $maxBytes): BackupFileContent
+    {
+        $entry = self::TREE[$path->value] ?? null;
+
+        if ($entry === null) {
+            throw BackupFileRefusedException::notFound($path->value);
+        }
+
+        if ($entry['kind'] === BackupFileKind::Symlink) {
+            throw BackupFileRefusedException::symlink($path->value);
+        }
+
+        if ($entry['kind'] !== BackupFileKind::File) {
+            throw BackupFileRefusedException::notAFile($path->value);
+        }
+
+        if ((int) $entry['size'] > $maxBytes) {
+            throw BackupFileRefusedException::tooLarge($path->value, $maxBytes);
+        }
+
+        // Deterministic and archive-specific, so a test can prove the bytes
+        // came from the archive that was asked for and not another.
+        $body = sprintf("# %s from %s\n", $path->value, $archiveId);
+        $stream = fopen('php://memory', 'r+b');
+
+        if ($stream === false) {
+            throw BackupProviderException::refused(self::NAME, 'file_read', 'no memory stream');
+        }
+
+        fwrite($stream, $body);
+        rewind($stream);
+
+        return new BackupFileContent($path->name(), strlen($body), $stream);
+    }
+
+    public function startFileRestore(string $nodeName, string $providerId, string $datastore, string $archiveId, array $paths): BackupOperation
+    {
+        $joined = implode(' ', array_map(static fn (BackupPath $p): string => $p->value, $paths));
+
+        $this->refuseMarked($joined, 'file_restore');
+
+        $taskId = 'UPID:fake-file-restore:'.$this->nextId++;
+
+        $this->tasks[$taskId] = [
+            'failing' => str_contains($joined, self::FAILING_MARKER),
+            'polls' => 0,
+            'request' => new BackupRequest($nodeName, $providerId, $datastore),
+        ];
+
+        return new BackupOperation($taskId, $nodeName);
     }
 
     /**

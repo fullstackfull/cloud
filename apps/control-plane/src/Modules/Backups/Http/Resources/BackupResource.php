@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Backups\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Modules\Backups\Application\Actions\FileLevelSupport;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 
 /**
@@ -79,6 +80,12 @@ final class BackupResource extends JsonResource
              * of disk space is owed a better answer than "it failed".
              */
             'failure_reason' => $this->failure_reason,
+
+            // Whether this backup can be opened file by file, and if not,
+            // why not — the same answer the file routes refuse with, so a
+            // screen can disable the button with the reason instead of
+            // offering one that fails.
+            'files' => app(FileLevelSupport::class)->describe($this->resource),
         ];
     }
 }

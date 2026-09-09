@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Lynomia\Modules\Backups\Application\Actions\ReconcileFileRestores;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileRunningBackups;
 
 /**
@@ -23,15 +24,24 @@ final class ReconcileBackups extends Command
 
     protected $description = 'Reconcile in-flight backups with their provider';
 
-    public function handle(ReconcileRunningBackups $reconcile): int
+    public function handle(ReconcileRunningBackups $reconcile, ReconcileFileRestores $files): int
     {
         $sweep = $reconcile->execute(limit: (int) $this->option('limit'));
+
+        // File-level restores ride the same schedule: the same providers, the
+        // same task polling, the same Timeout Rule. One run, two sweeps.
+        $restores = $files->execute(limit: (int) $this->option('limit'));
 
         $this->line(json_encode([
             'command' => 'backups:reconcile',
             'considered' => $sweep->considered,
             'settled' => $sweep->settled,
             'failed' => $sweep->failed,
+            'file_restores' => [
+                'considered' => $restores->considered,
+                'settled' => $restores->settled,
+                'failed' => $restores->failed,
+            ],
         ], JSON_THROW_ON_ERROR));
 
         /*
@@ -39,6 +49,6 @@ final class ReconcileBackups extends Command
          * exit code is how an operator finds out the backup provider is down —
          * which is a great deal more useful than the individual log lines.
          */
-        return $sweep->failed > 0 ? self::FAILURE : self::SUCCESS;
+        return ($sweep->failed > 0 || $restores->failed > 0) ? self::FAILURE : self::SUCCESS;
     }
 }

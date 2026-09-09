@@ -51,6 +51,14 @@ enum AuditAction: string
     // Data that cannot be recovered once it is gone.
     case BackupRestored = 'backup.restored';
 
+    /*
+     * Files out of a backup: named paths put back over the machine, and one
+     * file handed to a browser. The second is a read and is audited anyway,
+     * because the thing read is the customer's data leaving the datastore.
+     */
+    case BackupFilesRestored = 'backup.files.restored';
+    case BackupFileDownloaded = 'backup.file.downloaded';
+
     // Operator intervention in the provisioning and reconciliation engines,
     // where the operator is asserting something about the outside world that
     // the platform could not verify itself.

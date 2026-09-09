@@ -559,6 +559,47 @@ return [
         'response' => $one('Backup'),
     ],
 
+    /*
+     * Files out of a backup, for the providers that can open one. The
+     * backup's `files` block says whether this one can, and why not when it
+     * cannot; every route here answers 409 `backup.file_level_unsupported`
+     * for the others. Paths are the archive's own, rooted at `/`; nothing
+     * about where the archive lives is accepted or returned.
+     */
+    'api.v1.backups.files.index' => [
+        'tag' => 'Backups',
+        'summary' => 'List one directory of a backup',
+        'description' => 'Read straight from the provider, never cached. `path` defaults to `/`. A path with `..`, `.`, an empty segment, a backslash, a control character or over 4096 characters is refused (422 `backup.file_path_invalid`) before anything is asked. A symlink is listed and never followed: browsing into one is refused. At most 1000 entries; `truncated` says there were more. Requires `service.manage`: a backup\'s contents are the customer\'s data at rest.',
+        'query' => ['path'],
+        'response' => $one('BackupFileListing'),
+    ],
+    'api.v1.backups.files.downloads.store' => [
+        'tag' => 'Backups',
+        'summary' => 'Mint a short-lived link to one file',
+        'description' => 'The file is looked up in its directory first: a directory, a symlink, a device or a file over the download limit is refused here with the reason, not at the moment the browser follows the link. The link lives for five minutes, is spent on its first use, still requires the session and the account, and its token appears only in this response — the platform stores the hash.',
+        'body' => ['path'],
+        'response' => $one('BackupFileDownload', 201),
+    ],
+    'api.v1.backups.downloads.show' => [
+        'tag' => 'Backups',
+        'summary' => 'Follow a download link',
+        'description' => 'Streamed as `application/octet-stream` with Content-Disposition: attachment, nosniff and a sandboxing CSP, so a browser saves the file rather than rendering it. A link that is unknown, expired, already used or another account\'s is 404 `backup.download_unavailable` — one answer for all four. Audited as `backup.file.downloaded`.',
+        'response' => ['envelope' => 'none', 'status' => 200],
+    ],
+    'api.v1.backups.files.restore' => [
+        'tag' => 'Backups',
+        'summary' => 'Put named files back on the machine',
+        'description' => 'Replaces what the machine holds at those paths. Clears the same bar as a whole-machine restore — the hostname typed exactly as `confirmation`, a completed backup from this machine, an active service, nothing else restoring into the machine — and one more: every path is looked up in the archive and a symlink is refused by name (422 `backup.symlink_refused`). At most 50 paths; a directory counts as one and brings back everything under it; `/` is refused (that is a whole-machine restore). Answers 202 with the restore row; a provider that does not answer leaves it `needs_review`, never retried.',
+        'body' => ['paths', 'confirmation'],
+        'response' => $one('BackupFileRestore', 202),
+    ],
+    'api.v1.backups.files.restores' => [
+        'tag' => 'Backups',
+        'summary' => 'File restores from this backup',
+        'description' => 'The last fifty, newest first.',
+        'response' => $many('BackupFileRestore'),
+    ],
+
     /* ---------------------------------------------------------------------
      | DNS
      |
