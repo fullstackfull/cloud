@@ -5,6 +5,10 @@ closure standard on this build; nothing is `REAL_INFRA_VERIFIED`; no product is
 `READY_TO_SELL`, and the platform says so about itself on every screen
 concerned.**
 
+> A scope addendum was carried out after this closure and is recorded in
+> [`docs/phase-30b-p-scope-addendum.md`](phase-30b-p-scope-addendum.md). This
+> report is unchanged by it.
+
 This is the authoritative report for Phase 30B-P. It records what was built to
 the full closure standard, what was found and fixed on the way, what the clean
 room and CI observed, and — precisely — what this build cannot claim. It does
