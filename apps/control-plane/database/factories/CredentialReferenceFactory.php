@@ -6,9 +6,9 @@ namespace Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
-use Lynomia\Modules\Estate\Domain\Enums\CredentialState;
-use Lynomia\Modules\Estate\Domain\Enums\EstateEnvironment;
-use Lynomia\Modules\Estate\Infrastructure\Models\CredentialReference;
+use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 
 /**
  * @extends Factory<CredentialReference>
@@ -25,14 +25,14 @@ class CredentialReferenceFactory extends Factory
         return [
             'name' => 'credential-'.Str::lower(Str::random(6)),
             'purpose' => 'connection test',
-            'environment' => EstateEnvironment::Staging,
+            'environment' => DeploymentEnvironment::Staging,
             'backend' => 'controller_environment',
             'backend_reference' => 'LYNOMIA_TEST_'.Str::upper(Str::random(6)),
             'state' => CredentialState::Configured,
         ];
     }
 
-    public function forEnvironment(EstateEnvironment $environment): self
+    public function forEnvironment(DeploymentEnvironment $environment): self
     {
         return $this->state(fn (): array => ['environment' => $environment]);
     }

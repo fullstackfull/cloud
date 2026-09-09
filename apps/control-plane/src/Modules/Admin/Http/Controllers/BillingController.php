@@ -7,7 +7,7 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
-use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;

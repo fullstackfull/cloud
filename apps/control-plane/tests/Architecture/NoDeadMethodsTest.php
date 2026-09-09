@@ -83,6 +83,11 @@ final class NoDeadMethodsTest extends TestCase
         'prepareForValidation', 'via', 'toMail', 'failed', 'backoff', 'retryUntil', 'uniqueId',
         'middleware', 'tags', 'newFactory', 'getMorphClass', 'resolve', 'answers', 'protocol',
         'definition', 'run', 'up', 'down',
+        // Called by PHP itself when a value is dumped, exactly as __toString
+        // is when one is printed. A DTO that redacts a secret in __debugInfo
+        // has no caller to find and is doing the most important job in the
+        // class.
+        '__debugInfo',
         // An adapter's statement of which vendor it speaks for, read by the
         // factory that built it. The same shape as name() and kind().
         'panel',

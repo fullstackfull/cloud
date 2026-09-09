@@ -3,9 +3,12 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
-use Lynomia\Modules\Estate\Infrastructure\EstateServiceProvider;
+// Aliased because Lynomia\Providers\InfrastructureServiceProvider already
+// holds that name and wires something else entirely — the provisioning
+// engine to the things it provisions.
 use Lynomia\Modules\Notifications\Infrastructure\NotificationServiceProvider;
 use Lynomia\Modules\Payments\Infrastructure\PaymentsServiceProvider;
+use Lynomia\Modules\Providers\Infrastructure\ProvidersServiceProvider;
 use Lynomia\Providers\ApiTokenServiceProvider;
 use Lynomia\Providers\AuthorizationServiceProvider;
 use Lynomia\Providers\DomainServiceProvider;
@@ -28,6 +31,6 @@ return [
     PaymentsServiceProvider::class,
     EventServiceProvider::class,
     InfrastructureServiceProvider::class,
-    EstateServiceProvider::class,
+    ProvidersServiceProvider::class,
     NotificationServiceProvider::class,
 ];

@@ -6,7 +6,7 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Lynomia\Modules\Admin\Http\Controllers\Concerns\ListsAcrossTenants;
+use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 
 /**

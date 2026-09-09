@@ -6,11 +6,11 @@ namespace Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
-use Lynomia\Modules\Estate\Domain\Enums\ConnectionState;
-use Lynomia\Modules\Estate\Domain\Enums\EstateEnvironment;
-use Lynomia\Modules\Estate\Domain\Enums\SafetyClass;
-use Lynomia\Modules\Estate\Domain\Enums\ServerState;
-use Lynomia\Modules\Estate\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
+use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
+use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 
 /**
  * @extends Factory<ManagedServer>
@@ -32,7 +32,7 @@ class ManagedServerFactory extends Factory
     {
         return [
             'name' => 'pve-'.Str::lower(Str::random(6)),
-            'environment' => EstateEnvironment::Staging,
+            'environment' => DeploymentEnvironment::Staging,
             'state' => ServerState::Registered,
             'safety_class' => SafetyClass::DoNotTouch,
             'allow_reimage' => false,
@@ -69,6 +69,6 @@ class ManagedServerFactory extends Factory
 
     public function inProduction(): self
     {
-        return $this->state(fn (): array => ['environment' => EstateEnvironment::Production]);
+        return $this->state(fn (): array => ['environment' => DeploymentEnvironment::Production]);
     }
 }

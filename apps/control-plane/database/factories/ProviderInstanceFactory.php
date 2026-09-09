@@ -6,12 +6,12 @@ namespace Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
-use Lynomia\Modules\Estate\Domain\Enums\ConnectionState;
-use Lynomia\Modules\Estate\Domain\Enums\EstateEnvironment;
-use Lynomia\Modules\Estate\Domain\Enums\ProviderCategory;
-use Lynomia\Modules\Estate\Domain\Enums\ProviderState;
-use Lynomia\Modules\Estate\Domain\Enums\ReadinessState;
-use Lynomia\Modules\Estate\Infrastructure\Models\ProviderInstance;
+use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
+use Lynomia\Modules\Providers\Domain\Enums\ProviderState;
+use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
+use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
 
 /**
  * @extends Factory<ProviderInstance>
@@ -29,7 +29,7 @@ class ProviderInstanceFactory extends Factory
             'name' => 'provider-'.Str::lower(Str::random(6)),
             'category' => ProviderCategory::Dns,
             'driver' => 'fake',
-            'environment' => EstateEnvironment::Staging,
+            'environment' => DeploymentEnvironment::Staging,
             'state' => ProviderState::Draft,
             'endpoint' => 'fake://connected',
             'connection_state' => ConnectionState::NotTested,
@@ -49,7 +49,7 @@ class ProviderInstanceFactory extends Factory
 
     public function inProduction(): self
     {
-        return $this->state(fn (): array => ['environment' => EstateEnvironment::Production]);
+        return $this->state(fn (): array => ['environment' => DeploymentEnvironment::Production]);
     }
 
     public function enabled(): self

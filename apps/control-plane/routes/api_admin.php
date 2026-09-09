@@ -13,6 +13,8 @@ use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
+use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 
@@ -169,6 +171,50 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
      * shift can be given the screen without being given the authority to
      * declare a customer's missing machine a non-issue.
      */
+    /*
+     |--------------------------------------------------------------------------
+     | Control Centre — the machines
+     |--------------------------------------------------------------------------
+     |
+     | Two permissions rather than one across these routes, because they are two
+     | different decisions. safety.change raises or lowers what may be done to a
+     | machine; safety.allow_reimage clears one for a wipe. An operator can
+     | reasonably hold the first and not the second, and the infrastructure-admin
+     | role is granted exactly that way.
+     |
+     | Reaching the destructive classification is checked twice — on the route
+     | and again in the controller — because the route protects the endpoint and
+     | the controller protects the specific transition, and only one of those
+     | knows which classification was asked for.
+     */
+    Route::get('infrastructure/servers', [ServerController::class, 'index'])
+        ->middleware('can:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.index');
+
+    Route::get('infrastructure/servers/{server}', [ServerController::class, 'show'])
+        ->middleware('can:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.show');
+
+    Route::post('infrastructure/servers', [ServerController::class, 'store'])
+        ->middleware('can:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.store');
+
+    Route::post('infrastructure/servers/{server}/classify', [ServerController::class, 'classify'])
+        ->middleware('can:'.Permission::SafetyChange->value)
+        ->name('infrastructure.servers.classify');
+
+    Route::post('infrastructure/servers/{server}/clear-for-reimage', [ServerController::class, 'clearForReimage'])
+        ->middleware('can:'.Permission::AllowReimage->value)
+        ->name('infrastructure.servers.clear_for_reimage');
+
+    Route::delete('infrastructure/servers/{server}/clear-for-reimage', [ServerController::class, 'revokeReimageClearance'])
+        ->middleware('can:'.Permission::SafetyChange->value)
+        ->name('infrastructure.servers.revoke_reimage_clearance');
+
+    Route::post('infrastructure/servers/{server}/connection-test', [ConnectionTestController::class, 'forServer'])
+        ->middleware('can:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.connection_test');
+
     Route::get('drift', [DriftController::class, 'index'])
         ->middleware('permission:'.Permission::DriftView->value)
         ->name('drift.index');

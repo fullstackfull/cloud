@@ -189,42 +189,23 @@ enum AuditAction: string
     case WordPressSiteOrdered = 'wordpress.site.ordered';
 
     // ---------------------------------------------------------------------
-    // The estate: machines, providers, credentials, licences and deployments
+    // Infrastructure: the machines, and what an operator may do to them
     // ---------------------------------------------------------------------
     //
-    // Safety changes are recorded separately from every other server edit,
-    // because they are the acts that decide what else is possible and they are
-    // the ones an investigation reads first.
-    case ServerRegistered = 'estate.server.registered';
-    case ServerSafetyChanged = 'estate.server.safety_changed';
-    case ServerReimageCleared = 'estate.server.reimage_cleared';
-    case ServerReimageClearanceRevoked = 'estate.server.reimage_clearance_revoked';
-    case ServerRoleAssigned = 'estate.server.role_assigned';
-    case ServerRetired = 'estate.server.retired';
-    case ServerDiscovered = 'estate.server.discovered';
-    case ServerProfileAssigned = 'estate.server.profile_assigned';
+    // Safety changes are recorded apart from every other server edit, because
+    // they are the acts that decide what else is possible and the ones an
+    // investigation reads first.
+    //
+    // Each word here is added in the same commit as the thing that writes it.
+    // Declaring the whole vocabulary up front and filling it in later is how
+    // an enum comes to describe capabilities the platform does not have, which
+    // is the defect EveryAuditActionIsRecordedSomewhereTest exists to catch.
+    case ServerRegistered = 'infrastructure.server.registered';
+    case ServerSafetyChanged = 'infrastructure.server.safety_changed';
+    case ServerReimageCleared = 'infrastructure.server.reimage_cleared';
+    case ServerReimageClearanceRevoked = 'infrastructure.server.reimage_clearance_revoked';
 
-    case ProviderRegistered = 'estate.provider.registered';
-    case ProviderEnabled = 'estate.provider.enabled';
-    case ProviderDisabled = 'estate.provider.disabled';
-    case ProviderCapabilitiesDiscovered = 'estate.provider.capabilities_discovered';
-
-    case ConnectionTested = 'estate.connection.tested';
-
-    case CredentialReferenceCreated = 'estate.credential.created';
-    case CredentialReferenceChanged = 'estate.credential.changed';
-    case CredentialReferenceRevoked = 'estate.credential.revoked';
-
-    case LicenceRecorded = 'estate.licence.recorded';
-    case LicenceChanged = 'estate.licence.changed';
-
-    case DeploymentPlanned = 'estate.deployment.planned';
-    case DeploymentApproved = 'estate.deployment.approved';
-    case DeploymentApprovalRevoked = 'estate.deployment.approval_revoked';
-    case DeploymentStarted = 'estate.deployment.started';
-    case DeploymentCompleted = 'estate.deployment.completed';
-    case DeploymentFailed = 'estate.deployment.failed';
-    case DeploymentResolvedByHand = 'estate.deployment.resolved_by_hand';
+    case ConnectionTested = 'providers.connection.tested';
 
     /**
      * Whether the act was a person asserting something the platform could not
