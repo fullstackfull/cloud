@@ -12,6 +12,8 @@ import { cn } from '@/lib/cn'
 interface NavItem {
   to: string
   labelKey: string
+  /** Match this route exactly, so a section's index link is not lit on every child. */
+  end?: boolean
 }
 
 /**
@@ -78,6 +80,8 @@ const OPERATOR_NAV: NavItem[] = [
  * not a module of its own; each screen's requests go to its own concern's API.
  */
 const CONTROL_CENTER_NAV: NavItem[] = [
+  { to: '/admin/control-center', labelKey: 'admin.nav.overview', end: true },
+  { to: '/admin/control-center/sites', labelKey: 'admin.nav.sites' },
   { to: '/admin/control-center/machines', labelKey: 'admin.nav.machines' },
   { to: '/admin/control-center/providers', labelKey: 'admin.nav.providers' },
   { to: '/admin/control-center/discovery', labelKey: 'admin.nav.discovery' },
@@ -204,7 +208,7 @@ function NavItemLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => v
   return (
     <NavLink
       to={item.to}
-      end={item.to === '/'}
+      end={item.end ?? item.to === '/'}
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(

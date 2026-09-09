@@ -23,6 +23,7 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
@@ -207,6 +208,7 @@ class E2ESeeder extends Seeder
         $this->licences();
         $this->machinesAndProviders();
         $this->secondOperator();
+        $this->rack();
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -1003,6 +1005,20 @@ class E2ESeeder extends Seeder
      * A second super-admin. A plan is not approved by the person who planned
      * it, so the browser suite needs two people who may approve.
      */
+    /**
+     * One rack in the seeded datacenter, so the site screen has a row and a
+     * name that already exists to refuse a duplicate of.
+     */
+    private function rack(): void
+    {
+        $datacenter = Datacenter::query()->orderBy('created_at')->firstOrFail();
+
+        Rack::query()->updateOrCreate(
+            ['datacenter_id' => $datacenter->getKey(), 'name' => 'E2E-R1'],
+            ['row' => 'A', 'units' => 42, 'power_notes' => 'Feed A/B from PDU-1', 'network_notes' => 'sw-1 ports 1-24'],
+        );
+    }
+
     private function secondOperator(): void
     {
         $second = User::firstOrCreate(

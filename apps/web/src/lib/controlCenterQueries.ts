@@ -268,6 +268,9 @@ export function useServerFacts(id: string | null) {
 export interface RegisterServerInput {
   name: string
   environment: Environment
+  datacenter_id?: string
+  rack_id?: string
+  rack_unit?: number
   management_address?: string
   bmc_address?: string
   vendor?: string
@@ -819,5 +822,100 @@ export function useCancelDeployment() {
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       admin.post<Envelope<DeploymentJob>>(`/infrastructure/deployments/${encodeURIComponent(id)}/cancel`, { reason }),
     onSuccess: () => { invalidateChainViews(queryClient) },
+  })
+}
+
+/* -------------------------------------------------------------------------
+ | Overview and sites
+ */
+
+export interface InfrastructureOverview {
+  machines: { total: number; by_classification: Record<string, number>; by_state: Record<string, number> }
+  providers: { total: number; by_state: Record<string, number>; by_readiness: Record<string, number> }
+  credentials: { by_state: Record<string, number> }
+  licences: { by_state: Record<string, number> }
+  products: { by_state: Record<string, number> }
+  deployments: { by_state: Record<string, number> }
+  sites: { datacenters: number; racks: number }
+  attention: {
+    deployments_waiting: number
+    providers_enabled_not_ready: number
+    credentials_missing: number
+    licences_expiring: number
+    infrastructure_drift_open: number
+    machines_never_classified: number
+  }
+}
+
+export interface Region { id: string; slug: string; name: string }
+
+export interface Datacenter {
+  id: string
+  slug: string
+  name: string
+  facility: string | null
+  region_id: string
+  region: string | null
+  is_active: boolean
+  racks: number
+  machines: number
+}
+
+export interface Rack {
+  id: string
+  datacenter_id: string
+  datacenter: string | null
+  name: string
+  row: string | null
+  units: number
+  power_notes: string | null
+  network_notes: string | null
+  machines: number
+}
+
+function invalidateSiteViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'sites'] })
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'overview'] })
+}
+
+export function useInfrastructureOverview() {
+  return useQuery({
+    queryKey: ['admin', 'overview'],
+    queryFn: () => admin.get<Envelope<InfrastructureOverview>>('/infrastructure/overview'),
+  })
+}
+
+export function useRegions() {
+  return useQuery({ queryKey: ['admin', 'sites', 'regions'], queryFn: () => admin.get<{ data: Region[] }>('/infrastructure/regions') })
+}
+
+export function useDatacenters() {
+  return useQuery({ queryKey: ['admin', 'sites', 'datacenters'], queryFn: () => admin.get<{ data: Datacenter[] }>('/infrastructure/datacenters') })
+}
+
+export function useRacks(datacenterId?: string) {
+  return useQuery({
+    queryKey: ['admin', 'sites', 'racks', datacenterId],
+    queryFn: () => admin.get<{ data: Rack[] }>('/infrastructure/racks', { datacenter: datacenterId }),
+  })
+}
+
+export function useRegisterDatacenter() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { region_id: string; slug: string; name: string; facility?: string }) =>
+      admin.post<Envelope<Datacenter>>('/infrastructure/datacenters', input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
+  })
+}
+
+export function useRegisterRack() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { datacenter_id: string; name: string; row?: string; units: number; power_notes?: string; network_notes?: string }) =>
+      admin.post<Envelope<Rack>>('/infrastructure/racks', input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
   })
 }

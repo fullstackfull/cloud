@@ -537,7 +537,9 @@
       "discovery": "الاستكشاف",
       "readiness": "الجاهزية",
       "plans": "الخطط",
-      "deployments": "عمليات النشر"
+      "deployments": "عمليات النشر",
+      "overview": "نظرة عامة",
+      "sites": "المواقع"
     },
     "customers": {
       "title": "العملاء",
@@ -895,7 +897,8 @@
         "declared": "مُصرَّح",
         "discovered": "مكتشَف",
         "derived": "مشتق"
-      }
+      },
+      "rackUnit": "وحدة الرف"
     },
     "providers": {
       "title": "المزوّدون",
@@ -1097,6 +1100,51 @@
         "apply": "تطبيق",
         "verify": "تحقّق"
       }
+    },
+    "overview": {
+      "title": "نظرة عامة على البنية التحتية",
+      "subtitle": "المنشأة كما تراها لوحة التحكم، وما يحتاج إلى شخص أولاً.",
+      "attentionHeading": "يحتاج إلى شخص",
+      "nothingNeedsAPerson": "لا شيء ينتظر شخصاً.",
+      "attention": {
+        "deployments_waiting": "عملية نشر توقّفت بلا جواب",
+        "providers_enabled_not_ready": "مزوّد مفعّل لم يعد جاهزاً",
+        "credentials_missing": "اعتماد غير موجود على المتحكّم",
+        "licences_expiring": "ترخيص ينتهي أو منتهٍ",
+        "infrastructure_drift_open": "جهاز انحرف عن ملفه",
+        "machines_never_classified": "جهاز لم يُصنَّف قط"
+      },
+      "tiles": {
+        "machines": "الأجهزة",
+        "providers": "المزوّدون",
+        "credentials": "الاعتمادات",
+        "licences": "التراخيص",
+        "products": "المنتجات",
+        "deployments": "عمليات النشر",
+        "sites": "مراكز البيانات"
+      },
+      "racks": "الرفوف"
+    },
+    "sites": {
+      "title": "المواقع",
+      "subtitle": "أين توجد الأجهزة: مراكز البيانات والرفوف فيها. تُسجَّل ولا تُستنتج.",
+      "registerDatacenter": "تسجيل مركز بيانات",
+      "registerRack": "تسجيل رف",
+      "empty": "لا مراكز بيانات مسجّلة.",
+      "counts": "{{racks}} رفوف · {{machines}} أجهزة",
+      "racksIn": "الرفوف في {{name}}",
+      "row": "الصف {{row}}",
+      "units": "{{units}}U · {{machines}} أجهزة",
+      "region": "المنطقة",
+      "slug": "المعرّف",
+      "name": "الاسم",
+      "facility": "المنشأة",
+      "datacenter": "مركز البيانات",
+      "rackName": "اسم الرف",
+      "rowLabel": "الصف",
+      "unitsLabel": "الوحدات",
+      "powerNotes": "ملاحظات الطاقة",
+      "networkNotes": "ملاحظات الشبكة"
     }
   },
   "backups": {

@@ -1309,6 +1309,136 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/datacenters":
+    get:
+      operationId: "api_admin_infrastructure_datacenters_index"
+      tags:
+        - "Operator"
+      summary: "Datacenters, with how many racks and machines each holds"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Datacenter"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_datacenters_store"
+      tags:
+        - "Operator"
+      summary: "Register a datacenter"
+      description: "Requires the `infrastructure.manage` permission."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                region_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                facility:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DatacenterResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/dedicated":
     get:
       operationId: "api_admin_infrastructure_dedicated"
@@ -1800,6 +1930,60 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/overview":
+    get:
+      operationId: "api_admin_infrastructure_overview"
+      tags:
+        - "Operator"
+      summary: "The estate on one screen"
+      description: |-
+        Counts by state for machines, providers, credentials, licences, products, deployments and sites, and the short list of what needs a person. Reads only.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/InfrastructureOverviewResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/plans/{plan}":
     get:
       operationId: "api_admin_infrastructure_plans_show"
@@ -2033,6 +2217,206 @@ paths:
                     type: "array"
                     items:
                       "$ref": "#/components/schemas/SoftwareProfile"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/racks":
+    get:
+      operationId: "api_admin_infrastructure_racks_index"
+      tags:
+        - "Operator"
+      summary: "Racks, optionally in one datacenter"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "datacenter"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Rack"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_racks_store"
+      tags:
+        - "Operator"
+      summary: "Register a rack"
+      description: |-
+        One name per datacenter (409 otherwise). The power and network notes are free text for a person and are never handed to anything that executes.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                datacenter_id:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                row:
+                  description: "See the endpoint description; validated server-side."
+                units:
+                  description: "See the endpoint description; validated server-side."
+                power_notes:
+                  description: "See the endpoint description; validated server-side."
+                network_notes:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RackResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/regions":
+    get:
+      operationId: "api_admin_infrastructure_regions_index"
+      tags:
+        - "Operator"
+      summary: "Regions a datacenter can be registered in"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Region"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -14700,6 +15084,39 @@ components:
           type:
             - "string"
             - "null"
+    Datacenter:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        facility:
+          type:
+            - "string"
+            - "null"
+        region_id:
+          "$ref": "#/components/schemas/Ulid"
+        region:
+          type:
+            - "string"
+            - "null"
+        is_active:
+          type: "boolean"
+        racks:
+          type: "integer"
+        machines:
+          type: "integer"
+    DatacenterResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Datacenter"
     DedicatedServer:
       type: "object"
       additionalProperties: false
@@ -15505,6 +15922,73 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/HostingPanelSession"
+    InfrastructureOverview:
+      type: "object"
+      additionalProperties: false
+      description: "Counts by state for every control-centre concern, and what needs a person."
+      properties:
+        machines:
+          type: "object"
+          additionalProperties: true
+        total:
+          type: "integer"
+        by_classification:
+          type: "object"
+          additionalProperties:
+            type: "integer"
+        by_state:
+          type: "object"
+          additionalProperties:
+            type: "integer"
+        providers:
+          type: "object"
+          additionalProperties: true
+        by_readiness:
+          type: "object"
+          additionalProperties:
+            type: "integer"
+        credentials:
+          type: "object"
+          additionalProperties: true
+        licences:
+          type: "object"
+          additionalProperties: true
+        products:
+          type: "object"
+          additionalProperties: true
+        deployments:
+          type: "object"
+          additionalProperties: true
+        sites:
+          type: "object"
+          additionalProperties: true
+        datacenters:
+          type: "integer"
+        racks:
+          type: "integer"
+        attention:
+          type: "object"
+          additionalProperties: true
+          description: "Counts of what needs a person. Each is a link on the screen."
+        deployments_waiting:
+          type: "integer"
+        providers_enabled_not_ready:
+          type: "integer"
+        credentials_missing:
+          type: "integer"
+        licences_expiring:
+          type: "integer"
+        infrastructure_drift_open:
+          type: "integer"
+        machines_never_classified:
+          type: "integer"
+    InfrastructureOverviewResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/InfrastructureOverview"
     InvitationOffer:
       type: "object"
       additionalProperties: false
@@ -16930,6 +17414,43 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ProvisioningOperation"
+    Rack:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        datacenter_id:
+          "$ref": "#/components/schemas/Ulid"
+        datacenter:
+          type:
+            - "string"
+            - "null"
+        name:
+          type: "string"
+        row:
+          type:
+            - "string"
+            - "null"
+        units:
+          type: "integer"
+        power_notes:
+          type:
+            - "string"
+            - "null"
+        network_notes:
+          type:
+            - "string"
+            - "null"
+        machines:
+          type: "integer"
+    RackResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Rack"
     ReadinessSweep:
       type: "object"
       additionalProperties: false
@@ -16966,6 +17487,16 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/RecoveryCodes"
+    Region:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
     ReinstallRequest:
       type: "object"
       additionalProperties: false

@@ -12,11 +12,11 @@ reserved for Phase 30B resuming against real systems.
 |---|---|
 | Branch | `claude/hv-t6hq1p` |
 | HEAD at time of writing | see the commit that introduced this revision of the file |
-| Backend tests | 2705 / 2705 passing locally |
+| Backend tests | 2708 / 2708 passing locally |
 | PHPStan | 0 errors |
-| Frontend unit tests | 79 / 79 (17 files) |
-| Browser E2E | 130 tests in 22 files (25 cover Control Center screens) |
-| OpenAPI operations | 205, generator and committed document in agreement |
+| Frontend unit tests | 81 / 81 (18 files) |
+| Browser E2E | 133 tests in 23 files (28 cover Control Center screens) |
+| OpenAPI operations | 211, generator and committed document in agreement |
 
 ---
 
@@ -56,8 +56,8 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 
 | Exit condition | State | What exists / what is missing |
 |---|---|---|
-| Infrastructure Overview | NOT STARTED | No overview screen or aggregate endpoint. |
-| Datacenter/Rack Registry | PARTIAL | Tables pre-existed (`datacenters`, `racks`); `racks` extended with `power_notes`/`network_notes`. No registry actions, API or screen for this phase. |
+| Infrastructure Overview | **COMPLETE** | `GET infrastructure/overview`: counts by state for machines, providers, credentials, licences, products, deployments and sites, and an `attention` block (deployments waiting for a person, enabled providers no longer ready, credentials missing, licences expiring or expired, infrastructure drift open, machines never classified). **Overview screen** at `/admin/control-center` (en/ar): what needs a person first, each a link to the screen that deals with it; a quiet estate says so. Component tests; browser test follows a link from the attention list. |
+| Datacenter/Rack Registry | **COMPLETE** | `RegisterDatacenter` (region, unique slug, name, facility), `RegisterRack` (one name per datacenter → 409 `rack_exists`; row, units, power and network notes as free text for a person, never handed to anything that executes); `GET regions|datacenters|racks` with rack and machine counts; audit `infrastructure.{datacenter,rack}.registered`; OpenAPI; **Sites screen** at `/admin/control-center/sites` (en/ar); the machine register form places a machine in a datacenter, rack and unit. 3 feature tests, 3 browser tests. |
 | Server Registry | **COMPLETE** | `RegisterServer`, `ServerController::{index,show,store}`, `ServerResource`, OpenAPI, audit `infrastructure.server.registered`, 13 + 8 feature tests; **Machines screen** at `/admin/control-center/machines` (en/ar): list with classification and connection in words, register form that says the machine arrives do-not-touch. |
 | Server Detail | **COMPLETE** | The Machines screen's detail panel: classification and its reason (or "never classified"), reimage clearance, credential, connection test with its steps, discovery, and the current facts with their source. Controls are disabled by `safety.permits.*` and the refusal is written on the panel before the click. |
 | Server Onboarding | **COMPLETE** | Register → classify (one rung up, typed name for the destructive rung, reason) → attach credential → test → discover, all from the Machines screen; the browser suite walks register → classify and test → discover on the seeded machines. No wizard: the ladder is the wizard, one rung per decision. |
@@ -86,12 +86,13 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Audit | COMPLETE for what exists | Twenty new actions (nine for the execution chain added) (`product_readiness.{changed,declared_sellable,sellability_withdrawn}` added; assessment audits only on change, so a sweep that concludes what the last one concluded writes nothing), each written by exactly one act via `RecordActAtomically`; `EveryAuditActionIsRecordedSomewhereTest` green. |
 | Security | **COMPLETE** | `EndpointPolicy` (Shared) decides where the control plane may open a connection, checked at registration and again at use: loopback, link-local, unspecified, multicast, `.internal`/`.local`/`localhost` names and the cloud metadata literals refused everywhere, by literal and by what a name resolves to; a provider that is not on our hardware is refused a private address; real drivers HTTPS only, no userinfo; controlled drivers `fake://<marker>` only and never in production; a machine address is a host, never a URL. 21 unit cases + 6 adversarial HTTP tests (`TheControlCenterRefusesTheDangerousInputsTest`): SSRF strings on provider and machine registration, a row written straight to the table refused before a socket opens, a staging credential never resolved for a production target (at attachment and at use, with the secret absent from the response and the audit log), a destructive plan needing the typed name and still refused on a machine nobody cleared, an approval that cannot be moved to another fingerprint. With the earlier findings: no endpoint returns a secret; fake driver and fake controller refused in production; overrides refused unless declared and shaped; no operator text reaches argv; CI refused by the bridge. |
 | Observability | **COMPLETE** | `ControlCenterCollector`: `lynomia_managed_servers{classification,state}`, `lynomia_provider_readiness{category,readiness}`, `lynomia_provider_state{state}`, `lynomia_providers_enabled_not_ready`, `lynomia_credentials{state}`, `lynomia_licences{state}`, `lynomia_product_readiness{product,state}`, `lynomia_deployments{state,kind}` — every combination at zero, no identifying label, one round trip (the query budget rose by exactly one, from 36 to 37). Every audited act already carries its context; the metrics are what pages. 4 feature tests including that every series the alert file names is one the collector emits. |
-| Browser E2E | **COMPLETE for the Control Center** | 25 Control Center browser tests across seven specs (credentials, licences, machines, providers, discovery, readiness, plans+deployments) in English and Arabic. The infrastructure overview screen, when it exists, joins them. |
+| Browser E2E | **COMPLETE** | 28 Control Center browser tests across eight specs (overview+sites, credentials, licences, machines, providers, discovery, readiness, plans+deployments) in English and Arabic, on seeded fixtures, run in CI. |
 | Architecture Gates | COMPLETE | All green, including two new gates (`ANewRecordKnowsItsOwnState`, `TheModulesAreNamedForWhatTheyOwn`, which now also asserts `ProductReadiness` exists as its own module) and one corrected gate (`NoDeadMethods` layer scope). `EveryDomainEventIsConsumedTest` covers `ProviderReadinessChanged`. |
 | Clean Room | NOT STARTED (for this phase) | |
 | CI | **RED through run 99; fixed in the commit carrying this revision** | Runs 95–98 failed at "Check code style" in both backend jobs (five files from the rename commit with reordered imports; `pint --dirty` never re-checks committed files). Run 99 (`5c1a2a2`) got past style and failed one test: `TheModulesAreNamedForWhatTheyOwnTest` asserted `src/Modules/ProductReadiness` exists — it existed locally as three empty, untracked directories, so the gate passed on one machine and failed in CI. The scaffold is deleted and the test now asserts only modules that have code, plus that readiness is not folded into Infrastructure or Providers. All other seven jobs green on run 99. Run 100 (`38a2a45`): both backend jobs green (2570 tests), one browser E2E failure — `wallet-credit.e2e.ts:23`, reproduced on a re-run, not reproducible locally in isolation or in full-suite order. Root cause in the spec: the credit dialogue's confirm button is enabled while the quote is loading and its handler silently does nothing without a quote; the spec asserted `toHaveCount(0)` on a warning (true of an empty dialogue) and clicked, so on a slow runner the click was swallowed. Spec now waits for the quote to render and scopes the button to the dialog. The silently inert button is itself a small UI defect, recorded in H. |
 
-**Closed: 26 of 40 exit conditions in the brief's sense** (Server Registry,
+**Closed: 28 of 40 exit conditions in the brief's sense** (Infrastructure
+Overview, Datacenter/Rack Registry, Server Registry,
 Server Detail, Server Onboarding, Safety Enforcement, Connection Framework,
 Discovery Framework, Provider Registry, Provider Catalog, Licence Center,
 Credential References, Capability Discovery, Requirement Engine, Readiness
@@ -182,7 +183,7 @@ until the first real endpoint exists.
 5. ~~Requirement Engine, product readiness, `READY_TO_SELL`, blocker propagation, dependency view.~~ Done: the `ProductReadiness` module, its screen and its tests. `READY_TO_SELL` exists as a state and nothing on this build can reach it, which is the correct answer for a build with no real provider.
 6. ~~Profiles → desired state → plan (fingerprint) → approval (invalidated on plan change) → deployment jobs → controller bridge → IaC bridge, with timeout/indeterminate states under the Timeout Rule.~~ Done, against the fake controller; the Ansible bridge is tested for what it refuses and what it would run, and has never touched a machine.
 7. ~~SSRF and IaC-input guards; observability.~~ Done.
-8. Control Center frontend (en/ar, RTL/LTR) and browser E2E for the one surface still to come: the infrastructure overview.
+8. ~~Control Center frontend (en/ar, RTL/LTR) and browser E2E.~~ Done: ten screens under `/admin/control-center`, every state a screen shows translated in both languages under the gate, 28 browser tests.
 9. ~~Pre-existing, found while chasing CI: the invoice credit dialogue's confirm button was enabled before the quote had loaded.~~ Fixed: `ConfirmDialog` takes `ready`, and the credit dialogue passes the same condition its handler checks. Component-tested.
 10. Clean room, both matrices, closing questions.
 

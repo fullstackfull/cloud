@@ -15,10 +15,12 @@ import { CredentialsPage } from '@/features/controlCenter/CredentialsPage'
 import { DeploymentsPage } from '@/features/controlCenter/DeploymentsPage'
 import { DiscoveryPage } from '@/features/controlCenter/DiscoveryPage'
 import { LicencesPage } from '@/features/controlCenter/LicencesPage'
+import { OverviewPage } from '@/features/controlCenter/OverviewPage'
 import { PlansPage } from '@/features/controlCenter/PlansPage'
 import { ProvidersPage } from '@/features/controlCenter/ProvidersPage'
 import { ReadinessPage } from '@/features/controlCenter/ReadinessPage'
 import { ServersPage } from '@/features/controlCenter/ServersPage'
+import { SitesPage } from '@/features/controlCenter/SitesPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
 import { CataloguePage } from '@/features/catalog/CataloguePage'
@@ -149,6 +151,8 @@ export function App() {
                   <Route path="/admin/support" element={<AdminSupportPage />} />
                   <Route path="/admin/infrastructure" element={<AdminInfrastructurePage />} />
                   <Route path="/admin/payments" element={<AdminPaymentsPage />} />
+                  <Route path="/admin/control-center" element={<OverviewPage />} />
+                  <Route path="/admin/control-center/sites" element={<SitesPage />} />
                   <Route path="/admin/control-center/credentials" element={<CredentialsPage />} />
                   <Route path="/admin/control-center/licences" element={<LicencesPage />} />
                   <Route path="/admin/control-center/machines" element={<ServersPage />} />

@@ -533,7 +533,9 @@
       "discovery": "Discovery",
       "readiness": "Readiness",
       "plans": "Plans",
-      "deployments": "Deployments"
+      "deployments": "Deployments",
+      "overview": "Overview",
+      "sites": "Sites"
     },
     "customers": {
       "title": "Customers",
@@ -863,7 +865,8 @@
         "declared": "declared",
         "discovered": "discovered",
         "derived": "derived"
-      }
+      },
+      "rackUnit": "Rack unit"
     },
     "providers": {
       "title": "Providers",
@@ -1065,6 +1068,51 @@
         "apply": "Apply",
         "verify": "Verify"
       }
+    },
+    "overview": {
+      "title": "Infrastructure overview",
+      "subtitle": "The estate as the control plane sees it, and what needs a person first.",
+      "attentionHeading": "Needs a person",
+      "nothingNeedsAPerson": "Nothing is waiting for a person.",
+      "attention": {
+        "deployments_waiting": "deployment(s) stopped without an answer",
+        "providers_enabled_not_ready": "enabled provider(s) no longer ready",
+        "credentials_missing": "credential(s) not on the controller",
+        "licences_expiring": "licence(s) expiring or expired",
+        "infrastructure_drift_open": "machine(s) drifted from their profile",
+        "machines_never_classified": "machine(s) never classified"
+      },
+      "tiles": {
+        "machines": "Machines",
+        "providers": "Providers",
+        "credentials": "Credentials",
+        "licences": "Licences",
+        "products": "Products",
+        "deployments": "Deployments",
+        "sites": "Datacenters"
+      },
+      "racks": "Racks"
+    },
+    "sites": {
+      "title": "Sites",
+      "subtitle": "Where machines are: datacenters and the racks in them. Registered, never inferred.",
+      "registerDatacenter": "Register a datacenter",
+      "registerRack": "Register a rack",
+      "empty": "No datacenters registered.",
+      "counts": "{{racks}} racks · {{machines}} machines",
+      "racksIn": "Racks in {{name}}",
+      "row": "Row {{row}}",
+      "units": "{{units}}U · {{machines}} machines",
+      "region": "Region",
+      "slug": "Slug",
+      "name": "Name",
+      "facility": "Facility",
+      "datacenter": "Datacenter",
+      "rackName": "Rack name",
+      "rowLabel": "Row",
+      "unitsLabel": "Units",
+      "powerNotes": "Power notes",
+      "networkNotes": "Network notes"
     }
   },
   "backups": {

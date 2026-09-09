@@ -1165,6 +1165,47 @@ return [
      | machine whose classification does not permit the plan's risk.
      */
 
+    'api.admin.infrastructure.overview' => [
+        'tag' => 'Operator',
+        'summary' => 'The estate on one screen',
+        'description' => 'Counts by state for machines, providers, credentials, licences, products, deployments and sites, and the short list of what needs a person. Reads only.',
+        'permission' => 'infrastructure.view',
+        'response' => $one('InfrastructureOverview'),
+    ],
+    'api.admin.infrastructure.regions.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Regions a datacenter can be registered in',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'Region'],
+    ],
+    'api.admin.infrastructure.datacenters.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Datacenters, with how many racks and machines each holds',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'Datacenter'],
+    ],
+    'api.admin.infrastructure.datacenters.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a datacenter',
+        'permission' => 'infrastructure.manage',
+        'body' => ['region_id', 'slug', 'name', 'facility'],
+        'response' => $one('Datacenter', 201),
+    ],
+    'api.admin.infrastructure.racks.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Racks, optionally in one datacenter',
+        'permission' => 'infrastructure.view',
+        'query' => ['datacenter'],
+        'response' => ['envelope' => 'list', 'schema' => 'Rack'],
+    ],
+    'api.admin.infrastructure.racks.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a rack',
+        'description' => 'One name per datacenter (409 otherwise). The power and network notes are free text for a person and are never handed to anything that executes.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['datacenter_id', 'name', 'row', 'units', 'power_notes', 'network_notes'],
+        'response' => $one('Rack', 201),
+    ],
     'api.admin.infrastructure.profiles.index' => [
         'tag' => 'Operator',
         'summary' => 'The software profiles this build can put on a machine',

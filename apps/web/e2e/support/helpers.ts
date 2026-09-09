@@ -48,6 +48,8 @@ export const fixtures = {
   providerTestable: 'e2e-bmc-node-01',
   providerBlocked: 'e2e-dns',
   machineConfigurable: 'e2e-node-03',
+  rack: 'E2E-R1',
+  datacenter: 'Kuwait Central 1',
 } as const
 
 /**

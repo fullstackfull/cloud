@@ -205,6 +205,8 @@ enum AuditAction: string
     case ServerReimageCleared = 'infrastructure.server.reimage_cleared';
     case ServerReimageClearanceRevoked = 'infrastructure.server.reimage_clearance_revoked';
     case ServerDiscovered = 'infrastructure.server.discovered';
+    case DatacenterRegistered = 'infrastructure.datacenter.registered';
+    case RackRegistered = 'infrastructure.rack.registered';
     case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
     case DesiredStateCleared = 'infrastructure.desired_state.cleared';
     case PlanComputed = 'infrastructure.plan.computed';

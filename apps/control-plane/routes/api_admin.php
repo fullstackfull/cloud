@@ -16,7 +16,9 @@ use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\SiteController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SoftwareProfileController;
 use Lynomia\Modules\ProductReadiness\Http\Controllers\ProductReadinessController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
@@ -250,6 +252,34 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
      | one that stopped is deployment.run. Three decisions, three permissions,
      | and the four-eyes rule inside the approval on top.
      */
+    /*
+     | The overview and the site registry. Reading is the operator-view
+     | permission; registering a place is infrastructure.manage.
+     */
+    Route::get('infrastructure/overview', [OverviewController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.overview');
+
+    Route::get('infrastructure/regions', [SiteController::class, 'regions'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.regions.index');
+
+    Route::get('infrastructure/datacenters', [SiteController::class, 'datacenters'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.datacenters.index');
+
+    Route::post('infrastructure/datacenters', [SiteController::class, 'storeDatacenter'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.datacenters.store');
+
+    Route::get('infrastructure/racks', [SiteController::class, 'racks'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.racks.index');
+
+    Route::post('infrastructure/racks', [SiteController::class, 'storeRack'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.racks.store');
+
     Route::get('infrastructure/profiles', [SoftwareProfileController::class, 'index'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.profiles.index');

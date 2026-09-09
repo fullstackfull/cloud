@@ -20,7 +20,9 @@ import {
   useClassifyServer,
   useClearForReimage,
   useCredentials,
+  useDatacenters,
   useDiscoverServer,
+  useRacks,
   useRegisterServer,
   useRevokeReimageClearance,
   useServerFacts,
@@ -409,6 +411,11 @@ function RegisterServerForm({ onDone }: { onDone: () => void }) {
   const [vendor, setVendor] = useState('')
   const [model, setModel] = useState('')
   const [serial, setSerial] = useState('')
+  const [datacenterId, setDatacenterId] = useState('')
+  const [rackId, setRackId] = useState('')
+  const [rackUnit, setRackUnit] = useState('')
+  const datacenters = useDatacenters()
+  const racks = useRacks()
   const failure = describe(register.error)
   const fieldError = (field: string): string | undefined => failure?.fields?.[field]?.[0]
 
@@ -428,6 +435,9 @@ function RegisterServerForm({ onDone }: { onDone: () => void }) {
               ...(vendor.trim() === '' ? {} : { vendor: vendor.trim() }),
               ...(model.trim() === '' ? {} : { model: model.trim() }),
               ...(serial.trim() === '' ? {} : { serial: serial.trim() }),
+              ...(datacenterId === '' ? {} : { datacenter_id: datacenterId }),
+              ...(rackId === '' ? {} : { rack_id: rackId }),
+              ...(rackUnit.trim() === '' ? {} : { rack_unit: Number(rackUnit) }),
             },
             { onSuccess: onDone },
           )
@@ -448,6 +458,21 @@ function RegisterServerForm({ onDone }: { onDone: () => void }) {
           <Field label={t('admin.servers.vendor')} value={vendor} onChange={(e) => { setVendor(e.target.value); }} error={fieldError('vendor')} dir="ltr" />
           <Field label={t('admin.servers.model')} value={model} onChange={(e) => { setModel(e.target.value); }} error={fieldError('model')} dir="ltr" />
           <Field label={t('admin.servers.serial')} value={serial} onChange={(e) => { setSerial(e.target.value); }} error={fieldError('serial')} dir="ltr" />
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="register-server-datacenter" className="text-sm font-medium">{t('admin.sites.datacenter')}</label>
+            <select id="register-server-datacenter" value={datacenterId} onChange={(e) => { setDatacenterId(e.target.value); setRackId(''); }} className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm">
+              <option value="">—</option>
+              {(datacenters.data?.data ?? []).map((dc) => <option key={dc.id} value={dc.id}>{dc.name}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="register-server-rack" className="text-sm font-medium">{t('admin.sites.rackName')}</label>
+            <select id="register-server-rack" value={rackId} onChange={(e) => { setRackId(e.target.value); }} disabled={datacenterId === ''} className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm">
+              <option value="">—</option>
+              {(racks.data?.data ?? []).filter((rack) => rack.datacenter_id === datacenterId).map((rack) => <option key={rack.id} value={rack.id}>{rack.name}</option>)}
+            </select>
+          </div>
+          <Field label={t('admin.servers.rackUnit')} type="number" min={1} max={60} value={rackUnit} onChange={(e) => { setRackUnit(e.target.value); }} error={fieldError('rack_unit')} dir="ltr" disabled={rackId === ''} />
         </div>
         {failure !== null && failure.fields === null ? <Alert tone="error">{failure.message}</Alert> : null}
         <div className="flex justify-end gap-2">
