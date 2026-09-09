@@ -10,8 +10,13 @@ import { signIn, users } from './support/helpers'
  * country. The spec asks for a country-only change (the seeded account
  * has an open invoice, so a currency change would be blocked — which the
  * API tests cover), and moves the account back at the end so the fixtures
- * are left as they were found.
+ * are left as they were found — the account's country, and its inbox: each
+ * applied change tells the customer, and the seeded inbox holds exactly one
+ * unread notification for the specs that count it.
  */
+
+// Two sessions, two round trips through an operator, and an inbox to tidy.
+test.describe.configure({ timeout: 90_000 })
 
 async function askFor(page: Page, country: string): Promise<void> {
   await page.goto('/')
@@ -66,6 +71,18 @@ test('a country change is asked for by the customer, approved by an operator, an
   await approve(operatorPage)
   await customerPage.reload()
   await expect(customerPage.getByTestId('billed-in')).toHaveText(/KWD · KW/)
+
+  // The two notifications this spec raised, read; the seeded unread one, not.
+  await customerPage.goto('/notifications')
+  const raised = customerPage.getByRole('listitem').filter({ hasText: /now billed in/i })
+  await expect(raised).toHaveCount(2)
+  const unread = raised.getByRole('button', { name: /^mark read$/i })
+  await expect(unread).toHaveCount(2)
+  await unread.first().click()
+  await expect(unread).toHaveCount(1)
+  await unread.first().click()
+  await expect(unread).toHaveCount(0)
+  await expect(customerPage.getByText(/1 unread/i)).toBeVisible()
 
   await customer.close()
   await operator.close()
