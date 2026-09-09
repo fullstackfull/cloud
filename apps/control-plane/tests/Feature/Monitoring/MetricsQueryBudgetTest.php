@@ -57,7 +57,9 @@ final class MetricsQueryBudgetTest extends TestCase
      * same shape: one query each, whatever the number of dispositions. The
      * number moves when collectors are added and must not move when data is.
      */
-    private const int BUDGET = 36;
+    // 36 for the platform, plus the one round trip the control centre
+    // collector makes for all six of its tables.
+    private const int BUDGET = 37;
 
     private MetricsRegistry $registry;
 

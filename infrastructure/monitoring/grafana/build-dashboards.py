@@ -514,6 +514,51 @@ def build_business():
                      p, ["lynomia", "business"], refresh="1m", time_from="now-7d")
 
 
+def build_control_center():
+    p = []
+    p.append(row("Waiting for a person", {"h": 1, "w": 24, "x": 0, "y": 0}))
+    p.append(stat("Deployments waiting", "Indeterminate or needs-review runs. Nothing retries them and nothing else runs on those machines; each one is a person's job.",
+                  [("sum(lynomia_deployments{state=~\"indeterminate|needs_review\"})", "waiting")],
+                  {"h": 4, "w": 6, "x": 0, "y": 1}, graph_mode="area",
+                  steps=[{"color": "green", "value": None}, {"color": "red", "value": 1}]))
+    p.append(stat("Enabled but not ready", "Providers an operator switched on that have since lost a credential, a licence or their endpoint. Nothing switches them off for you.",
+                  [("lynomia_providers_enabled_not_ready", "providers")],
+                  {"h": 4, "w": 6, "x": 6, "y": 1}, graph_mode="area",
+                  steps=[{"color": "green", "value": None}, {"color": "red", "value": 1}]))
+    p.append(stat("Credentials missing", "References the deployment controller has no value behind.",
+                  [("lynomia_credentials{state=\"missing\"}", "missing")],
+                  {"h": 4, "w": 6, "x": 12, "y": 1}, graph_mode="area",
+                  steps=[{"color": "green", "value": None}, {"color": "yellow", "value": 1}]))
+    p.append(stat("Licences lapsing", "Expiring within thirty days, and already expired.",
+                  [("lynomia_licences{state=\"expiring\"}", "expiring"), ("lynomia_licences{state=\"expired\"}", "expired")],
+                  {"h": 4, "w": 6, "x": 18, "y": 1}, graph_mode="area",
+                  steps=[{"color": "green", "value": None}, {"color": "yellow", "value": 1}]))
+
+    p.append(row("The estate", {"h": 1, "w": 24, "x": 0, "y": 5}))
+    p.append(timeseries("Machines by classification",
+                        "A machine arrives do-not-touch and is raised one rung at a time. The shape of this chart is the shape of what the platform is allowed to do.",
+                        [("sum by (classification) (lynomia_managed_servers)", "{{classification}}")],
+                        {"h": 8, "w": 12, "x": 0, "y": 6}, stack=True))
+    p.append(timeseries("Providers by readiness",
+                        "ready_for_production means nothing in the control plane is stopping live use. It is not proof that anything works; that is what a real provider did when asked.",
+                        [("sum by (readiness) (lynomia_provider_readiness)", "{{readiness}}")],
+                        {"h": 8, "w": 12, "x": 12, "y": 6}, stack=True))
+
+    p.append(row("Products", {"h": 1, "w": 24, "x": 0, "y": 14}))
+    p.append(table("Where each product stands",
+                   "One row per product on its rung. ready_to_sell is a person's declaration, withdrawn automatically the moment the evidence goes.",
+                   [("lynomia_product_readiness == 1", "{{product}}: {{state}}")],
+                   {"h": 8, "w": 12, "x": 0, "y": 15}))
+    p.append(timeseries("Deployment runs by state",
+                        "A snapshot, not a rate. Completed and failed are terminal; queued and applying are in flight; the two waiting states are the ones the alert is about.",
+                        [("sum by (state) (lynomia_deployments)", "{{state}}")],
+                        {"h": 8, "w": 12, "x": 12, "y": 15}, stack=True))
+
+    return dashboard("lynomia-control-center", "Control Center",
+                     "Machines, providers, credentials, licences, products and deployments as the control plane sees them. The first row is what needs a person.",
+                     p, ["lynomia", "control-center"])
+
+
 def main():
     out = pathlib.Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
@@ -523,6 +568,7 @@ def main():
         ("hosting", build_hosting),
         ("dedicated", build_dedicated),
         ("business", build_business),
+        ("control-center", build_control_center),
     ]:
         _panel_id[0] = 0
         d = builder()

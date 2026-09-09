@@ -69,6 +69,13 @@ Schedule::command('deployments:detect-stale')
     ->withoutOverlapping()
     ->onOneServer();
 
+// Managed machines that no longer match their profile, into the drift
+// queue with everything else that disagrees with reality. Reads facts only.
+Schedule::command('infrastructure:detect-drift')
+    ->dailyAt('00:40')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('licences:refresh')
     ->dailyAt('00:10')
     ->withoutOverlapping()

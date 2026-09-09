@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Infrastructure\Application\Actions\DetectInfrastructureDrift;
 use Lynomia\Modules\Infrastructure\Domain\Contracts\DeploymentController;
 use Lynomia\Modules\Infrastructure\Domain\DTOs\DeploymentOrder;
 use Lynomia\Modules\Infrastructure\Domain\DTOs\DeploymentOutcome;
@@ -61,6 +62,7 @@ final class RunDeploymentJob implements ShouldQueue
         SoftwareCatalogue $catalogue,
         RecordActAtomically $record,
         SecretRedactor $redactor,
+        DetectInfrastructureDrift $drift,
     ): void {
         $job = $this->claim();
 
@@ -123,6 +125,11 @@ final class RunDeploymentJob implements ShouldQueue
         }
 
         $this->finish($job, $server, DeploymentState::Completed, null, null, $steps, $verified->facts, $record);
+
+        // A verify that came back clean writes fresh facts; a component the
+        // profile wants and the facts do not show is drift, and the drift
+        // queue is where a person will see it.
+        $drift->forServer($server->fresh());
     }
 
     private function claim(): ?DeploymentJob
