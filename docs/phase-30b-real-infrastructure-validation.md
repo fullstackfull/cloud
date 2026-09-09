@@ -490,12 +490,22 @@ must be true and recorded before a profile lands there — an isolated install
 VLAN, every machine that can hear it inventoried and classified, and the target
 `REIMAGE_ALLOWED` with `allow_reimage: true`. None is established.
 
-`playbooks/reimage-node.yml` exists with every gate built and **no destructive
-body**. It requires one named host (refusing `all`, `*`, a list and a group),
-`safety_class: REIMAGE_ALLOWED`, `allow_reimage: true` on that individual host,
-and the operator typing the machine's name. Then it fails with an explanation,
-because an untested wipe sequence left lying about for somebody to trust is
-worse than an honest gap.
+There is no generic reimage playbook, and the one written earlier in this phase
+was deleted with the duplicate tree — correctly, because the guards it carried
+already existed here in a stronger form.
+
+The `opnsense` role, which rewrites the edge firewall's ruleset, refuses three
+times before it acts: unless the host declares `lynomia_role: firewall`, unless
+that individual host carries `allow_reimage: true`, and unless
+`opnsense_console_access_confirmed` is true — because the difference between a
+five-minute mistake and a four-hour outage is whether somebody already had a
+console open when the management path went away. The `pxe` role will not serve
+DHCP without `pxe_allow_serve_dhcp`. None of those flags is set anywhere in any
+inventory, which is the intended steady state: a destructive flag is added for
+one scheduled piece of work against one named host and removed afterwards.
+
+What Phase 30B added in front of all of them is `safety_gate`, which asks first
+whether the machine may be written to at all.
 
 ---
 
@@ -537,7 +547,7 @@ Reviewed and enforced:
 | No credential in logs | Enforced at the Alloy collector |
 | CI cannot apply infrastructure | Enforced by `check-ci-cannot-apply.py` |
 | Default `DO_NOT_TOUCH` | Enforced by `safety_gate` and the inventory validator |
-| No wildcard destructive operations | Enforced by `reimage-node.yml`'s guards |
+| No wildcard destructive operations | Enforced per role: `opnsense` demands a firewall role, `allow_reimage` on that host, and a confirmed open console; `pxe` will not serve DHCP without its own flag. No flag is set in any inventory |
 | Metrics carry no customer identifiers | Enforced by an existing architecture test |
 | Metrics endpoint behind a bearer token | Configured |
 | Management network unreachable from the internet | Designed, not built |

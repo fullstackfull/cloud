@@ -26,9 +26,10 @@ APPLYING = [
     (re.compile(r"\b(tofu|terraform)\s+apply\b"), "applies OpenTofu"),
     (re.compile(r"\b(tofu|terraform)\s+destroy\b"), "destroys OpenTofu resources"),
     (re.compile(r"scripts/apply\.sh"), "runs the apply verb"),
-    (re.compile(r"reimage-node\.yml"), "runs the reimage playbook"),
-    (re.compile(r"deploy-control-plane\.yml"), "runs the deploy playbook"),
-    # A check-mode run is a plan and is fine; a bare ansible-playbook is not.
+    # A check-mode or syntax-check run writes nothing and is fine; a bare
+    # ansible-playbook is not. Matching on the mode rather than on playbook
+    # names means a new playbook is covered the day it is added, and a
+    # legitimate --check step in CI does not have to be argued about.
     (re.compile(r"ansible-playbook(?![^\n]*--(check|syntax-check))"), "runs a playbook outside check mode"),
 ]
 

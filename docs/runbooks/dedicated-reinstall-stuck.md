@@ -39,18 +39,19 @@ filename received" tells you exactly which link failed.
 ## What to do
 
 Settle the operation to reflect what the BMC shows, per
-`provider-indeterminate.md`. Then start the reinstall again deliberately, one
-machine at a time:
+`provider-indeterminate.md`:
 
-```bash
-infrastructure/scripts/preflight.sh production
-ansible-playbook -i infrastructure/ansible/inventories/production/hosts.yml \
-  infrastructure/ansible/playbooks/reimage-node.yml \
-  -e target=<hostname> -e reimage_confirm=<hostname>
+```
+GET  /admin/operations/reinstalls
+POST /admin/operations/reinstalls/dedicated/{operation}/resolve
 ```
 
-Both `target` and `reimage_confirm` name one machine, and the play refuses a
-group, a wildcard or a list.
+Then start the reinstall again deliberately, from the customer's server in the
+operator portal — one machine, with an audit entry against whoever asked for it.
+
+A dedicated reinstall is driven by Lynomia through the BMC, not by Ansible.
+There is no playbook for it and no CLI, which is deliberate: a command that
+takes a hostname is a command that can take a list of them.
 
 ## What not to do
 
