@@ -88,7 +88,7 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Browser E2E | NOT STARTED | 105 existing E2E tests, none for the control centre. |
 | Architecture Gates | COMPLETE | All green, including two new gates (`ANewRecordKnowsItsOwnState`, `TheModulesAreNamedForWhatTheyOwn`) and one corrected gate (`NoDeadMethods` layer scope). |
 | Clean Room | NOT STARTED (for this phase) | |
-| CI | **RED through run 99; fixed in the commit carrying this revision** | Runs 95–98 failed at "Check code style" in both backend jobs (five files from the rename commit with reordered imports; `pint --dirty` never re-checks committed files). Run 99 (`5c1a2a2`) got past style and failed one test: `TheModulesAreNamedForWhatTheyOwnTest` asserted `src/Modules/ProductReadiness` exists — it existed locally as three empty, untracked directories, so the gate passed on one machine and failed in CI. The scaffold is deleted and the test now asserts only modules that have code, plus that readiness is not folded into Infrastructure or Providers. All other seven jobs green on run 99. |
+| CI | **RED through run 99; fixed in the commit carrying this revision** | Runs 95–98 failed at "Check code style" in both backend jobs (five files from the rename commit with reordered imports; `pint --dirty` never re-checks committed files). Run 99 (`5c1a2a2`) got past style and failed one test: `TheModulesAreNamedForWhatTheyOwnTest` asserted `src/Modules/ProductReadiness` exists — it existed locally as three empty, untracked directories, so the gate passed on one machine and failed in CI. The scaffold is deleted and the test now asserts only modules that have code, plus that readiness is not folded into Infrastructure or Providers. All other seven jobs green on run 99. Run 100 (`38a2a45`): both backend jobs green (2570 tests), one browser E2E failure — `wallet-credit.e2e.ts:23`, reproduced on a re-run, not reproducible locally in isolation or in full-suite order. Root cause in the spec: the credit dialogue's confirm button is enabled while the quote is loading and its handler silently does nothing without a quote; the spec asserted `toHaveCount(0)` on a warning (true of an empty dialogue) and clicked, so on a slow runner the click was swallowed. Spec now waits for the quote to render and scopes the button to the dialog. The silently inert button is itself a small UI defect, recorded in H. |
 
 **Closed: 0 of 40 exit conditions in the brief's sense.** Eight are complete at
 the backend level and lack their operator surface; the rest are partial or not
@@ -176,7 +176,8 @@ until the first real endpoint exists.
 6. Profiles → desired state → plan (fingerprint) → approval (invalidated on plan change) → deployment jobs → controller bridge → IaC bridge, with timeout/indeterminate states under the Timeout Rule.
 7. SSRF and IaC-input guards; observability.
 8. Control Center frontend (en/ar, RTL/LTR) and browser E2E.
-9. Clean room, both matrices, closing questions.
+9. Pre-existing, found while chasing CI: the invoice credit dialogue's confirm button is enabled before the quote has loaded and does nothing when pressed then. Not touched in this phase; should be disabled until the quote is present.
+10. Clean room, both matrices, closing questions.
 
 ## I. Closing questions (to be answered at closure)
 
