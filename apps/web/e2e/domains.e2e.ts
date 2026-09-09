@@ -18,6 +18,8 @@ import { signIn, users } from './support/helpers'
 
 const HELD = 'e2e-held.test'
 const UNSURE = 'e2e-unsure.test'
+const LAPSED = 'e2e-lapsed.test'
+const LOST = 'e2e-lost.example'
 
 test.describe('in English', () => {
   test.beforeEach(async ({ page }) => {
@@ -116,6 +118,47 @@ test.describe('in English', () => {
   })
 })
 
+test.describe('a customer whose name lapsed', () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page, users.customer)
+  })
+
+  test('sees the redemption penalty, orders the recovery, and is sent to the invoice', async ({ page }) => {
+    await page.goto('/domains')
+
+    const card = page.locator('section', { hasText: LAPSED }).first()
+    await expect(card.getByText(/redemption window/i)).toBeVisible()
+    // The registry's penalty, from the catalogue: 25.000 KWD on this namespace.
+    await expect(card.getByText(/recovered for the registry's redemption penalty of/i)).toContainText('25.000')
+    // No renewal offered: the ordinary price does not apply.
+    await expect(card.getByRole('button', { name: /^save$/i })).toHaveCount(0)
+
+    await card.getByRole('button', { name: /recover this name/i }).click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText(/redemption penalty/i).first()).toBeVisible()
+    await expect(dialog.getByText(/quote valid until/i)).toBeVisible()
+    await dialog.getByRole('button', { name: /order the recovery/i }).click()
+
+    // Nothing is sent to the registry before payment; the screen says so and
+    // links the invoice.
+    await expect(card.getByText(/waiting for payment/i)).toBeVisible()
+    await card.getByRole('link', { name: /open the invoice/i }).click()
+    await expect(page).toHaveURL(/\/invoices$/)
+    // The penalty, invoiced: 25.000 KWD on this namespace.
+    await expect(page.getByText(/25\.000/).first()).toBeVisible()
+  })
+
+  test('is told plainly when a namespace cannot be recovered, and offered nothing', async ({ page }) => {
+    await page.goto('/domains')
+
+    const card = page.locator('section', { hasText: LOST }).first()
+    await expect(card.getByText(/redemption window/i)).toBeVisible()
+    await expect(card.getByText(/we will not quote a guess/i)).toBeVisible()
+    await expect(card.getByRole('button', { name: /recover this name/i })).toHaveCount(0)
+  })
+})
+
 test.describe('in Arabic', () => {
   test.use({ locale: 'ar' })
 
@@ -134,6 +177,9 @@ test.describe('in Arabic', () => {
     // The same refusal to guess, in Arabic.
     const unsure = page.locator('section', { hasText: UNSURE }).first()
     await expect(unsure.getByText(/لا تُعِد المحاولة/)).toBeVisible()
+
+    const lost = page.locator('section', { hasText: LOST }).first()
+    await expect(lost.getByText(/لن نعرض تخميناً/)).toBeVisible()
 
     await page.getByLabel('اسم النطاق').fill('quiet-unreachable.test')
     await page.getByRole('button', { name: 'بحث' }).click()

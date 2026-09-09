@@ -164,6 +164,7 @@ enum AuditAction: string
      */
     case DomainRegistrationOrdered = 'domain.registration.ordered';
     case DomainRenewalOrdered = 'domain.renewal.ordered';
+    case DomainRedemptionOrdered = 'domain.redemption.ordered';
     case DomainTransferOrdered = 'domain.transfer.ordered';
     case DomainNameserversChanged = 'domain.nameservers.changed';
     case DomainContactsChanged = 'domain.contacts.changed';
@@ -207,6 +208,7 @@ enum AuditAction: string
     case ServerDiscovered = 'infrastructure.server.discovered';
     case DatacenterRegistered = 'infrastructure.datacenter.registered';
     case RackRegistered = 'infrastructure.rack.registered';
+    case GpuDeviceRegistered = 'infrastructure.gpu.registered';
     case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
     case DesiredStateCleared = 'infrastructure.desired_state.cleared';
     case PlanComputed = 'infrastructure.plan.computed';

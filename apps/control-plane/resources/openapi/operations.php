@@ -648,6 +648,13 @@ return [
         'body' => ['quote_id'],
         'response' => $one('DomainOperation', 201),
     ],
+    'api.v1.domains.redemptions.store' => [
+        'tag' => 'Domains',
+        'summary' => 'Recover a name from redemption',
+        'description' => 'Money first, registry second: issues an invoice for the registry\'s penalty from a quote written for this name, and asks the registrar to restore it when the invoice is paid. Refused (409) unless the name is in `redemption` and the namespace\'s registrar can recover names — a registrar that has never said (`.sy`) answers `unknown` and nothing is offered. A second recovery while one is requested, queued, running or indeterminate answers 409: a redemption that timed out may have been performed and charged. A registrar timeout leaves the operation and the name `indeterminate`, never retried; reconciliation settles it against the registry.',
+        'body' => ['quote_id'],
+        'response' => $one('DomainOperation', 201),
+    ],
     'api.v1.domains.transfers.store' => [
         'tag' => 'Domains',
         'summary' => 'Transfer a name in',
@@ -1155,6 +1162,22 @@ return [
         'summary' => 'What is currently known about a machine',
         'permission' => 'infrastructure.view',
         'response' => ['envelope' => 'list', 'schema' => 'ServerFact'],
+    ],
+    'api.admin.infrastructure.servers.gpus.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The GPU devices recorded in a machine',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'GpuDevice'],
+    ],
+    'api.admin.infrastructure.servers.gpus.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a GPU device in a machine',
+        'description' => 'Recording is not touching: a device may be recorded on a machine of any classification and counts as '
+            .'capacity only on one classified to allow configuration. One row per PCI address per machine (409 otherwise). '
+            .'Nothing here raises a classification.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['vendor', 'model', 'vram_mib', 'pci_address', 'passthrough_mode', 'notes'],
+        'response' => $one('GpuDevice', 201),
     ],
     /* ---------------------------------------------------------------------
      | The execution chain

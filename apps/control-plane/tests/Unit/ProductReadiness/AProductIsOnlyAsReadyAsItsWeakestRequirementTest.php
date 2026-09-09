@@ -192,9 +192,9 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
     #[Test]
     public function a_capability_the_product_never_calls_does_not_hold_it_back(): void
     {
-        // Compute asks about resize and console; the VPS product's own
-        // requirement does not list them.
-        $compute = $this->provider(ProviderCategory::Compute, 'proxmox', supports: ['create', 'start', 'stop', 'reboot', 'reinstall', 'suspend', 'unsuspend', 'destroy', 'task_polling']);
+        // Compute asks about gpu_passthrough for the GPU product; the VPS
+        // product's own requirement does not list it.
+        $compute = $this->provider(ProviderCategory::Compute, 'proxmox', supports: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling']);
         $rdns = $this->provider(ProviderCategory::ReverseDns, 'cloudflare_rdns');
 
         $this->assertSame(ProductReadinessState::ReadyForProduction, $this->evaluate(Product::Vps, [...$this->sharedMet(), $compute, $rdns])->state);

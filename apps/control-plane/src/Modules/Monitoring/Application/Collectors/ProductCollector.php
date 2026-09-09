@@ -8,6 +8,8 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
+use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
+use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Monitoring\Domain\Contracts\MetricsCollector;
@@ -65,6 +67,7 @@ final readonly class ProductCollector implements MetricsCollector
             $this->backupRetention(),
             $this->domains(),
             $this->domainOperations(),
+            $this->domainRedemptions(),
             $this->wordPressSites(),
             $this->termination(),
             $this->drift(),
@@ -364,6 +367,36 @@ final readonly class ProductCollector implements MetricsCollector
                 MetricSample::of(['disposition' => 'needs_attention'], (float) $row->needs_attention),
                 MetricSample::of(['disposition' => 'failed'], (float) $row->failed),
             ],
+        );
+    }
+
+    /**
+     * Recoveries of lapsed names, by state.
+     *
+     * Its own series because a redemption is the one domain operation with a
+     * penalty on it and a registry clock behind it: an `indeterminate` here
+     * is money spent on a name that may be about to be released to anybody,
+     * and the alert on it pages for that reason. Labels are the operation's
+     * state enum and nothing else.
+     */
+    private function domainRedemptions(): Metric
+    {
+        $counts = DB::table('domain_operations')
+            ->selectRaw('state, count(*) as total')
+            ->where('kind', DomainOperationKind::Redeem->value)
+            ->groupBy('state')
+            ->pluck('total', 'state');
+
+        $samples = [];
+
+        foreach (DomainOperationState::cases() as $state) {
+            $samples[] = MetricSample::of(['state' => $state->value], (float) ($counts[$state->value] ?? 0));
+        }
+
+        return Metric::gauge(
+            'lynomia_domain_redemptions_total',
+            'Recoveries of lapsed names by state. `indeterminate` is a penalty paid for a name the registry has not confirmed restoring; it is never retried and waits for reconciliation or a person.',
+            $samples,
         );
     }
 

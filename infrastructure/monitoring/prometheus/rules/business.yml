@@ -234,3 +234,29 @@ groups:
             review queue is otherwise a page nobody opens.
           runbook: docs/runbooks/provider-indeterminate.md
           runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
+
+  - name: business.domains
+    rules:
+      - alert: DomainRedemptionNeedsReview
+        # A redemption is a penalty paid to recover a lapsed name, and the
+        # registry's clock keeps running while the answer is unknown. An
+        # indeterminate one is never retried by the platform: the registry
+        # may already have restored the name and charged, and a second
+        # attempt pays the penalty twice. Somebody reads the registry and
+        # settles it — before the window closes and the name is released.
+        expr: >-
+          sum(lynomia_domain_redemptions_total{state=~"indeterminate|needs_review"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          component: domains
+        annotations:
+          summary: '{{ $value | printf "%.0f" }} domain redemption(s) waiting for a person'
+          description: >-
+            A paid recovery of a lapsed name did not get a confirmed answer from the
+            registrar. The platform will not try again. Run the domain reconciliation,
+            or check the registry by hand, and resolve the operation before the
+            redemption window closes.
+          runbook: docs/runbooks/domain-redemption-indeterminate.md
+          runbook_url: https://docs.lynomia.internal/runbooks/domain-redemption-indeterminate
+          dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business

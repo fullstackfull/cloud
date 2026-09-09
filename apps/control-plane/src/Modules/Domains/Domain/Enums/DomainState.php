@@ -190,6 +190,17 @@ enum DomainState: string
      * different operation at a different price, and offering "renew" there
      * would quote the customer a number the registry will not accept.
      */
+    /**
+     * Whether the name can be recovered from redemption — only while the
+     * registry still holds it in that window. A renewal is refused here
+     * (isRenewable) because the ordinary price no longer applies; recovery
+     * is its own operation with the registry's penalty on it.
+     */
+    public function isRedeemable(): bool
+    {
+        return $this === self::Redemption;
+    }
+
     public function isRenewable(): bool
     {
         return match ($this) {

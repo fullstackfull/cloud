@@ -3481,6 +3481,153 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/servers/{server}/gpus":
+    get:
+      operationId: "api_admin_infrastructure_servers_gpus_index"
+      tags:
+        - "Operator"
+      summary: "The GPU devices recorded in a machine"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/GpuDevice"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_servers_gpus_store"
+      tags:
+        - "Operator"
+      summary: "Record a GPU device in a machine"
+      description: |-
+        Recording is not touching: a device may be recorded on a machine of any classification and counts as capacity only on one classified to allow configuration. One row per PCI address per machine (409 otherwise). Nothing here raises a classification.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                vendor:
+                  description: "See the endpoint description; validated server-side."
+                model:
+                  description: "See the endpoint description; validated server-side."
+                vram_mib:
+                  description: "See the endpoint description; validated server-side."
+                pci_address:
+                  description: "See the endpoint description; validated server-side."
+                passthrough_mode:
+                  description: "See the endpoint description; validated server-side."
+                notes:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/GpuDeviceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/servers/{server}/plan":
     post:
       operationId: "api_admin_infrastructure_servers_compute_plan"
@@ -8168,6 +8315,78 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/DomainResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/redemptions":
+    post:
+      operationId: "api_v1_domains_redemptions_store"
+      tags:
+        - "Domains"
+      summary: "Recover a name from redemption"
+      description: "Money first, registry second: issues an invoice for the registry's penalty from a quote written for this name, and asks the registrar to restore it when the invoice is paid. Refused (409) unless the name is in `redemption` and the namespace's registrar can recover names — a registrar that has never said (`.sy`) answers `unknown` and nothing is offered. A second recovery while one is requested, queued, running or indeterminate answers 409: a redemption that timed out may have been performed and charged. A registrar timeout leaves the operation and the name `indeterminate`, never retried; reconciliation settles it against the registry."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                quote_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainOperationResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -15541,8 +15760,16 @@ components:
           description: "Whether nameservers, contacts and the lock can be changed. False while a registration is unconfirmed."
         is_renewable:
           type: "boolean"
+        is_redeemable:
+          type: "boolean"
+          description: "True only in `redemption`. A renewal is refused there; recovery is its own operation with the registry's penalty on it."
         needs_attention:
           type: "boolean"
+        redemption:
+          oneOf:
+            - "$ref": "#/components/schemas/DomainRedemption"
+            - type: "null"
+          description: "Present for a name in redemption or one with a recovery attempt on record; null otherwise."
         term_years:
           type:
             - "integer"
@@ -15690,6 +15917,35 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DomainQuote"
+    DomainRedemption:
+      type: "object"
+      additionalProperties: false
+      description: "Whether a lapsed name can be recovered here, why not if not, the catalogue price, and where the last attempt stands. `unknown` is the .sy answer: no published policy, and the platform will not invent one."
+      properties:
+        support:
+          type: "string"
+          enum:
+            - "supported"
+            - "unsupported"
+            - "unknown"
+            - "blocked_configuration"
+        reason:
+          type: "string"
+        currency:
+          type:
+            - "string"
+            - "null"
+        price_minor:
+          type:
+            - "integer"
+            - "null"
+          description: "The catalogue's list price in minor units. The number the customer pays is the quote's."
+        attempt:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The latest recovery attempt: id, state, invoice_id, needs_attention, failure_message, completed_at."
     DomainResponse:
       type: "object"
       required:
@@ -15771,6 +16027,53 @@ components:
               additionalProperties: true
             request_id:
               type: "string"
+    GpuDevice:
+      type: "object"
+      additionalProperties: false
+      description: "One GPU an operator recorded in a managed machine. It counts as capacity only while available, in a mode a guest can hold, on a machine classified to allow configuration."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        server_id:
+          "$ref": "#/components/schemas/Ulid"
+        vendor:
+          type: "string"
+        model:
+          type: "string"
+        vram_mib:
+          type: "integer"
+        pci_address:
+          type: "string"
+        passthrough_mode:
+          type: "string"
+          enum:
+            - "pci_passthrough"
+            - "vgpu"
+            - "mig"
+            - "none"
+        dedicated:
+          type: "boolean"
+          description: "Whether a guest holding it holds it alone. Only whole-device passthrough is."
+        allocation_state:
+          type: "string"
+          enum:
+            - "available"
+            - "allocated"
+            - "reserved"
+            - "faulted"
+        notes:
+          type:
+            - "string"
+            - "null"
+        registered_at:
+          "$ref": "#/components/schemas/Timestamp"
+    GpuDeviceResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/GpuDevice"
     HostingAccount:
       type: "object"
       additionalProperties: false
@@ -17042,6 +17345,18 @@ components:
             - "domains"
             - "dns"
             - "backups"
+            - "cdn"
+            - "object_storage"
+            - "gpu_compute"
+            - "email_hosting"
+            - "managed_kubernetes"
+        software:
+          type: "string"
+          enum:
+            - "complete"
+            - "prepared"
+            - "readiness_only"
+          description: "How much of the product's software exists. prepared and readiness_only products are capped below production and cannot be declared sellable."
         state:
           type: "string"
           enum:
@@ -17082,6 +17397,8 @@ components:
           items:
             "$ref": "#/components/schemas/ProductRequirement"
           description: "Own requirements first, then the shared ones every product carries (payment, email). Each names the rung it reaches and the provider that carries it."
+        answers:
+          "$ref": "#/components/schemas/ProductReadinessAnswers"
         sellable:
           type: "object"
           additionalProperties: true
@@ -17107,6 +17424,71 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         state_changed_at:
           "$ref": "#/components/schemas/Timestamp"
+    ProductReadinessAnswers:
+      type: "object"
+      additionalProperties: false
+      description: "The questions readiness must answer for every product, each yes, no or not_applicable, derived from the verdict."
+      properties:
+        software:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        infrastructure:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        provider:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        credential:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        licence:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        capabilities:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        dependencies:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        real_validation:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        production:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
+        sellable:
+          type: "string"
+          enum:
+            - "yes"
+            - "no"
+            - "not_applicable"
     ProductReadinessResponse:
       type: "object"
       required:
@@ -17126,6 +17508,11 @@ components:
           items:
             type: "string"
           description: "The capabilities the product's own code calls — narrower than the category's whole question set."
+        optional:
+          type: "array"
+          items:
+            type: "string"
+          description: "Capabilities the product uses only where the provider reports them; their absence is not a blocker."
         shared:
           type: "boolean"
           description: "Carried by every product (payment, email) rather than asked for by this one."

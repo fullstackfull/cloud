@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -23,12 +24,16 @@ import {
   useDatacenters,
   useDiscoverServer,
   useRacks,
+  useRegisterGpu,
   useRegisterServer,
   useRevokeReimageClearance,
   useServerFacts,
+  useServerGpus,
   useServers,
   useTestServerConnection,
+  GPU_PASSTHROUGH_MODES,
   type Environment,
+  type GpuPassthroughMode,
   type SafetyClass,
   type Server,
 } from '@/lib/controlCenterQueries'
@@ -53,7 +58,8 @@ export function ServersPage() {
   const [page, setPage] = useState(1)
   const [environment, setEnvironment] = useState<Environment | ''>('')
   const [registering, setRegistering] = useState(false)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [params] = useSearchParams()
+  const [selectedId, setSelectedId] = useState<string | null>(params.get('open'))
 
   const { data, isPending, error } = useServers(page, environment)
   const selected = data?.data.find((server) => server.id === selectedId) ?? null
@@ -171,6 +177,7 @@ function ServerDetail({ server }: { server: Server }) {
   const [classifying, setClassifying] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [revoking, setRevoking] = useState(false)
+  const [recordingGpu, setRecordingGpu] = useState(false)
 
   const test = useTestServerConnection()
   const discover = useDiscoverServer()
@@ -178,6 +185,7 @@ function ServerDetail({ server }: { server: Server }) {
   const attach = useAttachServerCredential()
   const { data: credentials } = useCredentials(1, server.environment)
   const { data: facts } = useServerFacts(server.id)
+  const { data: gpus } = useServerGpus(server.id)
 
   const canRead = server.safety.permits.read
   const testError = describe(test.error)
@@ -305,8 +313,32 @@ function ServerDetail({ server }: { server: Server }) {
             </dl>
           )}
         </section>
+
+        {/* GPUs: what is in the chassis, and whether it counts. Recording never touches the machine. */}
+        <section className="flex flex-col gap-2" aria-labelledby={`gpus-${server.id}`}>
+          <h3 id={`gpus-${server.id}`} className="text-sm font-semibold">{t('admin.servers.gpuHeading')}</h3>
+          <p className="text-xs text-[var(--text-muted)]">{t('admin.servers.gpuCountsNote')}</p>
+          {gpus === undefined || gpus.data.length === 0 ? (
+            <p className="text-sm text-[var(--text-muted)]">{t('admin.servers.noGpus')}</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-sm" aria-label={t('admin.servers.gpuHeading')}>
+              {gpus.data.map((gpu) => (
+                <li key={gpu.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2">
+                  <span className="technical font-medium">{gpu.vendor} {gpu.model}</span>
+                  <span className="technical text-[var(--text-muted)]">{gpu.vram_mib} MiB · {gpu.pci_address}</span>
+                  <Badge tone={gpu.dedicated ? 'success' : 'neutral'}>{t(`admin.servers.passthroughModes.${gpu.passthrough_mode}`)}</Badge>
+                  <Badge tone={gpu.allocation_state === 'available' ? 'success' : gpu.allocation_state === 'faulted' ? 'danger' : 'neutral'}>{t(`admin.servers.allocationStates.${gpu.allocation_state}`)}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div>
+            <Button size="sm" variant="secondary" onClick={() => { setRecordingGpu(true); }}>{t('admin.servers.registerGpu')}</Button>
+          </div>
+        </section>
       </div>
 
+      {recordingGpu ? <RecordGpuDialog server={server} onClose={() => { setRecordingGpu(false); }} /> : null}
       {classifying ? <ClassifyDialog server={server} onClose={() => { setClassifying(false); }} /> : null}
       {clearing ? <ClearDialog server={server} onClose={() => { setClearing(false); }} /> : null}
 
@@ -371,6 +403,57 @@ function ClassifyDialog({ server, onClose }: { server: Server; onClose: () => vo
         if (target === '') return
         classify.mutate(
           { id: server.id, safety_class: target, reason, ...(destructive ? { confirm_name: phrase } : {}) },
+          { onSuccess: onClose },
+        )
+      }}
+    />
+  )
+}
+
+function RecordGpuDialog({ server, onClose }: { server: Server; onClose: () => void }) {
+  const { t } = useTranslation()
+  const describe = useApiErrorMessage()
+  const register = useRegisterGpu()
+  const [vendor, setVendor] = useState('')
+  const [model, setModel] = useState('')
+  const [vram, setVram] = useState('')
+  const [pci, setPci] = useState('')
+  const [mode, setMode] = useState<GpuPassthroughMode>('pci_passthrough')
+  const [notes, setNotes] = useState('')
+  const failure = describe(register.error)
+  const fieldError = (field: string): string | undefined => failure?.fields?.[field]?.[0]
+  const ready = vendor.trim() !== '' && model.trim() !== '' && Number(vram) > 0 && /^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$/.test(pci.trim())
+
+  return (
+    <ConfirmDialog
+      open
+      title={t('admin.servers.registerGpuTitle', { name: server.name })}
+      body={
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-[var(--text-secondary)]">{t('admin.servers.gpuCountsNote')}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label={t('admin.servers.gpuVendor')} value={vendor} onChange={(e) => { setVendor(e.target.value); }} error={fieldError('vendor')} dir="ltr" required />
+            <Field label={t('admin.servers.gpuModel')} value={model} onChange={(e) => { setModel(e.target.value); }} error={fieldError('model')} dir="ltr" required />
+            <Field label={t('admin.servers.gpuVram')} type="number" min={256} value={vram} onChange={(e) => { setVram(e.target.value); }} error={fieldError('vram_mib')} dir="ltr" required />
+            <Field label={t('admin.servers.gpuPciAddress')} hint={t('admin.servers.gpuPciAddressHint')} value={pci} onChange={(e) => { setPci(e.target.value); }} error={fieldError('pci_address')} dir="ltr" required />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor={`gpu-mode-${server.id}`} className="text-sm font-medium">{t('admin.servers.gpuPassthroughMode')}</label>
+            <select id={`gpu-mode-${server.id}`} value={mode} onChange={(e) => { setMode(e.target.value as GpuPassthroughMode); }} className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm">
+              {GPU_PASSTHROUGH_MODES.map((value) => <option key={value} value={value}>{t(`admin.servers.passthroughModes.${value}`)}</option>)}
+            </select>
+          </div>
+          <Field label={t('admin.servers.gpuNotes')} value={notes} onChange={(e) => { setNotes(e.target.value); }} error={fieldError('notes')} />
+        </div>
+      }
+      confirmLabel={t('admin.servers.registerGpu')}
+      ready={ready}
+      loading={register.isPending}
+      error={failure !== null && failure.fields === null ? failure.message : undefined}
+      onCancel={onClose}
+      onConfirm={() => {
+        register.mutate(
+          { id: server.id, vendor: vendor.trim(), model: model.trim(), vram_mib: Number(vram), pci_address: pci.trim().toLowerCase(), passthrough_mode: mode, ...(notes.trim() === '' ? {} : { notes: notes.trim() }) },
           { onSuccess: onClose },
         )
       }}

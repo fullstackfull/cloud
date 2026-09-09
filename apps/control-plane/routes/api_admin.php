@@ -234,6 +234,14 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.servers.discover');
 
+    Route::get('infrastructure/servers/{server}/gpus', [ServerController::class, 'gpus'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.servers.gpus.index');
+
+    Route::post('infrastructure/servers/{server}/gpus', [ServerController::class, 'registerGpu'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.servers.gpus.store');
+
     Route::get('infrastructure/servers/{server}/facts', [ServerController::class, 'facts'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.servers.facts');

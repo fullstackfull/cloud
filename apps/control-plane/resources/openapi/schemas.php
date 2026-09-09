@@ -101,7 +101,9 @@ return [
             'is_held' => ['type' => 'boolean'],
             'is_manageable' => ['type' => 'boolean', 'description' => 'Whether nameservers, contacts and the lock can be changed. False while a registration is unconfirmed.'],
             'is_renewable' => ['type' => 'boolean'],
+            'is_redeemable' => ['type' => 'boolean', 'description' => 'True only in `redemption`. A renewal is refused there; recovery is its own operation with the registry\'s penalty on it.'],
             'needs_attention' => ['type' => 'boolean'],
+            'redemption' => ['oneOf' => [['$ref' => '#/components/schemas/DomainRedemption'], ['type' => 'null']], 'description' => 'Present for a name in redemption or one with a recovery attempt on record; null otherwise.'],
             'term_years' => ['type' => ['integer', 'null']],
             'auto_renew' => ['type' => 'boolean', 'description' => 'On by default. A lapsed domain is not recoverable at the ordinary price, and it takes the customer\'s mail with it.'],
             'transfer_locked' => ['type' => ['boolean', 'null']],
@@ -111,6 +113,19 @@ return [
             'expires_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'is_expiring' => ['type' => 'boolean', 'description' => 'Computed from the expiry date at read time rather than stored, so it cannot be stale.'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'DomainRedemption' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'Whether a lapsed name can be recovered here, why not if not, the catalogue price, and where the last attempt stands. '
+            .'`unknown` is the .sy answer: no published policy, and the platform will not invent one.',
+        'properties' => [
+            'support' => ['type' => 'string', 'enum' => ['supported', 'unsupported', 'unknown', 'blocked_configuration']],
+            'reason' => ['type' => 'string'],
+            'currency' => ['type' => ['string', 'null']],
+            'price_minor' => ['type' => ['integer', 'null'], 'description' => 'The catalogue\'s list price in minor units. The number the customer pays is the quote\'s.'],
+            'attempt' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => 'The latest recovery attempt: id, state, invoice_id, needs_attention, failure_message, completed_at.'],
         ],
     ],
     'DomainOperation' => [
@@ -714,7 +729,12 @@ return [
         'description' => 'How far one product may be trusted, with the evidence. The engine never says ready_to_sell; '
             .'that rung is a person\'s declaration, and it is withdrawn automatically when the evidence goes.',
         'properties' => [
-            'product' => ['type' => 'string', 'enum' => ['vps', 'dedicated', 'shared_hosting', 'wordpress', 'domains', 'dns', 'backups']],
+            'product' => ['type' => 'string', 'enum' => ['vps', 'dedicated', 'shared_hosting', 'wordpress', 'domains', 'dns', 'backups', 'cdn', 'object_storage', 'gpu_compute', 'email_hosting', 'managed_kubernetes']],
+            'software' => [
+                'type' => 'string',
+                'enum' => ['complete', 'prepared', 'readiness_only'],
+                'description' => 'How much of the product\'s software exists. prepared and readiness_only products are capped below production and cannot be declared sellable.',
+            ],
             'state' => [
                 'type' => 'string',
                 'enum' => ['not_ready', 'ready_for_test', 'ready_for_real_validation', 'ready_for_production', 'ready_to_sell'],
@@ -730,6 +750,7 @@ return [
                 'items' => ['$ref' => '#/components/schemas/ProductRequirement'],
                 'description' => 'Own requirements first, then the shared ones every product carries (payment, email). Each names the rung it reaches and the provider that carries it.',
             ],
+            'answers' => ['$ref' => '#/components/schemas/ProductReadinessAnswers'],
             'sellable' => ['type' => 'object', 'additionalProperties' => true],
             'declared' => ['type' => 'boolean'],
             'declared_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -741,6 +762,15 @@ return [
             'state_changed_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'ProductReadinessAnswers' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'The questions readiness must answer for every product, each yes, no or not_applicable, derived from the verdict.',
+        'properties' => array_fill_keys(
+            ['software', 'infrastructure', 'provider', 'credential', 'licence', 'capabilities', 'dependencies', 'real_validation', 'production', 'sellable'],
+            ['type' => 'string', 'enum' => ['yes', 'no', 'not_applicable']],
+        ),
+    ],
     'ProductRequirement' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -748,6 +778,7 @@ return [
         'properties' => [
             'category' => ['type' => 'string'],
             'capabilities' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'The capabilities the product\'s own code calls — narrower than the category\'s whole question set.'],
+            'optional' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Capabilities the product uses only where the provider reports them; their absence is not a blocker.'],
             'shared' => ['type' => 'boolean', 'description' => 'Carried by every product (payment, email) rather than asked for by this one.'],
             'satisfied_up_to' => ['type' => 'string', 'enum' => ['not_ready', 'ready_for_test', 'ready_for_real_validation', 'ready_for_production']],
             'provider_id' => ['type' => ['string', 'null']],
@@ -781,6 +812,25 @@ return [
             'provider_id' => ['type' => ['string', 'null']],
             'provider_name' => ['type' => ['string', 'null']],
             'satisfied_up_to' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'GpuDevice' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One GPU an operator recorded in a managed machine. It counts as capacity only while available, '
+            .'in a mode a guest can hold, on a machine classified to allow configuration.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'server_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'vendor' => ['type' => 'string'],
+            'model' => ['type' => 'string'],
+            'vram_mib' => ['type' => 'integer'],
+            'pci_address' => ['type' => 'string'],
+            'passthrough_mode' => ['type' => 'string', 'enum' => ['pci_passthrough', 'vgpu', 'mig', 'none']],
+            'dedicated' => ['type' => 'boolean', 'description' => 'Whether a guest holding it holds it alone. Only whole-device passthrough is.'],
+            'allocation_state' => ['type' => 'string', 'enum' => ['available', 'allocated', 'reserved', 'faulted']],
+            'notes' => ['type' => ['string', 'null']],
+            'registered_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
     'ServerFact' => [

@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Domains\Application\Listeners;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Domains\Application\Jobs\RedeemDomainAtRegistrar;
 use Lynomia\Modules\Domains\Application\Jobs\RegisterDomainAtRegistrar;
 use Lynomia\Modules\Domains\Application\Jobs\RenewDomainAtRegistrar;
 use Lynomia\Modules\Domains\Application\Jobs\StartDomainTransfer;
@@ -73,15 +74,9 @@ final class RegisterDomainOnPayment implements ShouldQueue
                 DomainOperationKind::Register => RegisterDomainAtRegistrar::dispatch($operation['id']),
                 DomainOperationKind::Renew => RenewDomainAtRegistrar::dispatch($operation['id']),
                 DomainOperationKind::Transfer => StartDomainTransfer::dispatch($operation['id']),
-
-                /*
-                 * A redemption is not dispatched from here. Recovering a name
-                 * from redemption is a registry request with a penalty fee and
-                 * a manual step at most registrars, and this platform does not
-                 * yet offer it — the catalogue refuses to quote one, so no
-                 * invoice for one can exist to reach this line.
-                 */
-                DomainOperationKind::Redeem => null,
+                // Money first, registry second, the same as every other kind:
+                // the penalty is paid before the registry is asked to restore.
+                DomainOperationKind::Redeem => RedeemDomainAtRegistrar::dispatch($operation['id']),
             };
         }
     }

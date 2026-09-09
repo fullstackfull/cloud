@@ -65,6 +65,11 @@ Route::prefix('domains')->as('domains.')->group(function (): void {
         ->middleware('throttle:10,1,domain-order:')
         ->name('renewals.store');
 
+    Route::post('{domain}/redemptions', [DomainController::class, 'redeem'])
+        ->whereUlid('domain')
+        ->middleware('throttle:10,1,domain-order:')
+        ->name('redemptions.store');
+
     Route::put('{domain}/nameservers', [DomainController::class, 'setNameservers'])
         ->whereUlid('domain')
         ->middleware('throttle:30,1,domain-manage:')

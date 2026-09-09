@@ -257,6 +257,45 @@ export function useServer(id: string | null) {
   })
 }
 
+export type GpuPassthroughMode = 'pci_passthrough' | 'vgpu' | 'mig' | 'none'
+
+export const GPU_PASSTHROUGH_MODES: GpuPassthroughMode[] = ['pci_passthrough', 'vgpu', 'mig', 'none']
+
+export interface GpuDevice {
+  id: string
+  server_id: string
+  vendor: string
+  model: string
+  vram_mib: number
+  pci_address: string
+  passthrough_mode: GpuPassthroughMode
+  dedicated: boolean
+  allocation_state: 'available' | 'allocated' | 'reserved' | 'faulted'
+  notes: string | null
+  registered_at: string | null
+}
+
+export function useServerGpus(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'servers', 'gpus', id],
+    queryFn: () => admin.get<{ data: GpuDevice[] }>(`/infrastructure/servers/${encodeURIComponent(id ?? '')}/gpus`),
+    enabled: id !== null,
+  })
+}
+
+export function useRegisterGpu() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string; vendor: string; model: string; vram_mib: number; pci_address: string; passthrough_mode: GpuPassthroughMode; notes?: string }) =>
+      admin.post<Envelope<GpuDevice>>(`/infrastructure/servers/${encodeURIComponent(id)}/gpus`, input),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'servers', 'gpus', variables.id] })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'readiness'] })
+    },
+  })
+}
+
 export function useServerFacts(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'servers', 'facts', id],
@@ -530,7 +569,17 @@ export function useAttachProviderLicence() {
  | Product readiness
  */
 
-export type ProductName = 'vps' | 'dedicated' | 'shared_hosting' | 'wordpress' | 'domains' | 'dns' | 'backups'
+export type ProductName =
+  | 'vps' | 'dedicated' | 'shared_hosting' | 'wordpress' | 'domains' | 'dns' | 'backups'
+  | 'cdn' | 'object_storage' | 'gpu_compute' | 'email_hosting' | 'managed_kubernetes'
+
+export type ProductSoftwareState = 'complete' | 'prepared' | 'readiness_only'
+
+export type ReadinessAnswer = 'yes' | 'no' | 'not_applicable'
+
+export const READINESS_QUESTIONS = ['software', 'infrastructure', 'provider', 'credential', 'licence', 'capabilities', 'dependencies', 'real_validation', 'production', 'sellable'] as const
+
+export type ReadinessQuestion = (typeof READINESS_QUESTIONS)[number]
 
 export type ProductReadinessState = 'not_ready' | 'ready_for_test' | 'ready_for_real_validation' | 'ready_for_production' | 'ready_to_sell'
 
@@ -539,6 +588,7 @@ export const READINESS_LADDER: ProductReadinessState[] = ['not_ready', 'ready_fo
 export interface RequirementRow {
   category: string
   capabilities: string[]
+  optional: string[]
   shared: boolean
   satisfied_up_to: ProductReadinessState
   provider_id: string | null
@@ -550,6 +600,7 @@ export interface RequirementRow {
 
 export interface ProductReadiness {
   product: ProductName
+  software: ProductSoftwareState
   state: ProductReadinessState
   next_state: ProductReadinessState | null
   blocker: string | null
@@ -558,6 +609,7 @@ export interface ProductReadiness {
   depends_on: ProductName[]
   dependencies: Record<string, ProductReadinessState>
   requirements: RequirementRow[]
+  answers: Record<ReadinessQuestion, ReadinessAnswer>
   sellable: {
     declared: boolean
     declared_at: string | null

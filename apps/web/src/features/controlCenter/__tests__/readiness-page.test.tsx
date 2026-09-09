@@ -17,6 +17,7 @@ import '@/i18n'
 const REQUIREMENT = {
   category: 'dns',
   capabilities: ['create_zone', 'records'],
+  optional: [],
   shared: false,
   satisfied_up_to: 'not_ready',
   provider_id: '01JPRV',
@@ -26,8 +27,11 @@ const REQUIREMENT = {
   detail: 'dns-live is not_ready (blocked).',
 }
 
+const ANSWERS = { software: 'yes', infrastructure: 'not_applicable', provider: 'yes', credential: 'no', licence: 'yes', capabilities: 'no', dependencies: 'not_applicable', real_validation: 'no', production: 'no', sellable: 'no' }
+
 const BLOCKED = {
   product: 'dns',
+  software: 'complete',
   state: 'not_ready',
   next_state: 'ready_for_test',
   blocker: 'blocked_credentials',
@@ -35,10 +39,26 @@ const BLOCKED = {
   detail: 'dns: dns-live is not_ready (blocked).',
   depends_on: [],
   dependencies: {},
-  requirements: [REQUIREMENT, { ...REQUIREMENT, category: 'payment', shared: true, provider_name: null, blocker: 'blocked_dependency', detail: 'No payment provider is registered.' }],
+  requirements: [REQUIREMENT, { ...REQUIREMENT, category: 'payment', shared: true, provider_id: null, provider_name: null, blocker: 'blocked_dependency', detail: 'No payment provider is registered.' }],
+  answers: ANSWERS,
   sellable: { declared: false, declared_at: null, reason: null, validation_reference: null, withdrawn_at: null, withdrawn_reason: null },
   assessed_at: '2026-09-09T08:00:00+00:00',
   state_changed_at: null,
+}
+
+const PREPARED = {
+  ...BLOCKED,
+  product: 'cdn',
+  software: 'prepared',
+  state: 'ready_for_real_validation',
+  next_state: 'ready_for_production',
+  blocker: 'not_implemented',
+  next_action: 'controlCenter.guidance.notImplemented',
+  detail: 'The providers would carry this to ready_for_production, but the product\'s software is prepared: there is no customer flow to enable.',
+  depends_on: ['dns'],
+  dependencies: { dns: 'ready_for_production' },
+  requirements: [{ ...REQUIREMENT, category: 'cdn', capabilities: ['enable', 'purge_all'], satisfied_up_to: 'ready_for_production', blocker: null, next_action: null, provider_name: 'cdn-live', detail: 'cdn-live is enabled in production and supports everything asked.' }],
+  answers: { ...ANSWERS, software: 'no', credential: 'yes', capabilities: 'yes', dependencies: 'yes' },
 }
 
 const READY = {
@@ -49,7 +69,8 @@ const READY = {
   blocker: null,
   next_action: null,
   detail: 'Every requirement is met by a real provider enabled in production. Not yet declared sellable.',
-  requirements: [{ ...REQUIREMENT, category: 'registrar', satisfied_up_to: 'ready_for_production', blocker: null, next_action: null, provider_name: 'sy-live' }],
+  requirements: [{ ...REQUIREMENT, category: 'registrar', optional: ['redemption'], satisfied_up_to: 'ready_for_production', blocker: null, next_action: null, provider_name: 'sy-live' }],
+  answers: { ...ANSWERS, credential: 'yes', capabilities: 'yes', production: 'yes' },
 }
 
 function stubFetch(onDeclare?: (product: string, body: unknown) => void) {
@@ -66,7 +87,7 @@ function stubFetch(onDeclare?: (product: string, body: unknown) => void) {
       onDeclare?.(path, parsed)
       body = { data: { ...READY, state: 'ready_to_sell', next_state: null, sellable: { ...READY.sellable, declared: true, declared_at: '2026-09-09T09:00:00+00:00', validation_reference: parsed?.validation_reference } } }
     } else if (path.endsWith('/readiness/products')) {
-      body = { data: [BLOCKED, READY] }
+      body = { data: [BLOCKED, READY, PREPARED] }
     } else if (path.endsWith('/readiness/dependencies')) {
       body = { data: [{ product: 'dns', state: 'not_ready', depends_on: [], providers: [{ category: 'dns', shared: false, provider_id: '01JPRV', provider_name: 'dns-live', satisfied_up_to: 'not_ready' }] }] }
     } else {
@@ -114,6 +135,35 @@ describe('ReadinessPage', () => {
     expect(within(dns).getByText(/blocked: credentials/i)).toBeInTheDocument()
     expect(within(dns).getByText(/attach a credential the controller holds/i)).toBeInTheDocument()
     expect(screen.queryByText(/controlCenter\.guidance/)).not.toBeInTheDocument()
+  })
+
+  it('answers the ten questions per product, names the software state, and links the blocker to what carries it', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+    renderPage()
+
+    const products = await screen.findByRole('list', { name: /^product readiness$/i })
+    const dns = within(products).getByRole('listitem', { name: /^dns$/i })
+    // The grid: each question, in words, with its answer in words.
+    expect(within(dns).getByText(/^credential available\?$/i).nextElementSibling).toHaveTextContent(/^no$/i)
+    expect(within(dns).getByText(/^infrastructure available\?$/i).nextElementSibling).toHaveTextContent(/not applicable/i)
+    expect(within(dns).getByText(/^software complete$/i)).toBeInTheDocument()
+    // A credential blocker links to the credentials screen.
+    expect(within(dns).getByRole('link', { name: /^credentials$/i })).toHaveAttribute('href', '/admin/control-center/credentials')
+    // The requirement's provider is a link that opens that provider.
+    expect(within(dns).getByRole('link', { name: /open provider: dns-live/i })).toHaveAttribute('href', '/admin/control-center/providers?open=01JPRV')
+
+    // A prepared product says so, is capped, and offers no link for a blocker nobody can move.
+    const cdn = within(products).getByRole('listitem', { name: /^cdn$/i })
+    expect(within(cdn).getByText(/^software prepared$/i)).toBeInTheDocument()
+    expect(within(cdn).getByText(/not implemented/i)).toHaveTextContent(/to reach ready for production/i)
+    expect(within(cdn).getByText(/software is not written yet/i)).toBeInTheDocument()
+    expect(within(cdn).getByRole('button', { name: /declare sellable/i })).toBeDisabled()
+    expect(within(cdn).queryByRole('link', { name: /^providers$/i })).not.toBeInTheDocument()
+
+    // Optional capabilities are marked as such.
+    const domains = within(products).getByRole('listitem', { name: /^domains$/i })
+    expect(within(domains).getByText(/redemption/)).toHaveTextContent(/\(optional\)/)
+    expect(screen.queryByText(/controlCenter\.guidance|not_implemented/)).not.toBeInTheDocument()
   })
 
   it('does not offer the declaration below production', async () => {

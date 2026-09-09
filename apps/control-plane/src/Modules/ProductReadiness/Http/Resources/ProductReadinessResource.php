@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductReadinessState;
+use Lynomia\Modules\ProductReadiness\Domain\Services\ReadinessQuestions;
 use Lynomia\Modules\ProductReadiness\Infrastructure\Models\ProductReadiness;
 
 /**
@@ -25,8 +26,12 @@ final class ProductReadinessResource extends JsonResource
         /** @var ProductReadinessState $state */
         $state = $this->state;
 
+        $requirements = $this->requirements ?? [];
+        $dependencies = $this->dependencies ?? [];
+
         return [
             'product' => $product->value,
+            'software' => $product->softwareState()->value,
             'state' => $state->value,
             // The rung after this one, so the screen can say what the blocker
             // is a blocker TO.
@@ -35,8 +40,11 @@ final class ProductReadinessResource extends JsonResource
             'next_action' => $this->blocker?->nextAction(),
             'detail' => $this->detail,
             'depends_on' => array_map(static fn (Product $p): string => $p->value, $product->dependsOn()),
-            'dependencies' => (object) ($this->dependencies ?? []),
-            'requirements' => $this->requirements ?? [],
+            'dependencies' => (object) $dependencies,
+            'requirements' => $requirements,
+            // The questions the addendum says readiness must answer, derived
+            // from the row so they cannot disagree with the ladder.
+            'answers' => (new ReadinessQuestions)->answer($product, $state, $requirements, $dependencies, $this->isDeclaredSellable(), $this->blocker),
             'sellable' => [
                 'declared' => $this->isDeclaredSellable(),
                 'declared_at' => $this->declared_sellable_at?->toIso8601String(),

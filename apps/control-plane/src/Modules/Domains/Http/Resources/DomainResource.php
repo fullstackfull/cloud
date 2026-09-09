@@ -6,7 +6,13 @@ namespace Lynomia\Modules\Domains\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Modules\Domains\Domain\DTOs\RedemptionAnswer;
+use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
+use Lynomia\Modules\Domains\Domain\Enums\RedemptionSupport;
+use Lynomia\Modules\Domains\Domain\Services\RedemptionAvailability;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 
 /**
  * One name, as the account holding it may see it.
@@ -40,7 +46,14 @@ final class DomainResource extends JsonResource
             'is_held' => $this->state->isHeld(),
             'is_manageable' => $this->state->isManageable(),
             'is_renewable' => $this->state->isRenewable(),
+            'is_redeemable' => $this->state->isRedeemable(),
             'needs_attention' => $this->state->needsAttention(),
+
+            // Only for a name in redemption: whether it can be recovered here,
+            // why not if not, the catalogue price, and where the last attempt
+            // stands. Null for every other state, so a screen cannot offer a
+            // recovery for a name that does not need one.
+            'redemption' => $this->redemption(),
 
             'term_years' => $this->term_years,
             'auto_renew' => $this->auto_renew,
@@ -56,5 +69,47 @@ final class DomainResource extends JsonResource
 
             'created_at' => $this->created_at->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function redemption(): ?array
+    {
+        if (! $this->state->isRedeemable() && ! $this->latestRedemption() instanceof DomainOperation) {
+            return null;
+        }
+
+        $tld = DomainTld::query()->where('tld', $this->tld)->first();
+        $answer = $tld instanceof DomainTld
+            ? app(RedemptionAvailability::class)->forTld($tld)
+            : RedemptionAnswer::unavailable(RedemptionSupport::BlockedConfiguration, 'This namespace is not sold here.');
+        $attempt = $this->latestRedemption();
+
+        return [
+            'support' => $answer->support->value,
+            'reason' => $answer->reason,
+            'currency' => $answer->price?->currency(),
+            'price_minor' => $answer->price?->minorUnits(),
+            'attempt' => $attempt === null ? null : [
+                'id' => $attempt->id,
+                'state' => $attempt->state->value,
+                'invoice_id' => $attempt->invoice_id,
+                'needs_attention' => $attempt->state->needsAttention(),
+                'failure_message' => $attempt->failure_message,
+                'completed_at' => $attempt->completed_at?->toIso8601String(),
+            ],
+        ];
+    }
+
+    private function latestRedemption(): ?DomainOperation
+    {
+        /** @var DomainOperation|null $latest */
+        $latest = $this->operations()
+            ->where('kind', DomainOperationKind::Redeem->value)
+            ->latest('created_at')
+            ->first();
+
+        return $latest;
     }
 }

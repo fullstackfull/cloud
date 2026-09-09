@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Domains\Domain\Exceptions;
 
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
+use Lynomia\Modules\Domains\Domain\Enums\RedemptionSupport;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
 /**
@@ -137,6 +138,14 @@ final class DomainRefusedException extends DomainException
             ->as('domain.capability_unsupported')
             ->status(409)
             ->withContext(['capability' => $capability]);
+    }
+
+    public static function becauseRedemptionIsUnavailable(string $tld, RedemptionSupport $support, string $reason): self
+    {
+        return (new self($reason))
+            ->as('domain.redemption_unavailable')
+            ->status(409)
+            ->withContext(['tld' => $tld, 'support' => $support->value]);
     }
 
     public static function becauseAnOperationIsAlreadyRunning(string $name): self
