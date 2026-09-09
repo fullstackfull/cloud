@@ -1316,6 +1316,76 @@ return [
         'permission' => 'credential.manage',
         'response' => $one('Server'),
     ],
+    /* ---------------------------------------------------------------------
+     | Licences — what was bought, what it covers, when it lapses
+     */
+
+    'api.admin.licences.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Licences',
+        'description' => 'Expired and invalid first, then expiring, then the rest by when they lapse.',
+        'permission' => 'infrastructure.view',
+        'query' => ['environment', 'state'],
+        'response' => $many('Licence'),
+    ],
+    'api.admin.licences.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One licence',
+        'permission' => 'infrastructure.view',
+        'response' => $one('Licence'),
+    ],
+    'api.admin.licences.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a licence',
+        'description' => 'The state is computed from the dates: pending before it starts, active, expiring within '
+            .'thirty days, expired after. Recording an already-expired licence is allowed and honest. A licence key '
+            .'posted under any name is refused: keys are credential references. 409 for a machine or credential in '
+            .'another environment.',
+        'permission' => 'licence.manage',
+        'body' => ['product', 'licence_type', 'environment', 'managed_server_id', 'credential_id', 'starts_on', 'expires_on', 'renews_on', 'seats', 'external_reference', 'notes'],
+        'response' => $one('Licence', 201),
+    ],
+    'api.admin.licences.refresh' => [
+        'tag' => 'Operator',
+        'summary' => 'Let the calendar move licence states now',
+        'description' => 'The same sweep the scheduler runs nightly. Each state change is audited and the providers '
+            .'under it reassessed. Invalid and not-required are decisions, not dates, and are left alone.',
+        'permission' => 'licence.manage',
+        'response' => $one('LicenceSweep'),
+    ],
+    'api.admin.licences.renew' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a renewal',
+        'description' => 'A new fact from the vendor: clears an invalidation, recomputes the state from the new dates '
+            .'and reassesses every provider under the licence at once. 409 for an expiry that is not in the future.',
+        'permission' => 'licence.manage',
+        'body' => ['expires_on', 'renews_on', 'external_reference'],
+        'response' => $one('Licence'),
+    ],
+    'api.admin.licences.invalidate' => [
+        'tag' => 'Operator',
+        'summary' => 'Record that the vendor rejected a licence',
+        'description' => 'The one override of the calendar, and it only goes this way: nothing an operator types '
+            .'makes an expired licence active. Every provider under it reports a licence blocker with the reason. '
+            .'Nothing is switched off.',
+        'permission' => 'licence.manage',
+        'body' => ['reason'],
+        'response' => $one('Licence'),
+    ],
+    'api.admin.providers.attach_licence' => [
+        'tag' => 'Operator',
+        'summary' => 'Say which licence a provider runs under',
+        'description' => '409 for an invalid licence or one from another environment. Readiness is recomputed.',
+        'permission' => 'licence.manage',
+        'body' => ['licence_id'],
+        'response' => $one('Provider'),
+    ],
+    'api.admin.providers.detach_licence' => [
+        'tag' => 'Operator',
+        'summary' => 'Remove the licence from a provider',
+        'permission' => 'licence.manage',
+        'response' => $one('Provider'),
+    ],
     'api.admin.audit.index' => [
         'tag' => 'Operator',
         'summary' => 'The permanent record',

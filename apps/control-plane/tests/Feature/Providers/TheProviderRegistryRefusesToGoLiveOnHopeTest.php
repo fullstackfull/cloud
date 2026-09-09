@@ -332,9 +332,7 @@ final class TheProviderRegistryRefusesToGoLiveOnHopeTest extends TestCase
          * surface, and checks the state moves at each step for the reason that
          * step exists.
          *
-         * The credential is attached directly rather than through an endpoint,
-         * because the Credential Center is the next thing being built. That is
-         * the one seam in this walk and it is named rather than hidden.
+         * Every step goes through the HTTP surface an operator would use.
          */
         $operator = $this->operator();
 
@@ -345,14 +343,13 @@ final class TheProviderRegistryRefusesToGoLiveOnHopeTest extends TestCase
         $this->assertSame(ConnectionState::NotTested, $provider->connection_state);
         $this->assertSame(ReadinessState::NotReady, $provider->readiness);
 
-        // 2. A credential exists, and is merely configured — nobody has used
-        //    it yet, so this must not be enough to serve.
-        $provider->forceFill([
-            'credential_reference_id' => $this->credential(CredentialState::Configured)->getKey(),
-        ])->save();
-
+        // 2. A credential is attached through the credential centre, and is
+        //    merely configured — nobody has used it yet, so this must not be
+        //    enough to serve. The attachment itself already says so.
         $this->actingAs($operator)
-            ->postJson("/api/admin/providers/{$provider->id}/assess")
+            ->postJson("/api/admin/providers/{$provider->id}/credential", [
+                'credential_id' => $this->credential(CredentialState::Configured)->id,
+            ])
             ->assertOk()
             ->assertJsonPath('data.readiness.blocker', 'blocked_credentials');
 

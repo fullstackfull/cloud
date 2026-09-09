@@ -29,6 +29,7 @@ use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
@@ -118,6 +119,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             // The Control Center. Each concern's states join here in the
             // commit that gives them a screen, not before.
             CredentialState::class,
+            LicenceState::class,
         ],
 
         /*

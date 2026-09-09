@@ -79,6 +79,7 @@ const OPERATOR_NAV: NavItem[] = [
  */
 const CONTROL_CENTER_NAV: NavItem[] = [
   { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
+  { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },
 ]
 
 export function AppLayout() {

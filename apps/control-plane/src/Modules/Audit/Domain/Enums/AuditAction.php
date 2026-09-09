@@ -214,6 +214,12 @@ enum AuditAction: string
     case CredentialDetached = 'providers.credential.detached';
     case CredentialRotated = 'providers.credential.rotated';
     case CredentialRevoked = 'providers.credential.revoked';
+    case LicenceRecorded = 'providers.licence.recorded';
+    case LicenceAttached = 'providers.licence.attached';
+    case LicenceDetached = 'providers.licence.detached';
+    case LicenceRenewed = 'providers.licence.renewed';
+    case LicenceInvalidated = 'providers.licence.invalidated';
+    case LicenceStateChanged = 'providers.licence.state_changed';
 
     /**
      * Whether the act was a person asserting something the platform could not

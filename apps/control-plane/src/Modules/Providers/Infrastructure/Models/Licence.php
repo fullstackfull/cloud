@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
@@ -26,7 +27,20 @@ use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
  * external_reference here is an order number or account id — the thing a
  * person quotes to the vendor's support desk, which is not a secret.
  *
+ * @property string $id
  * @property string $product
+ * @property ?string $licence_type
+ * @property ?int $seats
+ * @property ?string $external_reference
+ * @property ?string $notes
+ * @property ?string $invalidated_reason
+ * @property ?CarbonImmutable $starts_on
+ * @property ?CarbonImmutable $renews_on
+ * @property ?CarbonImmutable $state_changed_at
+ * @property ?CarbonImmutable $renewed_at
+ * @property ?CarbonImmutable $invalidated_at
+ * @property ?CarbonImmutable $created_at
+ * @property-read ?int $provider_instances_count
  * @property DeploymentEnvironment $environment
  * @property LicenceState $state
  * @property ?CarbonImmutable $expires_on
@@ -66,6 +80,9 @@ class Licence extends Model
             'expires_on' => 'immutable_date',
             'renews_on' => 'immutable_date',
             'seats' => 'integer',
+            'state_changed_at' => 'immutable_datetime',
+            'renewed_at' => 'immutable_datetime',
+            'invalidated_at' => 'immutable_datetime',
         ];
     }
 
@@ -91,6 +108,14 @@ class Licence extends Model
      * Negative when it already has, so that "expired eleven days ago" is
      * sayable — an operator needs the number as much as the fact.
      */
+    /**
+     * @return HasMany<ProviderInstance, $this>
+     */
+    public function providerInstances(): HasMany
+    {
+        return $this->hasMany(ProviderInstance::class, 'licence_id');
+    }
+
     public function daysRemaining(?CarbonImmutable $now = null): ?int
     {
         if ($this->expires_on === null) {
@@ -112,6 +137,14 @@ class Licence extends Model
     {
         if ($this->state === LicenceState::NotRequired || $this->state === LicenceState::Invalid) {
             return $this->state;
+        }
+
+        $today = ($now ?? CarbonImmutable::now())->startOfDay();
+
+        // Bought but not yet in force. The calendar decides this too, and a
+        // licence whose start is tomorrow permits nothing today.
+        if ($this->starts_on !== null && $this->starts_on->startOfDay()->isAfter($today)) {
+            return LicenceState::Pending;
         }
 
         $remaining = $this->daysRemaining($now);

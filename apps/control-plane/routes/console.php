@@ -56,6 +56,17 @@ Schedule::command('subscriptions:sweep')
  *
  * It corrects nothing — see the command for why.
  */
+/*
+ * Licence states are stored, so a licence that lapses at midnight is still
+ * "active" in the database until something looks. This looks, once a day,
+ * early enough that the morning's first screen is right. Each change is
+ * audited and the providers under it reassessed.
+ */
+Schedule::command('licences:refresh')
+    ->dailyAt('00:10')
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('wallet:verify')
     ->dailyAt('03:20')
     ->withoutOverlapping(30)

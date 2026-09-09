@@ -12,11 +12,11 @@ reserved for Phase 30B resuming against real systems.
 |---|---|
 | Branch | `claude/hv-t6hq1p` |
 | HEAD at time of writing | see the commit that introduced this revision of the file |
-| Backend tests | 2589 / 2589 passing locally |
+| Backend tests | 2605 / 2605 passing locally |
 | PHPStan | 0 errors |
-| Frontend unit tests | 61 / 61 (11 files) |
-| Browser E2E | 110 tests in 16 files (5 cover the Control Center credentials screen) |
-| OpenAPI operations | 174, generator and committed document in agreement |
+| Frontend unit tests | 64 / 64 (12 files) |
+| Browser E2E | 115 tests in 17 files (10 cover Control Center screens) |
+| OpenAPI operations | 182, generator and committed document in agreement |
 
 ---
 
@@ -66,7 +66,7 @@ Legend: **COMPLETE** = full chain built and tested · **PARTIAL** = some links b
 | Provider Registry | COMPLETE (backend) | `RegisterProvider` / `EnableProvider` / `DisableProvider` / `AssessProvider`; 8 routes; `ProviderResource`; enable reassesses readiness inside the transaction under a row lock; partial unique index one-enabled-per-(category, environment) translated to a 409; disable writes one column and cascades to nothing; audit `providers.provider.{registered,enabled,disabled}`; 20 feature tests including the end-to-end walk. **No screen.** |
 | Provider Catalog | COMPLETE (backend) | `ProviderCatalogue` in source (12 drivers), `CatalogueEntryResource` with `testable` and `available_here`; `TheCatalogueOnlyClaimsWhatExistsTest` names the adapter class per driver. **No screen.** |
 | Requirement Engine | PARTIAL | Per-driver requirements (`needsEndpoint/Credential/Licence/Server`) live on `CatalogueEntry` and drive readiness. No cross-product requirement matrix. |
-| Licence Center | NOT STARTED | `licences` table, `Licence` model, `LicenceState`, `stateFromDates()` (no caller yet), factory. No actions, API, audit or screen. |
+| Licence Center | **COMPLETE** | `RecordLicence` (state from the calendar: pending before start, active, expiring ≤30 days, expired; a key posted under any name is refused and pointed at the credential centre), `AttachLicence` (invalid and cross-environment refused at attachment), `RenewLicence` (clears an invalidation, recomputes, reassesses dependents at once; an expired renewal is refused), `InvalidateLicence` (the operator's only override, one direction only), `RefreshLicenceStates` (nightly at 00:10 and on demand; each transition audited; invalid/not-required never touched). 8 routes, 6 audit actions, `licences:refresh` command, OpenAPI; 16 feature tests including time-travel through expiring→expired with the provider blocked at the right step; **Licences screen** (en/ar), component tests, 5 browser tests. |
 | Credential References | **COMPLETE** | `RecordCredentialReference` (reference shape enforced; a value-shaped reference is refused with "rotate it now"; any unexpected field such as `secret`/`password` is refused by name and never echoed), `AttachCredential` to provider or machine (revoked and cross-environment refused at attachment, not only at use), `RevokeCredential` (reason, row lock, every dependent provider reassessed, nothing switched off), `MarkCredentialRotated` (state drops to configured/missing, last test forgotten, dependents reassessed). `SecretResolver::exists()` answers presence without ever holding the value. 9 routes; `CredentialResource` never carries `backend_reference`; 5 audit actions; OpenAPI; 21 feature tests; **Credentials screen** at `/admin/control-center/credentials` (en/ar) with component tests and 5 browser tests. |
 | Capability Discovery | PARTIAL | Discovery runs inside `TestConnection::forProvider` and writes `provider_capabilities`; readiness refuses `ReadyForProduction` until capabilities exist. No standalone discovery action or surface. |
 | Software Profiles | NOT STARTED | Tables and models only. |
@@ -169,8 +169,8 @@ until the first real endpoint exists.
 ## H. Remaining blockers to closure, in order
 
 1. ~~CI green on a pushed HEAD.~~ Done at `fb2dd68`, run 101.
-2. ~~Credential References.~~ Done; the provider end-to-end test still attaches directly and is updated in the Licence Center slice to go through the endpoint.
-3. Licence Center.
+2. ~~Credential References.~~ Done (CI run 102 green); the provider end-to-end walk now attaches through the endpoint.
+3. ~~Licence Center.~~ Done.
 4. Capability Discovery as its own surface; derive `driver` for server tests from the BMC provider instead of the request.
 5. Requirement Engine, product readiness, `READY_TO_SELL`, blocker propagation, dependency view.
 6. Profiles → desired state → plan (fingerprint) → approval (invalidated on plan change) → deployment jobs → controller bridge → IaC bridge, with timeout/indeterminate states under the Timeout Rule.

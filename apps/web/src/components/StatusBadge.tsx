@@ -47,6 +47,9 @@ const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral
   valid: 'success',
   invalid: 'danger',
   rotation_due: 'warning',
+  // Licences.
+  expiring: 'warning',
+  not_required: 'neutral',
 }
 
 export function StatusBadge({ status }: { status: string }) {

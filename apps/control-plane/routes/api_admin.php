@@ -16,6 +16,7 @@ use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
 use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
+use Lynomia\Modules\Providers\Http\Controllers\LicenceController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderCatalogueController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
@@ -303,6 +304,46 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('credentials/{credential}/rotated', [CredentialController::class, 'rotated'])
         ->middleware('permission:'.Permission::CredentialManage->value)
         ->name('credentials.rotated');
+
+    Route::post('providers/{provider}/licence', [LicenceController::class, 'attachToProvider'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('providers.attach_licence');
+
+    Route::delete('providers/{provider}/licence', [LicenceController::class, 'detachFromProvider'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('providers.detach_licence');
+
+    /*
+     | Licences: what was bought, what it covers, and when it lapses.
+     |
+     | The state follows the calendar and is recomputed nightly; `refresh`
+     | runs the same sweep on demand. An operator's one override is to
+     | declare the vendor rejected a licence — never to declare an expired
+     | one active.
+     */
+    Route::get('licences', [LicenceController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('licences.index');
+
+    Route::get('licences/{licence}', [LicenceController::class, 'show'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('licences.show');
+
+    Route::post('licences', [LicenceController::class, 'store'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.store');
+
+    Route::post('licences/refresh', [LicenceController::class, 'refresh'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.refresh');
+
+    Route::post('licences/{licence}/renew', [LicenceController::class, 'renew'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.renew');
+
+    Route::post('licences/{licence}/invalidate', [LicenceController::class, 'invalidate'])
+        ->middleware('permission:'.Permission::LicenceManage->value)
+        ->name('licences.invalidate');
 
     Route::post('providers/{provider}/connection-test', [ConnectionTestController::class, 'forProvider'])
         ->middleware('permission:'.Permission::ProviderManage->value)

@@ -2295,6 +2295,426 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/licences":
+    get:
+      operationId: "api_admin_licences_index"
+      tags:
+        - "Operator"
+      summary: "Licences"
+      description: |-
+        Expired and invalid first, then expiring, then the rest by when they lapse.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "environment"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/LicencePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_licences_store"
+      tags:
+        - "Operator"
+      summary: "Record a licence"
+      description: |-
+        The state is computed from the dates: pending before it starts, active, expiring within thirty days, expired after. Recording an already-expired licence is allowed and honest. A licence key posted under any name is refused: keys are credential references. 409 for a machine or credential in another environment.
+
+        Requires the `licence.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                product:
+                  description: "See the endpoint description; validated server-side."
+                licence_type:
+                  description: "See the endpoint description; validated server-side."
+                environment:
+                  description: "See the endpoint description; validated server-side."
+                managed_server_id:
+                  description: "See the endpoint description; validated server-side."
+                credential_id:
+                  description: "See the endpoint description; validated server-side."
+                starts_on:
+                  description: "See the endpoint description; validated server-side."
+                expires_on:
+                  description: "See the endpoint description; validated server-side."
+                renews_on:
+                  description: "See the endpoint description; validated server-side."
+                seats:
+                  description: "See the endpoint description; validated server-side."
+                external_reference:
+                  description: "See the endpoint description; validated server-side."
+                notes:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/LicenceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/licences/refresh":
+    post:
+      operationId: "api_admin_licences_refresh"
+      tags:
+        - "Operator"
+      summary: "Let the calendar move licence states now"
+      description: |-
+        The same sweep the scheduler runs nightly. Each state change is audited and the providers under it reassessed. Invalid and not-required are decisions, not dates, and are left alone.
+
+        Requires the `licence.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/LicenceSweepResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/licences/{licence}":
+    get:
+      operationId: "api_admin_licences_show"
+      tags:
+        - "Operator"
+      summary: "One licence"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "licence"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/LicenceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/licences/{licence}/invalidate":
+    post:
+      operationId: "api_admin_licences_invalidate"
+      tags:
+        - "Operator"
+      summary: "Record that the vendor rejected a licence"
+      description: |-
+        The one override of the calendar, and it only goes this way: nothing an operator types makes an expired licence active. Every provider under it reports a licence blocker with the reason. Nothing is switched off.
+
+        Requires the `licence.manage` permission.
+      parameters:
+        - name: "licence"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/LicenceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/licences/{licence}/renew":
+    post:
+      operationId: "api_admin_licences_renew"
+      tags:
+        - "Operator"
+      summary: "Record a renewal"
+      description: |-
+        A new fact from the vendor: clears an invalidation, recomputes the state from the new dates and reassesses every provider under the licence at once. 409 for an expiry that is not in the future.
+
+        Requires the `licence.manage` permission.
+      parameters:
+        - name: "licence"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                expires_on:
+                  description: "See the endpoint description; validated server-side."
+                renews_on:
+                  description: "See the endpoint description; validated server-side."
+                external_reference:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/LicenceResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/operations/reinstalls":
     get:
       operationId: "api_admin_operations_reinstalls"
@@ -3129,6 +3549,136 @@ paths:
             type: "string"
         - "$ref": "#/components/parameters/customerId"
         - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProviderResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/providers/{provider}/licence":
+    post:
+      operationId: "api_admin_providers_attach_licence"
+      tags:
+        - "Operator"
+      summary: "Say which licence a provider runs under"
+      description: |-
+        409 for an invalid licence or one from another environment. Readiness is recomputed.
+
+        Requires the `licence.manage` permission.
+      parameters:
+        - name: "provider"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                licence_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ProviderResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      operationId: "api_admin_providers_detach_licence"
+      tags:
+        - "Operator"
+      summary: "Remove the licence from a provider"
+      description: "Requires the `licence.manage` permission."
+      parameters:
+        - name: "provider"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
       security:
         - sessionCookie: []
         - personalAccessToken: []
@@ -13495,6 +14045,150 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/IssuedApiToken"
+    Licence:
+      type: "object"
+      additionalProperties: false
+      description: "A licence Lynomia holds: what was bought, what it covers, and when it lapses. The state follows the calendar and is recomputed nightly. A sensitive licence KEY is never here — it is a credential reference, and `credential` points at it."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        product:
+          type: "string"
+        licence_type:
+          type:
+            - "string"
+            - "null"
+        environment:
+          type: "string"
+          enum:
+            - "development"
+            - "staging"
+            - "production"
+        state:
+          type: "string"
+          enum:
+            - "not_required"
+            - "missing"
+            - "pending"
+            - "active"
+            - "expiring"
+            - "expired"
+            - "invalid"
+            - "unknown"
+        permits:
+          type: "boolean"
+          description: "Whether the thing this licence covers may be used. Expiring still permits."
+        needs_attention:
+          type: "boolean"
+        days_remaining:
+          type:
+            - "integer"
+            - "null"
+          description: "Negative once expired."
+        starts_on:
+          type:
+            - "string"
+            - "null"
+          format: "date"
+        expires_on:
+          type:
+            - "string"
+            - "null"
+          format: "date"
+        renews_on:
+          type:
+            - "string"
+            - "null"
+          format: "date"
+        seats:
+          type:
+            - "integer"
+            - "null"
+        external_reference:
+          type:
+            - "string"
+            - "null"
+          description: "An order number or account id — what a person quotes to the vendor. Not a secret."
+        server:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        server_name:
+          type:
+            - "string"
+            - "null"
+        credential:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        credential_name:
+          type:
+            - "string"
+            - "null"
+        credential_state:
+          type:
+            - "string"
+            - "null"
+        usage:
+          type: "object"
+          additionalProperties: true
+        providers:
+          type: "integer"
+        invalidated_at:
+          "$ref": "#/components/schemas/Timestamp"
+        invalidated_reason:
+          type:
+            - "string"
+            - "null"
+        renewed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        state_changed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        notes:
+          type:
+            - "string"
+            - "null"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    LicencePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Licence"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    LicenceResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/Licence"
+    LicenceSweep:
+      type: "object"
+      additionalProperties: false
+      description: "What one run of the licence sweep did."
+      properties:
+        examined:
+          type: "integer"
+        changed:
+          type: "integer"
+        providers_reassessed:
+          type: "integer"
+    LicenceSweepResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/LicenceSweep"
     LoginActivity:
       type: "object"
       additionalProperties: false

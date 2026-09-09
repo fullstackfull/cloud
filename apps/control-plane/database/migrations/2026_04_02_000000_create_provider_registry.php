@@ -113,6 +113,18 @@ return new class extends Migration
             $table->string('external_reference')->nullable();
             $table->foreignUlid('credential_reference_id')->nullable()->constrained('credential_references')->nullOnDelete();
 
+            // Provenance. A licence's state is recomputed from the calendar,
+            // and an operator can override the calendar in one direction only:
+            // by declaring the vendor rejected it. Who did that, when and why
+            // sits on the row because it is the sentence beside every blocker
+            // it causes.
+            $table->foreignUlid('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamp('state_changed_at')->nullable();
+            $table->timestamp('renewed_at')->nullable();
+            $table->timestamp('invalidated_at')->nullable();
+            $table->foreignUlid('invalidated_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('invalidated_reason')->nullable();
+
             $table->text('notes')->nullable();
             $table->timestamps();
 

@@ -177,7 +177,9 @@
     "untested": "Untested",
     "valid": "Valid",
     "invalid": "Invalid",
-    "rotation_due": "Rotation due"
+    "rotation_due": "Rotation due",
+    "not_required": "Not required",
+    "expiring": "Expiring"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -495,7 +497,8 @@
       "drift": "Drift",
       "support": "Support",
       "controlCenter": "Control Center",
-      "credentials": "Credentials"
+      "credentials": "Credentials",
+      "licences": "Licences"
     },
     "customers": {
       "title": "Customers",
@@ -718,6 +721,48 @@
       "revokeReasonHint": "Recorded in the audit trail and shown beside every blocker this causes.",
       "revokedOn": "Revoked {{when}}",
       "empty": "No credentials recorded."
+    },
+    "licences": {
+      "title": "Licences",
+      "subtitle": "What was bought, what it covers, and when it stops being true. States follow the calendar.",
+      "record": "Record a licence",
+      "recordTitle": "Record a licence",
+      "keysGoElsewhere": "A licence key that is itself secret does not go here — record it as a credential reference and point the licence at it. This form takes what a person quotes to the vendor: an order or account number.",
+      "product": "Product",
+      "licenceType": "Type",
+      "environment": "Environment",
+      "seats": "Seats",
+      "startsOn": "Starts",
+      "expiresOn": "Expires",
+      "externalReference": "Vendor reference",
+      "externalReferenceHint": "Order or account number. Not a key.",
+      "notes": "Notes",
+      "submit": "Record",
+      "state": "State",
+      "needsAttention": "Needs attention",
+      "expires": "Expires",
+      "noExpiry": "No expiry recorded",
+      "noMachine": "Not tied to a machine",
+      "daysLeft_one": "{{count}} day left",
+      "daysLeft_other": "{{count}} days left",
+      "daysAgo_one": "{{count}} day ago",
+      "daysAgo_other": "{{count}} days ago",
+      "usage": "Used by",
+      "usageProviders_one": "{{count}} provider",
+      "usageProviders_other": "{{count}} providers",
+      "refresh": "Refresh from calendar",
+      "refreshed_one": "Refreshed — {{count}} changed",
+      "refreshed_other": "Refreshed — {{count}} changed",
+      "renew": "Renew",
+      "renewTitle": "Record a renewal of {{product}}",
+      "renewBody": "A new term from the vendor. This clears any invalidation, recomputes the state from the new dates and reassesses every provider under the licence at once.",
+      "newExpiry": "New expiry",
+      "invalidate": "Mark invalid",
+      "invalidateTitle": "Mark the {{product}} licence invalid",
+      "invalidateBody": "Record that the vendor rejected this licence. Every provider under it will report a licence blocker with your reason. Nothing is switched off — whether to stop selling onto it is your next decision.",
+      "invalidateReason": "Why?",
+      "invalidateReasonHint": "What the vendor said. Shown beside every blocker this causes.",
+      "empty": "No licences recorded."
     }
   },
   "backups": {

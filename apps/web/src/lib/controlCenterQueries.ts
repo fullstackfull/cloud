@@ -95,3 +95,104 @@ export function useMarkCredentialRotated() {
     },
   })
 }
+
+/* -------------------------------------------------------------------------
+ | Licences
+ */
+
+export interface Licence {
+  id: string
+  product: string
+  licence_type: string | null
+  environment: Environment
+  state: string
+  permits: boolean
+  needs_attention: boolean
+  days_remaining: number | null
+  starts_on: string | null
+  expires_on: string | null
+  renews_on: string | null
+  seats: number | null
+  external_reference: string | null
+  server: { id: string; server_name: string } | null
+  credential: { id: string; credential_name: string; credential_state: string } | null
+  usage: { providers: number }
+  invalidated_at: string | null
+  invalidated_reason: string | null
+  renewed_at: string | null
+  state_changed_at: string | null
+  notes: string | null
+  created_at: string | null
+}
+
+export function useLicences(page: number, environment?: Environment | '') {
+  return useQuery({
+    queryKey: ['admin', 'licences', page, environment],
+    queryFn: () => admin.get<Paginated<Licence>>('/licences', { page, environment }),
+  })
+}
+
+export interface RecordLicenceInput {
+  product: string
+  licence_type?: string
+  environment: Environment
+  starts_on?: string
+  expires_on?: string
+  renews_on?: string
+  seats?: number
+  external_reference?: string
+  notes?: string
+}
+
+function invalidateLicenceViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'licences'] })
+  // Every licence change reassesses the providers under it.
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'providers'] })
+}
+
+export function useRecordLicence() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RecordLicenceInput) => admin.post<Envelope<Licence>>('/licences', input),
+    onSuccess: () => { invalidateLicenceViews(queryClient) },
+  })
+}
+
+export function useRenewLicence() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, expires_on, external_reference }: { id: string; expires_on: string; external_reference?: string }) =>
+      admin.post<Envelope<Licence>>(`/licences/${encodeURIComponent(id)}/renew`, {
+        expires_on,
+        ...(external_reference === undefined ? {} : { external_reference }),
+      }),
+    onSuccess: () => { invalidateLicenceViews(queryClient) },
+  })
+}
+
+export function useInvalidateLicence() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      admin.post<Envelope<Licence>>(`/licences/${encodeURIComponent(id)}/invalidate`, { reason }),
+    onSuccess: () => { invalidateLicenceViews(queryClient) },
+  })
+}
+
+export interface LicenceSweep {
+  examined: number
+  changed: number
+  providers_reassessed: number
+}
+
+export function useRefreshLicences() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () => admin.post<Envelope<LicenceSweep>>('/licences/refresh', {}),
+    onSuccess: () => { invalidateLicenceViews(queryClient) },
+  })
+}

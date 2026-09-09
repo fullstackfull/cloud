@@ -38,7 +38,9 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
+use Lynomia\Modules\Providers\Domain\Enums\LicenceState;
 use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
+use Lynomia\Modules\Providers\Infrastructure\Models\Licence;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
@@ -196,6 +198,7 @@ class E2ESeeder extends Seeder
         $this->team($customer);
         $this->ticket($customer);
         $this->credentials();
+        $this->licences();
 
         $this->announce(sprintf(
             'E2E fixtures seeded: machine %s, invoices %s and %s, plus a billing-only staff login.',
@@ -956,5 +959,25 @@ class E2ESeeder extends Seeder
                 'state' => CredentialState::Missing,
             ],
         );
+    }
+
+    /**
+     * Three licences for the Control Center specs: one comfortably in force,
+     * one within the thirty-day window, one already lapsed. All by the
+     * calendar, so the states the screen shows are the ones the sweep would
+     * compute.
+     */
+    private function licences(): void
+    {
+        foreach ([
+            ['product' => 'cpanel', 'licence_type' => 'admin', 'expires_on' => now()->addYear(), 'state' => LicenceState::Active, 'external_reference' => 'E2E-ORDER-1'],
+            ['product' => 'directadmin', 'licence_type' => 'standard', 'expires_on' => now()->addDays(12), 'state' => LicenceState::Expiring, 'external_reference' => 'E2E-ORDER-2'],
+            ['product' => 'litespeed', 'licence_type' => null, 'expires_on' => now()->subDays(3), 'state' => LicenceState::Expired, 'external_reference' => 'E2E-ORDER-3'],
+        ] as $licence) {
+            Licence::query()->updateOrCreate(
+                ['external_reference' => $licence['external_reference']],
+                $licence + ['environment' => DeploymentEnvironment::Staging, 'starts_on' => now()->subMonths(6), 'seats' => 50],
+            );
+        }
     }
 }
