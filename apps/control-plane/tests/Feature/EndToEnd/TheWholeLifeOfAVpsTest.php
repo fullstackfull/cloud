@@ -345,7 +345,7 @@ final class TheWholeLifeOfAVpsTest extends TestCase
         $this->actingAs($this->user)
             ->deleteJson(
                 '/api/v1/vps/'.$machine->getKey().'/backups/'.$second->getKey(),
-                ['confirm_backup_id' => (string) $second->getKey()],
+                ['confirmation' => $machine->hostname],
             )
             ->assertOk()
             // Asked for, not gone: nothing has been said to the datastore yet,

@@ -774,12 +774,20 @@ export function useHostingAccounts(pageNumber = 1) {
   })
 }
 
-export function useHostingAccount(id: string) {
+/**
+ * One hosting account.
+ *
+ * Accepts null so that a caller which may not have an account to ask about —
+ * a WordPress site whose account is still being built — can call the hook
+ * unconditionally and get nothing rather than a request for `/hosting/`.
+ */
+export function useHostingAccount(id: string | null) {
   return useQuery({
     queryKey: ['hosting', 'detail', id],
+    enabled: id !== null && id !== '',
     queryFn: async () => {
       const response = await api.get<Envelope<HostingAccount>>(
-        `/hosting/${encodeURIComponent(id)}`,
+        `/hosting/${encodeURIComponent(id ?? '')}`,
       )
       return response.data
     },
@@ -886,7 +894,7 @@ export function useDeleteBackup() {
     mutationFn: (payload: { vmId: string; backupId: string; confirmation: string }) =>
       api.delete<Envelope<Backup>>(
         `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}`,
-        { confirm_backup_id: payload.confirmation },
+        { confirmation: payload.confirmation },
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backups'] })
@@ -1594,7 +1602,13 @@ export function useUpdateDnsRecord() {
     }: {
       zoneId: string
       recordId: string
-      changes: Partial<Pick<NewDnsRecord, 'content' | 'ttl' | 'priority'>>
+      /*
+       * What a record says, never what it is. The endpoint accepts neither
+       * the name nor the type: a record with a different name is a different
+       * record, and editing one into another would leave the provider holding
+       * the old value under an identifier the platform had quietly reassigned.
+       */
+      changes: Partial<Pick<NewDnsRecord, 'content' | 'ttl' | 'priority' | 'data'>>
     }) =>
       api.patch<Envelope<DnsRecordRow>>(
         `/dns/zones/${encodeURIComponent(zoneId)}/records/${encodeURIComponent(recordId)}`,

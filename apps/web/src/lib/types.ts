@@ -73,6 +73,16 @@ export interface OrderService {
   id: string
   kind: string
   identity: string | null
+  /**
+   * The row that fulfils this service, as the API resolved it.
+   *
+   * A service's own id is not the machine's, the hosting account's or the
+   * chassis's, so a link built from the service id would point at nothing.
+   * The kind is a customer-facing family and the portal owns the route it maps
+   * to — the same handle shape a notification carries, so one map turns either
+   * into a destination. Null until something has been created.
+   */
+  resource: { kind: string; id: string } | null
   state: string
   is_usable: boolean
 }
@@ -293,6 +303,16 @@ export interface SubscriptionService {
   kind: string
   label: string | null
   identity: string | null
+  /**
+   * The row that fulfils this service, as the API resolved it.
+   *
+   * A service's own id is not the machine's, the hosting account's or the
+   * chassis's, so a link built from the service id would point at nothing.
+   * The kind is a customer-facing family and the portal owns the route it maps
+   * to — the same handle shape a notification carries, so one map turns either
+   * into a destination. Null until something has been created.
+   */
+  resource: { kind: string; id: string } | null
   state: string
   is_usable: boolean
 }
@@ -322,16 +342,43 @@ export interface Service {
    * created.
    */
   identity: string | null
+  /**
+   * The row that fulfils this service, as the API resolved it.
+   *
+   * A service's own id is not the machine's, the hosting account's or the
+   * chassis's, so a link built from the service id would point at nothing.
+   * The kind is a customer-facing family and the portal owns the route it maps
+   * to — the same handle shape a notification carries, so one map turns either
+   * into a destination. Null until something has been created.
+   */
+  resource: { kind: string; id: string } | null
   state: string
   is_usable: boolean
   resources: Record<string, unknown>
+  /**
+   * What bought this, as ids the server published.
+   *
+   * The commercial half of a service: the catalogue plan, the order line it
+   * came from, and the subscription that renews it. Declared here in Wave 3
+   * because a resource page shows the billing relationship, and the audit's
+   * finding was that the customer had to infer the whole chain — matching it
+   * in the client on amount or date would have been the same defect with
+   * better manners.
+   */
+  plan_id: string | null
+  order_id: string | null
+  order_item_id: string | null
+  subscription_id: string | null
   activated_at: string | null
+  suspended_at: string | null
   /**
    * When the data behind a stopped service is destroyed, and why it stopped.
    * Both null while it is running.
    */
   retention_ends_at: string | null
   ended_reason: string | null
+  terminated_at: string | null
+  created_at: string | null
 }
 
 /**
@@ -606,7 +653,14 @@ export interface HostingUsage {
 export interface HostingUsageMeasure {
   used_mib: number | null
   quota_mib: number | null
-  unlimited: boolean
+  /**
+   * True for a plan sold without a ceiling, false for one with a quota, and
+   * null when there is no package to read at all — which is not the same as
+   * unlimited. The API is explicit about the difference because "unlimited"
+   * beside a figure the platform is about to enforce a quota against is the
+   * same class of lie as drawing an unmeasured account at 0%.
+   */
+  unlimited: boolean | null
   used_percent: number | null
 }
 

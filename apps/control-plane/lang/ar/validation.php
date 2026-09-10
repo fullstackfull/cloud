@@ -198,7 +198,6 @@ return [
         'code' => 'رمز التحقق',
         'company_name' => 'اسم الشركة',
         'confirm_account_id' => 'تأكيد الحساب',
-        'confirm_backup_id' => 'تأكيد النسخة الاحتياطية',
         'confirm_hostname' => 'تأكيد اسم المضيف',
         'confirm_serial' => 'تأكيد الرقم التسلسلي',
         'confirm_subscription_id' => 'تأكيد الاشتراك',
@@ -311,6 +310,7 @@ return [
             'expires_in_future' => 'يجب أن يكون تاريخ الانتهاء في المستقبل.',
         ],
         'backup' => [
+            'delete_confirmation_required' => 'اكتب اسم مضيف الجهاز للتأكيد. حذف النسخة الاحتياطية لا يمكن التراجع عنه بعد انتهاء مهلة السماح.',
             'restore_confirmation_required' => 'اكتب اسم مضيف الجهاز للتأكيد. الاستعادة تستبدل كل الأقراص عليه.',
             'file_restore_confirmation_required' => 'اكتب اسم مضيف الجهاز للتأكيد. استعادة الملفات تستبدل تلك الملفات عليه.',
         ],

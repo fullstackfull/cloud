@@ -28,6 +28,17 @@ final class ServiceIdentities
     public const string ATTRIBUTE = 'identity';
 
     /**
+     * The attribute the resource handle is attached to.
+     *
+     * A service's own id is not the id of the thing that fulfils it: the
+     * machine, the account and the chassis each have their own. A client that
+     * built a link from the service id would be pointing at a resource that
+     * does not exist, so the handle — the family and the fulfilling row's id —
+     * is published rather than left to be guessed.
+     */
+    public const string HANDLE_ATTRIBUTE = 'resource_handle';
+
+    /**
      * Where each kind of service is actually fulfilled: the table, the
      * customer-facing family it belongs to, and the column holding the name a
      * customer knows it by.
@@ -40,6 +51,45 @@ final class ServiceIdentities
         'dedicated_servers' => ['dedicated', 'serial'],
         'wordpress_sites' => ['wordpress', 'domain'],
     ];
+
+    /**
+     * The identity attached to one service, or null.
+     *
+     * Read through here by every resource that publishes it, so that "what
+     * counts as an identity" is decided once. A service fetched without
+     * attach() having run has no attribute, and null is the honest answer
+     * rather than an empty string.
+     */
+    public static function identityOf(Service $service): ?string
+    {
+        $identity = $service->getAttribute(self::ATTRIBUTE);
+
+        return is_string($identity) && $identity !== '' ? $identity : null;
+    }
+
+    /**
+     * The `{kind, id}` handle attached to one service, or null.
+     *
+     * The shape a client needs to build a link, published identically by the
+     * service resource, the order's services and a subscription's services:
+     * three copies of this extraction would have been three chances for one of
+     * them to publish a service id where a machine id belongs.
+     *
+     * @return array{kind: string, id: string}|null
+     */
+    public static function handleOf(Service $service): ?array
+    {
+        $handle = $service->getAttribute(self::HANDLE_ATTRIBUTE);
+
+        if (! is_array($handle)) {
+            return null;
+        }
+
+        $kind = $handle['kind'] ?? null;
+        $id = $handle['id'] ?? null;
+
+        return is_string($kind) && is_string($id) ? ['kind' => $kind, 'id' => $id] : null;
+    }
 
     /**
      * Resolves the identities for a set of services and hangs each one on its
@@ -60,15 +110,25 @@ final class ServiceIdentities
             return;
         }
 
-        $identities = $this->for(array_map(
+        $handles = $this->handlesFor(array_map(
             static fn (Service $service): string => (string) $service->getKey(),
             $models,
         ));
 
         foreach ($models as $service) {
+            $handle = $handles[(string) $service->getKey()] ?? null;
+
+            $service->setAttribute(self::ATTRIBUTE, $handle['identity'] ?? null);
+
+            /*
+             * Both halves come from the same lookup, so a resource whose
+             * identity is known and whose id is not — or the reverse — is not
+             * a state a caller has to handle. There is no such state: the row
+             * either exists or it does not.
+             */
             $service->setAttribute(
-                self::ATTRIBUTE,
-                $identities[(string) $service->getKey()] ?? null,
+                self::HANDLE_ATTRIBUTE,
+                $handle === null ? null : ['kind' => $handle['kind'], 'id' => $handle['id']],
             );
         }
     }

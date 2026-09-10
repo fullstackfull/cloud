@@ -23,7 +23,8 @@
     "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total",
     "remove": "Remove",
     "dismiss": "Dismiss",
-    "breadcrumbs": "You are here"
+    "breadcrumbs": "You are here",
+    "edit": "Edit"
   },
   "nav": {
     "apiKeys": "API Keys",
@@ -514,7 +515,9 @@
     "activated": "Since",
     "unnamed": "Unnamed service",
     "empty": "Nothing is running yet.",
-    "dataUntil": "Data kept until"
+    "dataUntil": "Data kept until",
+    "resource": "Resource",
+    "beingBuilt": "Being created"
   },
   "vps": {
     "subtitle": "Your virtual machines.",
@@ -537,7 +540,13 @@
       "advice": "Take a backup first if there is anything on this server you still need. The address, the specification and the hostname stay the same.",
       "confirmLabel": "Reinstall this server",
       "phraseLabel": "Type the hostname to confirm",
-      "started": "The rebuild has been queued. This page will show its progress."
+      "started": "The rebuild has been queued. This page will show its progress.",
+      "templateLabel": "Operating system",
+      "templateHint": "Only images this platform has prepared for this machine are listed.",
+      "sameImage": "Keep the current image",
+      "sshLabel": "Public SSH keys",
+      "sshHint": "One key per line. Public keys only — never paste a private key, here or anywhere else.",
+      "noSsh": "This image cannot be given a key on first boot. Set one up once the machine has started."
     },
     "reinstallState": {
       "requested": "Rebuild requested",
@@ -569,8 +578,14 @@
       "service_not_active": "This service is not active, so its controls are off.",
       "not_provisioned": "The hypervisor has not confirmed this machine yet, so nothing can be done to it.",
       "operation_in_flight": "Another operation is running on this machine. Its controls come back when it finishes.",
-      "operation_needs_review": "An earlier operation did not finish and our team is looking at it. Controls stay off until it is resolved."
-    }
+      "operation_needs_review": "An earlier operation did not finish and our team is looking at it. Controls stay off until it is resolved.",
+      "default": "Some actions are unavailable on this machine at the moment."
+    },
+    "os": "Operating system",
+    "primaryAddress": "Main address",
+    "noAddresses": "No addresses assigned to this machine yet.",
+    "rebuildBody": "The last rebuild of this machine.",
+    "rebuildRequested": "Requested"
   },
   "dedicated": {
     "subtitle": "Your physical machines.",
@@ -618,7 +633,16 @@
       "server_not_in_service": "This machine is not in service right now, so its controls are off.",
       "reinstall_in_flight": "The machine is being rebuilt. Nothing else can be done to it until the rebuild finishes.",
       "operation_in_flight": "Another operation is running on this machine. A rebuild can be asked for when it finishes."
-    }
+    },
+    "serial": "Serial",
+    "manufacturer": "Manufacturer",
+    "model": "Model",
+    "hardwareProfile": "Hardware",
+    "sinceHint": "When this machine entered service on your account.",
+    "rebuildBody": "The last rebuild of this machine.",
+    "rebuildRequested": "Requested",
+    "rebuildDataDestroyed": "This rebuild has already erased the disks. Whatever was on them is gone, whether or not the installation finished.",
+    "rebuildNeedsAttention": "The platform did not hear how this rebuild ended. Do not request another — support can tell you where it stands."
   },
   "hosting": {
     "subtitle": "Your hosting accounts.",
@@ -627,7 +651,32 @@
     "package": "Package",
     "openPanel": "Open panel",
     "empty": "No hosting accounts.",
-    "diskQuota": "{{gib}} GiB disk"
+    "diskQuota": "{{gib}} GiB disk",
+    "username": "Username",
+    "panelType": "Control panel",
+    "panelUnknownHint": "The platform does not name the panel until this account is on a node.",
+    "panel": {
+      "cpanel": "cPanel",
+      "directadmin": "DirectAdmin",
+      "generic": "hosting control panel"
+    },
+    "openNamedPanel": "Open {{panel}}",
+    "usage": "Usage",
+    "usageBody": "Disk and bandwidth against your allowance, from the platform's last reading of the panel. These figures are not live.",
+    "disk": "Disk",
+    "bandwidth": "Bandwidth",
+    "diskQuotaLabel": "Disk allowance",
+    "bandwidthQuotaLabel": "Bandwidth allowance",
+    "addonDomains": "Extra domains",
+    "databases": "Databases",
+    "mailboxes": "Mailboxes",
+    "unlimited": "Unmetered",
+    "measuredAt": "Measured {{when}}",
+    "neverMeasured": "The platform has not had a reading from the panel for this account yet.",
+    "usageStale": "this reading is old",
+    "notMeasured": "Not measured. The panel reported no figure, which is not the same as zero.",
+    "quotaUnknown": "The platform cannot say what the ceiling is for this account.",
+    "relatedBody": "Other things that sit on this account."
   },
   "ips": {
     "subtitle": "Addresses assigned to your services.",
@@ -637,7 +686,8 @@
     "setReverseDns": "Set reverse DNS",
     "hostname": "Hostname",
     "reverseDnsHint": "Published out of band. The change is queued, not immediate.",
-    "empty": "No addresses assigned."
+    "empty": "No addresses assigned.",
+    "version": "Version"
   },
   "wallet": {
     "subtitle": "Stored credit on your account.",
@@ -1442,7 +1492,8 @@
       "noRestores": "No files have been restored from this backup.",
       "restoreRow": "{{count}} path(s), asked for {{date}}",
       "needsReview": "The provider did not confirm this restore. It may still be running, so no other restore can start into this server until our team has checked. Nothing needs doing on your side."
-    }
+    },
+    "forMachine": "Archives of {{hostname}}."
   },
   "confirm": {
     "typeToConfirm": "Type {{phrase}} to confirm",
@@ -1722,6 +1773,21 @@
       "title": "Remove this record?",
       "body": "{{record}} stops being served as soon as the change is published. Anything relying on it — a website, mail delivery, a certificate check — stops working until it is added back. You can add it back at any time.",
       "confirmLabel": "Remove record"
+    },
+    "zones": "Your domains",
+    "zonesBody": "The domains this platform answers for.",
+    "recordCount": "Records",
+    "lastSynced": "Last published",
+    "lastSyncedHint": "When the platform last pushed this zone to the DNS provider.",
+    "openDomain": "Domain registration",
+    "relatedBody": "The registration behind this zone, and support.",
+    "transfer": {
+      "title": "Import and export"
+    },
+    "ttlHint": "In seconds. 1 means the provider decides.",
+    "editRecord": {
+      "title": "Change this record",
+      "body": "The name and the type cannot be changed — a record with a different name is a different record. To move it, remove this one and add the new one under {{zone}}."
     }
   },
   "domains": {
@@ -1789,7 +1855,66 @@
       "needsReview": "The registry did not confirm the recovery. Do not order it again — the penalty may already have been paid and the name restored. We are checking with the registry and will tell you where it stands.",
       "failed": "The registry refused to restore the name. You have been charged the penalty and are owed a refund; our team is arranging it. You may try again while the redemption window is open.",
       "recovered": "The name has been recovered."
-    }
+    },
+    "attention": "Needs attention",
+    "held": "Your domains",
+    "heldBody": "The names on your account.",
+    "registered": "Registered",
+    "term": "Term",
+    "renewal": "Renewal",
+    "renewalBody": "When this name lapses, and what keeps it.",
+    "autoRenewOn": "Auto-renew is on",
+    "autoRenewOff": "Auto-renew is off",
+    "autoRenewTurnOn": "Turn on",
+    "autoRenewTurnOff": "Turn off",
+    "autoRenewOnHint": "An invoice is raised before this name lapses. You can turn this off at any time.",
+    "autoRenewOffHint": "No invoice will be raised for the next term. This is not a cancellation: the name is yours until it expires, and you can renew it by hand or turn this back on.",
+    "renew": {
+      "action": "Renew now",
+      "title": "Renew {{domain}}?",
+      "body": "Renewing keeps this name for another term. The price below is the platform's own quote for it.",
+      "price": "Price",
+      "quoteExpires": "This price holds until {{when}}.",
+      "paymentExplainer": "An invoice is issued now. The registry is asked to extend the name once it is paid — a renewal fee is not refundable, so nothing is bought before your payment arrives.",
+      "confirm": "Renew this name",
+      "requested": "The renewal has been requested. It takes effect once the invoice is paid.",
+      "needsReview": "The registry did not confirm this renewal. Do not try again — we are checking what happened, and support can tell you where it stands.",
+      "openInvoice": "Open the invoice"
+    },
+    "contacts": "Registrant",
+    "contactsBody": "The person or organisation this name is registered to.",
+    "contactsSaved": "The registrant details have been sent to the registry.",
+    "contactsPrivacy": "These details go to the registry and are stored encrypted here. Nothing on this form is written to a log.",
+    "registrantOrganisation": "Organisation (optional)",
+    "registrantAddressTwo": "Address line 2 (optional)",
+    "registrantRegion": "Region (optional)",
+    "registrantPostalCode": "Postal code (optional)",
+    "nameserversBody": "Where this name points. The change is made at the registry.",
+    "nameserversSaved": "The nameservers have been sent to the registry.",
+    "lockedOn": "This name is locked against transfer",
+    "lockedOff": "This name is unlocked",
+    "transferOut": "Moving away",
+    "transferOutBody": "The lock and the transfer code, so you can leave whenever you want.",
+    "transferIn": {
+      "action": "Transfer a domain in",
+      "title": "Transfer a domain in",
+      "body": "Bring a name you hold elsewhere to this platform. You will need the transfer code from your current registrar, and the name has to be unlocked there.",
+      "name": "Domain name",
+      "code": "Transfer code",
+      "codeHint": "From your current registrar. It is sent once and never shown back.",
+      "submit": "Start the transfer",
+      "requested": "The transfer of {{domain}} has been requested.",
+      "needsReview": "The registry did not confirm this transfer. Do not try again — we are checking what happened.",
+      "price": "Price: {{price}}",
+      "openInvoice": "Open the invoice",
+      "waitExplainer": "A transfer takes several days: your current registrar and the registry both have to release the name. Nothing is finished until they do, and the name appears on this page when it arrives."
+    },
+    "openZone": "DNS records",
+    "claimZone": "Host DNS here",
+    "zoneBody": "This platform can answer for the name as well as register it.",
+    "relatedBody": "The zone, your invoices, and support.",
+    "termYears_one": "1 year",
+    "termYears_other": "{{years}} years"
   },
   "wordpress": {
     "adminEmail": "WordPress email",
@@ -1832,7 +1957,9 @@
       "cloneSubmit": "Clone",
       "unavailable": "{{reason}}",
       "requested": "Asked for. The toolkit is copying the site; this page updates as it goes.",
-      "copiedFrom": "Copied from {{domain}}"
+      "copiedFrom": "Copied from {{domain}}",
+      "title": "Copies",
+      "body": "A staging copy, clones, and pushing a copy back over the live site."
     },
     "push": {
       "action": "Push to production",
@@ -1856,7 +1983,15 @@
         "clone": "Clone",
         "push_to_production": "Push to production"
       }
-    }
+    },
+    "version": "WordPress version",
+    "verifiedAt": "Checked live",
+    "progress": "Progress",
+    "progressBody": "Four things have to be true before a site is live. This is which of them are.",
+    "openAdmin": "Open WordPress",
+    "openHosting": "Hosting account",
+    "openDomain": "Domain",
+    "relatedBody": "The account this site runs on, and the name it answers to."
   },
   "controlCenter": {
     "guidance": {
@@ -1953,6 +2088,22 @@
     "sections": "Sections",
     "notAvailable": "Not available",
     "dangerZone": "Danger zone",
-    "dangerZoneBody": "These actions change what is running or destroy what is on it. Each one asks you to confirm first."
+    "dangerZoneBody": "These actions change what is running or destroy what is on it. Each one asks you to confirm first.",
+    "open": "Open",
+    "overview": "Overview",
+    "related": "Related",
+    "networking": "Networking",
+    "networkingBody": "The addresses this machine answers on.",
+    "activity": "Activity",
+    "activityBody": "What the platform has done to this service, and how each attempt ended.",
+    "activityWhen": "When",
+    "activityWhat": "What happened",
+    "activityOutcome": "Outcome",
+    "noActivity": "There is no service record behind this, so there is no history to show.",
+    "noActivityYet": "Nothing has happened to this service since it was created.",
+    "billing": "Billing",
+    "billingBody": "What this costs, what renews it, and the order and invoice behind it.",
+    "noBillingRelation": "This is not linked to a service, so there is nothing to bill against.",
+    "noSubscription": "Nothing renews this: the platform has no subscription recorded against it."
   }
 }

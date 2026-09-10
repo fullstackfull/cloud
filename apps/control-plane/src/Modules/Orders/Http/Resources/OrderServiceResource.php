@@ -30,9 +30,15 @@ final class OrderServiceResource extends JsonResource
         return [
             'id' => $this->id,
             'kind' => (string) $this->kind,
-            'identity' => is_string($this->resource->getAttribute(ServiceIdentities::ATTRIBUTE))
-                ? (string) $this->resource->getAttribute(ServiceIdentities::ATTRIBUTE)
-                : null,
+            'identity' => ServiceIdentities::identityOf($this->resource),
+
+            /*
+             * Where the thing lives, as `{kind, id}`. The order's own id is
+             * not the machine's: a client that linked from the service id
+             * would send a customer to a page for a resource that does not
+             * exist.
+             */
+            'resource' => ServiceIdentities::handleOf($this->resource),
             'state' => CustomerServiceState::for($this->resource->status, false)->value,
             'is_usable' => $this->resource->isUsable(),
         ];

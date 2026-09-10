@@ -26,16 +26,59 @@ import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
 import { CataloguePage } from '@/features/catalog/CataloguePage'
 import { ProductPage } from '@/features/catalog/ProductPage'
+import {
+  DedicatedActivitySection,
+  DedicatedBillingSection,
+  DedicatedDangerSection,
+  DedicatedDetailPage,
+  DedicatedOverviewSection,
+} from '@/features/infrastructure/DedicatedDetailPage'
 import { DedicatedPage } from '@/features/infrastructure/DedicatedPage'
+import {
+  HostingActivitySection,
+  HostingBillingSection,
+  HostingDetailPage,
+  HostingOverviewSection,
+} from '@/features/infrastructure/HostingDetailPage'
 import { HostingPage } from '@/features/infrastructure/HostingPage'
 import { IpAddressesPage } from '@/features/infrastructure/IpAddressesPage'
 import { NotificationsPage } from '@/features/notifications/NotificationsPage'
 import { BackupsPage } from '@/features/backups/BackupsPage'
 import { DnsPage } from '@/features/dns/DnsPage'
+import {
+  DnsZoneDangerSection,
+  DnsZoneDetailPage,
+  DnsZoneOverviewSection,
+  DnsZoneRecordsSection,
+  DnsZoneTransferSection,
+} from '@/features/dns/DnsZoneDetailPage'
+import {
+  DomainContactsSection,
+  DomainDetailPage,
+  DomainNameserversSection,
+  DomainOverviewSection,
+  DomainTransferSection,
+} from '@/features/domains/DomainDetailPage'
 import { DomainsPage } from '@/features/domains/DomainsPage'
+import {
+  WordPressActivitySection,
+  WordPressBillingSection,
+  WordPressCopiesSection,
+  WordPressDetailPage,
+  WordPressOverviewSection,
+} from '@/features/wordpress/WordPressDetailPage'
 import { WordPressPage } from '@/features/wordpress/WordPressPage'
 import { PlanChangePage } from '@/features/billing/PlanChangePage'
 import { ConsolePage } from '@/features/console/ConsolePage'
+import {
+  VpsActivitySection,
+  VpsBackupsSection,
+  VpsBillingSection,
+  VpsDangerSection,
+  VpsDetailPage,
+  VpsNetworkingSection,
+  VpsOverviewSection,
+} from '@/features/infrastructure/VpsDetailPage'
 import { VpsPage } from '@/features/infrastructure/VpsPage'
 import { OrderDetailPage } from '@/features/orders/OrderDetailPage'
 import { OrdersPage } from '@/features/orders/OrdersPage'
@@ -154,16 +197,83 @@ export function App() {
                 />
 
                 <Route path="/services" element={<ServicesPage />} />
+
+                {/*
+                  One place per resource (Wave 3).
+
+                  Each family has an index and a page per thing, and the
+                  sections of that page are child routes rather than tabs
+                  inside a component: a customer sends "the backups of web-01"
+                  to a colleague, refreshes it and bookmarks it, and gets the
+                  browser's own history and the accessible current-page state
+                  for free. Every index path is unchanged, so nothing anybody
+                  bookmarked before this wave has moved.
+
+                  The console keeps its own route above the machine's page. It
+                  is a full-screen terminal rather than a section of a
+                  document, and it was reachable before this wave: nothing
+                  about it changes.
+                */}
                 <Route path="/vps" element={<VpsPage />} />
                 <Route path="/vps/:id/console" element={<ConsolePage />} />
+                <Route path="/vps/:id" element={<VpsDetailPage />}>
+                  <Route index element={<VpsOverviewSection />} />
+                  <Route path="networking" element={<VpsNetworkingSection />} />
+                  <Route path="backups" element={<VpsBackupsSection />} />
+                  <Route path="activity" element={<VpsActivitySection />} />
+                  <Route path="billing" element={<VpsBillingSection />} />
+                  <Route path="danger" element={<VpsDangerSection />} />
+                </Route>
+
                 <Route path="/backups" element={<BackupsPage />} />
                 <Route path="/notifications" element={<NotificationsPage />} />
+
                 <Route path="/dedicated" element={<DedicatedPage />} />
+                <Route path="/dedicated/:id" element={<DedicatedDetailPage />}>
+                  <Route index element={<DedicatedOverviewSection />} />
+                  <Route path="activity" element={<DedicatedActivitySection />} />
+                  <Route path="billing" element={<DedicatedBillingSection />} />
+                  <Route path="danger" element={<DedicatedDangerSection />} />
+                </Route>
+
                 <Route path="/hosting" element={<HostingPage />} />
+                <Route path="/hosting/:id" element={<HostingDetailPage />}>
+                  <Route index element={<HostingOverviewSection />} />
+                  <Route path="activity" element={<HostingActivitySection />} />
+                  <Route path="billing" element={<HostingBillingSection />} />
+                </Route>
+
                 <Route path="/ips" element={<IpAddressesPage />} />
+
                 <Route path="/dns" element={<DnsPage />} />
+                {/*
+                  Addressed by the zone's name — `/dns/example.com` — which is
+                  what a customer recognises. The API accepts a name or an id
+                  and resolves either through the acting customer, so a name
+                  somebody else holds is not found rather than refused.
+                */}
+                <Route path="/dns/:identity" element={<DnsZoneDetailPage />}>
+                  <Route index element={<DnsZoneOverviewSection />} />
+                  <Route path="records" element={<DnsZoneRecordsSection />} />
+                  <Route path="transfer" element={<DnsZoneTransferSection />} />
+                  <Route path="danger" element={<DnsZoneDangerSection />} />
+                </Route>
+
                 <Route path="/domains" element={<DomainsPage />} />
+                <Route path="/domains/:identity" element={<DomainDetailPage />}>
+                  <Route index element={<DomainOverviewSection />} />
+                  <Route path="nameservers" element={<DomainNameserversSection />} />
+                  <Route path="contacts" element={<DomainContactsSection />} />
+                  <Route path="transfer" element={<DomainTransferSection />} />
+                </Route>
+
                 <Route path="/wordpress" element={<WordPressPage />} />
+                <Route path="/wordpress/:id" element={<WordPressDetailPage />}>
+                  <Route index element={<WordPressOverviewSection />} />
+                  <Route path="copies" element={<WordPressCopiesSection />} />
+                  <Route path="activity" element={<WordPressActivitySection />} />
+                  <Route path="billing" element={<WordPressBillingSection />} />
+                </Route>
 
                 <Route path="/profile" element={<ProfilePage />} />
                 <Route path="/security" element={<SecurityPage />} />

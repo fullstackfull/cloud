@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
@@ -9,29 +10,30 @@ import { DataTable, type Column } from '@/components/DataTable'
 import { EmptyState } from '@/components/EmptyState'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
+import { Loading } from '@/components/Loading'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
-import { formatDate, formatMinorUnits } from '@/lib/format'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
+import { formatDate, formatMinorUnits } from '@/lib/format'
 import {
-  useDomainAuthorisationCode,
   useDomains,
   useDomainSearch,
   useOrderDomain,
   useQuoteDomain,
-  useRedeemDomain,
-  useSetDomainNameservers,
-  useSetDomainTransferLock,
 } from '@/lib/queries'
-import type { Locale } from '@/i18n'
-import type { Domain, DomainQuote, DomainSearchResult } from '@/lib/types'
+import type { Domain, DomainSearchResult } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
-import { ConfirmDialog } from '@/components/ConfirmDialog'
-import { Loading } from '@/components/Loading'
-import { Link } from 'react-router'
+
+import { DomainTransferInForm } from './DomainTransferInForm'
 
 /**
- * Buying a name, and looking after the ones already bought.
+ * Buying a name, bringing one in, and getting to the ones already held.
+ *
+ * Since Wave 3 the held names are an index: a row identifies the name, says
+ * whether it needs attention and links to it. Everything that can be done to
+ * one name — nameservers, contacts, auto-renew, renewing now, the transfer
+ * lock, the authorisation code, recovery of a lapsed name — moved to that
+ * name's own page, where somebody working on one name is.
  *
  * Two things on this screen are load-bearing and easy to design away.
  *
@@ -56,9 +58,62 @@ export function DomainsPage() {
 
   const [typed, setTyped] = useState('')
   const [searching, setSearching] = useState('')
+  const [transferring, setTransferring] = useState(false)
   const search = useDomainSearch(searching)
 
   const searchFailure = describeError(search.error)
+
+  const columns: Array<Column<Domain>> = [
+    {
+      key: 'name',
+      header: t('domains.name'),
+      ltr: true,
+      cell: (domain) => (
+        <Link
+          to={`/domains/${encodeURIComponent(domain.name)}`}
+          className="technical font-medium text-[var(--text-primary)] hover:underline"
+        >
+          {domain.name}
+        </Link>
+      ),
+    },
+    {
+      key: 'state',
+      header: t('services.state'),
+      cell: (domain) => (
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={domain.state} />
+          {domain.needs_attention ? (
+            <Badge tone="warning">{t('domains.attention')}</Badge>
+          ) : domain.is_expiring ? (
+            <Badge tone="warning">{t('domains.expiringSoon')}</Badge>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: 'expires',
+      header: t('domains.expires'),
+      cell: (domain) =>
+        domain.expires_at === null ? '—' : formatDate(domain.expires_at, locale),
+    },
+    {
+      key: 'autoRenew',
+      header: t('domains.autoRenew'),
+      cell: (domain) => (domain.auto_renew ? t('common.yes') : t('common.no')),
+    },
+    {
+      key: 'actions',
+      header: '',
+      cell: (domain) => (
+        <div className="flex justify-end">
+          <Link to={`/domains/${encodeURIComponent(domain.name)}`} className="text-sm underline">
+            {t('resource.open')}
+          </Link>
+        </div>
+      ),
+    },
+  ]
 
   return (
     <>
@@ -106,16 +161,30 @@ export function DomainsPage() {
       </Card>
 
       <div className="mt-4">
+        {transferring ? (
+          <DomainTransferInForm onDone={() => { setTransferring(false) }} />
+        ) : (
+          <Button variant="secondary" onClick={() => { setTransferring(true) }}>
+            {t('domains.transferIn.action')}
+          </Button>
+        )}
+      </div>
+
+      <div className="mt-4">
         {isPending ? (
           <Loading />
         ) : rows.length === 0 ? (
           <EmptyState>{t('domains.none')}</EmptyState>
         ) : (
-          <div className="flex flex-col gap-4">
-            {rows.map((domain) => (
-              <DomainCard key={domain.id} domain={domain} locale={locale} />
-            ))}
-          </div>
+          <Card title={t('domains.held')} description={t('domains.heldBody')}>
+            <DataTable
+              caption={t('domains.held')}
+              columns={columns}
+              rows={rows}
+              rowKey={(domain) => domain.id}
+              empty={t('domains.none')}
+            />
+          </Card>
         )}
       </div>
     </>
@@ -305,237 +374,5 @@ function RegistrationForm({
         </div>
       )}
     </Card>
-  )
-}
-
-/** One held name: what it costs to keep, where it points, and how to leave. */
-function DomainCard({ domain, locale }: { domain: Domain; locale: Locale }) {
-  const { t } = useTranslation()
-  const describeError = useApiErrorMessage()
-
-  const nameservers = useSetDomainNameservers(domain.id)
-  const lock = useSetDomainTransferLock(domain.id)
-  const authCode = useDomainAuthorisationCode(domain.id)
-
-  const [hosts, setHosts] = useState(domain.nameservers.join('\n'))
-
-  const failure =
-    describeError(nameservers.error) ?? describeError(lock.error) ?? describeError(authCode.error)
-
-  return (
-    <Card>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="technical text-sm font-medium" dir="ltr">
-          {domain.name}
-        </h2>
-        <StatusBadge status={domain.state} />
-      </div>
-
-      <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-        <div>
-          <dt className="text-[var(--text-muted)]">{t('domains.expires')}</dt>
-          <dd>
-            {domain.expires_at === null ? '—' : formatDate(domain.expires_at, locale)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[var(--text-muted)]">{t('domains.autoRenew')}</dt>
-          <dd>{domain.auto_renew ? t('common.yes') : t('common.no')}</dd>
-        </div>
-        <div>
-          <dt className="text-[var(--text-muted)]">{t('domains.transferLock')}</dt>
-          <dd>{domain.transfer_locked === true ? t('common.yes') : t('common.no')}</dd>
-        </div>
-      </dl>
-
-      {domain.needs_attention ? (
-        <div className="mt-3">
-          {/*
-            * The Timeout Rule reaching the customer. A name the platform could
-            * not confirm must not be presented as working, and must not offer
-            * a retry: the money may already have moved.
-            */}
-          <Alert tone="warning">{t('domains.needsAttention')}</Alert>
-        </div>
-      ) : null}
-
-      {domain.is_expiring ? (
-        <div className="mt-3">
-          <Alert tone="warning">{t('domains.expiringSoon')}</Alert>
-        </div>
-      ) : null}
-
-      {domain.redemption === null ? null : <RedemptionPanel domain={domain} locale={locale} />}
-
-      {domain.is_manageable ? (
-        <>
-          <form
-            className="mt-4 flex flex-col gap-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-
-              nameservers.mutate({
-                nameservers: hosts
-                  .split(/[\s,]+/)
-                  .map((host) => host.trim())
-                  .filter((host) => host !== ''),
-              })
-            }}
-          >
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="font-medium">{t('domains.nameservers')}</span>
-              <textarea
-                dir="ltr"
-                rows={3}
-                value={hosts}
-                onChange={(event) => { setHosts(event.target.value) }}
-                className="technical rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 py-2 text-sm"
-              />
-            </label>
-            <span className="text-sm text-[var(--text-muted)]">{t('domains.nameserversHint')}</span>
-
-            <div>
-              <Button type="submit" loading={nameservers.isPending}>
-                {t('common.save')}
-              </Button>
-            </div>
-          </form>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <Button
-              variant="secondary"
-              loading={lock.isPending}
-              onClick={() => { lock.mutate({ locked: domain.transfer_locked !== true }) }}
-            >
-              {domain.transfer_locked === true ? t('domains.unlock') : t('domains.lock')}
-            </Button>
-
-            <Button
-              variant="secondary"
-              loading={authCode.isPending}
-              onClick={() => { authCode.mutate() }}
-            >
-              {t('domains.getAuthCode')}
-            </Button>
-          </div>
-
-          <p className="mt-2 text-sm text-[var(--text-muted)]">{t('domains.leavingExplainer')}</p>
-
-          {authCode.data === undefined ? null : (
-            <div className="mt-3">
-              <Alert tone="info">
-                <span className="technical" dir="ltr">
-                  {authCode.data.data.authorisation_code}
-                </span>
-              </Alert>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">{t('domains.authCodeHint')}</p>
-            </div>
-          )}
-        </>
-      ) : null}
-
-      {failure === null ? null : (
-        <div className="mt-3">
-          <Alert tone="error" requestId={failure.requestId}>
-            {failure.message}
-          </Alert>
-        </div>
-      )}
-    </Card>
-  )
-}
-
-/**
- * A lapsed name and the one way back.
- *
- * Every state the addendum lists is a sentence here — expired, in
- * redemption, recovery available or not (and why), the price, the quote's
- * expiry, awaiting payment, provider processing, needs review, recovered —
- * and none of them is urgent-sounding. The registry's clock is real; a
- * countdown would be theatre.
- */
-function RedemptionPanel({ domain, locale }: { domain: Domain; locale: Locale }) {
-  const { t } = useTranslation()
-  const describeError = useApiErrorMessage()
-  const quote = useQuoteDomain()
-  const redeem = useRedeemDomain(domain.id)
-  const [pending, setPending] = useState<DomainQuote | null>(null)
-  const redemption = domain.redemption
-  if (redemption === null) return null
-
-  const attempt = redemption.attempt
-  const inFlight = attempt !== null && ['requested', 'queued', 'running', 'awaiting_registry', 'indeterminate', 'needs_review'].includes(attempt.state)
-  const failure = describeError(quote.error) ?? describeError(redeem.error)
-
-  return (
-    <section className="mt-4 flex flex-col gap-2 rounded-lg border border-[var(--border-subtle)] p-3" aria-label={t('domains.redemption.heading')}>
-      <h3 className="text-sm font-semibold">{t('domains.redemption.heading')}</h3>
-
-      {domain.state === 'redemption' ? (
-        <p className="text-sm text-[var(--text-secondary)]">
-          {t('domains.redemption.lapsed', { date: domain.expires_at === null ? '' : formatDate(domain.expires_at, locale) })}
-        </p>
-      ) : null}
-
-      {attempt !== null && attempt.state === 'completed' ? <Alert tone="success">{t('domains.redemption.recovered')}</Alert> : null}
-      {attempt !== null && (attempt.state === 'requested' || attempt.state === 'queued') ? (
-        <Alert tone="info">
-          {t('domains.redemption.awaitingPayment')}{' '}
-          {attempt.invoice_id === null ? null : (
-            <Link to="/invoices" className="underline underline-offset-2">{t('domains.redemption.openInvoice')}</Link>
-          )}
-        </Alert>
-      ) : null}
-      {attempt !== null && (attempt.state === 'running' || attempt.state === 'awaiting_registry') ? <Alert tone="info">{t('domains.redemption.processing')}</Alert> : null}
-      {attempt !== null && attempt.needs_attention ? <Alert tone="warning">{t('domains.redemption.needsReview')}</Alert> : null}
-      {attempt !== null && attempt.state === 'failed' ? <Alert tone="error">{t('domains.redemption.failed')}</Alert> : null}
-
-      {domain.is_redeemable && !inFlight ? (
-        redemption.support === 'supported' && redemption.price_minor !== null && redemption.currency !== null ? (
-          <>
-            <p className="text-sm">{t('domains.redemption.available', { price: formatMinorUnits(redemption.price_minor, redemption.currency, locale) })}</p>
-            <div>
-              <Button
-                loading={quote.isPending}
-                onClick={() => {
-                  quote.mutate({ name: domain.name, operation: 'redeem' }, { onSuccess: (result) => { setPending(result.data) } })
-                }}
-              >
-                {t('domains.redemption.recover')}
-              </Button>
-            </div>
-          </>
-        ) : (
-          <Alert tone="warning">{t(`domains.redemption.unavailable.${redemption.support === 'supported' ? 'blocked_configuration' : redemption.support}`)}</Alert>
-        )
-      ) : null}
-
-      {failure === null ? null : (
-        <Alert tone="error" requestId={failure.requestId}>{failure.message}</Alert>
-      )}
-
-      {pending === null ? null : (
-        <ConfirmDialog
-          open
-          title={t('domains.redemption.quoteTitle', { domain: domain.name })}
-          body={
-            <div className="flex flex-col gap-2 text-sm">
-              <p>{t('domains.redemption.quoteBody')}</p>
-              <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1">
-                <dt className="text-[var(--text-muted)]">{t('domains.redemption.quotePrice')}</dt>
-                <dd className="technical">{formatMinorUnits(pending.price_minor, pending.currency, locale)}</dd>
-              </dl>
-              <p className="text-[var(--text-muted)]">{t('domains.redemption.quoteExpires', { when: formatDate(pending.expires_at, locale) })}</p>
-              <p className="text-[var(--text-muted)]">{t('domains.redemption.paymentExplainer')}</p>
-            </div>
-          }
-          confirmLabel={t('domains.redemption.confirm')}
-          loading={redeem.isPending}
-          error={describeError(redeem.error)?.message}
-          onCancel={() => { setPending(null); redeem.reset() }}
-          onConfirm={() => { redeem.mutate({ quote_id: pending.id }, { onSuccess: () => { setPending(null) } }) }}
-        />
-      )}
-    </section>
   )
 }

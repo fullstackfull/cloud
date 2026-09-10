@@ -14182,7 +14182,7 @@ paths:
       tags:
         - "Backups"
       summary: "Delete a backup"
-      description: "Requires the backup's own id typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force."
+      description: "Requires the machine's hostname typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Which archive is destroyed is settled by the URL; the phrase is evidence that a person meant to destroy a copy of that machine's data, which the backup's own ULID never was. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force."
       parameters:
         - name: "vm"
           in: "path"
@@ -14202,7 +14202,7 @@ paths:
             schema:
               type: "object"
               properties:
-                confirm_backup_id:
+                confirmation:
                   description: "See the endpoint description; validated server-side."
       security:
         - sessionCookie: []
@@ -19481,6 +19481,12 @@ components:
           type:
             - "string"
             - "null"
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The row that fulfils this service, as `{kind, id}` — the same handle the service and notification documents carry, because a service id is not the id of the machine or account behind it."
         state:
           type:
             - "string"
@@ -20673,6 +20679,12 @@ components:
             - "string"
             - "null"
           description: "The name the customer knows this by — a hostname, a primary domain, a serial. The label beside it comes from the catalogue and is the same string for everyone who bought the plan. Null while the service is still being created."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The row that fulfils this service, as `{kind, id}`. A service's own id is not the machine's, the hosting account's or the chassis's, so the id a link needs is published rather than guessed. `kind` is a customer-facing family (`vps`, `dedicated`, `hosting`, `wordpress`) and the client owns the route it maps to. Null until something has been created."
         state:
           type:
             - "string"

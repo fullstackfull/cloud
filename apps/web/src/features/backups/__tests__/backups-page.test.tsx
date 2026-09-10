@@ -188,7 +188,7 @@ describe('backups page', () => {
     })
   })
 
-  it('will not delete until the backup reference is typed back', async () => {
+  it('will not delete until the machine\'s hostname is typed back', async () => {
     const deleted = vi.fn()
     vi.stubGlobal('fetch', stubFetch({ onDelete: deleted }))
     const user = userEvent.setup()
@@ -203,21 +203,28 @@ describe('backups page', () => {
 
     expect(confirm).toBeDisabled()
 
-    // The reference of a *different* backup is the mistake this guards
-    // against — two tabs open, the wrong one confirmed.
-    await user.type(box, '01JOTHER')
+    // Another machine's hostname is the mistake this guards against — two
+    // tabs open, the wrong one confirmed.
+    await user.type(box, 'web-kw-02')
     expect(confirm).toBeDisabled()
 
+    /*
+     * The machine's own hostname. It was the backup's ULID until Wave 3: a
+     * twenty-six character identifier is not evidence that anybody read the
+     * screen, and which archive is destroyed is settled by the row the
+     * customer clicked. The dialogue names the archive by its date, its size
+     * and whether it has been verified.
+     */
     await user.clear(box)
-    await user.type(box, '01JBACKUP')
+    await user.type(box, 'web-kw-01')
     expect(confirm).toBeEnabled()
 
     await user.click(confirm)
 
-    // What the customer typed, not the id the client already held: the
+    // What the customer typed, not a value the client already held: the
     // server's check is worthless if the client fills it in.
     await waitFor(() => {
-      expect(deleted).toHaveBeenCalledWith({ confirm_backup_id: '01JBACKUP' })
+      expect(deleted).toHaveBeenCalledWith({ confirmation: 'web-kw-01' })
     })
   })
 

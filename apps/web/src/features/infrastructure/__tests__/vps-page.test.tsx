@@ -8,13 +8,16 @@ import { VpsPage } from '@/features/infrastructure/VpsPage'
 import '@/i18n'
 
 /**
- * The VPS list, on the three things Wave 0 changed about it.
+ * The VPS list, which since Wave 3 is an index.
  *
  * The specification column used to read "vCPU · NaN GiB · GiB" on every row,
- * because the page read fields the API nests under `resources`. Force off
- * used to fire on one click. And a machine whose last rebuild had timed out
- * offered an enabled Reinstall button the API then refused with 409. Each of
- * those is a fact about what the customer sees, so each is asserted here.
+ * because the page read fields the API nests under `resources`. That is still
+ * asserted here, and so is the row's way in.
+ *
+ * The destructive controls moved to the machine's own page — see
+ * vps-detail-page.test.tsx, which carries Wave 0's guarantees about them: the
+ * force-off confirmation, one request per decision, and a stranded machine's
+ * controls being off with the reason said out loud.
  */
 
 const MACHINE = {
@@ -112,50 +115,24 @@ describe('the VPS list', () => {
     expect(screen.queryByText(/undefined/)).not.toBeInTheDocument()
   })
 
-  it('asks before forcing a machine off, and does nothing when the customer backs out', async () => {
-    const powered = vi.fn()
-    vi.stubGlobal('fetch', stubFetch(powered))
-    const user = userEvent.setup()
+  it('names each machine as a link to it, and offers the one control a list needs', async () => {
+    vi.stubGlobal('fetch', stubFetch())
 
     renderPage()
     await screen.findByText('2 vCPU · 4 GiB · 40 GiB')
 
-    await user.click(within(row('web-kw-01')).getByRole('button', { name: /^force off$/i }))
+    // The hostname is the way in. Before Wave 3 there was no page to go to.
+    expect(screen.getByRole('link', { name: 'web-kw-01' })).toHaveAttribute('href', '/vps/01JVM')
 
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/pulls the plug/i)).toBeInTheDocument()
+    const healthy = row('web-kw-01')
 
-    await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }))
+    // Reboot is the one power control a list keeps: the rest, and everything
+    // destructive, are on the machine's own page.
+    expect(within(healthy).getByRole('button', { name: /^reboot$/i })).toBeEnabled()
 
-    expect(powered).not.toHaveBeenCalled()
-  })
-
-  it('forces off exactly once when confirmed, with the key in the header', async () => {
-    const powered = vi.fn()
-    vi.stubGlobal('fetch', stubFetch(powered))
-    const user = userEvent.setup()
-
-    renderPage()
-    await screen.findByText('2 vCPU · 4 GiB · 40 GiB')
-
-    await user.click(within(row('web-kw-01')).getByRole('button', { name: /^force off$/i }))
-    const dialog = await screen.findByRole('dialog')
-    const confirm = within(dialog).getByRole('button', { name: /^force off$/i })
-
-    // Two presses: the second lands on a button that is loading, and so
-    // disabled, which is what stops a slow network turning one decision
-    // into two requests.
-    await user.click(confirm)
-    await user.click(confirm)
-
-    await waitFor(() => {
-      expect(powered).toHaveBeenCalledTimes(1)
-    })
-
-    const [headers, body] = powered.mock.calls[0] as [Headers, Record<string, unknown>]
-    expect(body).toEqual({ action: 'stop' })
-    // The header, not the body: the API reads it from there and nowhere else.
-    expect(headers.get('Idempotency-Key')).toMatch(/^[0-9a-f-]{36}$/)
+    for (const name of [/^start$/i, /^shut down$/i, /^force off$/i, /^reinstall$/i]) {
+      expect(within(healthy).queryByRole('button', { name })).not.toBeInTheDocument()
+    }
   })
 
   it('sends every other power action straight away with the key in the header', async () => {
@@ -177,7 +154,7 @@ describe('the VPS list', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('disables every disruptive control on a machine the API says it would refuse, and says why', async () => {
+  it('disables the control on a machine the API says it would refuse, and says why', async () => {
     vi.stubGlobal('fetch', stubFetch())
 
     renderPage()
@@ -185,12 +162,10 @@ describe('the VPS list', () => {
 
     const stranded = row('web-kw-02')
 
-    for (const name of [/^start$/i, /^shut down$/i, /^force off$/i, /^reboot$/i, /^reinstall$/i]) {
-      expect(within(stranded).getByRole('button', { name })).toBeDisabled()
-    }
+    expect(within(stranded).getByRole('button', { name: /^reboot$/i })).toBeDisabled()
     expect(within(stranded).getByText(/our team is looking at it\. controls stay off/i)).toBeInTheDocument()
 
     // And the healthy neighbour is untouched.
-    expect(within(row('web-kw-01')).getByRole('button', { name: /^reinstall$/i })).toBeEnabled()
+    expect(within(row('web-kw-01')).getByRole('button', { name: /^reboot$/i })).toBeEnabled()
   })
 })

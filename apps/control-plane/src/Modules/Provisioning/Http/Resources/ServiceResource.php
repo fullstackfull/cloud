@@ -70,9 +70,17 @@ final class ServiceResource extends JsonResource
              * null while the service is still being created — "being created"
              * is true and useful; a fabricated hostname is not.
              */
-            'identity' => is_string($identity = $this->resource->getAttribute(ServiceIdentities::ATTRIBUTE))
-                ? $identity
-                : null,
+            'identity' => ServiceIdentities::identityOf($this->resource),
+
+            /*
+             * The thing that fulfils this service: its family and its own id.
+             *
+             * Published as a handle rather than as a path, because routes
+             * belong to the portal and not to the API — the same contract the
+             * notification inbox uses, so one map in the client turns either
+             * into a destination. Null while nothing has been created yet.
+             */
+            'resource' => ServiceIdentities::handleOf($this->resource),
 
             'state' => $this->customerState()->value,
             // Asked of the enum that decides, so a client's "can I use this?"

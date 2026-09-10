@@ -178,7 +178,12 @@ final class ServiceShowEndpointTest extends ServiceApiTestCase
             // by, so a resource page can be titled with the hostname rather
             // than with a catalogue label shared by every customer on the
             // plan. A resource name, not an operational fact.
-            'id', 'kind', 'label', 'identity', 'state', 'is_usable', 'resources',
+            //
+            // `resource` arrived with it: the family and the id of the row
+            // that fulfils the service, because a service's own id is not the
+            // machine's and a client building a link from it would point at
+            // nothing. A handle and not a path — routes belong to the portal.
+            'id', 'kind', 'label', 'identity', 'resource', 'state', 'is_usable', 'resources',
             'plan_id', 'order_id', 'order_item_id', 'subscription_id',
             'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
             'terminated_at', 'created_at',

@@ -3,7 +3,8 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { WordPressPage } from '@/features/wordpress/WordPressPage'
+import { SiteCopies } from '@/features/wordpress/SiteCopies'
+import type { WordPressSite } from '@/lib/types'
 import '@/i18n'
 
 /**
@@ -14,6 +15,10 @@ import '@/i18n'
  * and no button), and that the push shows what it overwrites — in the
  * server's words, including that the platform holds no backup — and
  * cannot be confirmed until the production domain is typed exactly.
+ *
+ * Rendered as the component rather than through the sites list: Wave 3 moved
+ * these controls onto the site's own page, and the guarantees asserted here
+ * are the component's, not any one screen's.
  */
 
 const PRODUCTION = {
@@ -100,12 +105,12 @@ function stubFetch({ sites, onPush, onStaging }: { sites: unknown[]; onPush?: (b
   })
 }
 
-function renderPage() {
+function renderCopies(site: unknown) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
   return render(
     <QueryClientProvider client={client}>
-      <WordPressPage />
+      <SiteCopies site={site as WordPressSite} />
     </QueryClientProvider>,
   )
 }
@@ -120,19 +125,24 @@ describe('WordPress copies', () => {
     vi.stubGlobal('fetch', stubFetch({ sites: [PRODUCTION, CANNOT], onStaging: asked }))
     const user = userEvent.setup()
 
-    renderPage()
+    const production = renderCopies(PRODUCTION)
+    const staging = await screen.findByRole('button', { name: /create a staging copy/i })
 
-    const shop = (await screen.findByRole('heading', { name: 'shop.test' })).closest('section') as HTMLElement
-    expect(within(shop).getByRole('button', { name: /create a staging copy/i })).toBeInTheDocument()
-
-    const elsewhere = (await screen.findByRole('heading', { name: 'elsewhere.test' })).closest('section') as HTMLElement
-    expect(within(elsewhere).queryByRole('button', { name: /create a staging copy/i })).not.toBeInTheDocument()
-    expect(within(elsewhere).getByText(/cannot copy wordpress sites/i)).toBeInTheDocument()
-
-    await user.click(within(shop).getByRole('button', { name: /create a staging copy/i }))
+    await user.click(staging)
     await waitFor(() => {
       expect(asked).toHaveBeenCalled()
     })
+
+    production.unmount()
+
+    // The same component, for a site whose panel toolkit cannot copy: no
+    // button at all, and the provider's own reason in its place.
+    renderCopies(CANNOT)
+
+    expect(
+      screen.queryByRole('button', { name: /create a staging copy/i }),
+    ).not.toBeInTheDocument()
+    expect(await screen.findByText(/cannot copy wordpress sites/i)).toBeInTheDocument()
   })
 
   it('shows what a push overwrites in the server\'s words and needs the production domain typed exactly', async () => {
@@ -140,11 +150,9 @@ describe('WordPress copies', () => {
     vi.stubGlobal('fetch', stubFetch({ sites: [PRODUCTION, STAGING], onPush: pushed }))
     const user = userEvent.setup()
 
-    renderPage()
+    const copy = renderCopies(STAGING)
 
-    const staging = (await screen.findByRole('heading', { name: 'staging.shop.test' })).closest('section') as HTMLElement
-    expect(within(staging).getByText(/^staging copy$/i)).toBeInTheDocument()
-    await user.click(within(staging).getByRole('button', { name: /push to production/i }))
+    await user.click(await screen.findByRole('button', { name: /push to production/i }))
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/holds no backup of a shared-hosting site/i)).toBeInTheDocument()
@@ -162,7 +170,11 @@ describe('WordPress copies', () => {
     })
 
     // A production site has nothing to push, and never shows the button.
-    const shop = screen.getByRole('heading', { name: 'shop.test' }).closest('section') as HTMLElement
-    expect(within(shop).queryByRole('button', { name: /push to production/i })).not.toBeInTheDocument()
+    copy.unmount()
+    renderCopies(PRODUCTION)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /push to production/i })).not.toBeInTheDocument()
+    })
   })
 })

@@ -217,7 +217,6 @@ return [
         'code' => 'authentication code',
         'company_name' => 'company name',
         'confirm_account_id' => 'account confirmation',
-        'confirm_backup_id' => 'backup confirmation',
         'confirm_hostname' => 'hostname confirmation',
         'confirm_serial' => 'serial number confirmation',
         'confirm_subscription_id' => 'subscription confirmation',
@@ -337,6 +336,7 @@ return [
             'expires_in_future' => 'The expiry date must be in the future.',
         ],
         'backup' => [
+            'delete_confirmation_required' => 'Type the machine\'s hostname to confirm. Deleting a backup cannot be undone once the grace period runs out.',
             'restore_confirmation_required' => 'Type the machine\'s hostname to confirm. A restore replaces every disk on it.',
             'file_restore_confirmation_required' => 'Type the machine\'s hostname to confirm. A file restore replaces those files on it.',
         ],

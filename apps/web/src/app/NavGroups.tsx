@@ -37,7 +37,17 @@ export function NavGroups({
           )}
 
           {group.items.map((item) => (
-            <NavItemLink key={item.to} item={item} onNavigate={onNavigate} size={size} />
+            <NavItemLink
+              key={item.to}
+              item={item}
+              size={size}
+              /*
+               * Spread rather than passed as undefined: under
+               * exactOptionalPropertyTypes an optional prop must be absent,
+               * not present-and-undefined.
+               */
+              {...(onNavigate === undefined ? {} : { onNavigate })}
+            />
           ))}
         </div>
       ))}

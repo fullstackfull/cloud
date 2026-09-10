@@ -16,6 +16,8 @@ import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
  */
 const POWER_ACTIONS = ['start', 'shutdown', 'stop', 'reboot'] as const
 
+export type PowerAction = (typeof POWER_ACTIONS)[number]
+
 /**
  * The four power controls, wherever a machine is shown.
  *
@@ -26,7 +28,21 @@ const POWER_ACTIONS = ['start', 'shutdown', 'stop', 'reboot'] as const
  * fresh key per press, the force-off confirmation and the error live here and
  * nowhere else.
  */
-export function VpsPowerActions({ vm }: { vm: VirtualMachine }) {
+export function VpsPowerActions({
+  vm,
+  only,
+}: {
+  vm: VirtualMachine
+  /**
+   * Which of the four to render.
+   *
+   * The list row shows one — a reboot, the thing customers do most — and the
+   * machine's own page shows all four. It is the same component either way, so
+   * the row's reboot and the page's reboot are the same request with the same
+   * key and the same error handling.
+   */
+  only?: readonly PowerAction[]
+}) {
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
   const power = useVpsPower()
@@ -44,7 +60,7 @@ export function VpsPowerActions({ vm }: { vm: VirtualMachine }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {POWER_ACTIONS.map((action) => (
+        {(only ?? POWER_ACTIONS).map((action) => (
           <Button
             key={action}
             size="sm"
@@ -84,8 +100,16 @@ export function VpsPowerActions({ vm }: { vm: VirtualMachine }) {
         </Alert>
       )}
 
+      {/*
+        * Mounted only while it is open. A closed <dialog> stays in the
+        * document, and its confirm button — hidden, but still labelled
+        * "Force off" — is a button anything counting the controls on this
+        * page would find, and one a stale reference could still be clicked
+        * through.
+        */}
+      {forcingOff ? (
       <ConfirmDialog
-        open={forcingOff}
+        open
         title={t('vps.forceOff.title', { hostname: vm.hostname })}
         body={<p>{t('vps.forceOff.body')}</p>}
         confirmLabel={t('vps.forceOff.confirmLabel')}
@@ -99,6 +123,7 @@ export function VpsPowerActions({ vm }: { vm: VirtualMachine }) {
         }}
         onCancel={() => { setForcingOff(false); }}
       />
+      ) : null}
     </div>
   )
 }

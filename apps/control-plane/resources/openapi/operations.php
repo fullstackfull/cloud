@@ -715,8 +715,8 @@ return [
     'api.v1.backups.destroy' => [
         'tag' => 'Backups',
         'summary' => 'Delete a backup',
-        'description' => "Requires the backup's own id typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force.",
-        'body' => ['confirm_backup_id'],
+        'description' => "Requires the machine's hostname typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Which archive is destroyed is settled by the URL; the phrase is evidence that a person meant to destroy a copy of that machine's data, which the backup's own ULID never was. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force.",
+        'body' => ['confirmation'],
         'response' => $one('Backup'),
     ],
     'api.v1.backups.keep' => [

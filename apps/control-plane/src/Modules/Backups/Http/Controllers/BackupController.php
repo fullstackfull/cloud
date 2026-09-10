@@ -134,7 +134,7 @@ final class BackupController
      *
      * `service.destroy` rather than `service.manage`: a technical contact who
      * may rebuild a machine may not destroy the thing that would let it be
-     * rebuilt afterwards. And behind the archive's own id typed back, because
+     * rebuilt afterwards. And behind the machine's hostname typed back, because
      * this is irreversible and a mis-click is common.
      *
      * The endpoint records a decision; it does not call the provider. The
@@ -154,9 +154,18 @@ final class BackupController
             ->whereKey($backup)
             ->firstOrFail();
 
-        // Compared exactly, and before anything else is read. hash_equals
-        // rather than a loose compare so the check cannot be shortened.
-        if (! hash_equals((string) $row->getKey(), $request->confirmation())) {
+        /*
+         * The machine's hostname, compared exactly and before anything else is
+         * read. hash_equals rather than a loose compare so the check cannot be
+         * shortened.
+         *
+         * Which archive is being destroyed is decided by the URL, which named
+         * the row the customer clicked; the phrase is evidence that a person
+         * meant to destroy a copy of that machine's data. It was the archive's
+         * ULID until Wave 3 — a string nobody can verify by reading it, which
+         * is the opposite of what a confirmation is for.
+         */
+        if (! hash_equals($machine->hostname, $request->confirmation())) {
             throw BackupDeletionRefusedException::becauseTheConfirmationDoesNotMatch();
         }
 

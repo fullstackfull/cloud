@@ -173,7 +173,7 @@ final class SubscriptionResource extends JsonResource
     }
 
     /**
-     * @return list<array{id: string, kind: string, label: string|null, identity: string|null, state: string, is_usable: bool}>
+     * @return list<array{id: string, kind: string, label: string|null, identity: string|null, resource: array{kind: string, id: string}|null, state: string, is_usable: bool}>
      */
     private function serviceSummaries(): array
     {
@@ -182,9 +182,11 @@ final class SubscriptionResource extends JsonResource
                 'id' => (string) $service->getKey(),
                 'kind' => (string) $service->kind,
                 'label' => $service->label,
-                'identity' => is_string($service->getAttribute(ServiceIdentities::ATTRIBUTE))
-                    ? (string) $service->getAttribute(ServiceIdentities::ATTRIBUTE)
-                    : null,
+                'identity' => ServiceIdentities::identityOf($service),
+
+                // The resource this agreement pays for, so a cancellation
+                // dialogue and a resource page can be reached from each other.
+                'resource' => ServiceIdentities::handleOf($service),
                 'state' => CustomerServiceState::for($service->status, false)->value,
                 'is_usable' => $service->isUsable(),
             ])
