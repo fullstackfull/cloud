@@ -34,6 +34,7 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -157,6 +158,27 @@ class E2ESeeder extends Seeder
     public const string ARABIC_DECLINE_INVOICE_NUMBER = 'INV-E2E-W2-0004';
 
     /**
+     * The account those journeys spend from, which is not the shared one.
+     *
+     * Paying an invoice is not a read: it moves a wallet balance, writes a
+     * payment row and tells the customer about it. Run against the shared
+     * fixture, the money journeys left every later spec looking at an account
+     * whose credit was gone, whose notification count had grown by four and
+     * which had one more subscription than the seeder wrote — nine failures
+     * that were all about the harness. This login owns the invoices above and
+     * its own wallet, so what the money journeys spend is theirs to spend.
+     */
+    public const string MONEY_EMAIL = 'money@lynomia.local';
+
+    /**
+     * 15.000 KWD, and deliberately not the shared account's 12.750.
+     *
+     * Two accounts holding the same balance would let a spec that signed in as
+     * the wrong one pass anyway.
+     */
+    public const int MONEY_CREDIT_MINOR = 15_000;
+
+    /**
      * A ticket in mid-conversation, with an internal note on it.
      *
      * The note is the fixture that matters: the customer's screen must not
@@ -237,6 +259,7 @@ class E2ESeeder extends Seeder
         $this->notifications($customer);
         $this->invoices($customer);
         $this->wallet($customer);
+        $this->moneyJourneys();
         $this->billingAdmin();
         $this->address($customer);
         $this->hostingAccount($customer);
@@ -1186,33 +1209,6 @@ class E2ESeeder extends Seeder
             'due_at' => now()->addDays(20),
         ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
 
-        /*
-         * Bigger than the seeded wallet balance, so paying it from credit
-         * leaves a remainder for a card — which is the mixed payment the
-         * portal has to be able to show as two rows.
-         */
-        $this->invoiceWithLines($customer, [
-            'number' => self::CREDIT_THEN_CARD_INVOICE_NUMBER,
-            'status' => InvoiceStatus::Open,
-            'amount_paid_minor' => 0,
-            'issued_at' => now()->subDay(),
-            'due_at' => now()->addDays(20),
-        ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
-
-        foreach ([
-            self::DECLINE_INVOICE_NUMBER,
-            self::PHONE_PAYMENT_INVOICE_NUMBER,
-            self::ARABIC_DECLINE_INVOICE_NUMBER,
-        ] as $number) {
-            $this->invoiceWithLines($customer, [
-                'number' => $number,
-                'status' => InvoiceStatus::Open,
-                'amount_paid_minor' => 0,
-                'issued_at' => now()->subDays(2),
-                'due_at' => now()->addDays(12),
-            ], Money::of('9.000', 'KWD'), 'Cloud VPS — Starter (monthly)');
-        }
-
         $this->invoiceWithLines($customer, [
             'number' => self::PAID_INVOICE_NUMBER,
             'status' => InvoiceStatus::Paid,
@@ -1273,6 +1269,95 @@ class E2ESeeder extends Seeder
             'period_start' => $attributes['issued_at'] ?? now(),
             'period_end' => ($attributes['issued_at'] ?? now())->copy()->addMonth(),
         ]);
+    }
+
+    /**
+     * The account the Wave 2 money journeys spend from, and what it owns.
+     *
+     * A verified login, one wallet with credit in it, and the four invoices
+     * the journeys pay. Separate from the shared fixture on purpose: those
+     * journeys settle invoices, and settling one credits a ledger, writes a
+     * payment and posts a notification. Every one of those is a fact a later
+     * spec reads, so the account that changes has to be the account nobody
+     * else asserts on.
+     *
+     * The invoices stay one per journey, for the reason their constants give:
+     * the browser projects share a database and run one after another.
+     */
+    private function moneyJourneys(): void
+    {
+        $user = User::firstOrCreate(
+            ['email' => self::MONEY_EMAIL],
+            [
+                'name' => 'Money Journeys',
+                'password' => 'password',
+                'email_verified_at' => Date::now(),
+                'password_changed_at' => Date::now(),
+            ],
+        );
+
+        $user->syncRoles([Role::Customer->value]);
+
+        $customer = Customer::firstOrCreate(
+            ['billing_email' => self::MONEY_EMAIL],
+            [
+                'type' => CustomerType::Individual,
+                'display_name' => 'Money Journeys',
+                'currency' => 'KWD',
+                'country' => 'KW',
+                'address_line1' => 'Block 4, Street 12, Building 7',
+                'city' => 'Kuwait City',
+                'postal_code' => '13001',
+            ],
+        );
+
+        $customer->members()->firstOrCreate(
+            ['user_id' => $user->getKey()],
+            ['role' => CustomerRole::Owner, 'accepted_at' => Date::now()],
+        );
+
+        $ledger = app(WalletLedger::class);
+        $wallet = $ledger->walletFor($customer, 'KWD');
+
+        if (! $wallet->transactions()->exists()) {
+            $ledger->credit(
+                wallet: $wallet,
+                amount: Money::ofMinor(self::MONEY_CREDIT_MINOR, 'KWD'),
+                kind: WalletTransactionKind::Promotional,
+                description: 'Credit for the money journeys',
+            );
+        }
+
+        if (Invoice::query()->where('number', self::CREDIT_THEN_CARD_INVOICE_NUMBER)->exists()) {
+            return;
+        }
+
+        /*
+         * Worth more than the credit above, so paying it from credit leaves a
+         * remainder for a card — the mixed payment the invoice has to show as
+         * two rows.
+         */
+        $this->invoiceWithLines($customer, [
+            'number' => self::CREDIT_THEN_CARD_INVOICE_NUMBER,
+            'status' => InvoiceStatus::Open,
+            'amount_paid_minor' => 0,
+            'issued_at' => now()->subDay(),
+            'due_at' => now()->addDays(20),
+        ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
+
+        foreach ([
+            self::DECLINE_INVOICE_NUMBER,
+            self::PHONE_PAYMENT_INVOICE_NUMBER,
+            self::ARABIC_DECLINE_INVOICE_NUMBER,
+        ] as $number) {
+            $this->invoiceWithLines($customer, [
+                'number' => $number,
+                'status' => InvoiceStatus::Open,
+                'amount_paid_minor' => 0,
+                'issued_at' => now()->subDays(2),
+                'due_at' => now()->addDays(12),
+            ], Money::of('9.000', 'KWD'), 'Cloud VPS — Starter (monthly)');
+        }
     }
 
     private function wallet(Customer $customer): void

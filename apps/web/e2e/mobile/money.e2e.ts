@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { fixtures, signIn } from '../support/helpers'
+import { fixtures, signIn, users } from '../support/helpers'
 import { openMenu } from '../support/mobile'
 
 /**
@@ -44,7 +44,9 @@ test.describe('an invoice on a phone', () => {
   })
 
   test('paying from a phone reaches the provider page and settles by webhook', async ({ page }) => {
-    await signIn(page)
+    // The money account: this journey settles an invoice, and the shared
+    // fixture is what the rest of the suite reads.
+    await signIn(page, users.moneyCustomer)
 
     await page.goto('/invoices')
 
@@ -98,6 +100,8 @@ test.describe('the wallet ledger on a phone', () => {
     await page.goto('/wallet')
 
     await expect(page.getByRole('table', { name: /credit history/i })).toBeVisible()
-    await expect(page.getByText(/balance after/i)).toBeVisible()
+    // The column, by its role: the card's own description ends with the same
+    // words, and a loose text match finds both.
+    await expect(page.getByRole('columnheader', { name: /balance after/i })).toBeVisible()
   })
 })

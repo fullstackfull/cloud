@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { fixtures, signIn } from './support/helpers'
+import { fixtures, signIn, users } from './support/helpers'
 import { linkFromMailTo } from './support/outbox'
 
 /**
@@ -107,7 +107,13 @@ test.describe('journey B — an unverified customer may look and may not buy', (
 
 test.describe('journey C — buying something, with the price shown first', () => {
   test('the quote, the order, the invoice and the payment are one chain', async ({ page }) => {
-    await signIn(page)
+    /*
+     * Signed in as the account the money journeys own, not the shared one.
+     * This journey buys a plan, which leaves behind an order, an invoice, a
+     * payment, a subscription and two notifications — and the shared fixture
+     * is what every other spec in the suite asserts on.
+     */
+    await signIn(page, users.moneyCustomer)
 
     await page.goto('/catalogue')
     await page.getByRole('link', { name: /view plans/i }).first().click()
@@ -167,7 +173,7 @@ test.describe('journey C — buying something, with the price shown first', () =
 
 test.describe('journey D — paying part of an invoice from credit', () => {
   test('credit covers what it can and the rest stays payable', async ({ page }) => {
-    await signIn(page)
+    await signIn(page, users.moneyCustomer)
     await page.goto('/invoices')
 
     const row = page.getByRole('row', { name: new RegExp(fixtures.creditThenCardInvoice) })
@@ -193,7 +199,7 @@ test.describe('journey D — paying part of an invoice from credit', () => {
 
 test.describe('journey E — one invoice paid from credit and a card', () => {
   test('the invoice shows both, as two rows', async ({ page }) => {
-    await signIn(page)
+    await signIn(page, users.moneyCustomer)
     await page.goto('/invoices')
 
     const row = page.getByRole('row', { name: new RegExp(fixtures.creditThenCardInvoice) })
@@ -227,7 +233,7 @@ test.describe('journey E — one invoice paid from credit and a card', () => {
 
 test.describe('journey F — a payment the bank refuses', () => {
   test('the refusal is visible on the invoice and the invoice stays payable', async ({ page }) => {
-    await signIn(page)
+    await signIn(page, users.moneyCustomer)
     await page.goto('/invoices')
 
     const row = page.getByRole('row', { name: new RegExp(fixtures.declineInvoice) })
@@ -325,7 +331,7 @@ test.describe('the customer surface never claims a payment it cannot prove', () 
 
 test.describe('the payments history', () => {
   test('shows what was paid, what failed, and links back to each invoice', async ({ page }) => {
-    await signIn(page)
+    await signIn(page, users.moneyCustomer)
     await page.goto('/payments')
 
     await expect(page.getByRole('heading', { name: /payments/i })).toBeVisible()

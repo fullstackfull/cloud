@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
-import { fixtures, resetTwoFactor, signIn, users } from './support/helpers'
+import { fixtures, forgetSessions, resetTwoFactor, signIn, users } from './support/helpers'
 
 /*
  * Wave 0: every existing control does what it says.
@@ -238,8 +238,21 @@ test.describe('changing plan', () => {
   test('an upgrade is quoted, confirmed and applied', async ({ page }) => {
     await page.goto('/subscriptions')
 
+    /*
+     * The operable machine's agreement, by name.
+     *
+     * Whichever row happened to come first was a coin toss, and since the
+     * fixture began naming what each subscription pays for it has been the
+     * wrong one: the other agreement runs e2e-web-01, whose rebuild nobody can
+     * settle, so the platform correctly refuses to resize it and every option
+     * on that screen is disabled. The subscription this spec is about is the
+     * one whose server is quiet.
+     */
     const options = page.waitForResponse((response) => response.url().includes('/plan-options'))
-    await page.getByRole('link', { name: /change plan/i }).first().click()
+    await page
+      .getByRole('row', { name: new RegExp(fixtures.operableHostname) })
+      .getByRole('link', { name: /change plan/i })
+      .click()
     await options
 
     // The first plan the platform would allow: refused ones (the current
@@ -358,6 +371,20 @@ test.describe('revoking access', () => {
     page,
     browser,
   }) => {
+    /*
+     * A known number of devices to start from.
+     *
+     * The security screen lists a hundred sessions at most, and one browser
+     * running the whole suite signs in far more often than that: by the time
+     * this spec runs, revoking a row only lets an older session slide into
+     * view and the count never moves. So every stored session for the account
+     * is dropped and this page signs in again as the only one, which makes
+     * the numbers below the ones the platform decides rather than the ones
+     * the harness happened to leave behind.
+     */
+    forgetSessions()
+    await signIn(page)
+
     // A second signed-in device, so there is another session to end.
     const other = await browser.newContext()
     const otherPage = await other.newPage()

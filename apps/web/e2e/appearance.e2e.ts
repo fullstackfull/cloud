@@ -129,10 +129,15 @@ test.describe('Arabic layout', () => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
     await page.goto('/wallet')
 
-    // 12.750 KWD, seeded. Eastern Arabic numerals are correct Arabic and wrong
-    // here: the platform's invoices, the bank's statements and the payment
-    // provider's receipts all print 12.750, and a customer comparing them
-    // should not have to transliterate.
-    await expect(page.getByText(/12\.750/)).toBeVisible()
+    /*
+     * 12.750 KWD, seeded. Eastern Arabic numerals are correct Arabic and wrong
+     * here: the platform's invoices, the bank's statements and the payment
+     * provider's receipts all print 12.750, and a customer comparing them
+     * should not have to transliterate.
+     *
+     * Scoped to the balance card, because the credit history below it carries
+     * the balance after each movement and the top row's is the same figure.
+     */
+    await expect(page.getByRole('listitem').getByText(/12\.750/)).toBeVisible()
   })
 })

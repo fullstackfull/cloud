@@ -79,9 +79,16 @@ test('the wallet shows a balance with its currency', async ({ page }) => {
   await page.goto('/wallet')
 
   await expect(page.getByText(/KWD/).first()).toBeVisible()
-  // 12.750 KWD, seeded. Fils and all: a balance rendered to two decimals
-  // would be wrong for this currency.
-  await expect(page.getByText(/12\.750/)).toBeVisible()
+  /*
+   * 12.750 KWD, seeded. Fils and all: a balance rendered to two decimals
+   * would be wrong for this currency.
+   *
+   * Read off the balance card rather than off the page. Since Wave 2 the
+   * screen also shows the history behind the balance, and one of its columns
+   * is the balance after each movement — so the same figure legitimately
+   * appears twice and a page-wide match resolves to both.
+   */
+  await expect(page.getByRole('listitem').getByText(/12\.750/)).toBeVisible()
 })
 
 test('the services list shows the seeded VPS', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { documentLanguage, fixtures, signIn, users } from '../support/helpers'
 import { expectArabicProse } from '../support/language'
@@ -15,8 +15,11 @@ import { expectArabicProse } from '../support/language'
 /** The same welcome the rest of the Arabic suite matches on. */
 const WELCOME = /مرحب|أهل/
 
-async function signInArabic(page: import('@playwright/test').Page): Promise<void> {
-  await signIn(page, users.customer, { headingPattern: WELCOME })
+async function signInArabic(
+  page: Page,
+  who: { email: string; password: string } = users.customer,
+): Promise<void> {
+  await signIn(page, who, { headingPattern: WELCOME })
 
   // Read from the document rather than inferred from how it looks: this is
   // what assistive technology and the browser's own text handling read.
@@ -50,7 +53,9 @@ test.describe('an invoice in Arabic', () => {
   })
 
   test('a refused payment explains itself in Arabic', async ({ page }) => {
-    await signInArabic(page)
+    // The money account: a refusal writes a failed payment and a notification
+    // onto whichever account it is attempted from.
+    await signInArabic(page, users.moneyCustomer)
 
     await page.goto('/invoices')
 

@@ -17,6 +17,16 @@ export const users = {
   // A second super-admin, because a plan is not approved by the person who
   // planned it and the chain spec needs two people.
   secondOperator: { email: 'ops2@lynomia.local', password: 'password' },
+  /*
+   * The account the money journeys spend from.
+   *
+   * Paying an invoice is not a read: it moves a wallet balance, writes a
+   * payment row and posts a notification, and every one of those is a fact a
+   * later spec reads off the shared account. This login owns the four W2
+   * invoices and its own credit, so the journeys that spend money spend their
+   * own. See E2ESeeder::moneyJourneys.
+   */
+  moneyCustomer: { email: 'money@lynomia.local', password: 'password' },
 } as const
 
 /** Fixtures the specs assert on by name. Mirrors E2ESeeder's constants. */
@@ -116,6 +126,38 @@ export function resetTwoFactor(): void {
       'tinker',
       '--execute',
       'Lynomia\\Modules\\Identity\\Infrastructure\\Models\\User::query()->where("email", "customer@lynomia.local")->update(["two_factor_secret" => null, "two_factor_recovery_codes" => null, "two_factor_confirmed_at" => null]);',
+    ],
+    {
+      cwd: path.resolve(import.meta.dirname, '../../../control-plane'),
+      stdio: 'ignore',
+      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e' },
+    },
+  )
+}
+
+/**
+ * Drops every stored session for an account.
+ *
+ * The security screen lists a hundred sessions at most, and a suite-long run
+ * of sign-ins fills that list: by the time the sign-out spec runs, revoking
+ * one row lets an older session slide into view and the count does not move.
+ * That is a fact about the harness — one browser signing in two hundred times
+ * — and not about the platform, so the spec that counts rows arranges the
+ * number it starts from instead of inheriting it.
+ *
+ * Done in the database rather than through the screen, because the screen is
+ * the thing under test.
+ */
+export function forgetSessions(email: string = users.customer.email): void {
+  execFileSync(
+    'php',
+    [
+      'artisan',
+      'tinker',
+      '--execute',
+      '\\Illuminate\\Support\\Facades\\DB::table("sessions")->whereIn("user_id", ' +
+        'Lynomia\\Modules\\Identity\\Infrastructure\\Models\\User::query()' +
+        `->where("email", "${email}")->pluck("id"))->delete();`,
     ],
     {
       cwd: path.resolve(import.meta.dirname, '../../../control-plane'),
