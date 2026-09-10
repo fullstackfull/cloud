@@ -192,6 +192,9 @@ final class VpsController
             $this->machine($vm),
             $request->action(),
             $request->idempotencyKey(),
+            // Who asked. A team of three can then read back which of them
+            // rebooted the server at 3am, which is the question the audit put.
+            $request->user()?->getKey(),
         );
 
         return (new ProvisioningOperationResource($job))->response()->setStatusCode(202);
@@ -217,6 +220,7 @@ final class VpsController
             idempotencyKey: $request->idempotencyKey(),
             template: $this->template($machine, $request->templateId()),
             sshKeys: $request->sshKeys(),
+            requestedByUserId: $request->user()?->getKey(),
         );
 
         return (new ProvisioningOperationResource($job))->response()->setStatusCode(202);

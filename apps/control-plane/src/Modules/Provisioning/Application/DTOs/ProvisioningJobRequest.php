@@ -36,6 +36,15 @@ final readonly class ProvisioningJobRequest
         public ?int $maxAttempts = null,
         public ?int $timeoutSeconds = null,
         public ?string $correlationId = null,
+        /**
+         * The signed-in user who asked, where a person asked at all.
+         *
+         * Null is a real answer and the common one: the build that follows a
+         * paid order, the suspension that follows an unpaid one and the
+         * reconciler correcting drift are the platform acting. The activity
+         * feed reads a null here as "Lynomia", never as whoever was nearest.
+         */
+        public ?string $requestedByUserId = null,
     ) {
         if (trim($this->idempotencyKey) === '') {
             throw new InvalidArgumentException('A provisioning job needs an idempotency key.');
@@ -61,6 +70,7 @@ final readonly class ProvisioningJobRequest
         array $payload = [],
         ?string $idempotencyKey = null,
         ?string $correlationId = null,
+        ?string $requestedByUserId = null,
     ): self {
         return new self(
             kind: $kind,
@@ -75,6 +85,7 @@ final readonly class ProvisioningJobRequest
             payload: $payload,
             timeoutSeconds: $kind->defaultTimeoutSeconds(),
             correlationId: $correlationId,
+            requestedByUserId: $requestedByUserId,
         );
     }
 }

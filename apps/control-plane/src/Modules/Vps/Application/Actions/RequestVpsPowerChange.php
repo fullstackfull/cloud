@@ -49,6 +49,7 @@ final readonly class RequestVpsPowerChange
         VirtualMachine $machine,
         PowerAction $action,
         string $idempotencyKey,
+        ?string $requestedByUserId = null,
     ): ProvisioningJob {
         $key = VpsIdempotencyKey::for($machine, $action->value, $idempotencyKey);
 
@@ -73,6 +74,7 @@ final readonly class RequestVpsPowerChange
             provider: (string) ($machine->cluster()->first()?->driver->value ?? 'unknown'),
             serviceId: (string) $machine->service_id,
             customerId: $machine->service()->first()?->customer_id,
+            requestedByUserId: $requestedByUserId,
             payload: [
                 'virtual_machine_id' => (string) $machine->getKey(),
                 /*

@@ -53,6 +53,14 @@ return [
         // Provisioning actions are expensive and irreversible; throttle harder.
         'provisioning' => ['attempts' => 20, 'decay_minutes' => 1],
 
+        /*
+         * Status reads a customer makes while waiting on their own operation:
+         * operation status, the account overview, the activity feed. Roomier
+         * than a mutation because observing is not acting, and still bounded
+         * because a client that loses its backoff should be stopped.
+         */
+        'reads' => ['attempts' => 300, 'decay_minutes' => 1],
+
         // Per account per hour. The resource being spent is somebody else's
         // inbox, so this is a limit on the platform's own reputation as much
         // as on the account.

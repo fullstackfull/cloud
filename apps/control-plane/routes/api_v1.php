@@ -199,6 +199,7 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->gro
         'payments',
         'wallet',
         'services',
+        'activity',
         'vps',
         'backups',
         'dedicated',

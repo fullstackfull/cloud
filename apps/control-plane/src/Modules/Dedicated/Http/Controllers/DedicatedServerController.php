@@ -210,6 +210,7 @@ final class DedicatedServerController
             confirmation: $request->confirmation(),
             idempotencyKey: $request->idempotencyKey(),
             profile: $profile,
+            requestedByUserId: $request->user()?->getKey(),
         );
 
         return (new ReinstallRequestResource($job))

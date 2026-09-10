@@ -60,6 +60,7 @@ final readonly class RequestVpsReinstall
         string $idempotencyKey,
         ?VmTemplate $template = null,
         array $sshKeys = [],
+        ?string $requestedByUserId = null,
     ): ProvisioningJob {
         /*
          * Compared before anything else, and compared exactly — no trimming
@@ -88,6 +89,7 @@ final readonly class RequestVpsReinstall
             provider: (string) ($machine->cluster()->first()?->driver->value ?? 'unknown'),
             serviceId: (string) $machine->service_id,
             customerId: $machine->service()->first()?->customer_id,
+            requestedByUserId: $requestedByUserId,
             payload: [
                 'virtual_machine_id' => (string) $machine->getKey(),
                 'hostname' => $machine->hostname,
