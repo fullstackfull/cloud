@@ -103,3 +103,9 @@ infra/ansible/*.retry
 
 # ansible-lint scratch
 .ansible/
+
+# Browser-suite run artifacts: the fake provider's recorded decisions and the
+# test mail outbox. Written by a run, read by the harness, and never part of
+# the source: a committed outbox would also carry the signed links from
+# whoever ran the suite last.
+apps/web/e2e/.artifacts/

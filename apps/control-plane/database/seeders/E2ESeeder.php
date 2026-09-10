@@ -85,7 +85,8 @@ use Lynomia\Modules\Support\Infrastructure\Models\SupportMessage;
 use Lynomia\Modules\Support\Infrastructure\Models\SupportTicket;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
-use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use RuntimeException;
 
 /**
@@ -1276,12 +1277,35 @@ class E2ESeeder extends Seeder
 
     private function wallet(Customer $customer): void
     {
-        Wallet::query()->updateOrCreate(
-            ['customer_id' => $customer->getKey(), 'currency' => 'KWD'],
-            // A non-zero balance so the wallet screen renders an amount rather
-            // than an empty state, and a value with fils so the formatting is
-            // actually exercised.
-            ['balance_minor' => 12750],
+        $ledger = app(WalletLedger::class);
+        $wallet = $ledger->walletFor($customer, 'KWD');
+
+        if ($wallet->transactions()->exists()) {
+            return;
+        }
+
+        /*
+         * Credited through the ledger, not written onto the wallet row.
+         *
+         * The balance the screen shows is the ledger's own, and the screen now
+         * shows the history behind it — so a fixture that set the balance
+         * directly produced a wallet holding 12.750 KWD that had, according to
+         * the ledger, never received anything. Two credits and one refund, so
+         * the history has more than one shape in it and a value with fils, so
+         * the formatting is actually exercised.
+         */
+        $ledger->credit(
+            wallet: $wallet,
+            amount: Money::ofMinor(9000, 'KWD'),
+            kind: WalletTransactionKind::Promotional,
+            description: 'Launch credit',
+        );
+
+        $ledger->credit(
+            wallet: $wallet->refresh(),
+            amount: Money::ofMinor(3750, 'KWD'),
+            kind: WalletTransactionKind::Refund,
+            description: 'Refund of an overpayment',
         );
     }
 
