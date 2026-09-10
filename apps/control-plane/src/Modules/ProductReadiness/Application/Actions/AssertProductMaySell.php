@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\ProductReadiness\Application\Actions;
 
-use Illuminate\Contracts\Foundation\Application;
+use Lynomia\Modules\ProductReadiness\Application\Services\ProductSellability;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
-use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductReadinessState;
 use Lynomia\Modules\ProductReadiness\Domain\Exceptions\ProductNotSellable;
-use Lynomia\Modules\ProductReadiness\Infrastructure\Models\ProductReadiness;
 
 /**
  * The guard between the readiness ladder and a new sale.
@@ -25,14 +23,15 @@ use Lynomia\Modules\ProductReadiness\Infrastructure\Models\ProductReadiness;
  * Outside production the guard stands aside. Every other environment exists
  * to rehearse the sale against controlled providers that can never reach
  * ready_to_sell, and a guard that refused there would refuse every test and
- * every staging walk-through of the checkout. That is the one environment
- * check in this module, and it is the same question the fake providers ask
- * before agreeing to exist.
+ * every staging walk-through of the checkout.
+ *
+ * The decision itself lives in {@see ProductSellability}, which the catalogue
+ * reads too: what this guard would refuse, the catalogue does not offer.
  */
 final readonly class AssertProductMaySell
 {
     public function __construct(
-        private Application $app,
+        private ProductSellability $sellability,
     ) {}
 
     /**
@@ -40,16 +39,10 @@ final readonly class AssertProductMaySell
      */
     public function execute(Product $product): void
     {
-        if (! $this->app->environment('production')) {
+        if ($this->sellability->maySell($product)) {
             return;
         }
 
-        $row = ProductReadiness::query()->where('product', $product->value)->first();
-
-        $reached = $row->state ?? ProductReadinessState::NotReady;
-
-        if ($reached !== ProductReadinessState::ReadyToSell) {
-            throw ProductNotSellable::because($product, $reached);
-        }
+        throw ProductNotSellable::because($product, $this->sellability->state($product));
     }
 }

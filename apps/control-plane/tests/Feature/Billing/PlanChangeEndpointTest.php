@@ -263,8 +263,8 @@ final class PlanChangeEndpointTest extends BillingApiTestCase
                 'price_id' => $this->priceOf($this->large)->id,
             ])
             ->assertStatus(422)
-            ->assertJsonPath('error.code', 'validation.failed')
-            ->assertJsonStructure(['error' => ['details' => ['fields' => ['idempotency_key']]]]);
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected')
+            ->assertJsonPath('error.details.header', 'Idempotency-Key');
     }
 
     #[Test]

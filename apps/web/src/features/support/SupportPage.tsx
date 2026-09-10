@@ -7,6 +7,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
@@ -60,7 +61,7 @@ export function SupportPage() {
   const [files, setFiles] = useState<File[]>([])
   const [replyBody, setReplyBody] = useState('')
 
-  const displayed = describeError(listError ?? openTicket.error ?? reply.error ?? close.error)
+  const displayed = describeError(openTicket.error ?? reply.error ?? close.error)
   const ticket = opened?.data ?? null
 
   const columns: Array<Column<Ticket>> = [
@@ -119,12 +120,20 @@ export function SupportPage() {
 
       <div className="flex flex-col gap-4">
         <Card title={t('support.yourTickets')}>
-          <DataTable
-            columns={columns}
-            rows={tickets?.data ?? []}
-            rowKey={(row) => row.id}
-            empty={isPending ? t('common.loading') : t('support.noTickets')}
-          />
+          {/*
+            * A refused or failed read is reported, never rendered as "no
+            * requests": a customer with an open ticket who sees an empty list
+            * opens a second one.
+            */}
+          <LoadFailure error={listError} />
+          {listError !== null ? null : (
+            <DataTable
+              columns={columns}
+              rows={tickets?.data ?? []}
+              rowKey={(row) => row.id}
+              empty={isPending ? t('common.loading') : t('support.noTickets')}
+            />
+          )}
         </Card>
 
         {ticket !== null ? (

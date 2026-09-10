@@ -22,6 +22,10 @@ export const users = {
 /** Fixtures the specs assert on by name. Mirrors E2ESeeder's constants. */
 export const fixtures = {
   vpsHostname: 'e2e-web-01',
+  // The machine with nothing unresolved against it: the one the power,
+  // reinstall and plan-change specs actually drive. e2e-web-01 carries a
+  // rebuild nobody can settle, so its controls are (correctly) off.
+  operableHostname: 'e2e-app-02',
   dedicatedSerial: 'E2E-SN-000117',
   openInvoice: 'INV-E2E-0001',
   paidInvoice: 'INV-E2E-0002',
@@ -85,6 +89,31 @@ function clearRateLimits(): void {
       DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e',
     },
   })
+}
+
+/**
+ * Removes the seeded customer's second factor.
+ *
+ * The one spec that turns two-factor authentication on turns it off again at
+ * its end, but a spec that fails halfway would leave every later sign-in in
+ * the suite stuck at a code prompt. Cleared directly rather than through the
+ * UI, because the UI is the thing that may have just failed.
+ */
+export function resetTwoFactor(): void {
+  execFileSync(
+    'php',
+    [
+      'artisan',
+      'tinker',
+      '--execute',
+      'Lynomia\\Modules\\Identity\\Infrastructure\\Models\\User::query()->where("email", "customer@lynomia.local")->update(["two_factor_secret" => null, "two_factor_recovery_codes" => null, "two_factor_confirmed_at" => null]);',
+    ],
+    {
+      cwd: path.resolve(import.meta.dirname, '../../../control-plane'),
+      stdio: 'ignore',
+      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e' },
+    },
+  )
 }
 
 export async function signIn(

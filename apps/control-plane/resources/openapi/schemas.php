@@ -554,6 +554,25 @@ return [
             'status' => ['type' => ['string', 'null']],
             'power_state' => ['type' => ['string', 'null']],
             'is_powered_on' => ['type' => 'boolean'],
+            /*
+             * Whether each disruptive control would be accepted right now,
+             * and if not, why — published from the same facts the dedicated
+             * operation guard refuses on (power is refused only while a
+             * REINSTALL is live; a reinstall while ANY job is), so a client never enables a button the API
+             * already knows it will answer 409 to. The guard stays the
+             * authority: this is what a screen should say, the refusal is what
+             * the endpoint does.
+             */
+            'actions' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['power', 'reinstall', 'blocked_reason'],
+                'properties' => [
+                    'power' => ['type' => 'boolean'],
+                    'reinstall' => ['type' => 'boolean'],
+                    'blocked_reason' => ['type' => ['string', 'null']],
+                ],
+            ],
             'service_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'activated_at' => ['$ref' => '#/components/schemas/Timestamp'],
             /*
@@ -1459,6 +1478,24 @@ return [
             'os_version' => ['type' => ['string', 'null']],
             'addresses' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
             'is_operable' => ['type' => 'boolean'],
+            /*
+             * Whether each disruptive control would be accepted right now,
+             * and if not, why — published from the same facts the operation
+             * guard refuses on, so a client never enables a button the API
+             * already knows it will answer 409 to. The guard stays the
+             * authority: this is what a screen should say, the refusal is what
+             * the endpoint does.
+             */
+            'actions' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['power', 'reinstall', 'blocked_reason'],
+                'properties' => [
+                    'power' => ['type' => 'boolean'],
+                    'reinstall' => ['type' => 'boolean'],
+                    'blocked_reason' => ['type' => ['string', 'null']],
+                ],
+            ],
             /*
              * The machine's most recent rebuild, or null if it has never had
              * one. `data_destroyed` is the field a client should read before

@@ -1,5 +1,8 @@
 import { execFileSync } from 'node:child_process'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
+
+import { FAKE_COMPUTE_STATE_PATH } from '../../playwright.config'
 
 /*
  * A clean database before the suite, and the same one every time.
@@ -24,11 +27,19 @@ export default function globalSetup(): void {
 
   const controlPlane = path.resolve(import.meta.dirname, '../../../control-plane')
 
+  /*
+   * The fake hypervisor's fleet file, shared with the API process. Removed
+   * first so a run starts with the fleet the seeder writes and nothing a
+   * previous run left behind.
+   */
+  const fleet = process.env.COMPUTE_FAKE_STATE_PATH ?? FAKE_COMPUTE_STATE_PATH
+  rmSync(fleet, { force: true })
+
   const artisan = (args: string[]): void => {
     execFileSync('php', ['artisan', ...args], {
       cwd: controlPlane,
       stdio: 'inherit',
-      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: database },
+      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: database, COMPUTE_FAKE_STATE_PATH: fleet },
     })
   }
 

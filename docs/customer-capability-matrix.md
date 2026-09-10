@@ -254,8 +254,12 @@ that no screen shows is a service quietly not working.
 Stated plainly, because a matrix of mostly-green rows is easy to skim past.
 Every entry on the previous edition of this list — team membership, spending
 wallet credit, support tickets, deleting a backup, forward DNS, ending their
-own service — is now a row above. What replaces them is shorter, and none of
-it is an oversight:
+own service — is now a row above; so, since the Phase 30B-P scope addendum,
+are four entries this list carried for one edition too long (recovering a
+name from redemption, moving a zone in or out as a file, restoring one file
+from a backup, and asking for a country or currency change), each of which is
+built, tested in a browser and documented in `docs/phase-30b-p-scope-addendum.md`.
+What remains is shorter, and none of it is an oversight:
 
 1. **Buy a `.sy` name.** The seat exists, every capability answers false, and
    the search reports the namespace as not sold. What is missing is a registry
@@ -263,27 +267,25 @@ it is an oversight:
    an invented EPP client would produce tests that pass and a first real
    registration that fails, with every design decision downstream of it made
    from fiction.
-2. **Recover a name from redemption.** The state exists, the price column
-   exists, and the catalogue refuses to quote one unless an operator has been
-   told the registry's penalty. Every registry requires a manual step for
-   this, and none of them is built.
+2. **Recover a name whose registry penalty nobody has recorded.** The
+   redemption lifecycle is built (ADD.2), and the card quotes the exact
+   penalty and orders the recovery once it is paid — but only for a
+   namespace whose penalty and windows an operator has entered. For the rest
+   the portal says so and will not quote a guess.
 3. **Have WordPress installed on a real cPanel or DirectAdmin node.** The
    installer is an optional interface on the panel boundary, and neither real
    adapter implements it. Writing one means guessing at WP Toolkit's or
    Softaculous's API for the version each node runs. The fake implements it
    fully, so the product chain is proven; the two real panels will refuse to
    take a WordPress order until the toolkit clients exist.
-4. **Move a zone's records in or out as a file.** No zone-file import or
-   export: records are added one at a time. A customer with fifty records
-   migrating in will feel it.
-5. **Restore one file from a backup.** A restore is the whole machine; there
-   is no file-level browse.
-6. **Undo a deletion once the sweep has run.** The hour between asking and
+4. **Undo a deletion once the sweep has run.** The hour between asking and
    acting is the only window, and it is on purpose — after it, the archive is
    gone at the provider and no row in this platform brings it back.
-7. **Change their own account's currency or country.** Both are set at
-   registration and pinned to the ledger; changing either is an operator act
-   through support, because it would reprice open subscriptions.
+5. **Change their own account's currency or country without a person
+   approving it.** The request workflow is built (ADD.5): the customer asks
+   from the dashboard, the platform lists what the change would touch, and an
+   operator approves. What a customer cannot do is flip either setting
+   themselves, and that is by design — it would reprice open subscriptions.
 
 ## What no test in this repository proves
 

@@ -181,19 +181,39 @@ export interface Service {
   ended_reason: string | null
 }
 
+/**
+ * Whether the API would accept each disruptive control right now, and why
+ * not when it would not. Published by the server from the same facts its
+ * operation guard refuses on, so a screen reading this never enables a button
+ * the endpoint already knows it will answer 409 to. The guard stays the
+ * authority; this is what the screen says.
+ */
+export interface ActionAvailability {
+  power: boolean
+  reinstall: boolean
+  blocked_reason: string | null
+}
+
 export interface VirtualMachine {
   id: string
   service_id: string | null
   hostname: string
   service_status: string
   power_state: string
-  vcpu: number
-  memory_mib: number
-  disk_gib: number
+  /**
+   * Nested, as the API sends it. The row used to declare these at the top
+   * level and read `vm.memory_mib`, which rendered "NaN GiB" on every machine.
+   */
+  resources: {
+    vcpu: number
+    memory_mib: number
+    disk_gib: number
+  }
   os_family: string | null
   os_version: string | null
   addresses: Array<{ address: string; ip_version: number; is_primary: boolean }>
   is_operable: boolean
+  actions: ActionAvailability
   /**
    * The machine's most recent rebuild, or null if it has never had one.
    *
@@ -348,6 +368,7 @@ export interface DedicatedServer {
   status: string
   power_state: string
   is_powered_on: boolean
+  actions: ActionAvailability
   service_id: string | null
   activated_at?: string | null
   /**

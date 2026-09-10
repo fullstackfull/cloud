@@ -278,7 +278,7 @@ final class VpsPowerEndpointTest extends VpsApiTestCase
     }
 
     #[Test]
-    public function a_missing_idempotency_key_is_a_422_naming_the_field(): void
+    public function a_missing_idempotency_key_is_a_422_naming_the_header(): void
     {
         [$customer, $user] = $this->accountWithOwner();
         $machine = $this->machineFor($customer);
@@ -286,8 +286,8 @@ final class VpsPowerEndpointTest extends VpsApiTestCase
         $this->actingAs($user)
             ->postJson('/api/v1/vps/'.$machine->id.'/power', ['action' => 'stop'])
             ->assertStatus(422)
-            ->assertJsonPath('error.code', 'validation.failed')
-            ->assertJsonStructure(['error' => ['details' => ['fields' => ['idempotency_key']]]]);
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected')
+            ->assertJsonPath('error.details.header', 'Idempotency-Key');
     }
 
     #[Test]
@@ -304,7 +304,7 @@ final class VpsPowerEndpointTest extends VpsApiTestCase
                 'idempotency_key' => 'smuggled-in-the-body',
             ])
             ->assertStatus(422)
-            ->assertJsonPath('error.code', 'validation.failed');
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected');
     }
 
     #[Test]

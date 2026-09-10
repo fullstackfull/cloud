@@ -4,8 +4,10 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -27,7 +29,11 @@ export function ApiTokensPage() {
   const [password, setPassword] = useState('')
   const [issued, setIssued] = useState<string | null>(null)
 
-  const displayed = describeError(readError ?? create.error ?? revoke.error)
+  // The token about to be revoked. Named in the dialogue, because "revoke
+  // this?" over a row of similar names is how the wrong integration dies.
+  const [revoking, setRevoking] = useState<ApiToken | null>(null)
+
+  const displayed = describeError(create.error ?? revoke.error)
 
   const columns: Array<Column<ApiToken>> = [
     { key: 'name', header: t('tokens.name'), cell: (token) => token.name },
@@ -59,7 +65,7 @@ export function ApiTokensPage() {
             size="sm"
             variant="ghost"
             loading={revoke.isPending && revoke.variables === token.id}
-            onClick={() => { revoke.mutate(token.id); }}
+            onClick={() => { setRevoking(token); }}
           >
             {t('tokens.revoke')}
           </Button>
@@ -141,19 +147,40 @@ export function ApiTokensPage() {
         </Card>
 
         <Card title={t('tokens.existing')}>
+          {/*
+            * Three states, kept apart: loading, failed, loaded. A read that
+            * failed used to fall through to the table with no rows and read
+            * as "No tokens" — which is the opposite of "you may not see the
+            * tokens" and of "the server is down".
+            */}
+          <LoadFailure error={readError} />
           {isPending ? (
             <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
-          ) : (
+          ) : readError !== null ? null : (
             <DataTable
               caption={t('nav.apiKeys')}
               columns={columns}
-              rows={data?.data ?? []}
+              rows={data.data}
               rowKey={(token) => token.id}
               empty={t('tokens.empty')}
             />
           )}
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={revoking !== null}
+        title={t('tokens.revokeDialog.title', { name: revoking?.name ?? '' })}
+        body={<p>{t('tokens.revokeDialog.body')}</p>}
+        confirmLabel={t('tokens.revokeDialog.confirmLabel')}
+        loading={revoke.isPending}
+        onConfirm={() => {
+          if (revoking === null) return
+
+          revoke.mutate(revoking.id, { onSettled: () => { setRevoking(null); } })
+        }}
+        onCancel={() => { setRevoking(null); }}
+      />
     </>
   )
 }

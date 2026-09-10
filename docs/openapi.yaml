@@ -16974,6 +16974,22 @@ components:
             - "null"
         is_powered_on:
           type: "boolean"
+        actions:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "power"
+            - "reinstall"
+            - "blocked_reason"
+          properties:
+            power:
+              type: "boolean"
+            reinstall:
+              type: "boolean"
+            blocked_reason:
+              type:
+                - "string"
+                - "null"
         service_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
@@ -20358,6 +20374,22 @@ components:
             additionalProperties: true
         is_operable:
           type: "boolean"
+        actions:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "power"
+            - "reinstall"
+            - "blocked_reason"
+          properties:
+            power:
+              type: "boolean"
+            reinstall:
+              type: "boolean"
+            blocked_reason:
+              type:
+                - "string"
+                - "null"
         reinstall:
           type:
             - "object"

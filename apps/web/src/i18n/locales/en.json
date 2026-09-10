@@ -94,7 +94,8 @@
     "rateLimited": "Too many attempts. Please wait a moment and try again.",
     "referenceId": "Reference: {{requestId}}",
     "pageNotFound": "Page not found",
-    "pageNotFoundBody": "The address you opened does not match anything in the portal."
+    "pageNotFoundBody": "The address you opened does not match anything in the portal.",
+    "request.idempotency_key_rejected": "This request could not be protected against being sent twice, so it was not sent. Reload the page and try again; if it keeps happening, tell support."
   },
   "status": {
     "active": "Active",
@@ -259,7 +260,12 @@
       "appliedAt": "Applied {{date}}",
       "needsReview": "This change was approved and then put on hold because something on the account changed. Our team is looking at it; nothing needs doing on your side.",
       "awaiting": "Waiting for our team to approve it.",
-      "blocked": "The account has to clear the items below first. Once they are cleared, check again."
+      "blocked": "The account has to clear the items below first. Once they are cleared, check again.",
+      "withdrawDialog": {
+        "title": "Withdraw this request?",
+        "body": "The request to change to {{currency}} is closed and nothing on the account changes. You can send a new request at any time.",
+        "confirmLabel": "Withdraw request"
+      }
     }
   },
   "security": {
@@ -313,7 +319,20 @@
       "logged_out": "Signed out",
       "password_reset": "Password reset",
       "failed_password_confirmation": "Password guess in session"
-    }
+    },
+    "revokeSessionDialog": {
+      "title": "Sign out this device?",
+      "body": "The session at {{ip}} ends now. Whoever is using it is signed out and has to sign in again. Your own session here is not affected.",
+      "confirmLabel": "Sign out that device"
+    },
+    "revokeOthersDialog": {
+      "title": "Sign out every other device?",
+      "body": "Every session except this one ends now. Anyone else signed in — including you on another device — has to sign in again.",
+      "confirmLabel": "Sign out other devices"
+    },
+    "enableTwoFactorHint": "Your password is required so that a stolen session cannot change the way you sign in.",
+    "enableContinue": "Continue",
+    "recoveryCodesSaved": "I have saved these codes"
   },
   "catalogue": {
     "subtitle": "What you can buy, priced in your account's currency.",
@@ -373,7 +392,13 @@
     "subtotal": "Subtotal",
     "discount": "Discount",
     "tax": "Tax",
-    "cancel": "Cancel order"
+    "cancel": "Cancel order",
+    "cancelDialog": {
+      "title": "Cancel order {{number}}?",
+      "body": "The order and its unpaid invoice are cancelled and nothing is provisioned. Nothing has been charged. If you change your mind, place a new order.",
+      "confirmLabel": "Cancel this order",
+      "keep": "Keep order"
+    }
   },
   "invoices": {
     "subtitle": "Issued invoices and what is still owed.",
@@ -463,6 +488,17 @@
       "reactivating": "Coming back",
       "failed": "Build failed",
       "terminated": "Terminated"
+    },
+    "forceOff": {
+      "title": "Force off {{hostname}}?",
+      "body": "This pulls the plug without asking the operating system to close its files. Anything unsaved on the machine is lost, and a database that was writing may need repair. The machine stays yours and can be started again from this page. If the machine is responsive, use Shut down instead.",
+      "confirmLabel": "Force off"
+    },
+    "blocked": {
+      "service_not_active": "This service is not active, so its controls are off.",
+      "not_provisioned": "The hypervisor has not confirmed this machine yet, so nothing can be done to it.",
+      "operation_in_flight": "Another operation is running on this machine. Its controls come back when it finishes.",
+      "operation_needs_review": "An earlier operation did not finish and our team is looking at it. Controls stay off until it is resolved."
     }
   },
   "dedicated": {
@@ -501,6 +537,16 @@
       "provisioning_timeout": "The install did not report back and our team is looking at it",
       "indeterminate": "The rebuild is unconfirmed and our team is looking at it",
       "needs_review": "The rebuild stopped and our team is looking at it"
+    },
+    "forceOff": {
+      "title": "Force off server {{serial}}?",
+      "body": "This cuts the power at the chassis without a clean shutdown. Anything unsaved is lost and the disks may need checking on the next boot. The machine stays yours and can be powered on again from this page. If it is responsive, use Power cycle instead.",
+      "confirmLabel": "Force off"
+    },
+    "blocked": {
+      "server_not_in_service": "This machine is not in service right now, so its controls are off.",
+      "reinstall_in_flight": "The machine is being rebuilt. Nothing else can be done to it until the rebuild finishes.",
+      "operation_in_flight": "Another operation is running on this machine. A rebuild can be asked for when it finishes."
     }
   },
   "hosting": {
@@ -544,7 +590,13 @@
     "revoke": "Revoke",
     "empty": "No tokens.",
     "copyItNow": "Copy this token now",
-    "shownOnce": "This is the only time it is shown. It cannot be retrieved again."
+    "shownOnce": "This is the only time it is shown. It cannot be retrieved again.",
+    "revokeDialog": {
+      "title": "Revoke the token “{{name}}”?",
+      "body": "Anything using it stops being able to reach the API immediately. This cannot be undone; create a new token if you need access again.",
+      "confirmLabel": "Revoke token"
+    },
+    "loadFailed": "The token list could not be loaded."
   },
   "admin": {
     "nav": {
@@ -1308,7 +1360,8 @@
     }
   },
   "confirm": {
-    "typeToConfirm": "Type {{phrase}} to confirm"
+    "typeToConfirm": "Type {{phrase}} to confirm",
+    "keep": "Keep it"
   },
   "notifications": {
     "subtitle": "Everything we have told you about your account.",
@@ -1439,6 +1492,11 @@
       "declined": "Declined",
       "revoked": "Withdrawn",
       "expired": "Expired"
+    },
+    "withdrawDialog": {
+      "title": "Withdraw the invitation to {{email}}?",
+      "body": "The link they were sent stops working immediately. Nothing else changes; you can invite them again later.",
+      "confirmLabel": "Withdraw invitation"
     }
   },
   "invitation": {
@@ -1574,6 +1632,11 @@
       "copy": "Copy",
       "copied": "Copied.",
       "download": "Download {{filename}}"
+    },
+    "removeRecord": {
+      "title": "Remove this record?",
+      "body": "{{record}} stops being served as soon as the change is published. Anything relying on it — a website, mail delivery, a certificate check — stops working until it is added back. You can add it back at any time.",
+      "confirmLabel": "Remove record"
     }
   },
   "domains": {

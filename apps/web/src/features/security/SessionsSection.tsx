@@ -1,10 +1,13 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import {
   useRevokeOtherSessions,
   useRevokeSession,
@@ -24,8 +27,16 @@ export function SessionsSection() {
   const revoke = useRevokeSession()
   const revokeOthers = useRevokeOtherSessions()
 
-  const displayed = describeError(error ?? revoke.error ?? revokeOthers.error)
+  const displayed = describeError(revoke.error ?? revokeOthers.error)
   const others = (sessions ?? []).filter((session) => !session.is_current)
+
+  /*
+   * What is about to be signed out: one named device, or every other one.
+   * A plain confirmation — the person on the other end has to sign in again,
+   * which is disruptive and entirely recoverable.
+   */
+  const [revoking, setRevoking] = useState<ActiveSession | null>(null)
+  const [revokingOthers, setRevokingOthers] = useState(false)
 
   const columns: Array<Column<ActiveSession>> = [
     {
@@ -60,7 +71,7 @@ export function SessionsSection() {
             variant="ghost"
             size="sm"
             loading={revoke.isPending && revoke.variables === session.id}
-            onClick={() => { revoke.mutate(session.id); }}
+            onClick={() => { setRevoking(session); }}
           >
             {t('security.revoke')}
           </Button>
@@ -78,7 +89,7 @@ export function SessionsSection() {
             variant="secondary"
             size="sm"
             loading={revokeOthers.isPending}
-            onClick={() => { revokeOthers.mutate(); }}
+            onClick={() => { setRevokingOthers(true); }}
           >
             {t('security.revokeOthers')}
           </Button>
@@ -93,17 +104,43 @@ export function SessionsSection() {
         </div>
       ) : null}
 
+      {/* A failed read is reported, never rendered as "no sessions". */}
+      <LoadFailure error={error} />
       {isPending ? (
         <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
-      ) : (
+      ) : error !== null ? null : (
         <DataTable
           caption={t('security.sessionsTitle')}
           columns={columns}
-          rows={sessions ?? []}
+          rows={sessions}
           rowKey={(session) => session.id}
           empty={t('security.noSessions')}
         />
       )}
+
+      <ConfirmDialog
+        open={revoking !== null}
+        title={t('security.revokeSessionDialog.title')}
+        body={<p>{t('security.revokeSessionDialog.body', { ip: revoking?.ip_address ?? '—' })}</p>}
+        confirmLabel={t('security.revokeSessionDialog.confirmLabel')}
+        loading={revoke.isPending}
+        onConfirm={() => {
+          if (revoking === null) return
+
+          revoke.mutate(revoking.id, { onSettled: () => { setRevoking(null); } })
+        }}
+        onCancel={() => { setRevoking(null); }}
+      />
+
+      <ConfirmDialog
+        open={revokingOthers}
+        title={t('security.revokeOthersDialog.title')}
+        body={<p>{t('security.revokeOthersDialog.body')}</p>}
+        confirmLabel={t('security.revokeOthersDialog.confirmLabel')}
+        loading={revokeOthers.isPending}
+        onConfirm={() => { revokeOthers.mutate(undefined, { onSettled: () => { setRevokingOthers(false); } }); }}
+        onCancel={() => { setRevokingOthers(false); }}
+      />
     </Card>
   )
 }

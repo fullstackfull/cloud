@@ -8,6 +8,7 @@ import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -85,9 +86,11 @@ export function TeamPage() {
   const [role, setRole] = useState<TeamRole>('member')
   const [removing, setRemoving] = useState<TeamMember | null>(null)
   const [handingOver, setHandingOver] = useState<TeamMember | null>(null)
+  // The open offer about to be taken back. Named in the dialogue by address.
+  const [withdrawing, setWithdrawing] = useState<TeamInvitation | null>(null)
 
   const displayed = describeError(
-    membersError ?? invitationsError ?? invite.error ?? resend.error ?? revoke.error ?? changeRole.error ?? remove.error,
+    invite.error ?? resend.error ?? revoke.error ?? changeRole.error ?? remove.error,
   )
   const transferError = describeError(transfer.error)
 
@@ -211,7 +214,7 @@ export function TeamPage() {
               size="sm"
               variant="ghost"
               loading={revoke.isPending && revoke.variables === invitation.id}
-              onClick={() => { revoke.mutate(invitation.id); }}
+              onClick={() => { setWithdrawing(invitation); }}
             >
               {t('team.revoke')}
             </Button>
@@ -234,12 +237,20 @@ export function TeamPage() {
 
       <div className="flex flex-col gap-4">
         <Card title={t('team.membersTitle')} description={t('team.membersSubtitle')}>
-          <DataTable
-            columns={memberColumns}
-            rows={members?.data ?? []}
-            rowKey={(member) => member.id}
-            empty={isPending ? t('common.loading') : t('team.noMembers')}
-          />
+          {/*
+            * Loading, failed and empty are three different facts. A refused
+            * read used to render as "Nobody else has access to this account",
+            * which is the one thing a refused read cannot know.
+            */}
+          <LoadFailure error={membersError} />
+          {membersError !== null ? null : (
+            <DataTable
+              columns={memberColumns}
+              rows={members?.data ?? []}
+              rowKey={(member) => member.id}
+              empty={isPending ? t('common.loading') : t('team.noMembers')}
+            />
+          )}
         </Card>
 
         {canManage ? (
@@ -295,16 +306,33 @@ export function TeamPage() {
             </Card>
 
             <Card title={t('team.invitationsTitle')} description={t('team.invitationsSubtitle')}>
-              <DataTable
-                columns={invitationColumns}
-                rows={invitations?.data ?? []}
-                rowKey={(invitation) => invitation.id}
-                empty={t('team.noInvitations')}
-              />
+              <LoadFailure error={invitationsError} />
+              {invitationsError !== null ? null : (
+                <DataTable
+                  columns={invitationColumns}
+                  rows={invitations?.data ?? []}
+                  rowKey={(invitation) => invitation.id}
+                  empty={t('team.noInvitations')}
+                />
+              )}
             </Card>
           </>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={withdrawing !== null}
+        title={t('team.withdrawDialog.title', { email: withdrawing?.email ?? '' })}
+        body={<p>{t('team.withdrawDialog.body')}</p>}
+        confirmLabel={t('team.withdrawDialog.confirmLabel')}
+        loading={revoke.isPending}
+        onConfirm={() => {
+          if (withdrawing === null) return
+
+          revoke.mutate(withdrawing.id, { onSettled: () => { setWithdrawing(null); } })
+        }}
+        onCancel={() => { setWithdrawing(null); }}
+      />
 
       <ConfirmDialog
         open={removing !== null}

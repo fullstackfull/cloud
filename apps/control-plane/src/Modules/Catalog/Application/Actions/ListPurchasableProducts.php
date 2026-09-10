@@ -9,15 +9,24 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
+use Lynomia\Modules\ProductReadiness\Application\Services\ProductSellability;
 
 /**
  * The catalogue a customer is allowed to see.
  *
- * "Allowed to see" is one predicate — active and public — and it lives here
- * rather than in a controller so that the browse endpoint, a future sitemap
- * builder and anything else that lists products all answer the same question.
- * A product that is inactive or unlisted is absent, not forbidden: a 403 would
- * confirm that a slug somebody guessed is real.
+ * "Allowed to see" is one predicate — active, public, and of a kind the
+ * readiness engine currently permits selling — and it lives here rather than
+ * in a controller so that the browse endpoint, a future sitemap builder and
+ * anything else that lists products all answer the same question. A product
+ * that is inactive or unlisted is absent, not forbidden: a 403 would confirm
+ * that a slug somebody guessed is real.
+ *
+ * The readiness half is the same decision the checkout makes
+ * ({@see ProductSellability}), so a product this listing offers is a product
+ * the order guard would accept, and one it would refuse is not on the shelf.
+ * It used to be: the guard was consulted at order time only, and a product
+ * whose sellability had been withdrawn stayed listed with a button that
+ * answered 409.
  *
  * The plan count is counted through the same predicate, so a product whose
  * plans are all unlisted reports zero rather than advertising configurations
@@ -38,6 +47,10 @@ final class ListPurchasableProducts
 
     private const int DEFAULT_PER_PAGE = 25;
 
+    public function __construct(
+        private readonly ProductSellability $sellability,
+    ) {}
+
     /**
      * @return LengthAwarePaginator<int, Product>
      */
@@ -48,8 +61,11 @@ final class ListPurchasableProducts
         // a small one, so they fall back to the default instead of to 1.
         $perPage = $perPage < 1 ? self::DEFAULT_PER_PAGE : min($perPage, self::MAX_PER_PAGE);
 
+        $sellable = $this->sellability->sellableCatalogueKinds();
+
         return Product::query()
             ->purchasable()
+            ->when($sellable !== null, static fn (Builder $query): Builder => $query->whereIn('kind', $sellable ?? []))
             ->when($kind !== null, static fn (Builder $query): Builder => $query->where('kind', $kind?->value))
             ->withCount(['plans' => self::onlyPurchasablePlans(...)])
             // sort_order is the merchandising decision; slug is the tiebreak

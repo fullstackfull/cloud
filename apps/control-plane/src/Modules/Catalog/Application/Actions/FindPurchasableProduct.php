@@ -8,12 +8,15 @@ use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Catalog\Domain\Services\CataloguePriceVisibility;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
+use Lynomia\Modules\ProductReadiness\Application\Services\ProductSellability;
 
 /**
  * One product, addressed by slug or id, with the plans a customer may buy.
  *
  * Both identifiers resolve through the same visibility predicate, so a product
- * that is not on sale is missing whichever way it is asked for. The lookup
+ * that is not on sale is missing whichever way it is asked for — including a
+ * product of a kind the readiness engine will not currently sell, which is
+ * absent by direct link exactly as it is absent from the listing. The lookup
  * throws ModelNotFoundException rather than returning null: the renderer turns
  * that into the same 404 an invented slug gets, and "hidden" and "never
  * existed" must be indistinguishable from outside.
@@ -38,13 +41,17 @@ final readonly class FindPurchasableProduct
 
     public function __construct(
         private CataloguePriceVisibility $prices,
+        private ProductSellability $sellability,
     ) {}
 
     public function execute(string $identifier, string $currency): Product
     {
+        $sellable = $this->sellability->sellableCatalogueKinds();
+
         /** @var Product $product */
         $product = Product::query()
             ->purchasable()
+            ->when($sellable !== null, static fn (Builder $query): Builder => $query->whereIn('kind', $sellable ?? []))
             ->where(static fn (Builder $query): Builder => $query
                 ->where('slug', $identifier)
                 ->orWhere('id', $identifier))

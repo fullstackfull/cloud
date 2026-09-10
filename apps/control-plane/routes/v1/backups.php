@@ -19,16 +19,14 @@ use Lynomia\Modules\Backups\Http\Controllers\BackupFileController;
  * cannot be omitted.
  *
  * ---------------------------------------------------------------------------
- * What is deliberately not here yet
+ * Deletion
  * ---------------------------------------------------------------------------
  *
- * **No delete.** Deleting a backup is irreversible and interacts with the
- * datastore's own prune policy, which the platform does not own. Until the
- * platform can say what a customer's retention actually is, a delete button
- * would remove a copy on the strength of a policy nobody has agreed.
- *
- * Both are recorded in docs/build-status.md as not implemented rather than
- * left to be discovered as a missing route.
+ * Deletion IS here (DELETE {backup} below, with an undo window and a keep
+ * route), since Phase 30A+.4 gave the platform a retention policy of its own
+ * to delete against. An earlier edition of this comment said the opposite —
+ * that no delete would exist until retention was owned — and it outlived the
+ * route it described. See docs/customer-capability-matrix.md for the row.
  */
 
 Route::prefix('vps/{vm}/backups')->as('backups.')->group(function (): void {

@@ -98,6 +98,19 @@ export interface RequestOptions {
    */
   headers?: Record<string, string>
   /**
+   * The key that makes a retry of this request the same operation.
+   *
+   * Sent as the `Idempotency-Key` header, which is the one place the API
+   * reads it from: every guarded endpoint (placing an order, power actions,
+   * reinstalls, plan changes, paying from credit) merges the header over the
+   * body and validates the result, so a key in the body alone is a request
+   * with no key at all. It used to be sent in the body by five of the six
+   * callers, and every one of them was answered 422 with a field error that
+   * named no visible field. One option here, set by one helper, means the
+   * transport cannot drift per call site again.
+   */
+  idempotencyKey?: string
+  /**
    * Treat `path` as a full path from the origin rather than relative to
    * `/api/v1`.
    *
@@ -124,6 +137,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (options.locale !== undefined) {
     headers['Accept-Language'] = options.locale
+  }
+
+  if (options.idempotencyKey !== undefined) {
+    headers['Idempotency-Key'] = options.idempotencyKey
   }
 
   /*
@@ -196,6 +213,18 @@ function extractError(payload: unknown): ApiErrorBody | null {
   if (typeof code !== 'string' || typeof message !== 'string') return null
 
   return error as ApiErrorBody
+}
+
+/**
+ * A fresh idempotency key for one deliberate press of a control.
+ *
+ * Minted once per press, never per retry: two deliberate reboots are two
+ * operations, and only a retry of the same press should collapse into one.
+ * Callers that hold a key across retries (the checkout) mint it once and keep
+ * it in state.
+ */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID()
 }
 
 export const api = {

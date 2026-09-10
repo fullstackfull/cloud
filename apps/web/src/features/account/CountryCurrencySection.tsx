@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Field } from '@/components/Field'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -38,6 +39,9 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
   const withdraw = useWithdrawCountryCurrencyChange()
 
   const [asking, setAsking] = useState(false)
+  // The open request about to be taken back; a plain confirmation, since a
+  // withdrawn request changes nothing and a new one is a form away.
+  const [withdrawing, setWithdrawing] = useState<CountryCurrencyChange | null>(null)
   const [country, setCountry] = useState(customer.country ?? '')
   const [currency, setCurrency] = useState(customer.currency)
   const [reason, setReason] = useState('')
@@ -66,7 +70,7 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
           change={open}
           heading={t('account.countryCurrency.open')}
           onRecheck={() => { recheck.mutate(open.id) }}
-          onWithdraw={() => { withdraw.mutate(open.id) }}
+          onWithdraw={() => { setWithdrawing(open) }}
           busy={recheck.isPending || withdraw.isPending}
         />
       ) : asking ? (
@@ -177,6 +181,19 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
           </ul>
         </div>
       )}
+      <ConfirmDialog
+        open={withdrawing !== null}
+        title={t('account.countryCurrency.withdrawDialog.title')}
+        body={<p>{t('account.countryCurrency.withdrawDialog.body', { currency: withdrawing?.to_currency ?? '' })}</p>}
+        confirmLabel={t('account.countryCurrency.withdrawDialog.confirmLabel')}
+        loading={withdraw.isPending}
+        onConfirm={() => {
+          if (withdrawing === null) return
+
+          withdraw.mutate(withdrawing.id, { onSettled: () => { setWithdrawing(null) } })
+        }}
+        onCancel={() => { setWithdrawing(null) }}
+      />
     </Card>
   )
 }

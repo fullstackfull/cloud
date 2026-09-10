@@ -6,8 +6,11 @@ namespace Lynomia\Modules\Dedicated\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Dedicated\Infrastructure\Queries\LiveServerWork;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 
 /**
  * What a customer may see of the physical machine they bought.
@@ -72,6 +75,12 @@ final class DedicatedServerResource extends JsonResource
          * row — the same reason the VPS resource takes its addresses this way.
          */
         private readonly ?DedicatedReinstall $reinstall = null,
+        /**
+         * The live job against this machine, if any — the fact the operation
+         * guard refuses on, resolved for the whole page in one query
+         * ({@see LiveServerWork}) and handed in like the reinstall.
+         */
+        private readonly ?ProvisioningJobKind $liveWork = null,
     ) {
         parent::__construct($resource);
     }
@@ -101,6 +110,16 @@ final class DedicatedServerResource extends JsonResource
             // Asked of the enum that decides, so a client's "can I press the
             // button?" cannot drift from what the platform would allow.
             'is_powered_on' => $this->resource->power_state->isOn(),
+
+            /*
+             * Whether each disruptive control would be accepted right now,
+             * and if not, why — from the same facts
+             * {@see \Lynomia\Modules\Dedicated\Domain\Services\DedicatedOperationGuard}
+             * refuses on, so the portal never offers a button the API already
+             * knows it will answer 409 to. The guard stays the authority; this
+             * is what the screen says, the refusal is what the endpoint does.
+             */
+            'actions' => $this->actions(),
 
             // The service this machine fulfils, so a client can join it back
             // to what was bought. Within the acting account by construction —
@@ -154,5 +173,33 @@ final class DedicatedServerResource extends JsonResource
                 $this->whenLoaded('components')
             ),
         ];
+    }
+
+    /**
+     * The guard's two questions, answered for the screen.
+     *
+     * Power is refused while the machine is not in service or a REINSTALL is
+     * live; a reinstall is refused while the machine is not in service or ANY
+     * job is live. The two differ on purpose — a power request is how a
+     * customer recovers a host that stopped listening, and an unrelated job
+     * must not take that away.
+     *
+     * @return array{power: bool, reinstall: bool, blocked_reason: string|null}
+     */
+    private function actions(): array
+    {
+        if ($this->resource->status !== DedicatedServerStatus::Active) {
+            return ['power' => false, 'reinstall' => false, 'blocked_reason' => 'server_not_in_service'];
+        }
+
+        if ($this->liveWork === ProvisioningJobKind::ReinstallDedicated) {
+            return ['power' => false, 'reinstall' => false, 'blocked_reason' => 'reinstall_in_flight'];
+        }
+
+        if ($this->liveWork !== null) {
+            return ['power' => true, 'reinstall' => false, 'blocked_reason' => 'operation_in_flight'];
+        }
+
+        return ['power' => true, 'reinstall' => true, 'blocked_reason' => null];
     }
 }

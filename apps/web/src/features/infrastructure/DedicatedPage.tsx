@@ -12,6 +12,7 @@ import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
+import { newIdempotencyKey } from '@/lib/api'
 import { useDedicatedPower, useDedicatedReinstall, useDedicatedServers } from '@/lib/queries'
 import type { DedicatedServer } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -34,6 +35,13 @@ export function DedicatedPage() {
    */
   const [rebuilding, setRebuilding] = useState<DedicatedServer | null>(null)
 
+  /*
+   * The machine about to have its power cut at the chassis. A plain
+   * confirmation rather than a typed one: the machine survives it and can be
+   * powered on again from this page (the graded policy in the audit, BD-6).
+   */
+  const [forcingOff, setForcingOff] = useState<DedicatedServer | null>(null)
+
   const displayed = describeError(power.error)
   const reinstallError = describeError(reinstall.error)
 
@@ -52,7 +60,24 @@ export function DedicatedPage() {
       ),
     },
     { key: 'status', header: t('dedicated.status'), cell: (server) => <StatusBadge status={server.status} /> },
-    { key: 'power', header: t('dedicated.power'), cell: (server) => <StatusBadge status={server.power_state} /> },
+    {
+      key: 'power',
+      header: t('dedicated.power'),
+      cell: (server) => (
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge status={server.power_state} />
+          {/*
+            * Why the buttons on this row are off, in the customer's words —
+            * published by the API from the facts its guard refuses on.
+            */}
+          {server.actions.blocked_reason === null ? null : (
+            <span className="text-xs text-[var(--warning-text)]">
+              {t(`dedicated.blocked.${server.actions.blocked_reason}`, { defaultValue: server.actions.blocked_reason })}
+            </span>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'since',
       header: t('dedicated.since'),
@@ -89,11 +114,18 @@ export function DedicatedPage() {
               key={action}
               size="sm"
               variant={action === 'off' ? 'danger' : 'ghost'}
+              disabled={! server.actions.power}
               loading={
                 power.isPending && power.variables.id === server.id && power.variables.action === action
               }
-              onClick={() => { power.mutate({ id: server.id, action, idempotency_key: crypto.randomUUID() }); }
-              }
+              onClick={() => {
+                if (action === 'off') {
+                  setForcingOff(server)
+                  return
+                }
+
+                power.mutate({ id: server.id, action, idempotencyKey: newIdempotencyKey() })
+              }}
             >
               {t(`dedicated.actions.${action}`)}
             </Button>
@@ -101,9 +133,10 @@ export function DedicatedPage() {
           <Button
             size="sm"
             variant="danger"
-            // Disabled while a rebuild is already running, so the screen does
-            // not offer a button the API would answer 409 to.
-            disabled={server.reinstall?.in_flight === true}
+            // Disabled on the API's own word — not in service, or a job
+            // live against the machine — so the screen does not offer a
+            // button the endpoint would answer 409 to.
+            disabled={! server.actions.reinstall}
             onClick={() => { setRebuilding(server); }}
           >
             {t('dedicated.actions.reinstall')}
@@ -150,6 +183,24 @@ export function DedicatedPage() {
       </Card>
 
       <ConfirmDialog
+        open={forcingOff !== null}
+        title={t('dedicated.forceOff.title', { serial: forcingOff?.serial ?? '' })}
+        body={<p>{t('dedicated.forceOff.body')}</p>}
+        confirmLabel={t('dedicated.forceOff.confirmLabel')}
+        loading={power.isPending}
+        error={displayed?.message}
+        onConfirm={() => {
+          if (forcingOff === null) return
+
+          power.mutate(
+            { id: forcingOff.id, action: 'off', idempotencyKey: newIdempotencyKey() },
+            { onSettled: () => { setForcingOff(null); } },
+          )
+        }}
+        onCancel={() => { setForcingOff(null); }}
+      />
+
+      <ConfirmDialog
         open={rebuilding !== null}
         title={t('dedicated.reinstall.title', { serial: rebuilding?.serial ?? '' })}
         body={
@@ -177,7 +228,7 @@ export function DedicatedPage() {
               id: rebuilding.id,
               // Sent as typed. The server compares it and decides.
               confirm_serial: phrase,
-              idempotency_key: crypto.randomUUID(),
+              idempotencyKey: newIdempotencyKey(),
             },
             { onSuccess: () => { setRebuilding(null); } },
           )

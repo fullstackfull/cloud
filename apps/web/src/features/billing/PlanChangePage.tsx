@@ -10,6 +10,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatMoney } from '@/lib/format'
+import { newIdempotencyKey } from '@/lib/api'
 import { useChangePlan, usePlanOptions } from '@/lib/queries'
 import type { PlanChangeQuote } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -147,7 +148,7 @@ export function PlanChangePage() {
               subscriptionId: id,
               plan_id: chosen.plan_id,
               price_id: chosen.price_id,
-              idempotency_key: crypto.randomUUID(),
+              idempotencyKey: newIdempotencyKey(),
             },
             { onSuccess: () => { setChosen(null); } },
           )

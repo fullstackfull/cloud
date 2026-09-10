@@ -12,6 +12,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { newIdempotencyKey } from '@/lib/api'
 import { useVirtualMachines, useVpsPower, useVpsReinstall } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -42,6 +43,16 @@ export function VpsPage() {
    */
   const [rebuilding, setRebuilding] = useState<VirtualMachine | null>(null)
 
+  /**
+   * The machine about to have its plug pulled.
+   *
+   * Force off is the one power control that costs data: it does not ask the
+   * guest to close its files. So it asks the customer instead — a plain
+   * confirmation, not a typed one, because the machine survives it and can be
+   * started again from this page (the graded policy in the audit, BD-6).
+   */
+  const [forcingOff, setForcingOff] = useState<VirtualMachine | null>(null)
+
   const displayed = describeError(power.error)
   const reinstallError = describeError(reinstall.error)
 
@@ -58,7 +69,7 @@ export function VpsPage() {
       ltr: true,
       cell: (vm) => (
         <span className="technical text-xs">
-          {vm.vcpu} vCPU · {Math.round(vm.memory_mib / 1024)} GiB · {vm.disk_gib} GiB
+          {vm.resources.vcpu} vCPU · {Math.round(vm.resources.memory_mib / 1024)} GiB · {vm.resources.disk_gib} GiB
         </span>
       ),
     },
@@ -93,6 +104,22 @@ export function VpsPage() {
               {t(`vps.serviceState.${vm.service_status}`, { defaultValue: vm.service_status })}
             </Badge>
           )}
+          {/*
+            * Why the buttons on this row are off, in the customer's words.
+            *
+            * Published by the API from the same facts its guard refuses on,
+            * so the row never offers a control the endpoint would answer 409
+            * to — the case that used to happen was a machine whose last
+            * rebuild timed out: operable, yet every operation refused until a
+            * person had looked, with an enabled Reinstall button saying
+            * otherwise. Not shown for an inactive service, which the badge
+            * above already explains.
+            */}
+          {vm.actions.blocked_reason === null || vm.actions.blocked_reason === 'service_not_active' ? null : (
+            <span className="text-xs text-[var(--warning-text)]">
+              {t(`vps.blocked.${vm.actions.blocked_reason}`, { defaultValue: vm.actions.blocked_reason })}
+            </span>
+          )}
         </div>
       ),
     },
@@ -124,17 +151,27 @@ export function VpsPage() {
               key={action}
               size="sm"
               variant={action === 'stop' ? 'danger' : 'ghost'}
-              disabled={! vm.is_operable}
+              /*
+               * Disabled on the API's own word about whether it would accept
+               * the request, not on a guess made here from the badges.
+               */
+              disabled={! vm.actions.power}
               loading={power.isPending && power.variables.id === vm.id && power.variables.action === action}
-              onClick={() => { power.mutate({
+              onClick={() => {
+                if (action === 'stop') {
+                  setForcingOff(vm)
+                  return
+                }
+
+                power.mutate({
                   id: vm.id,
                   action,
                   // A fresh key per press: two deliberate reboots are two
                   // operations, and only a retry of the same press should
                   // collapse into one.
-                  idempotency_key: crypto.randomUUID(),
-                }); }
-              }
+                  idempotencyKey: newIdempotencyKey(),
+                })
+              }}
             >
               {t(`vps.actions.${action}`)}
             </Button>
@@ -155,11 +192,14 @@ export function VpsPage() {
             size="sm"
             variant="danger"
             /*
-             * Disabled on exactly the same fact the API refuses on, and also
-             * while a rebuild is already running: offering a button that
-             * answers 409 is a door with a sign rather than a closed door.
+             * Disabled on exactly the facts the API refuses on — the service,
+             * the hypervisor, and anything queued, running or stranded on the
+             * service — as the API itself reports them. `is_operable` alone
+             * left a machine whose rebuild had timed out with an enabled
+             * button and a 409 behind it: a door with a sign rather than a
+             * closed door.
              */
-            disabled={! vm.is_operable || vm.reinstall?.in_flight === true}
+            disabled={! vm.actions.reinstall}
             onClick={() => { setRebuilding(vm); }}
           >
             {t('vps.actions.reinstall')}
@@ -206,6 +246,24 @@ export function VpsPage() {
       </Card>
 
       <ConfirmDialog
+        open={forcingOff !== null}
+        title={t('vps.forceOff.title', { hostname: forcingOff?.hostname ?? '' })}
+        body={<p>{t('vps.forceOff.body')}</p>}
+        confirmLabel={t('vps.forceOff.confirmLabel')}
+        loading={power.isPending}
+        error={displayed?.message}
+        onConfirm={() => {
+          if (forcingOff === null) return
+
+          power.mutate(
+            { id: forcingOff.id, action: 'stop', idempotencyKey: newIdempotencyKey() },
+            { onSettled: () => { setForcingOff(null); } },
+          )
+        }}
+        onCancel={() => { setForcingOff(null); }}
+      />
+
+      <ConfirmDialog
         open={rebuilding !== null}
         title={t('vps.reinstall.title', { hostname: rebuilding?.hostname ?? '' })}
         body={
@@ -235,7 +293,7 @@ export function VpsPage() {
               // Sent as typed. The server compares it against the machine's
               // hostname and is the one that decides.
               confirm_hostname: phrase,
-              idempotency_key: crypto.randomUUID(),
+              idempotencyKey: newIdempotencyKey(),
             },
             { onSuccess: () => { setRebuilding(null); } },
           )

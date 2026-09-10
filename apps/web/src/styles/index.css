@@ -27,11 +27,34 @@
   --surface: oklch(0.99 0.002 250);
   --surface-raised: oklch(1 0 0);
   --surface-sunken: oklch(0.96 0.004 250);
+  /*
+   * The ground an input or a card sits on. Referenced by thirty-odd
+   * components since the first screens were written and, until Wave 0,
+   * defined nowhere — so every one of them rendered transparent and took
+   * whatever was behind it. The same value as the page in light, a shade
+   * above it in dark, so a field stays a field on a raised card.
+   */
+  --surface-base: oklch(1 0 0);
   --border-subtle: oklch(0.90 0.006 250);
   --border-strong: oklch(0.80 0.010 250);
+  /* The plain border, between the two above. Same history as --surface-base. */
+  --border: oklch(0.86 0.008 250);
   --text-primary: oklch(0.22 0.01 250);
   --text-secondary: oklch(0.48 0.012 250);
   --text-muted: oklch(0.62 0.010 250);
+
+  /*
+   * Text that carries a warning or a danger without a badge around it: the
+   * "existing data may be permanently lost" line in a reinstall dialogue,
+   * the resize caveat on a plan change. Both were referenced from the
+   * start and undefined, which left the most important sentence in the
+   * portal in the same colour as the one above it.
+   */
+  --danger-text: oklch(0.50 0.19 25);
+  --warning-text: oklch(0.55 0.15 70);
+
+  /* Interactive emphasis outside a button: an unread dot, an inline link. */
+  --accent: var(--color-brand-600);
 
   --status-running: oklch(0.65 0.15 150);
   --status-stopped: oklch(0.62 0.02 250);
@@ -45,11 +68,17 @@
     --surface: oklch(0.17 0.008 250);
     --surface-raised: oklch(0.21 0.010 250);
     --surface-sunken: oklch(0.14 0.008 250);
+    --surface-base: oklch(0.19 0.009 250);
     --border-subtle: oklch(0.28 0.012 250);
     --border-strong: oklch(0.38 0.014 250);
+    --border: oklch(0.33 0.013 250);
     --text-primary: oklch(0.95 0.004 250);
     --text-secondary: oklch(0.74 0.010 250);
     --text-muted: oklch(0.58 0.010 250);
+
+    --danger-text: oklch(0.75 0.16 25);
+    --warning-text: oklch(0.80 0.14 75);
+    --accent: var(--color-brand-400);
 
     --status-running: oklch(0.72 0.15 150);
     --status-stopped: oklch(0.60 0.02 250);
@@ -63,11 +92,17 @@
   --surface: oklch(0.17 0.008 250);
   --surface-raised: oklch(0.21 0.010 250);
   --surface-sunken: oklch(0.14 0.008 250);
+  --surface-base: oklch(0.19 0.009 250);
   --border-subtle: oklch(0.28 0.012 250);
   --border-strong: oklch(0.38 0.014 250);
+  --border: oklch(0.33 0.013 250);
   --text-primary: oklch(0.95 0.004 250);
   --text-secondary: oklch(0.74 0.010 250);
   --text-muted: oklch(0.58 0.010 250);
+
+  --danger-text: oklch(0.75 0.16 25);
+  --warning-text: oklch(0.80 0.14 75);
+  --accent: var(--color-brand-400);
 
   --status-running: oklch(0.72 0.15 150);
   --status-stopped: oklch(0.60 0.02 250);

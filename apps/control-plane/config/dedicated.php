@@ -3,6 +3,21 @@
 declare(strict_types=1);
 
 return [
+    /*
+     * The one switch that replaces every BMC adapter with the controlled fake.
+     *
+     * Read here since Wave 0. DEDICATED_PROVIDER had been documented in
+     * .env.example and set in phpunit.xml for a year without anything
+     * consuming it: the factory read `dedicated.provider`, this file never
+     * declared it, and every environment that was not a PHPUnit test (which
+     * sets the config key by hand) built a real Redfish or IPMI adapter and
+     * tried to open a connection to 192.0.2.x. The browser suite found it the
+     * first time it pressed Power cycle. The fake refuses to be constructed in
+     * production whatever this says, so a production .env carrying "fake" is
+     * a loud failure rather than a silent one.
+     */
+    'provider' => env('DEDICATED_PROVIDER'),
+
     'bmc' => [
         'timeout_seconds' => (int) env('REDFISH_TIMEOUT_SECONDS', 60),
         'verify_tls' => (bool) env('REDFISH_VERIFY_TLS', true),

@@ -69,6 +69,17 @@ test.describe('in English', () => {
     await expect(row.getByText('203.0.113.10')).toBeVisible()
 
     await row.getByRole('button', { name: /^remove$/i }).click()
+
+    // Removal asks first, naming the record, and backing out changes nothing.
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText('www.' + DOMAIN)).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await expect(page.getByRole('row').filter({ hasText: 'www.' + DOMAIN })).toHaveCount(1)
+
+    await row.getByRole('button', { name: /^remove$/i }).click()
+    await page.getByRole('dialog').getByRole('button', { name: /^remove record$/i }).click()
     await expect(page.getByRole('row').filter({ hasText: 'www.' + DOMAIN })).toHaveCount(0)
 
     await giveUp(page)

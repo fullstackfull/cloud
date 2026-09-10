@@ -25,8 +25,8 @@ test.beforeEach(async ({ page }) => {
  * asserting about one of those the moment such a fixture was added, which is
  * exactly what happened when they were.
  */
-function machineRow(page: Page): Locator {
-  return page.getByRole('row').filter({ hasText: fixtures.vpsHostname })
+function machineRow(page: Page, hostname: string = fixtures.vpsHostname): Locator {
+  return page.getByRole('row').filter({ hasText: hostname })
 }
 
 /**
@@ -275,7 +275,10 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
    */
   await page.goto('/vps')
 
-  await machineRow(page).getByRole('button', { name: /^reinstall$/i }).click()
+  // On the machine whose controls are on. The seeded e2e-web-01 carries a
+  // rebuild nobody can settle, and since Wave 0 its Reinstall is disabled
+  // rather than offered and refused — asserted in its own spec below.
+  await machineRow(page, fixtures.operableHostname).getByRole('button', { name: /^reinstall$/i }).click()
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -287,17 +290,34 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
   const confirm = dialog.getByRole('button', { name: /reinstall this server/i })
   await expect(confirm).toBeDisabled()
 
-  await dialog.getByRole('textbox').fill(fixtures.vpsHostname.toUpperCase())
+  await dialog.getByRole('textbox').fill(fixtures.operableHostname.toUpperCase())
   await expect(confirm).toBeDisabled()
 
-  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await dialog.getByRole('textbox').fill(fixtures.operableHostname)
   await expect(confirm).toBeEnabled()
+})
+
+test('a machine whose last rebuild nobody can settle has its controls off, with the reason', async ({ page }) => {
+  await page.goto('/vps')
+
+  const stranded = machineRow(page)
+
+  // Every disruptive control, not just Reinstall: the API refuses a reboot on
+  // this machine for the same reason, and a screen that offered one would be
+  // offering a 409.
+  for (const name of [/^reinstall$/i, /^reboot$/i, /^force off$/i, /^shut down$/i, /^start$/i]) {
+    await expect(stranded.getByRole('button', { name })).toBeDisabled()
+  }
+  await expect(stranded.getByText(/our team is looking at it\. controls stay off/i)).toBeVisible()
+
+  // And the machine next to it is untouched.
+  await expect(machineRow(page, fixtures.operableHostname).getByRole('button', { name: /^reinstall$/i })).toBeEnabled()
 })
 
 test('escape closes the reinstall dialogue without rebuilding anything', async ({ page }) => {
   await page.goto('/vps')
 
-  await machineRow(page).getByRole('button', { name: /^reinstall$/i }).click()
+  await machineRow(page, fixtures.operableHostname).getByRole('button', { name: /^reinstall$/i }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
 
   await page.keyboard.press('Escape')
@@ -333,7 +353,7 @@ test('the dedicated rebuild dialogue warns about the operating system and needs 
 
   // The hostname of the customer's *other* machine is not this machine's
   // serial, and a confirmation that accepted it would be no confirmation.
-  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await dialog.getByRole('textbox').fill(fixtures.operableHostname)
   await expect(confirm).toBeDisabled()
 
   await dialog.getByRole('textbox').fill(fixtures.dedicatedSerial)

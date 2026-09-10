@@ -110,10 +110,21 @@ export function usePlan(id: string) {
 /* ----------------------------------------------------------------- orders */
 
 export interface CheckoutPayload {
-  lines: Array<{ plan_id: string; quantity: number }>
+  /**
+   * `items`, as the API names them. The hook sent `lines` until Wave 0 and
+   * every checkout was answered "the items field is required" — a refusal
+   * the idempotency-key defect (AR-1) hid behind its own 422 until that was
+   * fixed. Two contract mismatches, one button.
+   */
+  items: Array<{ plan_id: string; quantity: number }>
   billing_period: string
   coupon_code?: string
-  idempotency_key: string
+  /**
+   * Sent as the `Idempotency-Key` header and never in the body. The server
+   * reads it from the header alone, so one key held across retries of the
+   * same basket is what makes a double-click one order.
+   */
+  idempotencyKey: string
 }
 
 export function useOrders(pageNumber = 1) {
@@ -137,8 +148,8 @@ export function usePlaceOrder() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (payload: CheckoutPayload): Promise<Order> => {
-      const response = await api.post<Envelope<Order>>('/orders', payload)
+    mutationFn: async ({ idempotencyKey, ...payload }: CheckoutPayload): Promise<Order> => {
+      const response = await api.post<Envelope<Order>>('/orders', payload, { idempotencyKey })
       return response.data
     },
     onSuccess: () => {
@@ -296,15 +307,16 @@ export function useVirtualMachine(id: string) {
 export interface PowerRequest {
   id: string
   action: string
-  idempotency_key: string
+  /** One per press; sent as the `Idempotency-Key` header. */
+  idempotencyKey: string
 }
 
 export function useVpsPower() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, action, idempotency_key }: PowerRequest) =>
-      api.post<unknown>(`/vps/${encodeURIComponent(id)}/power`, { action, idempotency_key }),
+    mutationFn: ({ id, action, idempotencyKey }: PowerRequest) =>
+      api.post<unknown>(`/vps/${encodeURIComponent(id)}/power`, { action }, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -314,7 +326,7 @@ export function useVpsPower() {
 export interface ReinstallRequest {
   id: string
   confirm_hostname: string
-  idempotency_key: string
+  idempotencyKey: string
 }
 
 /**
@@ -329,11 +341,8 @@ export function useVpsReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_hostname, idempotency_key }: ReinstallRequest) =>
-      api.post<unknown>(`/vps/${encodeURIComponent(id)}/reinstall`, {
-        confirm_hostname,
-        idempotency_key,
-      }),
+    mutationFn: ({ id, confirm_hostname, idempotencyKey }: ReinstallRequest) =>
+      api.post<unknown>(`/vps/${encodeURIComponent(id)}/reinstall`, { confirm_hostname }, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -386,15 +395,15 @@ export interface PlanChangeSubmission {
   subscriptionId: string
   plan_id: string
   price_id: string
-  idempotency_key: string
+  idempotencyKey: string
 }
 
 export function useChangePlan() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ subscriptionId, ...body }: PlanChangeSubmission) =>
-      api.post<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}/plan`, body),
+    mutationFn: ({ subscriptionId, idempotencyKey, ...body }: PlanChangeSubmission) =>
+      api.post<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}/plan`, body, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
       // The machine's shape changes too, once the hypervisor agrees.
@@ -584,8 +593,8 @@ export function useDedicatedPower() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, action, idempotency_key }: PowerRequest) =>
-      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/power`, { action, idempotency_key }),
+    mutationFn: ({ id, action, idempotencyKey }: PowerRequest) =>
+      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/power`, { action }, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dedicated'] })
     },
@@ -595,7 +604,7 @@ export function useDedicatedPower() {
 export interface DedicatedReinstallRequest {
   id: string
   confirm_serial: string
-  idempotency_key: string
+  idempotencyKey: string
 }
 
 /**
@@ -609,11 +618,8 @@ export function useDedicatedReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_serial, idempotency_key }: DedicatedReinstallRequest) =>
-      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/reinstall`, {
-        confirm_serial,
-        idempotency_key,
-      }),
+    mutationFn: ({ id, confirm_serial, idempotencyKey }: DedicatedReinstallRequest) =>
+      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/reinstall`, { confirm_serial }, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dedicated'] })
     },
@@ -851,7 +857,7 @@ export function usePayFromWalletCredit() {
         {},
         // The header, not the body: the server reads it from there and from
         // nowhere else, so a body field of the same name cannot win.
-        { headers: { 'Idempotency-Key': payload.idempotencyKey } },
+        { idempotencyKey: payload.idempotencyKey },
       ),
     onSuccess: () => {
       // Both moved: the invoice is paid or partly paid, and the balance that

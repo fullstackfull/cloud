@@ -118,7 +118,7 @@ final class CatalogueBrowsingContractTest extends TestCase
         // The ceiling is a property of listing the catalogue, not of the
         // controller that happens to list it today. A queue worker or a
         // sitemap builder resolving the action gets the same bound.
-        $page = (new ListPurchasableProducts)->execute(null, 100_000);
+        $page = app(ListPurchasableProducts::class)->execute(null, 100_000);
 
         $this->assertLessThanOrEqual(ListProductsRequest::MAX_PER_PAGE, $page->perPage());
     }

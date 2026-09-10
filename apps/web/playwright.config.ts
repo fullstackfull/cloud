@@ -1,3 +1,5 @@
+import path from 'node:path'
+
 import { defineConfig, devices } from '@playwright/test'
 
 /*
@@ -19,6 +21,20 @@ const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5174)
 
 const API_ORIGIN = `http://127.0.0.1:${API_PORT}`
 const WEB_ORIGIN = `http://localhost:${WEB_PORT}`
+
+/*
+ * Where the fake hypervisor keeps its fleet between processes.
+ *
+ * The fake is constructed per request, so without a state file every API
+ * request starts with an empty hypervisor and a power action on a seeded
+ * machine is refused as "no such machine" — which is a fact about the
+ * harness, not about the platform. The seeder registers the operable machine
+ * here (see E2ESeeder::operableMachine) and the API process reads it back.
+ */
+export const FAKE_COMPUTE_STATE_PATH = path.resolve(
+  import.meta.dirname,
+  '../control-plane/storage/framework/testing/e2e-fake-compute-fleet.dat',
+)
 
 /*
  * The API is served from the control plane with its own database. `APP_ENV` is
@@ -70,6 +86,8 @@ const apiEnvironment = {
    * that references it renders as missing.
    */
   LYNOMIA_E2E_REGISTRAR_SECRET: 'not-a-real-secret',
+
+  COMPUTE_FAKE_STATE_PATH: FAKE_COMPUTE_STATE_PATH,
 }
 
 export default defineConfig({

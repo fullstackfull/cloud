@@ -23,6 +23,7 @@ use Lynomia\Modules\Vps\Http\Resources\ProvisioningOperationResource;
 use Lynomia\Modules\Vps\Http\Resources\VirtualMachineResource;
 use Lynomia\Modules\Vps\Infrastructure\Queries\CustomerVirtualMachines;
 use Lynomia\Modules\Vps\Infrastructure\Queries\LatestMachineReinstalls;
+use Lynomia\Modules\Vps\Infrastructure\Queries\UnresolvedServiceWork;
 use Lynomia\Modules\Vps\Infrastructure\Queries\VirtualMachineAddresses;
 
 /**
@@ -95,6 +96,9 @@ final class VpsController
 
         $addresses = VirtualMachineAddresses::forMachines($machineIds);
         $reinstalls = LatestMachineReinstalls::forMachines($machineIds);
+        $unresolved = UnresolvedServiceWork::forServices(
+            $machines->getCollection()->map(static fn (VirtualMachine $vm): string => (string) $vm->service_id)->all(),
+        );
 
         return response()->json([
             'data' => $machines->getCollection()
@@ -102,6 +106,7 @@ final class VpsController
                     $vm,
                     $addresses[(string) $vm->getKey()] ?? [],
                     $reinstalls[(string) $vm->getKey()] ?? null,
+                    $unresolved[(string) $vm->service_id] ?? null,
                 ))
                 ->all(),
             'meta' => [
@@ -129,6 +134,7 @@ final class VpsController
             $machine,
             VirtualMachineAddresses::forMachines([$machineId])[$machineId] ?? [],
             LatestMachineReinstalls::forMachines([$machineId])[$machineId] ?? null,
+            UnresolvedServiceWork::forServices([$machine->service_id])[(string) $machine->service_id] ?? null,
         ))->response();
     }
 

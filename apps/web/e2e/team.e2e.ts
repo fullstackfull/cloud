@@ -107,6 +107,16 @@ test.describe('as the owner', () => {
     await expect(row.getByText(/waiting/i)).toBeVisible()
 
     await row.getByRole('button', { name: /withdraw/i }).click()
+
+    // Withdrawing asks first, naming the address; escape leaves the offer open.
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('e2e-invited@example.test')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await expect(row.getByText(/waiting/i)).toBeVisible()
+
+    await row.getByRole('button', { name: /withdraw/i }).click()
+    await page.getByRole('dialog').getByRole('button', { name: /^withdraw invitation$/i }).click()
     await expect(
       page
         .getByRole('row')

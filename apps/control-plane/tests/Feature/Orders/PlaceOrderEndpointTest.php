@@ -107,8 +107,11 @@ final class PlaceOrderEndpointTest extends OrdersApiTestCase
         $this->actingAs($user)
             ->postJson('/api/v1/orders', $this->basket($plan))
             ->assertStatus(422)
-            ->assertJsonPath('error.code', 'validation.failed')
-            ->assertJsonStructure(['error' => ['details' => ['fields' => ['idempotency_key']]]]);
+            // Its own code, naming the header: the key is not a form field,
+            // and a client that renders this as "correct the highlighted
+            // fields" sends the customer looking for a box that is not there.
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected')
+            ->assertJsonPath('error.details.header', 'Idempotency-Key');
 
         $this->assertSame(0, Order::query()->count());
     }
@@ -125,7 +128,7 @@ final class PlaceOrderEndpointTest extends OrdersApiTestCase
         $this->actingAs($user)
             ->postJson('/api/v1/orders', $this->basket($plan) + ['idempotency_key' => 'from-the-body'])
             ->assertStatus(422)
-            ->assertJsonPath('error.code', 'validation.failed');
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected');
 
         $this->assertSame(0, Order::query()->count());
     }

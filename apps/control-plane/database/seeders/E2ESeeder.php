@@ -14,13 +14,18 @@ use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
+use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
+use Lynomia\Modules\Dedicated\Domain\Enums\BmcProtocol;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
@@ -103,6 +108,17 @@ class E2ESeeder extends Seeder
     /** The machine the VPS specs open. */
     public const string VPS_HOSTNAME = 'e2e-web-01';
 
+    /**
+     * A machine with nothing unresolved against it.
+     *
+     * `e2e-web-01` deliberately carries a rebuild whose outcome nobody knows,
+     * so every disruptive control on it is refused until a person has looked
+     * — and since Wave 0 the screen says so and disables them. That leaves
+     * nothing to press. This machine is the one the power, reinstall and
+     * duplicate-submission specs actually drive.
+     */
+    public const string OPERABLE_HOSTNAME = 'e2e-app-02';
+
     /** The physical machine the dedicated specs open. */
     public const string DEDICATED_SERIAL = 'E2E-SN-000117';
 
@@ -137,6 +153,9 @@ class E2ESeeder extends Seeder
 
     /** The address the machine answers on, asserted by name on two screens. */
     public const string VPS_ADDRESS = '198.51.100.24';
+
+    /** The operable machine's address, in the same seeded subnet. */
+    public const string OPERABLE_ADDRESS = '198.51.100.25';
 
     /** The shared hosting account the hosting screens are proved against. */
     public const string HOSTING_USERNAME = 'e2ehost';
@@ -270,6 +289,78 @@ class E2ESeeder extends Seeder
             'node_name' => 'e2e-node',
             'datastore' => 'e2e-datastore',
         ]);
+
+        $this->operableMachine($customer, $node);
+    }
+
+    /**
+     * The machine the browser suite is allowed to reboot, stop and rebuild.
+     *
+     * Its own service, active, on the same node, with no job in any state
+     * against it — so the fake compute provider carries every request out
+     * synchronously and the screen can be asserted on a real outcome rather
+     * than on a refusal.
+     */
+    private function operableMachine(Customer $customer, ComputeNode $node): void
+    {
+        if (VirtualMachine::query()->where('hostname', self::OPERABLE_HOSTNAME)->exists()) {
+            return;
+        }
+
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'kind' => 'vps',
+            'label' => 'Cloud VPS — '.self::OPERABLE_HOSTNAME,
+        ]);
+
+        /*
+         * An image staged on the cluster, so a rebuild has something to
+         * install. Staging is an operator act on a real cluster (the seeded
+         * templates deliberately carry no provider reference); on the fake,
+         * a reference is a name the fake records and nothing more.
+         */
+        $template = VmTemplate::query()
+            ->where('cluster_id', $node->cluster_id)
+            ->where('slug', 'debian-13')
+            ->firstOrFail();
+        $template->forceFill(['provider_reference' => 'e2e-fake-debian-13'])->save();
+
+        $machine = VirtualMachine::factory()
+            ->onNode($node)
+            ->forService($service)
+            ->resources(1, 2048, 40)
+            ->create([
+                'hostname' => self::OPERABLE_HOSTNAME,
+                'os_family' => 'debian',
+                'os_version' => '13',
+                'template_id' => $template->getKey(),
+                // A rebuild replaces the disk on the storage the platform
+                // recorded for it, and refuses rather than guesses when none
+                // is recorded. The name is the one the fake was told below.
+                'storage_name' => 'local-lvm',
+            ]);
+
+        /*
+         * And the same machine as the fake hypervisor sees it.
+         *
+         * A row written straight into the database is a machine the platform
+         * believes in and the hypervisor has never heard of, so the first
+         * power request is answered "no such machine" and the job goes to
+         * review — which is the fake modelling drift correctly, and useless
+         * for a fixture whose whole purpose is to be operated. Registering it
+         * through the provider's own create call puts it in the shared fleet
+         * file the browser suite's API process reads (COMPUTE_FAKE_STATE_PATH);
+         * without that variable the call is harmless and forgotten.
+         */
+        (new FakeComputeProvider)->createVirtualMachine(new CreateVmRequest(
+            nodeName: $node->provider_name,
+            vmId: (int) $machine->provider_id,
+            hostname: self::OPERABLE_HOSTNAME,
+            vcpu: 1,
+            memoryMib: 2048,
+            diskGib: 40,
+            storageName: 'local-lvm',
+        ));
     }
 
     /**
@@ -309,7 +400,7 @@ class E2ESeeder extends Seeder
             'label' => 'Dedicated — '.self::DEDICATED_SERIAL,
         ]);
 
-        DedicatedServer::factory()
+        $server = DedicatedServer::factory()
             ->inDatacenter($datacenter)
             ->create([
                 'serial' => self::DEDICATED_SERIAL,
@@ -318,6 +409,19 @@ class E2ESeeder extends Seeder
                 'customer_id' => $customer->getKey(),
                 'service_id' => $service->getKey(),
             ]);
+
+        /*
+         * Its out-of-band controller, answered by the fake BMC adapter that
+         * DEDICATED_PROVIDER=fake selects. Without an endpoint row the power
+         * and reinstall endpoints answer 500 ("no controller"), which is a
+         * fact about the fixture, not about the platform — and the browser
+         * suite has to press those buttons.
+         */
+        BmcEndpoint::factory()->forServer($server)->create([
+            'protocol' => BmcProtocol::Redfish,
+            'address' => '192.0.2.117',
+            'credentials_reference' => 'e2e-bmc-password',
+        ]);
     }
 
     private function subscriptions(Customer $customer): void
@@ -328,7 +432,7 @@ class E2ESeeder extends Seeder
 
         $plan = Plan::query()->orderBy('created_at')->firstOrFail();
 
-        Subscription::factory()
+        $renewing = Subscription::factory()
             ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
             ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
             ->create([
@@ -336,6 +440,20 @@ class E2ESeeder extends Seeder
                 'plan_id' => $plan->getKey(),
                 'status' => SubscriptionStatus::Active,
             ]);
+
+        /*
+         * The renewing subscription owns the operable machine, so a plan
+         * change on it has a service to resize. The machine was seeded with
+         * exactly the smallest tier's shape, which is what this subscription's
+         * plan describes; without the link the change-plan screen quoted every
+         * option against a subscription that governed nothing, and confirming
+         * one moved money for a resize that could never run.
+         */
+        VirtualMachine::query()
+            ->where('hostname', self::OPERABLE_HOSTNAME)
+            ->firstOrFail()
+            ->service()
+            ->update(['subscription_id' => $renewing->getKey(), 'resources' => $plan->resources]);
 
         Subscription::factory()
             ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
@@ -432,6 +550,30 @@ class E2ESeeder extends Seeder
             'service_id' => $machine->service_id,
             'assignable_type' => VirtualMachine::class,
             'assignable_id' => $machine->getKey(),
+            'is_primary' => true,
+            'assigned_at' => now(),
+            'released_at' => null,
+        ]);
+
+        /*
+         * The operable machine's address too. A rebuild writes the machine's
+         * live address back into the new guest and refuses when there is
+         * none, so a machine the browser suite rebuilds has to have one.
+         */
+        $operable = VirtualMachine::query()->where('hostname', self::OPERABLE_HOSTNAME)->firstOrFail();
+
+        $second = IpAddress::factory()->create([
+            'subnet_id' => $subnet->getKey(),
+            'address' => self::OPERABLE_ADDRESS,
+            'status' => IpAddressStatus::Assigned,
+        ]);
+
+        IpAssignment::factory()->create([
+            'ip_address_id' => $second->getKey(),
+            'customer_id' => $customer->getKey(),
+            'service_id' => $operable->service_id,
+            'assignable_type' => VirtualMachine::class,
+            'assignable_id' => $operable->getKey(),
             'is_primary' => true,
             'assigned_at' => now(),
             'released_at' => null,

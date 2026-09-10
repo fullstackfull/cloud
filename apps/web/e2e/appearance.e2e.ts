@@ -111,11 +111,12 @@ test.describe('Arabic layout', () => {
 
     await page.goto('/vps')
 
-    // The machine by name: the seeder also creates a suspended one, whose
-    // every control is correctly disabled, and `.first()` would find it.
+    // The machine by name, and the operable one: the seeder also creates a
+    // suspended machine and one whose last rebuild nobody can settle, and
+    // since Wave 0 every control on both is correctly disabled.
     await page
       .getByRole('row')
-      .filter({ hasText: fixtures.vpsHostname })
+      .filter({ hasText: fixtures.operableHostname })
       .getByRole('button', { name: /إعادة التثبيت/ })
       .click()
 

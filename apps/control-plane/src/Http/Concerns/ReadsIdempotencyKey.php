@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Http\Concerns;
 
+use Illuminate\Contracts\Validation\Validator;
+use Lynomia\Modules\Shared\Domain\Exceptions\IdempotencyKeyRejectedException;
+
 /**
  * The idempotency key is taken from the `Idempotency-Key` header and from
  * nowhere else.
@@ -15,12 +18,17 @@ namespace Lynomia\Http\Concerns;
  * The key is required, never generated. A key the server invents is unique per
  * request, which makes every retry a new operation — precisely the failure the
  * key exists to prevent.
+ *
+ * A missing or malformed header is refused as its own error rather than as a
+ * validation failure: the key is not a form field, and an error that sends a
+ * customer looking for a highlighted box that does not exist is worse than no
+ * error. See {@see IdempotencyKeyRejectedException}.
  */
 trait ReadsIdempotencyKey
 {
     protected function prepareForValidation(): void
     {
-        $key = $this->header('Idempotency-Key');
+        $key = $this->header(IdempotencyKeyRejectedException::HEADER);
 
         $this->merge([
             'idempotency_key' => is_string($key) ? trim($key) : null,
@@ -48,6 +56,25 @@ trait ReadsIdempotencyKey
             'idempotency_key.max' => 'The Idempotency-Key header must not exceed 128 characters.',
             'idempotency_key.regex' => 'The Idempotency-Key header may contain only letters, digits, dots, colons, hyphens and underscores.',
         ];
+    }
+
+    /**
+     * The header's own failure takes precedence over the body's.
+     *
+     * A request with no key and a bad body is a request from a client that is
+     * not speaking this API's contract, and the contract error is the one to
+     * fix first. Everything else falls through to the ordinary 422 with its
+     * field list.
+     */
+    protected function failedValidation(Validator $validator): void
+    {
+        $reason = $validator->errors()->first('idempotency_key');
+
+        if ($reason !== '') {
+            throw IdempotencyKeyRejectedException::because($reason);
+        }
+
+        parent::failedValidation($validator);
     }
 
     public function idempotencyKey(): string

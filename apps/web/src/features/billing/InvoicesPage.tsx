@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
+import { newIdempotencyKey } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import {
   useInvoices,
@@ -33,7 +34,7 @@ import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
  * decision to pay, however many times the button is pressed.
  */
 function mintKey(): string {
-  return `wallet-credit-${crypto.randomUUID()}`
+  return `wallet-credit-${newIdempotencyKey()}`
 }
 
 export function InvoicesPage() {

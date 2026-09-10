@@ -24,6 +24,12 @@ interface ConfirmDialogProps {
   evidenceLabel?: string
   evidenceHint?: string
   confirmLabel: string
+  /**
+   * What the way out is called. Defaults to "Cancel", which is wrong on
+   * exactly one kind of dialog — the one that confirms a cancellation, where
+   * two buttons reading "Cancel" are a coin toss. Those pass "Keep order".
+   */
+  cancelLabel?: string
   loading?: boolean
   /**
    * Whether confirming would do anything yet.
@@ -67,6 +73,7 @@ export function ConfirmDialog({
   evidenceLabel,
   evidenceHint,
   confirmLabel,
+  cancelLabel,
   loading = false,
   ready = true,
   error,
@@ -178,7 +185,7 @@ export function ConfirmDialog({
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onCancel} disabled={loading}>
-            {t('common.cancel')}
+            {cancelLabel ?? t('common.cancel')}
           </Button>
           {/*
             * type="button" with an explicit handler rather than a submit

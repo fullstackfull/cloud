@@ -273,6 +273,15 @@ function ZoneRecords({ zone }: { zone: DnsZone }) {
   const [priority, setPriority] = useState('10')
   const [caaTag, setCaaTag] = useState('issue')
 
+  /*
+   * The record about to go. Held as the whole row so the dialogue can name
+   * it — type, name and value — rather than asking "are you sure?" about a
+   * button. A plain confirmation, not a typed one: a removed record can be
+   * added back, but not before whatever relied on it has already stopped
+   * working, which is what the dialogue says.
+   */
+  const [removing, setRemoving] = useState<DnsRecord | null>(null)
+
   const addFailure = describeError(add.error)
   const removeFailure = describeError(remove.error)
 
@@ -305,7 +314,7 @@ function ZoneRecords({ zone }: { zone: DnsZone }) {
           variant="ghost"
           disabled={r.is_being_deleted}
           loading={remove.isPending && remove.variables.recordId === r.id}
-          onClick={() => { remove.mutate({ zoneId: zone.id, recordId: r.id }); }}
+          onClick={() => { setRemoving(r); }}
         >
           {t('common.remove')}
         </Button>
@@ -336,6 +345,32 @@ function ZoneRecords({ zone }: { zone: DnsZone }) {
           </Alert>
         </div>
       )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={t('dns.removeRecord.title')}
+        body={
+          <p>
+            {t('dns.removeRecord.body', {
+              record:
+                removing === null
+                  ? ''
+                  : `${removing.type} ${removing.name} → ${removing.priority === null ? removing.content : `${removing.priority} ${removing.content}`}`,
+            })}
+          </p>
+        }
+        confirmLabel={t('dns.removeRecord.confirmLabel')}
+        loading={remove.isPending}
+        onConfirm={() => {
+          if (removing === null) return
+
+          remove.mutate(
+            { zoneId: zone.id, recordId: removing.id },
+            { onSettled: () => { setRemoving(null); } },
+          )
+        }}
+        onCancel={() => { setRemoving(null); }}
+      />
 
       <form
         className="mt-4 flex flex-wrap items-end gap-3 border-t border-[var(--border-subtle)] pt-4"

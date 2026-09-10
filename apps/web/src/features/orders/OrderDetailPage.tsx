@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -20,6 +22,10 @@ export function OrderDetailPage() {
 
   const { data: order, isPending, error } = useOrder(id)
   const cancel = useCancelOrder()
+
+  // Cancelling an unpaid order is recoverable — nothing was charged and a new
+  // order is a click away — so it takes a plain confirmation, not a typed one.
+  const [cancelling, setCancelling] = useState(false)
 
   const displayed = describeError(cancel.error ?? error)
 
@@ -91,11 +97,23 @@ export function OrderDetailPage() {
               variant="danger"
               className="mt-4 w-full"
               loading={cancel.isPending}
-              onClick={() => { cancel.mutate(order.id); }}
+              onClick={() => { setCancelling(true); }}
             >
               {t('orders.cancel')}
             </Button>
           ) : null}
+
+          <ConfirmDialog
+            open={cancelling}
+            title={t('orders.cancelDialog.title', { number: order.number })}
+            body={<p>{t('orders.cancelDialog.body')}</p>}
+            confirmLabel={t('orders.cancelDialog.confirmLabel')}
+            // Two buttons reading "Cancel" would be a coin toss.
+            cancelLabel={t('orders.cancelDialog.keep')}
+            loading={cancel.isPending}
+            onConfirm={() => { cancel.mutate(order.id, { onSettled: () => { setCancelling(false); } }); }}
+            onCancel={() => { setCancelling(false); }}
+          />
 
           {/*
             Deliberately no "mark as paid" and no success-URL handling. An order

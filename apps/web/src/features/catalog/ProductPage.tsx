@@ -8,6 +8,7 @@ import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
+import { newIdempotencyKey } from '@/lib/api'
 import { usePlaceOrder, useProduct } from '@/lib/queries'
 import type { Plan, PlanPrice } from '@/lib/types'
 import { cn } from '@/lib/cn'
@@ -44,12 +45,12 @@ export function ProductPage() {
    * the same key is refused rather than silently replayed — so the key is reset
    * whenever the selection changes.
    */
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  const [idempotencyKey, setIdempotencyKey] = useState(() => newIdempotencyKey())
 
   function chooseP(plan: Plan, billingPeriod: string) {
     setSelected(plan.id)
     setPeriod(billingPeriod)
-    setIdempotencyKey(crypto.randomUUID())
+    setIdempotencyKey(newIdempotencyKey())
   }
 
   const displayed = describeError(place.error ?? error)
@@ -60,10 +61,10 @@ export function ProductPage() {
 
     try {
       const order = await place.mutateAsync({
-        lines: [{ plan_id: selected, quantity }],
+        items: [{ plan_id: selected, quantity }],
         billing_period: period,
         ...(coupon.trim() === '' ? {} : { coupon_code: coupon.trim() }),
-        idempotency_key: idempotencyKey,
+        idempotencyKey,
       })
 
       void navigate(`/orders/${order.id}`)
