@@ -51,24 +51,37 @@ const SCREENS: Array<{ name: string; index: string; identity?: string; section?:
 test.describe('the visual record', () => {
   test.skip(process.env.CAPTURES !== '1', 'captures are taken on request, not on every run')
 
-  // Sixteen screens at three widths in two languages is a long single test.
+  /*
+   * One test per language and width, rather than one test per language.
+   *
+   * Sixteen screens is already several minutes of navigating, waiting for the
+   * network to settle and writing a full-page PNG; three widths in one test
+   * was long enough that the portal's own session had gone by the end of it,
+   * and the failure that followed said nothing about the portal. Six short
+   * recordings, each signing in for itself, fail where the fault is.
+   */
   test.describe.configure({ timeout: 600_000 })
 
   for (const language of ['en', 'ar'] as const) {
-    test(`captures every changed screen in ${language}`, async ({ page }) => {
-      await signIn(page, users.customer, {
-        headingPattern: language === 'ar' ? /مرحب|أهل/ : /welcome/i,
-      })
-
-      if (language === 'ar') {
-        // Switched through the portal's own control, so the capture is of the
-        // portal a customer would be looking at.
-        await page.getByRole('button', { name: 'العربية' }).first().click()
-        await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
-      }
-
-      for (const [label, width, height] of WIDTHS) {
+    for (const [label, width, height] of WIDTHS) {
+      test(`records every changed screen in ${language} at ${label}`, async ({ page }) => {
         await page.setViewportSize({ width, height })
+
+        if (language === 'ar') {
+          /*
+           * Chosen on the sign-in screen, through the portal's own control,
+           * before there is a session to carry the choice: the capture is then
+           * of the portal an Arabic-speaking customer actually meets, from the
+           * first screen onward.
+           */
+          await page.goto('/sign-in')
+          await page.getByRole('button', { name: 'العربية' }).first().click()
+          await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
+        }
+
+        await signIn(page, users.customer, {
+          headingPattern: language === 'ar' ? /مرحب|أهل/ : /welcome/i,
+        })
 
         for (const screen of SCREENS) {
           await page.goto(screen.index)
@@ -91,7 +104,7 @@ test.describe('the visual record', () => {
             fullPage: true,
           })
         }
-      }
-    })
+      })
+    }
   }
 })
