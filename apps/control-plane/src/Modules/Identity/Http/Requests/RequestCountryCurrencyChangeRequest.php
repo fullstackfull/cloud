@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Identity\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
 
 final class RequestCountryCurrencyChangeRequest extends FormRequest
@@ -33,24 +32,22 @@ final class RequestCountryCurrencyChangeRequest extends FormRequest
                 },
             ],
 
-            // And the currency must be one the platform actually bills in, for
-            // the same reason: the answer is no either way, and it is cheaper
-            // and clearer to say so now.
-            'currency' => ['required', 'string', 'size:3', 'alpha', Rule::in($currencies->enabled())],
+            /*
+             * Deliberately NOT checked against the enabled list.
+             *
+             * This is the change *request* workflow, and its job is to answer
+             * a customer who asks. A currency the platform does not price in
+             * is a blocker the analysis explains — "nothing is priced in XAF"
+             * — on a request an operator can then see and reply to. Refusing
+             * it here would replace that explanation with a form error and
+             * lose the record that the customer asked at all.
+             *
+             * Registration is the opposite case and does check the list: there
+             * the currency is being set, not requested.
+             */
+            'currency' => ['required', 'string', 'size:3', 'alpha'],
 
             'reason' => ['required', 'string', 'min:3', 'max:500'],
-        ];
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return [
-            'currency.in' => __('validation.requests.registration.currency_not_billable', [
-                'currencies' => implode(', ', app(BillingCurrencies::class)->enabled()),
-            ]),
         ];
     }
 
