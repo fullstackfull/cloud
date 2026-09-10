@@ -45,6 +45,24 @@ return [
         'body' => ['name', 'email', 'password', 'password_confirmation'],
         'response' => $one('User', 201),
     ],
+    'api.v1.registration.options' => [
+        'tag' => 'Authentication',
+        'summary' => 'What a registration form may offer',
+        'description' => <<<'TEXT'
+        The countries this platform accepts, as ISO-3166-1 alpha-2 codes, the
+        currencies it bills in, as ISO-4217, and the currency recommended for
+        each country.
+
+        Read before an account exists, and it discloses nothing about anybody:
+        the lists are configuration. The same lists validate the registration,
+        so a client cannot submit a country or a currency it was never offered.
+
+        Country names are deliberately absent. A name is a translation, and
+        every client already has CLDR's.
+        TEXT,
+        'auth' => false,
+        'response' => $one('RegistrationOptions'),
+    ],
     'api.v1.login' => [
         'tag' => 'Authentication',
         'summary' => 'Sign in',
@@ -221,6 +239,25 @@ return [
         'body' => ['lines', 'billing_period', 'coupon_code', 'notes'],
         'response' => $one('Order', 201),
     ],
+    'api.v1.orders.quote' => [
+        'tag' => 'Orders',
+        'summary' => 'Price a basket without buying it',
+        'description' => <<<'TEXT'
+        The itemised price of a basket: the plan price, the setup fee, the
+        coupon, the tax, the total, and what the same lines will cost when the
+        period comes round again.
+
+        It runs the same pricing path as placing the order — the same catalogue
+        lookups, the same readiness and stock checks, the same engine — so the
+        figures here are the figures the order will be written with. A contract
+        test prices the same basket both ways and compares every one of them.
+
+        It writes nothing: no order, no held stock, no coupon use, nothing
+        owed. There is therefore no idempotency key.
+        TEXT,
+        'body' => ['items', 'billing_period', 'coupon_code'],
+        'response' => $one('OrderQuote'),
+    ],
     'api.v1.orders.show' => ['tag' => 'Orders', 'summary' => 'One order', 'response' => $one('Order')],
     'api.v1.orders.cancel' => [
         'tag' => 'Orders',
@@ -266,6 +303,42 @@ return [
         'response' => $one('Subscription'),
     ],
     'api.v1.payments.index' => ['tag' => 'Billing', 'summary' => 'List payments', 'query' => ['status'], 'response' => $many('Payment')],
+
+    /* ---------------------------------------------------------------------
+     | The controlled gateway
+     |
+     | The fake provider's own payment page, for tests and development. It is
+     | refused whenever a real provider is configured and refused outright in
+     | production. It settles nothing: approving there makes the provider send
+     | the platform a signed webhook, and that webhook is what settles the
+     | invoice.
+     */
+
+    'api.v1.fake_gateway.show' => [
+        'tag' => 'Payments',
+        'summary' => 'The controlled gateway page for a pending payment',
+        'description' => 'Development and test only. The amount comes from the platform\'s own record of the payment, never from the URL.',
+        'response' => $one('ControlledGatewayPage'),
+    ],
+    'api.v1.fake_gateway.approve' => [
+        'tag' => 'Payments',
+        'summary' => 'Authorise a payment on the controlled gateway',
+        'description' => 'Development and test only. Records the decision on the provider side and sends the platform a signed webhook; the invoice is settled by that webhook.',
+        'response' => $one('ControlledGatewayDecision'),
+    ],
+    'api.v1.fake_gateway.decline' => [
+        'tag' => 'Payments',
+        'summary' => 'Decline a payment on the controlled gateway',
+        'description' => 'Development and test only. The invoice stays open and the failure is visible on it.',
+        'response' => $one('ControlledGatewayDecision'),
+    ],
+    'api.v1.fake_gateway.confirm' => [
+        'tag' => 'Payments',
+        'summary' => 'Confirm a payment with its client credential',
+        'description' => 'Development and test only. The credential is checked against the intent, so a client that does not hold it confirms nothing.',
+        'body' => ['client_secret'],
+        'response' => $one('ControlledGatewayDecision'),
+    ],
     'api.v1.payments.show' => ['tag' => 'Billing', 'summary' => 'One payment', 'response' => $one('Payment')],
     'api.v1.wallet.show' => [
         'tag' => 'Billing',

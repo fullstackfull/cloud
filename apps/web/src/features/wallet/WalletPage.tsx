@@ -1,13 +1,18 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Card } from '@/components/Card'
+import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
+import { Paginator } from '@/components/Paginator'
 import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
-import { formatDateTime } from '@/lib/format'
-import { useWallet } from '@/lib/queries'
+import { formatDate, formatDateTime } from '@/lib/format'
+import { useWallet, useWalletTransactions } from '@/lib/queries'
+import type { WalletTransaction } from '@/lib/types'
 
 /**
  * Every balance the account holds, one per currency.
@@ -31,8 +36,59 @@ export function WalletPage() {
   const locale = useActiveLocale()
   const { data: wallet, isPending, error: readError } = useWallet()
 
+  const [page, setPage] = useState(1)
+  const ledger = useWalletTransactions(page)
+
   const balances = wallet?.data ?? []
   const accountCurrency = wallet?.meta.account_currency
+
+  const ledgerColumns: Array<Column<WalletTransaction>> = [
+    {
+      key: 'when',
+      header: t('wallet.entryWhen'),
+      cell: (entry) => (entry.created_at === null ? '—' : formatDate(entry.created_at, locale)),
+    },
+    {
+      key: 'kind',
+      header: t('wallet.entryKind'),
+      cell: (entry) => t(`walletKind.${entry.kind}`, { defaultValue: entry.kind }),
+    },
+    { key: 'description', header: t('wallet.entryDescription'), cell: (entry) => entry.description },
+    {
+      key: 'amount',
+      header: t('wallet.entryAmount'),
+      cell: (entry) => (
+        <span className="flex items-center gap-2">
+          <MoneyText value={entry.amount} />
+          {/*
+            The direction is a word as well as a sign: a minus on its own is
+            easy to miss, and colour alone would mean nothing to a screen
+            reader.
+          */}
+          <span className="text-xs text-[var(--text-muted)]">
+            {t(`wallet.direction.${entry.direction}`)}
+          </span>
+        </span>
+      ),
+    },
+    {
+      key: 'balance',
+      header: t('wallet.entryBalanceAfter'),
+      cell: (entry) => <MoneyText value={entry.balance_after} />,
+    },
+    {
+      key: 'invoice',
+      header: t('wallet.entryInvoice'),
+      cell: (entry) =>
+        entry.invoice_id === null ? (
+          '—'
+        ) : (
+          <Link className="underline" to={`/invoices/${entry.invoice_id}`}>
+            {t('payments.viewInvoice')}
+          </Link>
+        ),
+    },
+  ]
 
   return (
     <>
@@ -84,6 +140,43 @@ export function WalletPage() {
           <p className="mt-4 text-xs text-[var(--text-muted)]">{t('wallet.howItFills')}</p>
         </Card>
       </div>
+
+      {/*
+        The ledger, which is where the balance above comes from.
+
+        The portal does not add these rows up and compare the answer with the
+        balance: the balance is the server's, the ledger is its history, and two
+        sums that can disagree is how a customer stops trusting both. Each row
+        carries the balance the platform recorded after it, so a customer can
+        follow the money without arithmetic.
+      */}
+      <Card
+        title={t('wallet.ledger')}
+        description={t('wallet.ledgerBody')}
+        className="mt-6"
+      >
+        <LoadFailure error={ledger.error} />
+
+        {ledger.isPending ? (
+          <Loading />
+        ) : (
+          <>
+            <DataTable
+              caption={t('wallet.ledger')}
+              columns={ledgerColumns}
+              rows={ledger.data?.data ?? []}
+              rowKey={(entry) => entry.id}
+              empty={t('wallet.noEntries')}
+            />
+            <Paginator
+              page={ledger.data?.meta.page ?? 1}
+              lastPage={ledger.data?.meta.last_page ?? 1}
+              total={ledger.data?.meta.total ?? 0}
+              onChange={setPage}
+            />
+          </>
+        )}
+      </Card>
     </>
   )
 }

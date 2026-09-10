@@ -14,7 +14,9 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Casts\DatabaseGeneratedInteger;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * A financial document: what a customer was billed, and how it was settled.
@@ -111,6 +113,36 @@ class Invoice extends Model
     public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class)->chaperone();
+    }
+
+    /**
+     * Every payment attempt recorded against this invoice, successful or not.
+     *
+     * A failed attempt stays on the record and is shown to the customer. An
+     * invoice that silently drops a declined card is an invoice whose owner
+     * believes they have paid, and the next thing they hear about it is a
+     * suspension notice.
+     *
+     * @return HasMany<Transaction, $this>
+     */
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(Transaction::class);
+    }
+
+    /**
+     * Wallet ledger entries that moved money against this invoice.
+     *
+     * Wallet credit and a card payment are different things and are shown as
+     * different rows: an invoice settled half from credit and half from a card
+     * has to be able to say so, because "paid" with no explanation of from
+     * where is exactly the question that reaches support.
+     *
+     * @return HasMany<WalletTransaction, $this>
+     */
+    public function walletCredits(): HasMany
+    {
+        return $this->hasMany(WalletTransaction::class);
     }
 
     public function subtotal(): Money

@@ -9,6 +9,7 @@ use Lynomia\Modules\Identity\Http\Controllers\LoginController;
 use Lynomia\Modules\Identity\Http\Controllers\PasswordResetController;
 use Lynomia\Modules\Identity\Http\Controllers\ProfileController;
 use Lynomia\Modules\Identity\Http\Controllers\RegistrationController;
+use Lynomia\Modules\Identity\Http\Controllers\RegistrationOptionsController;
 use Lynomia\Modules\Identity\Http\Controllers\SessionController;
 use Lynomia\Modules\Identity\Http\Controllers\TwoFactorController;
 use Lynomia\Modules\Notifications\Http\Controllers\NotificationPreferenceController;
@@ -23,6 +24,19 @@ use Lynomia\Modules\Notifications\Http\Controllers\NotificationPreferenceControl
 | operation, so anything a customer can do in the UI they can also automate.
 |
 */
+
+/*
+ * What the registration form may offer: the accepted countries, the currencies
+ * this platform bills in, and the currency recommended for each country.
+ *
+ * Public because it is read before an account exists, and cacheable because it
+ * is configuration rather than anybody's data. The same lists validate the
+ * submission, so the form cannot offer a choice the server will not accept and
+ * a browser cannot submit one it was never offered.
+ */
+Route::get('registration/options', RegistrationOptionsController::class)
+    ->middleware('throttle:60,1,registration-options:')
+    ->name('registration.options');
 
 Route::middleware('guest')->group(function (): void {
     Route::post('register', RegistrationController::class)
@@ -155,10 +169,31 @@ Route::post('login/two-factor', [LoginController::class, 'twoFactorChallenge'])
 | otherwise a customer who mistyped their address cannot even reach the resend
 | button — but nothing that spends money or provisions hardware should.
 |
+| The catalogue is the one read that does neither, and it is registered in its
+| own group just above without `verified`.
+|
 */
+/*
+ * The catalogue, and only the catalogue, is readable before the address is
+ * verified.
+ *
+ * A customer who has just registered is three minutes into their first
+ * session and is looking at prices. Refusing them the catalogue teaches them
+ * nothing except that the product does not work; letting them read it costs
+ * nothing, because reading a price moves no money and provisions no hardware.
+ *
+ * What is NOT here is the point of the split: orders, invoices, payments,
+ * wallet, services and every other business route keep `verified`, so an
+ * unverified account can look and cannot buy. `customer` still applies, so
+ * the reader is still resolved to exactly one account and sees exactly the
+ * catalogue that account is priced in.
+ */
+Route::middleware(['auth:sanctum', 'throttle:api', 'customer'])->group(function (): void {
+    require __DIR__.'/v1/catalog.php';
+});
+
 Route::middleware(['auth:sanctum', 'verified', 'throttle:api', 'customer'])->group(function (): void {
     foreach ([
-        'catalog',
         'orders',
         'billing',
         'payments',

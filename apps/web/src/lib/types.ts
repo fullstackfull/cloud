@@ -98,13 +98,117 @@ export interface Invoice {
   total: Money
   amount_paid: Money
   amount_due: Money
+  amount_refunded?: Money
   is_payable: boolean
   is_settled: boolean
   order_id: string | null
-  items_count: number
+  subscription_id?: string | null
+  items_count?: number
+  /*
+   * Present when one invoice is read as a document, absent from a list of
+   * them: a list has no use for twelve addresses and twelve line tables.
+   */
+  items?: InvoiceItem[]
+  billing_snapshot?: BillingSnapshot
+  payments?: InvoicePaymentRow[]
+  wallet_credits?: InvoiceWalletCreditRow[]
   issued_at: string | null
   due_at: string | null
   paid_at: string | null
+  voided_at?: string | null
+}
+
+/**
+ * One line of an invoice, as the invoice recorded it.
+ *
+ * Snapshotted at issue, so a catalogue rename does not rewrite a document
+ * somebody has already printed. `tax_rate` is a decimal string because it is
+ * the rate the invoice carries, not a number to recompute tax with.
+ */
+export interface InvoiceItem {
+  id: string
+  kind: string
+  description: string
+  quantity: number
+  unit_amount: Money
+  discount: Money
+  tax: Money
+  total: Money
+  tax_rate: string
+  tax_name: string | null
+  period_start: string | null
+  period_end: string | null
+}
+
+/**
+ * The billing details an invoice was issued against.
+ *
+ * Frozen: this is not the customer's profile today. Every field is optional
+ * because an invoice issued before a field existed does not carry it, and the
+ * screen omits a line rather than inventing one.
+ */
+export interface BillingSnapshot {
+  type?: string
+  display_name?: string
+  legal_name?: string | null
+  registration_number?: string | null
+  tax_id?: string | null
+  tax_exempt?: boolean
+  billing_email?: string | null
+  billing_phone?: string | null
+  address?: {
+    line1?: string | null
+    line2?: string | null
+    city?: string | null
+    state?: string | null
+    postal_code?: string | null
+    country?: string | null
+  }
+  captured_at?: string | null
+}
+
+/**
+ * A payment as an invoice document reports it: how it was paid, whether it
+ * worked, and why not when it did not. Billing's own view of a payment rather
+ * than the payments surface's, which is why it is a separate type.
+ */
+export interface InvoicePaymentRow {
+  id: string
+  provider: string
+  kind: string
+  status: string
+  is_settled: boolean
+  amount: Money
+  failure_code: string | null
+  processed_at: string | null
+  created_at: string | null
+}
+
+/** A wallet ledger entry as an invoice document reports it. */
+export interface InvoiceWalletCreditRow {
+  id: string
+  kind: string
+  /** Signed: negative when credit was spent. */
+  amount: Money
+  direction: 'credit' | 'debit'
+  balance_after: Money
+  description: string
+  created_at: string | null
+}
+
+/** One entry in the wallet ledger, which is the only source of a balance. */
+export interface WalletTransaction {
+  id: string
+  wallet_id: string
+  kind: string
+  /** Signed: negative when the balance went down. */
+  amount: Money
+  direction: 'credit' | 'debit'
+  balance_after: Money
+  description: string
+  invoice_id: string | null
+  transaction_id: string | null
+  created_at: string | null
 }
 
 export interface Subscription {
@@ -114,6 +218,14 @@ export interface Subscription {
   billing_period: string
   recurring_amount: Money
   plan_id: string | null
+  /**
+   * What this agreement is for. Present when the API was asked for
+   * subscriptions rather than for one subscription's summary, and absent
+   * otherwise — hence optional rather than nullable.
+   */
+  plan?: { id: string; name: string; billing_period: string } | null
+  product?: { id: string; kind: string; name: string } | null
+  services?: SubscriptionService[]
   current_period_end: string | null
   next_invoice_at: string | null
   auto_renew: boolean
@@ -150,6 +262,22 @@ export interface PlanChangeQuote {
   current_resources: { vcpu: number | null; memory_mib: number | null; disk_gib: number | null }
   new_resources: { vcpu: number | null; memory_mib: number | null; disk_gib: number | null }
   changes_infrastructure: boolean
+}
+
+/**
+ * A service a subscription pays for, named the way the customer names it.
+ *
+ * `identity` is the hostname, domain or serial; it is null while the service is
+ * still being created, and a screen says so rather than showing a placeholder
+ * that looks like a name.
+ */
+export interface SubscriptionService {
+  id: string
+  kind: string
+  label: string | null
+  identity: string | null
+  state: string
+  is_usable: boolean
 }
 
 export interface Payment {
@@ -807,4 +935,100 @@ export interface DnsRecord {
   failure_reason: string | null
   last_published_at: string | null
   created_at: string
+}
+
+/**
+ * What a basket costs, priced by the server.
+ *
+ * The portal renders these figures and adds up none of them. The same engine
+ * priced this quote and will price the order, and a contract test in the
+ * backend compares the two — so a screen that recomputed a total here could
+ * only ever be wrong in a way the customer would notice on their invoice.
+ */
+export interface OrderQuoteLine {
+  description: string
+  plan_id: string
+  quantity: number
+  unit_recurring: Money
+  unit_setup: Money
+  gross: Money
+  discount: Money
+  tax: Money
+  total: Money
+  tax_rate: string
+  tax_name: string | null
+}
+
+export interface OrderQuote {
+  currency: string
+  billing_period: string
+  lines: OrderQuoteLine[]
+  setup: Money
+  subtotal: Money
+  discount: Money
+  tax: Money
+  total: Money
+  coupon_code: string | null
+  tax_rate: string
+  tax_name: string | null
+  renewal: {
+    billing_period: string
+    subtotal: Money
+    tax: Money
+    total: Money
+    includes_setup: boolean
+    includes_coupon: boolean
+  }
+}
+
+/**
+ * The countries and currencies registration may offer, from the server.
+ *
+ * Country names are absent on purpose: the browser has CLDR's translations for
+ * every locale this portal speaks, and a half-translated table shipped in the
+ * bundle would be worse than none. `currency_is_explicit` is false when the
+ * country has no row of its own and takes the platform's stated fallback,
+ * which the screen says out loud.
+ */
+export interface RegistrationCountry {
+  code: string
+  currency: string
+  currency_is_explicit: boolean
+}
+
+export interface RegistrationOptions {
+  countries: RegistrationCountry[]
+  currencies: string[]
+  fallback_currency: string
+}
+
+/**
+ * What the platform needs the browser to do about a payment it has opened.
+ *
+ * Five answers, and each one is a different screen. `completed` is the
+ * provider saying it already has the money, which is still not the same as the
+ * invoice being settled — that is decided by the webhook and read back from
+ * the invoice. `pending` is the one state in which a client must not start a
+ * second payment.
+ */
+export type PaymentNextActionType =
+  | 'redirect'
+  | 'client_confirmation'
+  | 'completed'
+  | 'failed'
+  | 'pending'
+
+export interface StartedPayment {
+  payment: Payment
+  provider: string
+  reference: string
+  status: string
+  next_action: {
+    type: PaymentNextActionType
+    redirect_url: string | null
+    client_secret: string | null
+    is_awaiting_provider: boolean
+  }
+  failure_code: string | null
+  failure_message: string | null
 }

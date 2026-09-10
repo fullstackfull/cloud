@@ -77,6 +77,17 @@ return [
             'channel' => env('MAIL_LOG_CHANNEL'),
         ],
 
+        /*
+         * A test facility: writes each message as JSON to MAIL_OUTBOX_PATH so
+         * the browser suite can open the mail a customer would have received
+         * and follow the real link in it. Refuses to be constructed in
+         * production; see OutboxTransport.
+         */
+        'outbox' => [
+            'transport' => 'outbox',
+            'path' => env('MAIL_OUTBOX_PATH', storage_path('framework/testing/outbox.jsonl')),
+        ],
+
         'array' => [
             'transport' => 'array',
         ],

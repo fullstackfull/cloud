@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Providers;
 
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Console\Domain\Contracts\ConsoleUpstreamResolver;
 use Lynomia\Modules\Console\Infrastructure\Upstream\ProviderConsoleUpstreamResolver;
@@ -19,6 +20,7 @@ use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
+use Lynomia\Modules\Shared\Infrastructure\Mail\OutboxTransport;
 use Lynomia\Modules\SharedHosting\Application\Handlers\ChangeHostingPackageHandler;
 use Lynomia\Modules\SharedHosting\Application\Handlers\CopyWordPressSiteHandler;
 use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
@@ -149,6 +151,16 @@ final class InfrastructureServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        /*
+         * The outbox mail transport, available only because MAIL_MAILER can
+         * name it. It writes messages to a file for the browser suite to read;
+         * it refuses to be constructed in production, so naming it there fails
+         * at boot rather than sending customer mail into a file.
+         */
+        Mail::extend('outbox', static fn (array $config): OutboxTransport => new OutboxTransport(
+            (string) ($config['path'] ?? ''),
+        ));
+
         /** @var ProvisioningHandlerRegistry $handlers */
         $handlers = $this->app->make(ProvisioningHandlerRegistry::class);
 

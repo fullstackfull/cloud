@@ -9,12 +9,15 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Session\TokenMismatchException;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Lynomia\Http\Middleware\AssignRequestId;
+use Lynomia\Http\Middleware\EnsureEmailIsVerified;
 use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Http\Middleware\SecurityHeaders;
 use Lynomia\Http\Middleware\SetRequestLocale;
@@ -96,6 +99,14 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'permission' => PermissionMiddleware::class,
+
+            /*
+             * Ours, not the framework's. Laravel's version aborts with a bare
+             * 403, which is indistinguishable from a permission refusal by the
+             * time a client sees it; this one raises a coded exception so the
+             * portal can show the verification step instead of a dead end.
+             */
+            'verified' => EnsureEmailIsVerified::class,
             'role' => RoleMiddleware::class,
 
             // Resolves the one customer account a request acts for. Every
@@ -117,6 +128,28 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             static fn (Request $request): bool => $request->is('api/*', 'webhooks/*') || $request->expectsJson(),
         );
+
+        /*
+         * The one exception that is answered with a page rather than a payload.
+         *
+         * A verification link that is expired or tampered with fails at the
+         * `signed` middleware, before any controller runs. For an API client
+         * that is a 403 and correct. For a person who clicked a link in their
+         * mail three days late it is a JSON blob with no way forward, on the
+         * single most important link the platform sends — so a browser is
+         * handed back to the portal, which offers them a new link.
+         *
+         * Only that one route, and only when the caller did not ask for JSON.
+         */
+        $exceptions->render(static function (InvalidSignatureException $e, Request $request): ?RedirectResponse {
+            if ($request->expectsJson() || ! $request->routeIs('api.v1.verification.verify')) {
+                return null;
+            }
+
+            return redirect()->to(
+                rtrim((string) config('app.frontend_url'), '/').'/verify-email?status=expired'
+            );
+        });
 
         /*
          * One JSON error shape for the whole API.

@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Identity\Application\Actions;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
@@ -24,6 +25,10 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
  */
 final readonly class RegisterCustomer
 {
+    public function __construct(
+        private BillingCurrencies $currencies,
+    ) {}
+
     /**
      * @param  array{
      *     name: string,
@@ -66,10 +71,33 @@ final readonly class RegisterCustomer
 
         $type = CustomerType::from($attributes['account_type'] ?? CustomerType::Individual->value);
 
+        /*
+         * The currency is decided here, once, from two explicit inputs: the
+         * country the customer chose and the mapping a human wrote in
+         * config/billing.php. What it must never be is a default that nobody
+         * mentioned — this action used to fall back to the platform's own
+         * currency whenever the request carried none, and a customer in Riyadh
+         * found out they were billed in Kuwaiti dinars when their first
+         * invoice arrived.
+         *
+         * A submitted currency has already been checked against the enabled
+         * list by the FormRequest; it is asserted again because this action is
+         * also reachable from a seeder and a console command, and the assertion
+         * is cheaper than the invoice that would otherwise be issued in a
+         * currency the payment provider cannot take.
+         */
+        $country = isset($attributes['country']) && is_string($attributes['country']) && $attributes['country'] !== ''
+            ? strtoupper($attributes['country'])
+            : null;
+
+        $currency = isset($attributes['currency']) && is_string($attributes['currency']) && $attributes['currency'] !== ''
+            ? $this->currencies->assertEnabled($attributes['currency'])
+            : $this->currencies->recommendedFor($country);
+
         // One transaction: a user without their customer account, or a customer
         // with no owner, are both unusable states.
         try {
-            [$user, $customer] = DB::transaction(function () use ($attributes, $type): array {
+            [$user, $customer] = DB::transaction(function () use ($attributes, $type, $country, $currency): array {
                 $user = User::create([
                     'name' => $attributes['name'],
                     'email' => strtolower(trim($attributes['email'])),
@@ -91,9 +119,9 @@ final readonly class RegisterCustomer
                     'legal_name' => $type === CustomerType::Organization
                         ? ($attributes['company_name'] ?? null)
                         : null,
-                    'currency' => strtoupper($attributes['currency'] ?? config('billing.default_currency')),
+                    'currency' => $currency,
                     'billing_email' => strtolower(trim($attributes['email'])),
-                    'country' => isset($attributes['country']) ? strtoupper($attributes['country']) : null,
+                    'country' => $country,
                 ]);
 
                 $customer->members()->create([

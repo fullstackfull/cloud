@@ -9,6 +9,7 @@ use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Date;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -432,6 +433,21 @@ class E2ESeeder extends Seeder
 
         $plan = Plan::query()->orderBy('created_at')->firstOrFail();
 
+        /*
+         * A second, different plan for the second subscription.
+         *
+         * The fixture used to put both subscriptions on the same plan at the
+         * same price, which made the two rows on the screen identical — and a
+         * screen that cannot tell two subscriptions apart cannot be tested for
+         * telling two subscriptions apart. The second plan is whatever the
+         * catalogue's next tier is; if the catalogue has only one plan, the
+         * fixture falls back to it and the hostnames still differ.
+         */
+        $secondPlan = Plan::query()
+            ->where('id', '!=', $plan->getKey())
+            ->orderBy('created_at')
+            ->first() ?? $plan;
+
         $renewing = Subscription::factory()
             ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
             ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
@@ -455,17 +471,30 @@ class E2ESeeder extends Seeder
             ->service()
             ->update(['subscription_id' => $renewing->getKey(), 'resources' => $plan->resources]);
 
-        Subscription::factory()
+        $ending = Subscription::factory()
             ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
-            ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
+            // A different price as well as a different plan, so the two rows
+            // differ in every column a customer would use to tell them apart.
+            ->priced(self::SUBSCRIPTION_AMOUNT_MINOR + 3000)
             ->create([
                 'customer_id' => $customer->getKey(),
-                'plan_id' => $plan->getKey(),
+                'plan_id' => $secondPlan->getKey(),
                 'status' => SubscriptionStatus::Active,
                 // Cancelled at the end of the period the customer has already
                 // paid for, which is what "ends on" means on the screen.
                 'cancel_at' => CarbonImmutable::now()->endOfMonth(),
             ]);
+
+        /*
+         * And it owns the other machine, so the screen can say which server
+         * each agreement pays for. Cancelling the wrong one of two identical
+         * rows is how a customer loses a production machine.
+         */
+        VirtualMachine::query()
+            ->where('hostname', self::VPS_HOSTNAME)
+            ->firstOrFail()
+            ->service()
+            ->update(['subscription_id' => $ending->getKey()]);
     }
 
     /**
@@ -1115,29 +1144,90 @@ class E2ESeeder extends Seeder
             return;
         }
 
-        Invoice::factory()->for($customer)->totalling(Money::of('9.000', 'KWD'))->create([
+        /*
+         * Every seeded invoice carries its lines and a billing snapshot.
+         *
+         * They used to be totals and nothing else, which was enough while the
+         * portal showed only totals. An invoice screen and a printable
+         * document need what was bought, for which period, at what unit price,
+         * and the name and address the document is addressed to — and a
+         * fixture without them lets a blank document look finished.
+         */
+        $this->invoiceWithLines($customer, [
             'number' => self::OPEN_INVOICE_NUMBER,
             'status' => InvoiceStatus::Open,
             'amount_paid_minor' => 0,
             'issued_at' => now()->subDays(2),
             'due_at' => now()->addDays(12),
-        ]);
+        ], Money::of('9.000', 'KWD'), 'Cloud VPS — Starter (monthly)');
 
-        Invoice::factory()->for($customer)->totalling(Money::of('40.000', 'KWD'))->create([
+        $this->invoiceWithLines($customer, [
             'number' => self::LARGE_INVOICE_NUMBER,
             'status' => InvoiceStatus::Open,
             'amount_paid_minor' => 0,
             'issued_at' => now()->subDay(),
             'due_at' => now()->addDays(20),
-        ]);
+        ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
 
-        Invoice::factory()->for($customer)->totalling(Money::of('25.500', 'KWD'))->create([
+        $this->invoiceWithLines($customer, [
             'number' => self::PAID_INVOICE_NUMBER,
             'status' => InvoiceStatus::Paid,
             'amount_paid_minor' => 25500,
             'issued_at' => now()->subMonth(),
             'due_at' => now()->subMonth()->addDays(14),
             'paid_at' => now()->subMonth()->addDay(),
+        ], Money::of('25.500', 'KWD'), 'Cloud VPS — Starter (monthly)');
+    }
+
+    /**
+     * One invoice, its single line, and the billing details the document is
+     * addressed to.
+     *
+     * The line is the whole invoice: one plan, one period, no tax — Kuwait's
+     * rate is zero — so the document adds up exactly, which is the only way a
+     * printed page is worth looking at.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function invoiceWithLines(
+        Customer $customer,
+        array $attributes,
+        Money $total,
+        string $description,
+    ): void {
+        $invoice = Invoice::factory()->for($customer)->totalling($total)->create($attributes + [
+            'billing_snapshot' => [
+                'customer_id' => (string) $customer->getKey(),
+                'type' => $customer->type->value,
+                'display_name' => $customer->display_name,
+                'legal_name' => $customer->legal_name,
+                'tax_id' => $customer->tax_id,
+                'billing_email' => $customer->billing_email,
+                'billing_phone' => $customer->billing_phone,
+                'address' => [
+                    'line1' => $customer->address_line1,
+                    'line2' => $customer->address_line2,
+                    'city' => $customer->city,
+                    'state' => $customer->state,
+                    'postal_code' => $customer->postal_code,
+                    'country' => $customer->country,
+                ],
+                'captured_at' => ($attributes['issued_at'] ?? now())->toIso8601String(),
+            ],
+        ]);
+
+        $invoice->items()->create([
+            'kind' => InvoiceItemKind::Plan,
+            'description' => $description,
+            'quantity' => 1,
+            'unit_amount_minor' => $total->minorUnits(),
+            'discount_minor' => 0,
+            'tax_minor' => 0,
+            'total_minor' => $total->minorUnits(),
+            'tax_rate' => '0',
+            'tax_name' => null,
+            'period_start' => $attributes['issued_at'] ?? now(),
+            'period_end' => ($attributes['issued_at'] ?? now())->copy()->addMonth(),
         ]);
     }
 

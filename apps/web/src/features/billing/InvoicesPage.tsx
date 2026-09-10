@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
@@ -15,14 +16,12 @@ import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { newIdempotencyKey } from '@/lib/api'
 import { formatDate } from '@/lib/format'
-import {
-  useInvoices,
-  usePayFromWalletCredit,
-  useStartPayment,
-  useWalletCreditQuote,
-} from '@/lib/queries'
+import { useInvoices, usePayFromWalletCredit, useWalletCreditQuote } from '@/lib/queries'
 import type { Invoice } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+
+import { PaymentNextAction } from '../payments/PaymentNextAction'
+import { usePaymentLaunch } from '../payments/usePaymentLaunch'
 
 /**
  * One key per opened dialogue, not one per click.
@@ -45,7 +44,14 @@ export function InvoicesPage() {
 
   const [page, setPage] = useState(1)
   const { data, isPending, error: readError } = useInvoices(page)
-  const pay = useStartPayment()
+  /*
+   * The launcher handles all five answers the server can give — a redirect, a
+   * confirmation to make from here, a payment already taken, a refusal, and a
+   * payment nobody has decided yet. The list used to look for a redirect URL
+   * and do nothing when there was none, which made a declined card and a
+   * payment in flight both look like a button that did not work.
+   */
+  const launch = usePaymentLaunch()
 
   const [payingFromCredit, setPayingFromCredit] = useState<Invoice | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState<string>(mintKey)
@@ -53,7 +59,7 @@ export function InvoicesPage() {
   const quote = useWalletCreditQuote(payingFromCredit?.id ?? null)
   const payFromCredit = usePayFromWalletCredit()
 
-  const displayed = describeError(pay.error)
+  const displayed = describeError(launch.error)
   const creditError = describeError(quote.error ?? payFromCredit.error)
 
   function openCreditDialog(invoice: Invoice) {
@@ -61,21 +67,6 @@ export function InvoicesPage() {
     setPayingFromCredit(invoice)
   }
 
-  /**
-   * Hands the browser to the provider.
-   *
-   * This is the whole of the client's part in a payment. It does not, and must
-   * never, tell the server that the money arrived — that is decided by the
-   * webhook, server-side, and a portal that could assert it would be a portal an
-   * attacker could use to provision for free.
-   */
-  async function startPayment(invoice: Invoice) {
-    const started = await pay.mutateAsync(invoice.id).catch(() => null)
-
-    if (started?.redirect_url != null && started.redirect_url !== '') {
-      window.location.assign(started.redirect_url)
-    }
-  }
 
   const columns: Array<Column<Invoice>> = [
     {
@@ -93,6 +84,15 @@ export function InvoicesPage() {
       cell: (invoice) => (invoice.due_at === null ? '—' : formatDate(invoice.due_at, locale)),
     },
     {
+      key: 'view',
+      header: '',
+      cell: (invoice) => (
+        <Link className="text-sm underline" to={`/invoices/${invoice.id}`}>
+          {t('invoices.view')}
+        </Link>
+      ),
+    },
+    {
       key: 'pay',
       header: '',
       cell: (invoice) =>
@@ -100,8 +100,8 @@ export function InvoicesPage() {
           <div className="flex gap-2">
             <Button
               size="sm"
-              loading={pay.isPending && pay.variables === invoice.id}
-              onClick={() => void startPayment(invoice)}
+              loading={launch.isPending}
+              onClick={() => void launch.start(invoice.id)}
             >
               {t('invoices.pay')}
             </Button>
@@ -131,6 +131,12 @@ export function InvoicesPage() {
           <Alert tone="error" requestId={displayed.requestId}>
             {displayed.message}
           </Alert>
+        </div>
+      ) : null}
+
+      {launch.state.type !== 'idle' ? (
+        <div className="mb-4">
+          <PaymentNextAction state={launch.state} />
         </div>
       ) : null}
 

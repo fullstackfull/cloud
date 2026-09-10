@@ -77,8 +77,22 @@ final class FakePaymentProvider implements PaymentProvider
         4 => 'processing_error',
     ];
 
+    /** Ask the browser to visit the provider's own page. */
+    public const string NEXT_ACTION_REDIRECT = 'redirect';
+
+    /** Keep the customer here and confirm with a client credential. */
+    public const string NEXT_ACTION_CLIENT_CONFIRMATION = 'client_confirmation';
+
     /** @var list<string> */
     private array $supportedCurrencies;
+
+    private string $nextAction;
+
+    /**
+     * Where decisions taken by the controlled gateway are recorded, or null
+     * when this fake is a pure function of the reference.
+     */
+    private ?string $statePath;
 
     private string $webhookSecret;
 
@@ -103,6 +117,20 @@ final class FakePaymentProvider implements PaymentProvider
         // the check off silently.
         $tolerance = (int) config('payments.fake.webhook_tolerance', self::DEFAULT_WEBHOOK_TOLERANCE);
         $this->webhookTolerance = $tolerance > 0 ? $tolerance : self::DEFAULT_WEBHOOK_TOLERANCE;
+
+        /*
+         * Which shape of confirmation this fake asks a browser for. Both are
+         * real flows a real gateway uses; the fake can be pointed at either so
+         * that both branches of the portal's next_action handling are
+         * exercised by something rather than reasoned about.
+         */
+        $requested = (string) config('payments.fake.next_action', 'redirect');
+        $this->nextAction = $requested === self::NEXT_ACTION_CLIENT_CONFIRMATION
+            ? self::NEXT_ACTION_CLIENT_CONFIRMATION
+            : self::NEXT_ACTION_REDIRECT;
+
+        $statePath = config('payments.fake.state_path');
+        $this->statePath = is_string($statePath) && trim($statePath) !== '' ? $statePath : null;
     }
 
     public function name(): string
@@ -137,9 +165,10 @@ final class FakePaymentProvider implements PaymentProvider
             amount: $request->amount,
             // Shaped like a real one so that any code which accidentally logs
             // or persists it is caught by the same redaction rules.
-            clientSecret: $reference.'_secret_'.substr(hash('sha256', $request->idempotencyKey), 0, 16),
+            clientSecret: $this->clientSecretFor($reference, $request->idempotencyKey),
             nextActionUrl: $status === RemotePaymentStatus::RequiresAction
-                ? sprintf('https://fake-provider.test/authorise/%s', $reference)
+                && $this->nextAction === self::NEXT_ACTION_REDIRECT
+                ? $this->authorisationUrlFor($reference)
                 : null,
             failureCode: $failureCode,
             failureMessage: $failureCode !== null ? 'The fake provider declined this amount by design.' : null,
@@ -151,8 +180,26 @@ final class FakePaymentProvider implements PaymentProvider
     {
         [$status, $amount, $customerId] = $this->decodeReference($reference);
 
+        /*
+         * A decision the controlled gateway recorded outranks the one encoded
+         * in the reference.
+         *
+         * The reference is immutable by design — it is how a queue worker that
+         * never saw the request still knows the outcome — which means an
+         * intent created as "requires action" can never become "succeeded" on
+         * its own. That is correct for the unit tests and useless for a
+         * browser journey, where somebody has to be able to authorise the
+         * payment. So an approval or a decline is written to a file, and this
+         * is where it is read back. With no file configured nothing changes.
+         */
+        $recorded = $this->recordedStatusFor($reference);
+
+        if ($recorded !== null) {
+            $status = $recorded['status'];
+        }
+
         $failureCode = $status === RemotePaymentStatus::Failed
-            ? (self::declineCodeFor($amount) ?? 'card_declined')
+            ? ($recorded['failure_code'] ?? self::declineCodeFor($amount) ?? 'card_declined')
             : null;
 
         return new RemotePaymentState(
@@ -350,6 +397,136 @@ final class FakePaymentProvider implements PaymentProvider
     public static function declineCodeFor(Money $amount): ?string
     {
         return self::DECLINE_CODES[$amount->minorUnits() % 100] ?? null;
+    }
+
+    /**
+     * The page a redirecting browser is sent to.
+     *
+     * It points at the portal, because that is where the controlled gateway
+     * screen lives: a JSON API cannot serve the provider's hosted page, and a
+     * URL nobody can open would make the redirect branch unprovable.
+     */
+    public function authorisationUrlFor(string $reference): string
+    {
+        $configured = config('payments.fake.authorise_url');
+
+        $base = is_string($configured) && trim($configured) !== ''
+            ? rtrim($configured, '/')
+            : rtrim((string) config('app.frontend_url'), '/').'/fake-gateway/authorise';
+
+        return $base.'/'.$reference;
+    }
+
+    /**
+     * Which confirmation shape this fake is configured to ask for.
+     */
+    public function nextActionShape(): string
+    {
+        return $this->nextAction;
+    }
+
+    /**
+     * Records the decision a person took on the controlled gateway page.
+     *
+     * This is the fake's only mutable state, it exists only when a state file
+     * is configured, and it is what makes an authorisation in a browser
+     * visible to a later server-side retrieve. It does not settle anything: an
+     * invoice is settled when the platform receives the signed webhook, which
+     * the gateway sends next.
+     */
+    public function record(string $reference, RemotePaymentStatus $status, ?string $failureCode = null): void
+    {
+        if ($this->statePath === null) {
+            throw PaymentProviderException::requestFailed(
+                self::NAME,
+                'record_decision',
+                ['error_code' => 'no_state_path'],
+            );
+        }
+
+        $state = $this->readState();
+        $state[$reference] = ['status' => $status->value, 'failure_code' => $failureCode];
+
+        $directory = dirname($this->statePath);
+
+        if (! is_dir($directory)) {
+            mkdir($directory, 0o775, true);
+        }
+
+        file_put_contents(
+            $this->statePath,
+            json_encode($state, JSON_THROW_ON_ERROR),
+            LOCK_EX,
+        );
+    }
+
+    /**
+     * The client credential this fake would have issued for an intent.
+     *
+     * The controlled gateway's client-confirmation endpoint compares what the
+     * browser presents against this, so that path proves something: a browser
+     * that does not hold the credential cannot confirm the payment. It is
+     * derived rather than stored, exactly as the intent's own is.
+     */
+    public function clientSecretFor(string $reference, string $idempotencyKey): string
+    {
+        return $reference.'_secret_'.substr(hash('sha256', $idempotencyKey), 0, 16);
+    }
+
+    /**
+     * @return array{status: RemotePaymentStatus, failure_code: string|null}|null
+     */
+    private function recordedStatusFor(string $reference): ?array
+    {
+        if ($this->statePath === null) {
+            return null;
+        }
+
+        $entry = $this->readState()[$reference] ?? null;
+
+        if (! is_array($entry)) {
+            return null;
+        }
+
+        $status = RemotePaymentStatus::tryFrom((string) ($entry['status'] ?? ''));
+
+        if ($status === null) {
+            return null;
+        }
+
+        $failureCode = $entry['failure_code'] ?? null;
+
+        return [
+            'status' => $status,
+            'failure_code' => is_string($failureCode) && $failureCode !== '' ? $failureCode : null,
+        ];
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function readState(): array
+    {
+        if ($this->statePath === null || ! is_file($this->statePath)) {
+            return [];
+        }
+
+        $raw = (string) file_get_contents($this->statePath);
+
+        if (trim($raw) === '') {
+            return [];
+        }
+
+        try {
+            /** @var array<string, array<string, mixed>> $decoded */
+            $decoded = (array) json_decode($raw, true, 8, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            // A half-written file is not a payment decision. Treat it as no
+            // decision rather than as a failed payment.
+            return [];
+        }
+
+        return $decoded;
     }
 
     private function assertSupportedCurrency(string $currency): void

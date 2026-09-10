@@ -39,14 +39,29 @@ final class StartedPaymentResource extends JsonResource
         $started = $this->resource;
         $intent = $started->intent;
 
+        /*
+         * Five answers, and each one is a different screen.
+         *
+         * The vocabulary used to be `none | redirect | client_secret`, which
+         * collapsed three unlike situations into "none": a declined card, a
+         * payment that already went through, and a payment the provider has
+         * not made its mind up about. A portal cannot tell those apart, so it
+         * showed the same nothing for all three — and the most dangerous of
+         * them is the third, where the right thing to say is "we are checking,
+         * do not pay again" and the wrong thing is a retry button.
+         *
+         *   redirect             send the customer to the provider's page
+         *   client_confirmation  confirm here, with the client credential
+         *   completed            the provider has already taken it
+         *   failed               the provider refused it, and says why
+         *   pending              nobody knows yet; wait, do not retry
+         */
         $type = match (true) {
-            // A provider that has already said no is not waiting for the
-            // browser to do anything, and handing out a bearer credential for
-            // a payment that cannot proceed is a credential for nothing.
-            $intent->status->isFinal() && ! $intent->succeeded() => 'none',
+            $intent->succeeded() => 'completed',
+            $intent->status->isFinal() => 'failed',
             $intent->nextActionUrl !== null => 'redirect',
-            $intent->clientSecret !== null => 'client_secret',
-            default => 'none',
+            $intent->clientSecret !== null => 'client_confirmation',
+            default => 'pending',
         };
 
         return [
@@ -61,7 +76,17 @@ final class StartedPaymentResource extends JsonResource
             'next_action' => [
                 'type' => $type,
                 'redirect_url' => $type === 'redirect' ? $intent->nextActionUrl : null,
-                'client_secret' => $type === 'client_secret' ? $intent->clientSecret : null,
+                'client_secret' => $type === 'client_confirmation' ? $intent->clientSecret : null,
+
+                /*
+                 * Whether a client may ask again in a moment.
+                 *
+                 * True only for `pending`, and it is the one branch where a
+                 * client must NOT start a second payment: the money may
+                 * already be moving. Everything else is either finished or
+                 * waiting on the customer.
+                 */
+                'is_awaiting_provider' => $type === 'pending',
             ],
 
             'failure_code' => $intent->failureCode,

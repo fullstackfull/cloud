@@ -7,6 +7,9 @@ namespace Lynomia\Modules\Billing\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Http\Concerns\SerialisesMoney;
+use Lynomia\Modules\Provisioning\Domain\Enums\CustomerServiceState;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -55,6 +58,32 @@ final class SubscriptionResource extends JsonResource
             // the acting account, so a client can link back to either.
             'plan_id' => $this->plan_id,
             'order_id' => $this->order_id,
+
+            /*
+             * What this subscription is FOR.
+             *
+             * Without these three, a customer with two identical monthly
+             * subscriptions sees two rows reading "9.000 KWD — renews on the
+             * 1st" and has no way to tell which one runs the machine they
+             * still need. That is the whole of the AR-9 defect, and it made
+             * cancelling a subscription a guess.
+             *
+             * The plan name is the plan's own, in the language of the request,
+             * and it is the plan the subscription is on rather than whatever
+             * the catalogue is selling today. The price above comes from the
+             * subscription record for the same reason: a plan whose price rose
+             * last week did not raise this agreement.
+             */
+            'plan' => $this->whenLoaded('plan', fn (): ?array => $this->planSummary()),
+            'product' => $this->whenLoaded('plan', fn (): ?array => $this->productSummary()),
+
+            /*
+             * Every service this agreement pays for, named the way the
+             * customer names it: the hostname, the domain, the serial. A
+             * service that is still being created has no identity yet and says
+             * so with a null rather than a placeholder.
+             */
+            'services' => $this->whenLoaded('services', fn (): array => $this->serviceSummaries()),
 
             'current_period_start' => $this->current_period_start?->toIso8601String(),
             'current_period_end' => $this->current_period_end?->toIso8601String(),
@@ -105,5 +134,61 @@ final class SubscriptionResource extends JsonResource
 
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * @return array{id: string, name: string, billing_period: string}|null
+     */
+    private function planSummary(): ?array
+    {
+        $plan = $this->resource->plan;
+
+        if ($plan === null) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $plan->getKey(),
+            'name' => $plan->nameFor(app()->getLocale()),
+            'billing_period' => $this->resource->billing_period->value,
+        ];
+    }
+
+    /**
+     * @return array{id: string, kind: string, name: string}|null
+     */
+    private function productSummary(): ?array
+    {
+        $product = $this->resource->plan?->product;
+
+        if ($product === null) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $product->getKey(),
+            'kind' => $product->kind->value,
+            'name' => $product->nameFor(app()->getLocale()),
+        ];
+    }
+
+    /**
+     * @return list<array{id: string, kind: string, label: string|null, identity: string|null, state: string, is_usable: bool}>
+     */
+    private function serviceSummaries(): array
+    {
+        return $this->resource->services
+            ->map(fn (Service $service): array => [
+                'id' => (string) $service->getKey(),
+                'kind' => (string) $service->kind,
+                'label' => $service->label,
+                'identity' => is_string($service->getAttribute(ServiceIdentities::ATTRIBUTE))
+                    ? (string) $service->getAttribute(ServiceIdentities::ATTRIBUTE)
+                    : null,
+                'state' => CustomerServiceState::for($service->status, false)->value,
+                'is_usable' => $service->isUsable(),
+            ])
+            ->values()
+            ->all();
     }
 }

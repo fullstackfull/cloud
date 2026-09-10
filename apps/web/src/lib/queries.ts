@@ -23,12 +23,15 @@ import type {
   IpAssignment,
   NotificationPreference,
   Order,
+  OrderQuote,
   Paginated,
   Payment,
   Plan,
   PlanChangeQuote,
   Product,
+  RegistrationOptions,
   Service,
+  StartedPayment,
   Subscription,
   TeamInvitation,
   TeamMember,
@@ -42,6 +45,7 @@ import type {
   VirtualMachine,
   WalletBalances,
   WalletCreditQuote,
+  WalletTransaction,
   WordPressPushImpact,
   WordPressSite,
   WordPressSiteOperation,
@@ -144,6 +148,22 @@ export function useOrder(id: string) {
   })
 }
 
+/**
+ * What the basket in front of the customer costs, from the server.
+ *
+ * A mutation rather than a query because it is a POST with a body, and because
+ * it is asked again whenever the selection changes; it creates nothing, so
+ * there is no idempotency key and nothing to invalidate.
+ */
+export function useOrderQuote() {
+  return useMutation({
+    mutationFn: async (payload: Omit<CheckoutPayload, 'idempotencyKey'>): Promise<OrderQuote> => {
+      const response = await api.post<Envelope<OrderQuote>>('/orders/quote', payload)
+      return response.data
+    },
+  })
+}
+
 export function usePlaceOrder() {
   const queryClient = useQueryClient()
 
@@ -228,12 +248,21 @@ export function useCancelSubscription() {
 
 /* --------------------------------------------------------------- payments */
 
-export interface StartedPayment {
-  payment_id: string
-  provider: string
-  /** Where the browser must go next, when the provider needs a redirect. */
-  redirect_url?: string | null
-  client_secret?: string | null
+export function usePayment(id: string | null) {
+  return useQuery({
+    queryKey: ['payments', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<Payment>>(`/payments/${encodeURIComponent(id ?? '')}`)
+      return response.data
+    },
+    enabled: id !== null && id !== '',
+    /*
+     * Read fresh, never from cache: this is the hook a customer returning from
+     * a provider's page lands on, and the only honest answer to "did my
+     * payment work" is the platform's current record of it.
+     */
+    staleTime: 0,
+  })
 }
 
 export function usePayments(pageNumber = 1) {
@@ -654,6 +683,23 @@ export function useWallet() {
     // The whole envelope, not `.data`: the account currency in `meta` is what
     // tells the screen which of several balances is the customer's own.
     queryFn: () => api.get<WalletBalances>('/wallet'),
+  })
+}
+
+/**
+ * The wallet ledger, which is where a balance comes from.
+ *
+ * The portal never reconstructs a balance by adding these rows up: the balance
+ * is published by the API, and this list is the history behind it. Two
+ * different sums that disagree is exactly how a customer stops trusting both.
+ */
+export function useWalletTransactions(pageNumber = 1, currency?: string) {
+  return useQuery({
+    queryKey: ['wallet', 'transactions', pageNumber, currency ?? 'all'],
+    queryFn: () =>
+      api.get<Paginated<WalletTransaction>>(
+        `/wallet/transactions${page({ page: pageNumber, currency })}`,
+      ),
   })
 }
 
@@ -1417,6 +1463,97 @@ export function usePushWordPressToProduction() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+    },
+  })
+}
+
+/* --------------------------------------------------- registration options */
+
+/**
+ * The countries and currencies registration may offer.
+ *
+ * Read from the server, never assembled here: a country-to-currency table in
+ * this bundle would drift from the platform's the first time a currency was
+ * enabled or withdrawn, and the customer would find out at checkout.
+ */
+export function useRegistrationOptions() {
+  return useQuery({
+    queryKey: ['registration', 'options'],
+    queryFn: async () => {
+      const response = await api.get<Envelope<RegistrationOptions>>('/registration/options')
+      return response.data
+    },
+    // Configuration, not anybody's data: worth holding for the length of a
+    // sign-up rather than re-fetching per keystroke.
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/* ------------------------------------------------- email verification */
+
+export function useResendVerificationEmail() {
+  return useMutation({
+    mutationFn: () => api.post<unknown>('/email/verify/resend'),
+  })
+}
+
+/* ------------------------------------------------- the controlled gateway */
+
+/**
+ * The fake provider's own payment page.
+ *
+ * These hooks exist so a test and a developer can walk the redirect flow
+ * end to end in a browser. The endpoints behind them are refused whenever a
+ * real payment provider is configured and refused outright in production, and
+ * they settle nothing themselves: approving sends the platform a signed
+ * webhook, and the invoice is settled by that.
+ */
+export interface ControlledGatewayPage {
+  payment: Payment
+  provider: string
+  reference: string
+}
+
+export function useControlledGatewayPayment(reference: string | null) {
+  return useQuery({
+    queryKey: ['fake-gateway', reference],
+    queryFn: async () => {
+      const response = await api.get<Envelope<ControlledGatewayPage>>(
+        `/fake-gateway/payments/${encodeURIComponent(reference ?? '')}`,
+      )
+      return response.data
+    },
+    enabled: reference !== null && reference !== '',
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+export function useControlledGatewayDecision() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      reference,
+      decision,
+      clientSecret,
+    }: {
+      reference: string
+      decision: 'approve' | 'decline' | 'confirm'
+      clientSecret?: string
+    }): Promise<Payment> => {
+      const response = await api.post<Envelope<{ payment: Payment }>>(
+        `/fake-gateway/payments/${encodeURIComponent(reference)}/${decision}`,
+        decision === 'confirm' ? { client_secret: clientSecret } : undefined,
+      )
+
+      return response.data.payment
+    },
+    onSuccess: () => {
+      // The invoice may now be settled — by the webhook, not by this response.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      void queryClient.invalidateQueries({ queryKey: ['payments'] })
+      void queryClient.invalidateQueries({ queryKey: ['wallet'] })
     },
   })
 }

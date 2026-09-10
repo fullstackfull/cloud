@@ -196,6 +196,7 @@ return [
     */
 
     'attributes' => [
+        'client_secret' => 'payment credential',
         'accepts_terms' => 'terms of service',
         'account_type' => 'account type',
         'action' => 'power action',
@@ -325,6 +326,11 @@ return [
             'min' => 'The Idempotency-Key header must be at least 8 characters.',
             'max' => 'The Idempotency-Key header must not exceed 128 characters.',
             'regex' => 'The Idempotency-Key header may contain only letters, digits, dots, colons, hyphens and underscores.',
+        ],
+        'registration' => [
+            'country_required' => 'Choose the country this account is billed from. It decides the currency your invoices are issued in.',
+            'country_unknown' => 'That is not a country we can bill from. Choose one from the list.',
+            'currency_not_billable' => 'We bill in :currencies. Choose one of those.',
         ],
         'api_token' => [
             'current_password_required' => 'Confirm your account password to issue an API token.',

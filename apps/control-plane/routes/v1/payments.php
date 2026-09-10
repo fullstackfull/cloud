@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use Lynomia\Modules\Payments\Http\Controllers\ControlledGatewayController;
 use Lynomia\Modules\Payments\Http\Controllers\PaymentController;
 
 /*
@@ -32,3 +33,31 @@ Route::post('invoices/{invoice}/payments', [PaymentController::class, 'store'])
 
 Route::get('payments', [PaymentController::class, 'index'])->name('payments.index');
 Route::get('payments/{payment}', [PaymentController::class, 'show'])->name('payments.show');
+
+/*
+|--------------------------------------------------------------------------
+| The controlled gateway
+|--------------------------------------------------------------------------
+|
+| The fake provider's own payment page, for tests and for development. It is
+| refused whenever a real provider is configured and refused outright in
+| production, and it settles nothing itself: approving here makes the provider
+| send the platform a signed webhook, and that webhook is what settles the
+| invoice. See ControlledGatewayController for why every step is real.
+|
+*/
+Route::prefix('fake-gateway/payments')->as('fake_gateway.')->group(function (): void {
+    Route::get('{reference}', [ControlledGatewayController::class, 'show'])->name('show');
+
+    Route::post('{reference}/approve', [ControlledGatewayController::class, 'approve'])
+        ->middleware('throttle:30,1,controlled-gateway:')
+        ->name('approve');
+
+    Route::post('{reference}/decline', [ControlledGatewayController::class, 'decline'])
+        ->middleware('throttle:30,1,controlled-gateway:')
+        ->name('decline');
+
+    Route::post('{reference}/confirm', [ControlledGatewayController::class, 'confirm'])
+        ->middleware('throttle:30,1,controlled-gateway:')
+        ->name('confirm');
+});

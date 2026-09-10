@@ -63,6 +63,16 @@ Route::prefix('orders')->as('orders.')->group(function (): void {
         ->middleware('throttle:20,1,order-place:')
         ->name('store');
 
+    /*
+     * Before `{order}`, so "quote" is never read as an order id. It is a POST
+     * because a basket is a body rather than a query string, and it is
+     * throttled a little more generously than checkout because a customer
+     * changing the quantity re-prices as they type.
+     */
+    Route::post('quote', [OrderController::class, 'quote'])
+        ->middleware('throttle:60,1,order-quote:')
+        ->name('quote');
+
     Route::get('{order}', [OrderController::class, 'show'])->name('show');
 
     Route::post('{order}/cancel', [OrderController::class, 'cancel'])

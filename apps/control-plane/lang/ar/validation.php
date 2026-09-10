@@ -177,6 +177,7 @@ return [
      * match every index the validator reports.
      */
     'attributes' => [
+        'client_secret' => 'بيانات تأكيد الدفع',
         'accepts_terms' => 'شروط الخدمة',
         'account_type' => 'نوع الحساب',
         'action' => 'إجراء الطاقة',
@@ -299,6 +300,11 @@ return [
             'min' => 'يجب أن تتكون ترويسة Idempotency-Key من 8 أحرف على الأقل.',
             'max' => 'يجب ألا تتجاوز ترويسة Idempotency-Key 128 حرفًا.',
             'regex' => 'يجوز أن تحتوي ترويسة Idempotency-Key على أحرف وأرقام ونقاط ونقطتين وشرطات وشرطات سفلية فقط.',
+        ],
+        'registration' => [
+            'country_required' => 'اختر البلد الذي تُحتسب فواتير هذا الحساب منه، فهو الذي يحدد عملة فواتيرك.',
+            'country_unknown' => 'هذا ليس بلدًا يمكننا إصدار الفواتير منه. اختر بلدًا من القائمة.',
+            'currency_not_billable' => 'نُصدر الفواتير بـ :currencies. اختر واحدة منها.',
         ],
         'api_token' => [
             'current_password_required' => 'أكّد كلمة مرور حسابك لإصدار رمز وصول.',

@@ -22,6 +22,7 @@ return [
         'failed' => 'Please correct the highlighted fields.',
     ],
     'auth' => [
+        'email_unverified' => 'Your email address is not verified yet. Open the link we sent you, or ask for a new one.',
         'unauthenticated' => 'Please sign in to continue.',
         'forbidden' => 'You are not permitted to perform this action.',
         'csrf_token_mismatch' => 'Your session expired. Refresh the page and try again.',
@@ -143,6 +144,7 @@ return [
         'plan_change_refused' => 'This plan change was refused.',
     ],
     'payment' => [
+        'controlled_gateway_unavailable' => 'That payment page is not available.',
         'already_captured' => 'This payment has already been taken.',
         'attribution_mismatch' => 'This payment does not belong to that invoice.',
         'fake_provider_in_production' => 'Payments are not available right now.',
@@ -370,4 +372,7 @@ return [
         'too_many_open_tickets' => 'This account has too many open tickets. Reply on an existing one instead.',
     ],
 
+    'billing' => [
+        'currency_not_supported' => 'We do not bill in that currency. We bill in :currencies.',
+    ],
 ];

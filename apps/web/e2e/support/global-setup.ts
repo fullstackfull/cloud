@@ -2,7 +2,11 @@ import { execFileSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import path from 'node:path'
 
-import { FAKE_COMPUTE_STATE_PATH } from '../../playwright.config'
+import {
+  FAKE_COMPUTE_STATE_PATH,
+  FAKE_PAYMENTS_STATE_PATH,
+  MAIL_OUTBOX_PATH,
+} from '../../playwright.config'
 
 /*
  * A clean database before the suite, and the same one every time.
@@ -34,6 +38,17 @@ export default function globalSetup(): void {
    */
   const fleet = process.env.COMPUTE_FAKE_STATE_PATH ?? FAKE_COMPUTE_STATE_PATH
   rmSync(fleet, { force: true })
+
+  /*
+   * Last run's mail and last run's payment decisions, gone.
+   *
+   * Both are files the suite reads: a leftover verification link from the
+   * previous run would be followed instead of this run's, and a leftover
+   * approval would make a fresh payment look already authorised. Deleting
+   * them here rather than in a spec keeps one run independent of the last.
+   */
+  rmSync(process.env.MAIL_OUTBOX_PATH ?? MAIL_OUTBOX_PATH, { force: true })
+  rmSync(process.env.PAYMENTS_FAKE_STATE_PATH ?? FAKE_PAYMENTS_STATE_PATH, { force: true })
 
   const artisan = (args: string[]): void => {
     execFileSync('php', ['artisan', ...args], {

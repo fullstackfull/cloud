@@ -476,6 +476,51 @@ return [
             'paid_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'voided_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            /*
+             * Present when one invoice is being read as a document — the
+             * detail screen and the printable view — and absent from a list.
+             *
+             * The snapshot is the billing profile as it stood when the invoice
+             * was issued, not the customer's profile today: an issued document
+             * does not change when somebody moves office.
+             */
+            'billing_snapshot' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'payments' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/InvoicePayment']],
+            'wallet_credits' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/InvoiceWalletCredit']],
+        ],
+    ],
+    /*
+     * A payment and a wallet entry as an invoice document reports them:
+     * Billing's own views, because a module may not reach into another
+     * module's HTTP layer.
+     */
+    'InvoicePayment' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'provider' => ['type' => ['string', 'null']],
+            'kind' => ['type' => ['string', 'null']],
+            'status' => ['type' => ['string', 'null']],
+            'is_settled' => ['type' => 'boolean'],
+            'amount' => ['$ref' => '#/components/schemas/Money'],
+            'failure_code' => ['type' => ['string', 'null']],
+            'processed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'InvoiceWalletCredit' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => ['string', 'null']],
+            'amount' => ['$ref' => '#/components/schemas/Money'],
+            'direction' => ['type' => 'string'],
+            'balance_after' => ['$ref' => '#/components/schemas/Money'],
+            'description' => ['type' => ['string', 'null']],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
     'Subscription' => [
@@ -489,6 +534,15 @@ return [
             'recurring_amount' => ['$ref' => '#/components/schemas/Money'],
             'plan_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'order_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+
+            /*
+             * What the agreement is for. Present when the caller asked for a
+             * subscription rather than a page of them.
+             */
+            'plan' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'product' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'services' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+
             'current_period_start' => ['type' => ['string', 'null']],
             'current_period_end' => ['type' => ['string', 'null']],
             'next_invoice_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -1344,8 +1398,90 @@ return [
             'type' => ['type' => ['string', 'null']],
             'redirect_url' => ['type' => ['string', 'null']],
             'client_secret' => ['type' => ['string', 'null']],
+            /*
+             * True only while the provider has not made its mind up. It is the
+             * one state in which a client must not start a second payment:
+             * the money may already be moving.
+             */
+            'is_awaiting_provider' => ['type' => 'boolean'],
             'failure_code' => ['type' => ['string', 'null']],
             'failure_message' => ['type' => ['string', 'null']],
+        ],
+    ],
+
+    /*
+     * A basket priced without being bought. Every amount is a Money object —
+     * minor units and a currency — because a client formats money and never
+     * computes it.
+     */
+    'OrderQuote' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'currency' => ['type' => ['string', 'null']],
+            'billing_period' => ['type' => ['string', 'null']],
+
+            'lines' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+            'description' => ['type' => ['string', 'null']],
+            'plan_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'quantity' => ['type' => 'integer'],
+            'unit_recurring' => ['$ref' => '#/components/schemas/Money'],
+            'unit_setup' => ['$ref' => '#/components/schemas/Money'],
+            'gross' => ['$ref' => '#/components/schemas/Money'],
+
+            'setup' => ['$ref' => '#/components/schemas/Money'],
+            'subtotal' => ['$ref' => '#/components/schemas/Money'],
+            'discount' => ['$ref' => '#/components/schemas/Money'],
+            'tax' => ['$ref' => '#/components/schemas/Money'],
+            'total' => ['$ref' => '#/components/schemas/Money'],
+
+            'tax_rate' => ['type' => ['string', 'null']],
+            'tax_name' => ['type' => ['string', 'null']],
+            'coupon_code' => ['type' => ['string', 'null']],
+
+            /*
+             * What the same lines cost next time: the setup fee and the coupon
+             * are both dropped, because neither happens again.
+             */
+            'renewal' => ['type' => 'object', 'additionalProperties' => true],
+            'includes_setup' => ['type' => 'boolean'],
+            'includes_coupon' => ['type' => 'boolean'],
+        ],
+    ],
+
+    /*
+     * The countries and currencies a registration form may offer. Names are
+     * absent on purpose: every client already has CLDR's translations.
+     */
+    'RegistrationOptions' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'countries' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+            'currencies' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'fallback_currency' => ['type' => 'string'],
+        ],
+    ],
+
+    /*
+     * The controlled gateway, which exists only outside production.
+     */
+    'ControlledGatewayPage' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'payment' => ['$ref' => '#/components/schemas/Payment'],
+            'provider' => ['type' => ['string', 'null']],
+            'reference' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'ControlledGatewayDecision' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'payment' => ['$ref' => '#/components/schemas/Payment'],
+            'webhook_status' => ['type' => ['string', 'null']],
+            'webhook_was_duplicate' => ['type' => 'boolean'],
         ],
     ],
     'ProvisioningEvent' => [

@@ -31,6 +31,25 @@ const WEB_ORIGIN = `http://localhost:${WEB_PORT}`
  * harness, not about the platform. The seeder registers the operable machine
  * here (see E2ESeeder::operableMachine) and the API process reads it back.
  */
+/*
+ * The mail the API sends during a run, one JSON object per line. The
+ * registration spec reads it, finds the verification link, and follows it.
+ */
+export const MAIL_OUTBOX_PATH = path.resolve(
+  import.meta.dirname,
+  'e2e/.artifacts/outbox.jsonl',
+)
+
+/*
+ * Where the fake payment provider records the decisions taken on its
+ * controlled gateway page, so that a later server-side retrieve agrees with
+ * what the customer clicked.
+ */
+export const FAKE_PAYMENTS_STATE_PATH = path.resolve(
+  import.meta.dirname,
+  'e2e/.artifacts/fake-payments.json',
+)
+
 export const FAKE_COMPUTE_STATE_PATH = path.resolve(
   import.meta.dirname,
   '../control-plane/storage/framework/testing/e2e-fake-compute-fleet.dat',
@@ -70,7 +89,14 @@ const apiEnvironment = {
    * beside this suite, and standing one up would only prove that Symfony can
    * talk to it. What the specs are about is what the portal shows.
    */
-  MAIL_MAILER: 'log',
+  /*
+   * Mail is written to a file the suite can read, so the registration journey
+   * follows the real signed verification link out of the real message rather
+   * than writing `email_verified_at` and calling that proof. See
+   * OutboxTransport: it refuses to be constructed in production.
+   */
+  MAIL_MAILER: 'outbox',
+  MAIL_OUTBOX_PATH: MAIL_OUTBOX_PATH,
   APP_URL: API_ORIGIN,
   DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e',
   FRONTEND_URL: WEB_ORIGIN,
@@ -88,6 +114,12 @@ const apiEnvironment = {
   LYNOMIA_E2E_REGISTRAR_SECRET: 'not-a-real-secret',
 
   COMPUTE_FAKE_STATE_PATH: FAKE_COMPUTE_STATE_PATH,
+  PAYMENTS_FAKE_STATE_PATH: FAKE_PAYMENTS_STATE_PATH,
+  /*
+   * The fake gateway's page lives in the portal, so the redirect the provider
+   * issues has to point at the web server this suite starts.
+   */
+  PAYMENTS_FAKE_AUTHORISE_URL: `${WEB_ORIGIN}/fake-gateway/authorise`,
 }
 
 /**

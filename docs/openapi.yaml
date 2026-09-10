@@ -86,6 +86,7 @@ tags:
     description: "The NOC surface. Same guard as the customer API — what separates them is that every route here names the permission it needs."
   - name: "Orders"
     description: "Placing and cancelling orders. Nothing is provisioned until a payment has been verified server-side."
+  - name: "Payments"
   - name: "Services"
     description: "What the account owns, whatever kind it is, and what the platform has done to it."
   - name: "Shared hosting"
@@ -9366,6 +9367,248 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}":
+    get:
+      operationId: "api_v1_fake_gateway_show"
+      tags:
+        - "Payments"
+      summary: "The controlled gateway page for a pending payment"
+      description: "Development and test only. The amount comes from the platform's own record of the payment, never from the URL."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayPageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}/approve":
+    post:
+      operationId: "api_v1_fake_gateway_approve"
+      tags:
+        - "Payments"
+      summary: "Authorise a payment on the controlled gateway"
+      description: "Development and test only. Records the decision on the provider side and sends the platform a signed webhook; the invoice is settled by that webhook."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayDecisionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}/confirm":
+    post:
+      operationId: "api_v1_fake_gateway_confirm"
+      tags:
+        - "Payments"
+      summary: "Confirm a payment with its client credential"
+      description: "Development and test only. The credential is checked against the intent, so a client that does not hold it confirms nothing."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                client_secret:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayDecisionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}/decline":
+    post:
+      operationId: "api_v1_fake_gateway_decline"
+      tags:
+        - "Payments"
+      summary: "Decline a payment on the controlled gateway"
+      description: "Development and test only. The invoice stays open and the failure is visible on it."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayDecisionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/hosting":
     get:
       operationId: "api_v1_hosting_index"
@@ -11684,6 +11927,88 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/orders/quote":
+    post:
+      operationId: "api_v1_orders_quote"
+      tags:
+        - "Orders"
+      summary: "Price a basket without buying it"
+      description: |-
+        The itemised price of a basket: the plan price, the setup fee, the
+        coupon, the tax, the total, and what the same lines will cost when the
+        period comes round again.
+
+        It runs the same pricing path as placing the order — the same catalogue
+        lookups, the same readiness and stock checks, the same engine — so the
+        figures here are the figures the order will be written with. A contract
+        test prices the same basket both ways and compares every one of them.
+
+        It writes nothing: no order, no held stock, no coupon use, nothing
+        owed. There is therefore no idempotency key.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                items:
+                  description: "See the endpoint description; validated server-side."
+                billing_period:
+                  description: "See the endpoint description; validated server-side."
+                coupon_code:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OrderQuoteResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/orders/{order}":
     get:
       operationId: "api_v1_orders_show"
@@ -12047,6 +12372,51 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/registration/options":
+    get:
+      operationId: "api_v1_registration_options"
+      tags:
+        - "Authentication"
+      summary: "What a registration form may offer"
+      description: |-
+        The countries this platform accepts, as ISO-3166-1 alpha-2 codes, the
+        currencies it bills in, as ISO-4217, and the currency recommended for
+        each country.
+
+        Read before an account exists, and it discloses nothing about anybody:
+        the lists are configuration. The same lists validate the registration,
+        so a client cannot submit a country or a currency it was never offered.
+
+        Country names are deliberately absent. A name is a translation, and
+        every client already has CLDR's.
+      security: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RegistrationOptionsResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
         404:
           description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
           content:
@@ -16702,6 +17072,46 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ConsoleSession"
+    ControlledGatewayDecision:
+      type: "object"
+      additionalProperties: false
+      properties:
+        payment:
+          "$ref": "#/components/schemas/Payment"
+        webhook_status:
+          type:
+            - "string"
+            - "null"
+        webhook_was_duplicate:
+          type: "boolean"
+    ControlledGatewayDecisionResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ControlledGatewayDecision"
+    ControlledGatewayPage:
+      type: "object"
+      additionalProperties: false
+      properties:
+        payment:
+          "$ref": "#/components/schemas/Payment"
+        provider:
+          type:
+            - "string"
+            - "null"
+        reference:
+          type:
+            - "string"
+            - "null"
+    ControlledGatewayPageResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ControlledGatewayPage"
     CountryCurrencyChange:
       type: "object"
       additionalProperties: false
@@ -18002,6 +18412,19 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
+        billing_snapshot:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        payments:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/InvoicePayment"
+        wallet_credits:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/InvoiceWalletCredit"
     InvoiceItem:
       type: "object"
       additionalProperties: false
@@ -18056,6 +18479,36 @@ components:
             "$ref": "#/components/schemas/Invoice"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    InvoicePayment:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        provider:
+          type:
+            - "string"
+            - "null"
+        kind:
+          type:
+            - "string"
+            - "null"
+        status:
+          type:
+            - "string"
+            - "null"
+        is_settled:
+          type: "boolean"
+        amount:
+          "$ref": "#/components/schemas/Money"
+        failure_code:
+          type:
+            - "string"
+            - "null"
+        processed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
     InvoiceResponse:
       type: "object"
       required:
@@ -18063,6 +18516,28 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Invoice"
+    InvoiceWalletCredit:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type:
+            - "string"
+            - "null"
+        amount:
+          "$ref": "#/components/schemas/Money"
+        direction:
+          type: "string"
+        balance_after:
+          "$ref": "#/components/schemas/Money"
+        description:
+          type:
+            - "string"
+            - "null"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
     IpAssignment:
       type: "object"
       additionalProperties: false
@@ -18627,6 +19102,75 @@ components:
             "$ref": "#/components/schemas/Order"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    OrderQuote:
+      type: "object"
+      additionalProperties: false
+      properties:
+        currency:
+          type:
+            - "string"
+            - "null"
+        billing_period:
+          type:
+            - "string"
+            - "null"
+        lines:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        description:
+          type:
+            - "string"
+            - "null"
+        plan_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        quantity:
+          type: "integer"
+        unit_recurring:
+          "$ref": "#/components/schemas/Money"
+        unit_setup:
+          "$ref": "#/components/schemas/Money"
+        gross:
+          "$ref": "#/components/schemas/Money"
+        setup:
+          "$ref": "#/components/schemas/Money"
+        subtotal:
+          "$ref": "#/components/schemas/Money"
+        discount:
+          "$ref": "#/components/schemas/Money"
+        tax:
+          "$ref": "#/components/schemas/Money"
+        total:
+          "$ref": "#/components/schemas/Money"
+        tax_rate:
+          type:
+            - "string"
+            - "null"
+        tax_name:
+          type:
+            - "string"
+            - "null"
+        coupon_code:
+          type:
+            - "string"
+            - "null"
+        renewal:
+          type: "object"
+          additionalProperties: true
+        includes_setup:
+          type: "boolean"
+        includes_coupon:
+          type: "boolean"
+    OrderQuoteResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/OrderQuote"
     OrderResponse:
       type: "object"
       required:
@@ -19505,6 +20049,28 @@ components:
           type: "string"
         name:
           type: "string"
+    RegistrationOptions:
+      type: "object"
+      additionalProperties: false
+      properties:
+        countries:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        currencies:
+          type: "array"
+          items:
+            type: "string"
+        fallback_currency:
+          type: "string"
+    RegistrationOptionsResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/RegistrationOptions"
     ReinstallRequest:
       type: "object"
       additionalProperties: false
@@ -19981,6 +20547,8 @@ components:
           type:
             - "string"
             - "null"
+        is_awaiting_provider:
+          type: "boolean"
         failure_code:
           type:
             - "string"
@@ -20024,6 +20592,21 @@ components:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
+        plan:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        product:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        services:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
         current_period_start:
           type:
             - "string"
