@@ -18,22 +18,39 @@ const DOMAIN = 'e2e-zonefile.test'
 // up: several round trips more than a single screen's worth.
 test.describe.configure({ timeout: 90_000 })
 
+/** Moves to one section of the zone's page. The sections are links, not tabs. */
+async function section(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name }).click()
+}
+
+/**
+ * Claims the domain and opens the import section of its own page.
+ *
+ * Since Wave 3 the zone has an address of its own, so a run that failed
+ * halfway leaves a link on the index rather than an option in a select.
+ */
 async function claim(page: Page): Promise<void> {
   await page.goto('/dns')
 
   // A run that failed halfway leaves the domain behind; start from nothing.
-  const leftover = page.getByRole('option', { name: DOMAIN })
+  const leftover = page.getByRole('link', { name: DOMAIN })
   if ((await leftover.count()) > 0) {
-    await page.getByRole('combobox', { name: /^domain$/i }).selectOption({ label: DOMAIN })
+    await leftover.first().click()
     await giveUp(page)
+    await page.goto('/dns')
   }
 
   await page.getByLabel(/^domain$/i).first().fill(DOMAIN)
   await page.getByRole('button', { name: /add domain/i }).click()
-  await expect(page.getByRole('heading', { name: DOMAIN })).toBeVisible()
+
+  await page.getByRole('link', { name: DOMAIN }).first().click()
+  await expect(page.getByRole('heading', { level: 1, name: DOMAIN })).toBeVisible()
+
+  await section(page, /^import and export$/i)
 }
 
 async function giveUp(page: Page): Promise<void> {
+  await section(page, /^danger zone$/i)
   await page.getByRole('button', { name: /give up domain/i }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('textbox').fill(DOMAIN)
@@ -86,13 +103,16 @@ test.describe('in English', () => {
 
     await applyPlan(page)
 
-    // The records are in the zone, published like any other.
+    // The records are in the zone, published like any other — read in the
+    // section that lists them, which is where they live now.
+    await section(page, /^records$/i)
     const records = page.getByRole('table', { name: /^records$/i })
     await expect(records.getByRole('row').filter({ hasText: 'api.' + DOMAIN })).toBeVisible()
     await expect(records.getByRole('row').filter({ hasText: 'mail.' + DOMAIN })).toBeVisible()
 
     // Previewing the same records again changes nothing — including the TTLs,
     // which are part of a record and not decoration.
+    await section(page, /^import and export$/i)
     await preview(page, 'www 3600 IN A 203.0.113.10\napi 300 IN A 203.0.113.20\n')
     await expect(page.getByTestId('zone-import-plan').getByText('0 add')).toBeVisible()
     await expect(page.getByTestId('zone-import-plan').getByText('0 change')).toBeVisible()
@@ -122,6 +142,7 @@ test.describe('in English', () => {
     await expect(page.getByRole('button', { name: /apply this plan/i })).toBeDisabled()
 
     // And the good line was not written on the side.
+    await section(page, /^records$/i)
     const records = page.getByRole('table', { name: /^records$/i })
     await expect(records.getByRole('row').filter({ hasText: 'www.' + DOMAIN })).toHaveCount(0)
 
@@ -133,12 +154,15 @@ test.describe('in English', () => {
 
     const records = page.getByRole('table', { name: /^records$/i })
 
+    // The record this spec is about, added by hand in the records section.
+    await section(page, /^records$/i)
     await page.getByLabel(/name \(blank for/i).fill('old')
     await page.getByLabel(/^value$/i).fill('203.0.113.99')
     await page.getByRole('button', { name: /add record/i }).click()
     await expect(records.getByRole('row').filter({ hasText: 'old.' + DOMAIN })).toBeVisible()
 
     // Merge: the record the file does not mention is kept, and the plan says so.
+    await section(page, /^import and export$/i)
     await preview(page, 'www IN A 203.0.113.10\n')
     await expect(page.getByTestId('zone-import-plan').getByText('0 remove')).toBeVisible()
     await expect(page.getByTestId('zone-import-plan').getByText('1 kept as they are')).toBeVisible()
@@ -152,6 +176,8 @@ test.describe('in English', () => {
     await expect(plan.getByRole('row').filter({ hasText: 'old.' + DOMAIN })).toBeVisible()
 
     await applyPlan(page)
+
+    await section(page, /^records$/i)
     await expect(records.getByRole('row').filter({ hasText: 'old.' + DOMAIN })).toHaveCount(0)
     await expect(records.getByRole('row').filter({ hasText: 'www.' + DOMAIN })).toBeVisible()
 
@@ -168,7 +194,14 @@ test.describe('Arabic', () => {
     await page.goto('/dns')
     await page.getByLabel('النطاق').first().fill(DOMAIN)
     await page.getByRole('button', { name: 'إضافة نطاق' }).click()
-    await expect(page.getByRole('heading', { name: DOMAIN })).toBeVisible()
+
+    await page.getByRole('link', { name: DOMAIN }).first().click()
+    await expect(page.getByRole('heading', { level: 1, name: DOMAIN })).toBeVisible()
+
+    await page
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'الاستيراد والتصدير' })
+      .click()
 
     const textarea = page.getByLabel('أو الصق نص المنطقة')
     expect(await textarea.evaluate((node) => getComputedStyle(node).direction)).toBe('ltr')
@@ -177,6 +210,10 @@ test.describe('Arabic', () => {
     await page.getByRole('button', { name: 'معاينة التغييرات' }).click()
     await expect(page.getByTestId('zone-import-plan').getByText('إضافة').first()).toBeVisible()
 
+    await page
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
+      .click()
     await page.getByRole('button', { name: 'التخلّي عن النطاق' }).first().click()
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('textbox').fill(DOMAIN)

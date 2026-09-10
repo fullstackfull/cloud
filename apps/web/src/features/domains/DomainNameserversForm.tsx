@@ -7,6 +7,8 @@ import { useSetDomainNameservers } from '@/lib/queries'
 import type { Domain } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
+import { NotManageableNote } from './NotManageableNote'
+
 /**
  * Where this name points.
  *
@@ -55,6 +57,8 @@ export function DomainNameserversForm({ domain }: { domain: Domain }) {
             {t('common.save')}
           </Button>
         </div>
+
+        <NotManageableNote domain={domain} />
       </form>
 
       {nameservers.isSuccess ? (

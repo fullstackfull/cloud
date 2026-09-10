@@ -32,20 +32,28 @@ test.describe('an Arabic customer', () => {
     await signInArabic(page)
   })
 
-  test('navigates the portal in Arabic, from the bar and the More menu', async ({ page }) => {
-    await expect(page.getByRole('navigation', { name: 'التنقّل الرئيسي' })).toBeVisible()
-    await page.getByRole('link', { name: 'الكتالوج' }).click()
-    await expect(page.getByRole('heading', { name: 'الكتالوج' })).toBeVisible()
+  test('navigates the portal in Arabic from the sidebar, with nothing behind a disclosure', async ({ page }) => {
+    const sidebar = page.getByRole('navigation', { name: 'التنقّل الرئيسي' }).first()
+    await expect(sidebar).toBeVisible()
 
-    await page.getByText('المزيد', { exact: true }).click()
-    await page.getByRole('link', { name: 'الأمان' }).click()
+    await sidebar.getByRole('link', { name: 'شراء' }).click()
+    await expect(page.getByRole('heading', { name: 'شراء' })).toBeVisible()
+
+    /*
+     * Straight to Security, with no "المزيد" to open first: Wave 3 replaced
+     * the desktop disclosure that hid seventeen destinations with a
+     * persistent column, and this is the Arabic side of that gate.
+     */
+    await expect(page.getByText('المزيد', { exact: true })).toHaveCount(0)
+
+    await sidebar.getByRole('link', { name: 'الأمان' }).click()
     await expect(page.getByRole('heading', { name: 'الأمان' })).toBeVisible()
     await expect(page).toHaveURL(/\/security$/)
   })
 
   test('reads the catalogue in Arabic with prices in Western numerals', async ({ page }) => {
     await page.goto('/catalogue')
-    await expect(page.getByRole('heading', { name: 'الكتالوج' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'شراء' })).toBeVisible()
     await page.getByRole('link', { name: 'عرض الخطط' }).first().click()
     // Three-decimal KWD amounts in Western numerals; Intl puts the code after
     // the number in Arabic, so the two are asserted separately.
@@ -64,26 +72,41 @@ test.describe('an Arabic customer', () => {
     // The hostname stays Latin and left-to-right inside the Arabic row.
     await expect(row.locator('.technical, [dir="ltr"]').filter({ hasText: fixtures.operableHostname }).first()).toBeVisible()
 
-    const shutdown = page.waitForResponse((r) => r.url().endsWith('/power') && r.request().postData()?.includes('shutdown') === true)
-    await row.getByRole('button', { name: 'إيقاف آمن' }).click()
-    expect((await shutdown).status()).toBe(202)
-    await expect(row.getByText('متوقف', { exact: true })).toBeVisible()
+    // Onto the machine's own page, which since Wave 3 is where the power
+    // controls are.
+    await row.getByRole('link', { name: fixtures.operableHostname }).click()
+    await expect(page.getByRole('heading', { level: 1, name: fixtures.operableHostname })).toBeVisible()
 
-    await row.getByRole('button', { name: 'تشغيل', exact: true }).click()
-    await expect(row.getByText('قيد التشغيل', { exact: true })).toBeVisible()
+    const shutdown = page.waitForResponse((r) => r.url().endsWith('/power') && r.request().postData()?.includes('shutdown') === true)
+    await page.getByRole('button', { name: 'إيقاف آمن' }).click()
+    expect((await shutdown).status()).toBe(202)
+    await expect(page.getByText('متوقف', { exact: true }).first()).toBeVisible()
+
+    await page.getByRole('button', { name: 'تشغيل', exact: true }).click()
+    await expect(page.getByText('قيد التشغيل', { exact: true }).first()).toBeVisible()
 
     // Force off asks, in Arabic, and cancel leaves the machine alone.
-    await row.getByRole('button', { name: 'فصل قسري' }).click()
+    await page.getByRole('button', { name: 'فصل قسري' }).click()
     const dialog = page.getByRole('dialog')
     await expectArabicProse(dialog)
     await dialog.getByRole('button', { name: 'إلغاء' }).click()
     await expect(dialog).toBeHidden()
-    await expect(row.getByText('قيد التشغيل', { exact: true })).toBeVisible()
+    await expect(page.getByText('قيد التشغيل', { exact: true }).first()).toBeVisible()
 
-    // The machine whose rebuild nobody can settle: controls off, reason in Arabic.
-    const stranded = page.getByRole('row').filter({ hasText: fixtures.vpsHostname })
-    await expect(stranded.getByRole('button', { name: 'إعادة التثبيت' })).toBeDisabled()
-    await expectArabicProse(stranded.getByText(/فريقنا|معطّلة/).first())
+    // The machine whose rebuild nobody can settle: controls off, reason in
+    // Arabic, on its own page.
+    await page.goto('/vps')
+    await page.getByRole('link', { name: fixtures.vpsHostname }).click()
+
+    await expect(page.getByRole('button', { name: 'إيقاف آمن' })).toBeDisabled()
+    await expectArabicProse(page.getByText(/فريقنا|معطّلة/).first())
+
+    await page
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
+      .click()
+
+    await expect(page.getByRole('button', { name: 'إعادة التثبيت' })).toBeDisabled()
   })
 
   test('claims a DNS zone and is refused an unserviceable record in Arabic', async ({ page }) => {
@@ -91,7 +114,13 @@ test.describe('an Arabic customer', () => {
     await page.goto('/dns')
     await page.getByLabel('النطاق').first().fill(domain)
     await page.getByRole('button', { name: 'إضافة نطاق' }).click()
-    await expect(page.getByRole('heading', { name: domain })).toBeVisible()
+
+    // The zone's own page, and its records section.
+    await page.getByRole('link', { name: domain }).first().click()
+    await expect(page.getByRole('heading', { level: 1, name: domain })).toBeVisible()
+
+    const sections = page.getByRole('navigation', { name: 'الأقسام' })
+    await sections.getByRole('link', { name: 'السجلات' }).click()
 
     // A private address the zone cannot serve: the API refuses it, and the
     // refusal reaches the screen as an Arabic sentence, not the engineer's.
@@ -109,12 +138,16 @@ test.describe('an Arabic customer', () => {
     await expect(row).toHaveCount(1)
     await expect(row.getByText(/نشط|قيد الانتظار/)).toBeVisible()
 
+    await sections.getByRole('link', { name: 'منطقة الخطر' }).click()
     await page.getByRole('button', { name: 'التخلّي عن النطاق' }).first().click()
     const dialog = page.getByRole('dialog')
     await expectArabicProse(dialog)
     await dialog.getByRole('textbox').fill(domain)
     await dialog.getByRole('button', { name: 'التخلّي عن النطاق' }).click()
-    await expect(page.getByRole('heading', { name: domain })).toHaveCount(0)
+
+    // Back on the index, with the zone gone from it.
+    await expect(page).toHaveURL(/\/dns$/)
+    await expect(page.getByRole('link', { name: domain })).toHaveCount(0)
   })
 
   test('searches for domains in Arabic and reads a taken name and a held name coherently', async ({ page }) => {

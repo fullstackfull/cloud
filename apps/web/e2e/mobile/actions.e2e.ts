@@ -15,23 +15,30 @@ test.describe('a customer operating the portal from a phone', () => {
     await signIn(page, users.customer)
   })
 
-  test('shuts a machine down and starts it again', async ({ page }) => {
+  test('shuts a machine down and starts it again from the machine\'s own page', async ({ page }) => {
     await (await openMenu(page)).getByRole('link', { name: /^cloud vps$/i }).click()
-    const row = page.getByRole('row').filter({ hasText: fixtures.operableHostname })
-    await expect(row).toBeVisible()
+
+    /*
+     * Through the index and onto the machine, which is where the power
+     * controls live since Wave 3. On a phone this matters more than on a
+     * desktop: four buttons in a table row were four buttons in a cell 60
+     * pixels wide.
+     */
+    await page.getByRole('link', { name: fixtures.operableHostname }).click()
+    await expect(page.getByRole('heading', { level: 1, name: fixtures.operableHostname })).toBeVisible()
 
     const accepted = (action: string) =>
       page.waitForResponse((response) => response.url().endsWith('/power') && response.request().postData()?.includes(action) === true)
 
     const shutdown = accepted('shutdown')
-    await row.getByRole('button', { name: /^shut down$/i }).click()
+    await page.getByRole('button', { name: /^shut down$/i }).click()
     expect((await shutdown).status()).toBe(202)
-    await expect(row.getByText(/^stopped$/i)).toBeVisible()
+    await expect(page.getByText(/^stopped$/i).first()).toBeVisible()
 
     const start = accepted('start')
-    await row.getByRole('button', { name: /^start$/i }).click()
+    await page.getByRole('button', { name: /^start$/i }).click()
     expect((await start).status()).toBe(202)
-    await expect(row.getByText(/^running$/i)).toBeVisible()
+    await expect(page.getByText(/^running$/i).first()).toBeVisible()
   })
 
   test('claims a DNS zone, publishes a record, removes it after the dialog, and gives the zone up', async ({ page }) => {
@@ -40,7 +47,14 @@ test.describe('a customer operating the portal from a phone', () => {
 
     await page.getByLabel(/^domain$/i).first().fill(domain)
     await page.getByRole('button', { name: /add domain/i }).click()
-    await expect(page.getByRole('heading', { name: domain })).toBeVisible()
+
+    // Onto the zone's own page, and into its records section: on a phone the
+    // sections are a scrolling row of links rather than a wrapped block.
+    await page.getByRole('link', { name: domain }).first().click()
+    await expect(page.getByRole('heading', { level: 1, name: domain })).toBeVisible()
+
+    const sections = page.getByRole('navigation', { name: /sections/i })
+    await sections.getByRole('link', { name: /^records$/i }).click()
 
     await page.getByLabel(/name \(blank for/i).fill('m')
     await page.getByLabel(/^value$/i).fill('203.0.113.77')
@@ -52,11 +66,18 @@ test.describe('a customer operating the portal from a phone', () => {
     await page.getByRole('dialog').getByRole('button', { name: /^remove record$/i }).click()
     await expect(page.getByRole('row').filter({ hasText: 'm.' + domain })).toHaveCount(0)
 
+    const danger = page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name: /^danger zone$/i })
+    await danger.scrollIntoViewIfNeeded()
+    await danger.click()
+
     await page.getByRole('button', { name: /give up domain/i }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('textbox').fill(domain)
     await dialog.getByRole('button', { name: /give up domain/i }).click()
-    await expect(page.getByRole('heading', { name: domain })).toHaveCount(0)
+
+    // Back on the index, with the zone gone from it.
+    await expect(page).toHaveURL(/\/dns$/)
+    await expect(page.getByRole('link', { name: domain })).toHaveCount(0)
   })
 
   test('opens the credit dialogue on an invoice the credit does not cover, reads the shortfall, and closes it', async ({

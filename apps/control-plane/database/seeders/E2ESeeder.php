@@ -273,8 +273,11 @@ class E2ESeeder extends Seeder
         $this->virtualMachine($customer);
         $this->dedicatedServer($customer);
         $this->subscriptions($customer);
-        $this->notifications($customer);
+        // After the invoices: a notification about an invoice carries that
+        // invoice as its subject, and the inbox resolves the subject into the
+        // destination the row opens.
         $this->invoices($customer);
+        $this->notifications($customer);
         $this->wallet($customer);
         $this->moneyJourneys();
         $this->billingAdmin();
@@ -568,12 +571,34 @@ class E2ESeeder extends Seeder
             return;
         }
 
+        /*
+         * Both carry their subject, because the real notifier does.
+         *
+         * Until Wave 3 the inbox published only the collection path in `link`,
+         * so a fixture without a subject looked complete. It is the subject
+         * that the inbox now resolves into a `{kind, id}` handle — which is
+         * what makes "your server is ready" open the server rather than the
+         * list of servers — and a fixture without one would let that go
+         * untested against a screen that appeared to work.
+         */
+        $service = VirtualMachine::query()
+            ->where('hostname', self::VPS_HOSTNAME)
+            ->firstOrFail()
+            ->service;
+
         Notification::factory()->ofType(NotificationType::ServiceReady)->create([
             'customer_id' => $customer->getKey(),
             'data' => ['service' => self::VPS_HOSTNAME],
+            'subject_type' => $service?->getMorphClass(),
+            'subject_id' => $service?->getKey(),
             'link' => '/vps',
             'idempotency_key' => 'e2e:service-ready',
         ]);
+
+        $invoice = Invoice::query()
+            ->where('customer_id', $customer->getKey())
+            ->where('number', self::OPEN_INVOICE_NUMBER)
+            ->first();
 
         Notification::factory()->ofType(NotificationType::InvoiceIssued)->read()->create([
             'customer_id' => $customer->getKey(),
@@ -582,6 +607,8 @@ class E2ESeeder extends Seeder
                 'amount' => 'KWD 9.000',
                 'due_date' => CarbonImmutable::now()->addDays(7)->toDateString(),
             ],
+            'subject_type' => $invoice?->getMorphClass(),
+            'subject_id' => $invoice?->getKey(),
             'link' => '/invoices',
             'idempotency_key' => 'e2e:invoice-issued',
         ]);

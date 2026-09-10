@@ -6,6 +6,8 @@ import { useDomainAuthorisationCode, useSetDomainTransferLock } from '@/lib/quer
 import type { Domain } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
+import { NotManageableNote } from './NotManageableNote'
+
 /**
  * The two controls somebody needs in order to leave.
  *
@@ -56,6 +58,8 @@ export function DomainLeavingPanel({ domain }: { domain: Domain }) {
       </div>
 
       <p className="text-sm text-[var(--text-muted)]">{t('domains.leavingExplainer')}</p>
+
+      <NotManageableNote domain={domain} />
 
       {authCode.data === undefined ? null : (
         <div>

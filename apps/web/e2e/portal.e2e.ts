@@ -30,6 +30,25 @@ function machineRow(page: Page, hostname: string = fixtures.vpsHostname): Locato
 }
 
 /**
+ * Opens one machine's own page, the way a customer does: from the index, by
+ * name.
+ *
+ * Since Wave 3 the machine has an address of its own and the destructive
+ * controls live on it rather than in a table row, so the specs that drive
+ * them come through here.
+ */
+async function openMachine(page: Page, hostname: string = fixtures.vpsHostname): Promise<void> {
+  await page.goto('/vps')
+  await page.getByRole('link', { name: hostname }).click()
+  await expect(page.getByRole('heading', { level: 1, name: hostname })).toBeVisible()
+}
+
+/** Moves to one section of a resource page. The sections are links, not tabs. */
+async function openSection(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name }).click()
+}
+
+/**
  * Picks the machine whose backups the seeder writes.
  *
  * The picker defaults to the customer's first machine, which is not
@@ -91,10 +110,18 @@ test('the wallet shows a balance with its currency', async ({ page }) => {
   await expect(page.getByRole('listitem').getByText(/12\.750/)).toBeVisible()
 })
 
-test('the services list shows the seeded VPS', async ({ page }) => {
+test('the services list shows the seeded VPS and opens it', async ({ page }) => {
   await page.goto('/services')
 
-  await expect(page.getByText(new RegExp(fixtures.vpsHostname, 'i'))).toBeVisible()
+  /*
+   * The row names the machine and links to it. Since Wave 3 the plan label
+   * sits under the identity rather than instead of it — two servers on one
+   * plan used to be two identical rows — so the identity is asserted as the
+   * link it is.
+   */
+  const machine = page.getByRole('link', { name: fixtures.vpsHostname, exact: true })
+  await expect(machine).toBeVisible()
+  await expect(machine).toHaveAttribute('href', /^\/vps\/[^/]+$/)
 })
 
 test('the subscriptions screen tells a renewal apart from a cancellation', async ({ page }) => {
@@ -256,8 +283,8 @@ test('escape closes the restore dialog without restoring', async ({ page }) => {
   await expect(page.getByText(/restoring/i)).toHaveCount(0)
 })
 
-test('the VPS list offers the two ways of stopping a machine as separate controls', async ({ page }) => {
-  await page.goto('/vps')
+test("the machine's page offers the two ways of stopping it as separate controls", async ({ page }) => {
+  await openMachine(page, fixtures.operableHostname)
 
   // "Shut down" asks the guest to close its files; "Force off" pulls the plug.
   // One button for both is how a customer loses a database, so the screen has
@@ -280,12 +307,15 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
    * name, and a nearly-right name has to stay refused — the comparison is a
    * proof that somebody read the screen, not a lookup.
    */
-  await page.goto('/vps')
-
   // On the machine whose controls are on. The seeded e2e-web-01 carries a
   // rebuild nobody can settle, and since Wave 0 its Reinstall is disabled
   // rather than offered and refused — asserted in its own spec below.
-  await machineRow(page, fixtures.operableHostname).getByRole('button', { name: /^reinstall$/i }).click()
+  await openMachine(page, fixtures.operableHostname)
+
+  // In the danger zone, which is where a control that erases a disk belongs:
+  // not next to Reboot, where a thumb reaches it by accident.
+  await openSection(page, /^danger zone$/i)
+  await page.getByRole('button', { name: /^reinstall$/i }).click()
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -305,26 +335,31 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
 })
 
 test('a machine whose last rebuild nobody can settle has its controls off, with the reason', async ({ page }) => {
-  await page.goto('/vps')
+  await openMachine(page)
 
-  const stranded = machineRow(page)
-
-  // Every disruptive control, not just Reinstall: the API refuses a reboot on
-  // this machine for the same reason, and a screen that offered one would be
+  // Every power control, not just one: the API refuses a reboot on this
+  // machine for the same reason, and a screen that offered one would be
   // offering a 409.
-  for (const name of [/^reinstall$/i, /^reboot$/i, /^force off$/i, /^shut down$/i, /^start$/i]) {
-    await expect(stranded.getByRole('button', { name })).toBeDisabled()
+  for (const name of [/^reboot$/i, /^force off$/i, /^shut down$/i, /^start$/i]) {
+    await expect(page.getByRole('button', { name })).toBeDisabled()
   }
-  await expect(stranded.getByText(/our team is looking at it\. controls stay off/i)).toBeVisible()
+  await expect(page.getByText(/our team is looking at it\. controls stay off/i).first()).toBeVisible()
 
-  // And the machine next to it is untouched.
-  await expect(machineRow(page, fixtures.operableHostname).getByRole('button', { name: /^reinstall$/i })).toBeEnabled()
+  // And the rebuild, in its own section.
+  await openSection(page, /^danger zone$/i)
+  await expect(page.getByRole('button', { name: /^reinstall$/i })).toBeDisabled()
+
+  // The machine next to it is untouched.
+  await openMachine(page, fixtures.operableHostname)
+  await openSection(page, /^danger zone$/i)
+  await expect(page.getByRole('button', { name: /^reinstall$/i })).toBeEnabled()
 })
 
 test('escape closes the reinstall dialogue without rebuilding anything', async ({ page }) => {
-  await page.goto('/vps')
+  await openMachine(page, fixtures.operableHostname)
+  await openSection(page, /^danger zone$/i)
 
-  await machineRow(page, fixtures.operableHostname).getByRole('button', { name: /^reinstall$/i }).click()
+  await page.getByRole('button', { name: /^reinstall$/i }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
 
   await page.keyboard.press('Escape')
@@ -343,7 +378,10 @@ test('the dedicated rebuild dialogue warns about the operating system and needs 
    * physical machine.
    */
   await page.goto('/dedicated')
+  await page.getByRole('link', { name: fixtures.dedicatedSerial }).click()
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.dedicatedSerial })).toBeVisible()
 
+  await openSection(page, /^danger zone$/i)
   await page.getByRole('button', { name: /^reinstall$/i }).first().click()
 
   const dialog = page.getByRole('dialog')
@@ -380,9 +418,9 @@ test('the console page asks for a permit and says honestly when consoles are una
    * harness, and pretending otherwise here would be the kind of claim this
    * phase exists to remove.
    */
-  await page.goto('/vps')
+  await openMachine(page)
 
-  await machineRow(page).getByRole('link', { name: /^console$/i }).click()
+  await page.getByRole('link', { name: /^console$/i }).click()
 
   await expect(page.getByRole('heading', { name: /console/i })).toBeVisible()
 

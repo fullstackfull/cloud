@@ -6,6 +6,8 @@ import { useSetDomainAutoRenew } from '@/lib/queries'
 import type { Domain } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
+import { NotManageableNote } from './NotManageableNote'
+
 /**
  * Whether the platform raises the next invoice before this name lapses.
  *
@@ -49,6 +51,8 @@ export function DomainAutoRenewToggle({ domain }: { domain: Domain }) {
       <p className="text-xs text-[var(--text-muted)]">
         {domain.auto_renew ? t('domains.autoRenewOnHint') : t('domains.autoRenewOffHint')}
       </p>
+
+      <NotManageableNote domain={domain} />
 
       {failure === null ? null : (
         <Alert tone="error" requestId={failure.requestId}>

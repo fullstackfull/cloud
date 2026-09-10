@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { fixtures, forgetSessions, resetTwoFactor, signIn, users } from './support/helpers'
 
@@ -24,8 +24,24 @@ test.beforeEach(async ({ page }) => {
   await signIn(page)
 })
 
-function machineRow(page: Page, hostname: string): Locator {
-  return page.getByRole('row').filter({ hasText: hostname })
+/**
+ * Opens one machine's own page, the way a customer does: from the index, by
+ * name.
+ *
+ * Since Wave 3 a machine has an address of its own, and the controls that
+ * interrupt or destroy it live there rather than in a table row. These Wave 0
+ * specs still press the same buttons through the same mutation path; only the
+ * place a customer finds them has moved.
+ */
+async function openMachine(page: Page, hostname: string): Promise<void> {
+  await page.goto('/vps')
+  await page.getByRole('link', { name: hostname, exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1, name: hostname })).toBeVisible()
+}
+
+/** Moves to one section of a resource page. The sections are links, not tabs. */
+async function openSection(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name }).click()
 }
 
 /**
@@ -133,9 +149,18 @@ test.describe('operating a virtual machine', () => {
   test('every power control completes against the controlled hypervisor, and force off asks first', async ({
     page,
   }) => {
-    await page.goto('/vps')
-    const row = machineRow(page, fixtures.operableHostname)
-    await expect(row.getByText(/^running$/i)).toBeVisible()
+    await openMachine(page, fixtures.operableHostname)
+
+    /*
+     * The power state as the header reports it. It is stated twice on this
+     * page — once beside the hostname, once in the overview facts — because a
+     * customer scrolling to the facts should not have to scroll back up to
+     * learn whether the machine is on. The header badge is the first of the
+     * two in the document, and it is the one these assertions read.
+     */
+    const power = (state: RegExp) => page.getByText(state).first()
+
+    await expect(power(/^running$/i)).toBeVisible()
 
     const accepted = (action: string) =>
       page.waitForResponse(
@@ -146,38 +171,38 @@ test.describe('operating a virtual machine', () => {
 
     // Shut down: the guest is asked to close its files; the fake obliges.
     const shutdown = accepted('shutdown')
-    await row.getByRole('button', { name: /^shut down$/i }).click()
+    await page.getByRole('button', { name: /^shut down$/i }).click()
     await shutdown
-    await expect(row.getByText(/^stopped$/i)).toBeVisible()
+    await expect(power(/^stopped$/i)).toBeVisible()
 
     const start = accepted('start')
-    await row.getByRole('button', { name: /^start$/i }).click()
+    await page.getByRole('button', { name: /^start$/i }).click()
     await start
-    await expect(row.getByText(/^running$/i)).toBeVisible()
+    await expect(power(/^running$/i)).toBeVisible()
 
     // Force off asks, and backing out pulls no plug.
-    await row.getByRole('button', { name: /^force off$/i }).click()
+    await page.getByRole('button', { name: /^force off$/i }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText(/pulls the plug/i)).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
-    await expect(row.getByText(/^running$/i)).toBeVisible()
+    await expect(power(/^running$/i)).toBeVisible()
 
     const stop = accepted('stop')
-    await row.getByRole('button', { name: /^force off$/i }).click()
+    await page.getByRole('button', { name: /^force off$/i }).click()
     await page.getByRole('dialog').getByRole('button', { name: /^force off$/i }).click()
     await stop
-    await expect(row.getByText(/^stopped$/i)).toBeVisible()
+    await expect(power(/^stopped$/i)).toBeVisible()
 
     const startAgain = accepted('start')
-    await row.getByRole('button', { name: /^start$/i }).click()
+    await page.getByRole('button', { name: /^start$/i }).click()
     await startAgain
-    await expect(row.getByText(/^running$/i)).toBeVisible()
+    await expect(power(/^running$/i)).toBeVisible()
 
     const reboot = accepted('reboot')
-    await row.getByRole('button', { name: /^reboot$/i }).click()
+    await page.getByRole('button', { name: /^reboot$/i }).click()
     await reboot
-    await expect(row.getByText(/^running$/i)).toBeVisible()
+    await expect(power(/^running$/i)).toBeVisible()
 
     // And not one of those produced the field error the audit found.
     await expect(page.getByText(/correct the highlighted fields/i)).toHaveCount(0)
@@ -188,8 +213,17 @@ test.describe('operating a dedicated server', () => {
   test('power actions and a rebuild are accepted by the controlled controller, and force off asks first', async ({
     page,
   }) => {
+    /*
+     * Since Wave 3 the chassis has an address of its own. The index keeps the
+     * one power action a customer reaches for without thinking; everything
+     * that interrupts or destroys is on the machine's own page, where its
+     * serial is in the heading and the rebuild sits in a danger zone.
+     */
     await page.goto('/dedicated')
-    const row = page.getByRole('row').filter({ hasText: fixtures.dedicatedSerial })
+    await page.getByRole('link', { name: fixtures.dedicatedSerial }).click()
+
+    const heading = page.getByRole('heading', { level: 1, name: fixtures.dedicatedSerial })
+    await expect(heading).toBeVisible()
 
     const accepted = (path: string) =>
       page.waitForResponse(
@@ -197,33 +231,37 @@ test.describe('operating a dedicated server', () => {
       )
 
     const cycle = accepted('/power')
-    await row.getByRole('button', { name: /^power cycle$/i }).click()
+    await page.getByRole('button', { name: /^power cycle$/i }).click()
     await cycle
     await expect(page.getByRole('alert')).toHaveCount(0)
 
-    await row.getByRole('button', { name: /^force off$/i }).click()
+    await page.getByRole('button', { name: /^force off$/i }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText(/cuts the power at the chassis/i)).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
 
-    // Accepted by the controller. The row keeps showing what the controller
+    // Accepted by the controller. The page keeps showing what the controller
     // last REPORTED, not what was just asked — the platform deliberately does
     // not pretend a chassis is off because it sent the instruction — so the
     // outcome asserted is the acceptance and the absence of any error.
     const off = accepted('/power')
-    await row.getByRole('button', { name: /^force off$/i }).click()
+    await page.getByRole('button', { name: /^force off$/i }).click()
     await page.getByRole('dialog').getByRole('button', { name: /^force off$/i }).click()
     await off
     await expect(page.getByRole('alert')).toHaveCount(0)
 
     const on = accepted('/power')
-    await row.getByRole('button', { name: /^power on$/i }).click()
+    await page.getByRole('button', { name: /^power on$/i }).click()
     await on
     await expect(page.getByRole('alert')).toHaveCount(0)
 
-    // The rebuild: typed serial, accepted, and the row reports where it got to.
-    await row.getByRole('button', { name: /^reinstall$/i }).click()
+    // The rebuild: typed serial, accepted, and the page reports where it got to.
+    await page
+      .getByRole('navigation', { name: /sections/i })
+      .getByRole('link', { name: /^danger zone$/i })
+      .click()
+    await page.getByRole('button', { name: /^reinstall$/i }).click()
     const rebuild = page.getByRole('dialog')
     await rebuild.getByRole('textbox').fill(fixtures.dedicatedSerial)
     const reinstall = accepted('/reinstall')
@@ -281,10 +319,10 @@ test.describe('rebuilding a virtual machine', () => {
    * same service quiet to be quoted.
    */
   test('a reinstall is confirmed with the hostname and carried out', async ({ page }) => {
-    await page.goto('/vps')
-    const row = machineRow(page, fixtures.operableHostname)
+    await openMachine(page, fixtures.operableHostname)
+    await openSection(page, /^danger zone$/i)
 
-    await row.getByRole('button', { name: /^reinstall$/i }).click()
+    await page.getByRole('button', { name: /^reinstall$/i }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('textbox').fill(fixtures.operableHostname)
 
@@ -295,9 +333,14 @@ test.describe('rebuilding a virtual machine', () => {
     await accepted
     await expect(dialog).toBeHidden()
 
-    // The queue runs inline against the fake, so the rebuild has already
-    // finished by the time the list refetches: the row says so.
-    await expect(row.getByText(/^rebuilt$/i)).toBeVisible()
+    /*
+     * The queue runs inline against the fake, so the rebuild has already
+     * finished by the time the machine refetches. Where it got to is reported
+     * on the overview, beside when it was asked for — the danger zone offers
+     * the act, the overview records it.
+     */
+    await openSection(page, /^overview$/i)
+    await expect(page.getByText(/^rebuilt$/i)).toBeVisible()
     await expect(page.getByText(/correct the highlighted fields/i)).toHaveCount(0)
   })
 })

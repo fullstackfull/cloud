@@ -70,7 +70,13 @@ export function DomainDetailPage() {
             {domain.is_held ? <Badge tone="warning">{t('domains.held')}</Badge> : null}
           </>
         }
-        actions={<DomainRenewAction domain={domain} />}
+        /*
+         * No actions in the header, deliberately. Renewing is the one thing a
+         * customer does to a name they hold, and it belongs in the renewal
+         * section beside the price it costs and the switch that automates it —
+         * offering it twice on one page is the duplication this wave exists to
+         * remove.
+         */
       />
 
       <ResourceTabs base={`/domains/${encodeURIComponent(domain.name)}`} tabs={TABS} />

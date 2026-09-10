@@ -18,14 +18,29 @@ import { signIn, users } from './support/helpers'
 
 const DOMAIN = 'e2e-dns.test'
 
+/**
+ * Claims a domain and opens its own page.
+ *
+ * Since Wave 3 the index claims and lists; everything about one zone — the
+ * delegation, the records, the import, giving it up — is on `/dns/{name}`,
+ * which is the address a customer keeps.
+ */
 async function claim(page: Page, domain: string = DOMAIN): Promise<void> {
   await page.goto('/dns')
   await page.getByLabel(/^domain$/i).first().fill(domain)
   await page.getByRole('button', { name: /add domain/i }).click()
-  await expect(page.getByRole('heading', { name: domain })).toBeVisible()
+
+  await page.getByRole('link', { name: domain }).first().click()
+  await expect(page.getByRole('heading', { level: 1, name: domain })).toBeVisible()
+}
+
+/** Moves to one section of the zone's page. The sections are links, not tabs. */
+async function section(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name }).click()
 }
 
 async function giveUp(page: Page, domain: string = DOMAIN): Promise<void> {
+  await section(page, /^danger zone$/i)
   await page.getByRole('button', { name: /give up domain/i }).click()
 
   const dialog = page.getByRole('dialog')
@@ -59,6 +74,7 @@ test.describe('in English', () => {
     page,
   }) => {
     await claim(page)
+    await section(page, /^records$/i)
 
     await page.getByLabel(/name \(blank for/i).fill('www')
     await page.getByLabel(/^value$/i).fill('203.0.113.10')
@@ -89,6 +105,7 @@ test.describe('in English', () => {
     page,
   }) => {
     await claim(page)
+    await section(page, /^records$/i)
 
     /*
      * An address inside the customer's own network. A name resolving to it
@@ -108,6 +125,7 @@ test.describe('in English', () => {
 
   test('giving a domain up cannot be confirmed without typing it back', async ({ page }) => {
     await claim(page)
+    await section(page, /^danger zone$/i)
 
     await page.getByRole('button', { name: /give up domain/i }).click()
 
@@ -127,8 +145,12 @@ test.describe('in English', () => {
     await confirm.click()
     await expect(page.getByRole('dialog')).toBeHidden()
 
-    // Gone from the list, and the name is free to be claimed again.
-    await expect(page.getByRole('heading', { name: DOMAIN })).toHaveCount(0)
+    /*
+     * Back to the index — the zone this page was about no longer exists —
+     * and gone from the list, so the name is free to be claimed again.
+     */
+    await expect(page).toHaveURL(/\/dns$/)
+    await expect(page.getByRole('link', { name: DOMAIN })).toHaveCount(0)
   })
 })
 
@@ -142,16 +164,28 @@ test.describe('Arabic', () => {
     await page.getByLabel('النطاق').first().fill(DOMAIN)
     await page.getByRole('button', { name: 'إضافة نطاق' }).click()
 
-    const heading = page.getByRole('heading', { name: DOMAIN })
+    await page.getByRole('link', { name: DOMAIN }).first().click()
+
+    const heading = page.getByRole('heading', { level: 1, name: DOMAIN })
     await expect(heading).toBeVisible()
 
-    // A domain name is technical and must not be mirrored: reversed, it is a
-    // different string to anybody reading it back to support.
-    expect(await heading.evaluate((node) => getComputedStyle(node).direction)).toBe('ltr')
+    /*
+     * A domain name is technical and must not be mirrored: reversed, it is a
+     * different string to anybody reading it back to support. The heading is
+     * Arabic-direction prose; the name inside it declares its own direction,
+     * which is what the bidirectional algorithm needs.
+     */
+    const name = heading.locator('[dir="ltr"]')
+    await expect(name).toHaveText(DOMAIN)
+    expect(await name.evaluate((node) => getComputedStyle(node).direction)).toBe('ltr')
 
     // The same warning, in Arabic: the platform does not verify ownership.
     await expect(page.getByText(/لا تتحقق من ملكية النطاق/)).toBeVisible()
 
+    await page
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
+      .click()
     await page.getByRole('button', { name: 'التخلّي عن النطاق' }).first().click()
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('textbox').fill(DOMAIN)

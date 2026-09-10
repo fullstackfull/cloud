@@ -22,8 +22,15 @@ test.describe('an operator opening the control centre', () => {
     await expect(attention.getByText(/credential\(s\) not on the controller/i)).toBeVisible()
     await expect(attention.getByText(/machine\(s\) never classified/i)).toBeVisible()
 
-    await expect(page.getByRole('link', { name: /^machines$/i })).toBeVisible()
-    await expect(page.getByRole('link', { name: /^datacenters$/i })).toBeVisible()
+    /*
+     * Scoped to the page rather than the document: since Wave 3 the operator
+     * navigation is a persistent column rather than a menu that had to be
+     * opened, so "Machines" is legitimately both a navigation entry and a
+     * card on this screen. The card is what this spec is about.
+     */
+    const overview = page.getByRole('main')
+    await expect(overview.getByRole('link', { name: /^machines$/i })).toBeVisible()
+    await expect(overview.getByRole('link', { name: /^datacenters$/i })).toBeVisible()
 
     await attention.getByText(/credential\(s\) not on the controller/i).click()
     await expect(page.getByRole('heading', { name: /^credentials$/i })).toBeVisible()
@@ -68,7 +75,9 @@ test.describe('in Arabic', () => {
     await signIn(page, users.operator, { headingPattern: /مرحب|أهل/ })
     await page.goto('/admin/control-center')
     await expect(page.getByRole('heading', { name: /نظرة عامة على البنية التحتية/ })).toBeVisible()
-    await expect(page.getByText(/يحتاج إلى شخص/)).toBeVisible()
+    // The heading, named: the screen's own subtitle contains the same phrase,
+    // and asserting on the text alone matches both.
+    await expect(page.getByRole('heading', { name: 'يحتاج إلى شخص' })).toBeVisible()
 
     await page.goto('/admin/control-center/sites')
     await expect(page.getByRole('heading', { name: /المواقع/ })).toBeVisible()

@@ -1944,7 +1944,8 @@
     "termYears_two": "سنتان",
     "termYears_few": "{{years}} سنوات",
     "termYears_many": "{{years}} سنة",
-    "termYears_other": "{{years}} سنة"
+    "termYears_other": "{{years}} سنة",
+    "notManageable": "لا تستطيع المنصّة التعامل مع هذا الاسم حالياً، لذا هذه الأدوات معطّلة. يستطيع الدعم إخبارك بالوضع."
   },
   "wordpress": {
     "adminEmail": "بريد ووردبريس",

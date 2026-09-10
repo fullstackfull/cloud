@@ -101,6 +101,11 @@ test.describe('Arabic layout', () => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
 
     await page.goto('/dedicated')
+    await page.getByRole('link', { name: fixtures.dedicatedSerial }).click()
+    await page
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
+      .click()
     await page.getByRole('button', { name: /إعادة التثبيت/ }).first().click()
 
     const dedicated = page.getByRole('dialog')
@@ -114,11 +119,12 @@ test.describe('Arabic layout', () => {
     // The machine by name, and the operable one: the seeder also creates a
     // suspended machine and one whose last rebuild nobody can settle, and
     // since Wave 0 every control on both is correctly disabled.
+    await page.getByRole('link', { name: fixtures.operableHostname }).click()
     await page
-      .getByRole('row')
-      .filter({ hasText: fixtures.operableHostname })
-      .getByRole('button', { name: /إعادة التثبيت/ })
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
       .click()
+    await page.getByRole('button', { name: /إعادة التثبيت/ }).click()
 
     const vps = page.getByRole('dialog')
     await expect(vps).toBeVisible()

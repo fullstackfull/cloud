@@ -52,7 +52,21 @@ export const fixtures = {
   suspendedHostname: 'e2e-suspended-01',
   reactivatingHostname: 'e2e-reactivating-01',
   vpsAddress: '198.51.100.24',
+  /* The operable machine's own address, which is the one Wave 3's resource
+   * page specs read: e2e-web-01 is the stranded machine. */
+  operableAddress: '198.51.100.25',
   hostingUsername: 'e2ehost',
+  /*
+   * The seeded hosting account's primary domain, which since Wave 3 is what
+   * its row is titled by and what links to its page.
+   */
+  hostingDomain: 'e2e-customer.test',
+  /* The WordPress site the copies journeys drive. */
+  liveSite: 'e2e-live-site.test',
+  /* The name the platform holds, with a registrant and a zone behind it. */
+  heldDomain: 'e2e-held.test',
+  /* The money account's name, inside its renewal lead time. */
+  renewableDomain: 'e2e-renew.test',
   teammateEmail: 'teammate@lynomia.local',
   pendingInvitationEmail: 'invited@lynomia.local',
   ticketReference: 'LYN-E2E-000001',

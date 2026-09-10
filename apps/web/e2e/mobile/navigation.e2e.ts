@@ -31,8 +31,13 @@ const DESTINATIONS: Array<{ link: RegExp; heading: RegExp; path: string }> = [
   { link: /^notifications$/i, heading: /^notifications$/i, path: '/notifications' },
   { link: /^orders$/i, heading: /^orders$/i, path: '/orders' },
   { link: /^ip addresses$/i, heading: /^ip addresses$/i, path: '/ips' },
-  { link: /^services$/i, heading: /^services$/i, path: '/services' },
-  { link: /^catalogue$/i, heading: /^catalogue$/i, path: '/catalogue' },
+  // "All Services" in the drawer, because the group it sits in is Services:
+  // the answer to "what do I have?" should not require knowing which family a
+  // thing belongs to. The page it opens is still titled Services.
+  { link: /^all services$/i, heading: /^services$/i, path: '/services' },
+  // "Buy" since Wave 3: the navigation and the page it opens use one word
+  // for the act, and it is the customer's word rather than the platform's.
+  { link: /^buy$/i, heading: /^buy$/i, path: '/catalogue' },
 ]
 
 test.describe('a customer on a phone', () => {

@@ -158,7 +158,26 @@ export function VpsOverviewSection() {
           <FactList
             columns={2}
             facts={[
-              { label: t('services.state'), value: <StatusBadge status={vm.reinstall.state} /> },
+              {
+                /*
+                 * The rebuild's own vocabulary, not the generic status one: a
+                 * finished rebuild is a machine that was "Rebuilt", which is
+                 * the word the list has used since Wave 1, and it is emphasised
+                 * when the platform never heard how it ended.
+                 */
+                label: t('services.state'),
+                value: (
+                  <span
+                    className={
+                      vm.reinstall.needs_attention ? 'text-[var(--danger-text)]' : undefined
+                    }
+                  >
+                    {t(`vps.reinstallState.${vm.reinstall.state}`, {
+                      defaultValue: vm.reinstall.state,
+                    })}
+                  </span>
+                ),
+              },
               {
                 label: t('vps.rebuildRequested'),
                 value: formatDate(vm.reinstall.requested_at, locale),

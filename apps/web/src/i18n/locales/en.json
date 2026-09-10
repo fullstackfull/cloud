@@ -1908,7 +1908,8 @@
     "zoneBody": "This platform can answer for the name as well as register it.",
     "relatedBody": "The zone, your invoices, and support.",
     "termYears_one": "1 year",
-    "termYears_other": "{{years}} years"
+    "termYears_other": "{{years}} years",
+    "notManageable": "The platform cannot act on this name at the moment, so these controls are off. Support can tell you where it stands."
   },
   "wordpress": {
     "adminEmail": "WordPress email",

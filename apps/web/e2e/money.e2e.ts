@@ -62,7 +62,7 @@ test.describe('journey A — a new customer registers, verifies, and reads price
     await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible()
 
     await page.goto('/catalogue')
-    await expect(page.getByRole('heading', { name: /catalogue/i })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^buy$/i })).toBeVisible()
   })
 })
 
@@ -91,7 +91,7 @@ test.describe('journey B — an unverified customer may look and may not buy', (
 
     // Prices: readable.
     await page.goto('/catalogue')
-    await expect(page.getByRole('heading', { name: /catalogue/i })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^buy$/i })).toBeVisible()
 
     // Money: refused, and told apart from a permissions problem — the banner
     // offers the verification page rather than a dead end.
