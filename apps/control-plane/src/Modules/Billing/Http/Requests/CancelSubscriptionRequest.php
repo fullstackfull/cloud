@@ -64,9 +64,7 @@ final class CancelSubscriptionRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'confirm_subscription_id.required_if_accepted' => 'Cancelling immediately stops the service now and does not '
-                .'refund the rest of the period already paid for. Send confirm_subscription_id with this '
-                .'subscription\'s id to confirm, or omit `immediately` to end it when the paid period runs out.',
+            'confirm_subscription_id.required_if_accepted' => __('validation.requests.subscription.immediate_cancellation_confirmation'),
         ];
     }
 

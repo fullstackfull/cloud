@@ -7,6 +7,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -150,12 +151,16 @@ export function AdminSupportPage() {
             </label>
           </div>
 
-          <DataTable
-            columns={columns}
-            rows={queue.data?.data ?? []}
-            rowKey={(row) => row.id}
-            empty={queue.isPending ? t('common.loading') : t('admin.support.queueEmpty')}
-          />
+          {queue.isPending ? (
+            <Loading />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={queue.data?.data ?? []}
+              rowKey={(row) => row.id}
+              empty={t('admin.support.queueEmpty')}
+            />
+          )}
         </Card>
 
         {ticket !== null ? (
@@ -187,7 +192,7 @@ export function AdminSupportPage() {
                       {message.author ?? '—'}
                       {message.is_internal_note ? ` · ${t('admin.support.internalNote')}` : ''}
                     </span>
-                    <span dir="ltr">{formatDateTime(message.created_at, locale)}</span>
+                    <span>{formatDateTime(message.created_at, locale)}</span>
                   </div>
                   <p className="whitespace-pre-wrap text-sm">{message.body}</p>
                 </li>

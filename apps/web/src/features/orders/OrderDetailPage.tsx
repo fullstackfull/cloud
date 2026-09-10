@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useCancelOrder, useOrder } from '@/lib/queries'
@@ -30,7 +31,7 @@ export function OrderDetailPage() {
   const displayed = describeError(cancel.error ?? error)
 
   if (isPending) {
-    return <p className="py-12 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+    return <Loading className="py-12" />
   }
 
   if (order === undefined) {

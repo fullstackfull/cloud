@@ -6,6 +6,7 @@ namespace Lynomia\Modules\SharedHosting\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Responses\CustomerFailureReason;
 use Lynomia\Modules\SharedHosting\Application\Actions\WordPressCopySupport;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
 
@@ -60,7 +61,7 @@ final class WordPressSiteResource extends JsonResource
              * they were stored. A customer whose install failed needs to see
              * why; most of these are actionable.
              */
-            'failure_reason' => $this->failure_reason,
+            'failure_reason' => CustomerFailureReason::describe($this->failure_reason, 'wordpress.site_operation_failed'),
 
             'hosting_account_id' => $this->hosting_account_id,
             'verified_at' => $this->verified_at?->toIso8601String(),

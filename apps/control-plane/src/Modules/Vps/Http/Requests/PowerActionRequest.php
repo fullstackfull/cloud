@@ -47,7 +47,7 @@ final class PowerActionRequest extends FormRequest
     public function messages(): array
     {
         return $this->idempotencyKeyMessages() + [
-            'action.required' => 'Name the power action: start, stop, reboot or shutdown.',
+            'action.required' => __('validation.requests.vps.power_action_required'),
         ];
     }
 

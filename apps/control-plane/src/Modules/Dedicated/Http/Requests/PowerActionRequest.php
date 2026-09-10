@@ -66,7 +66,7 @@ final class PowerActionRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'action.required' => 'Name the power action: on, off or cycle.',
+            'action.required' => __('validation.requests.dedicated.power_action_required'),
         ];
     }
 

@@ -17,7 +17,9 @@ use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Lynomia\Http\Middleware\AssignRequestId;
 use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Http\Middleware\SecurityHeaders;
+use Lynomia\Http\Middleware\SetRequestLocale;
 use Lynomia\Http\Responses\ApiError;
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
@@ -84,6 +86,7 @@ return Application::configure(basePath: dirname(__DIR__))
          */
         $middleware->prepend([
             AssignRequestId::class,
+            SetRequestLocale::class,
             SecurityHeaders::class,
         ]);
 
@@ -128,23 +131,30 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             $error = match (true) {
+                /*
+                 * The code is the exception's; the sentence is the catalogue's,
+                 * in the language the request asked for. The exception's own
+                 * message is the engineer's and is only ever sent for a code
+                 * the customer catalogue has no entry for — which the parity
+                 * test keeps to the operator modules.
+                 */
                 $e instanceof DomainException => ApiError::make(
                     $e->errorCode(),
-                    $e->getMessage(),
+                    ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage()),
                     $e->httpStatus(),
                     $e->context(),
                 ),
 
                 $e instanceof ValidationException => ApiError::make(
                     'validation.failed',
-                    'The submitted data is invalid.',
+                    ErrorCatalogue::message('validation.failed', [], 'The submitted data is invalid.'),
                     422,
                     ['fields' => $e->errors()],
                 ),
 
                 $e instanceof AuthenticationException => ApiError::make(
                     'auth.unauthenticated',
-                    'Authentication is required.',
+                    ErrorCatalogue::message('auth.unauthenticated', [], 'Authentication is required.'),
                     401,
                 ),
 
@@ -171,13 +181,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof AccessDeniedHttpException,
                 $e instanceof HttpExceptionInterface && $e->getStatusCode() === 403 => ApiError::make(
                     'auth.forbidden',
-                    'You are not permitted to perform this action.',
+                    ErrorCatalogue::message('auth.forbidden', [], 'You are not permitted to perform this action.'),
                     403,
                 ),
 
                 $e instanceof TokenMismatchException => ApiError::make(
                     'auth.csrf_token_mismatch',
-                    'The CSRF token is missing or stale. Refresh and try again.',
+                    ErrorCatalogue::message('auth.csrf_token_mismatch', [], 'The CSRF token is missing or stale. Refresh and try again.'),
                     419,
                 ),
 
@@ -192,13 +202,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof ModelNotFoundException,
                 $e instanceof NotFoundHttpException => ApiError::make(
                     'resource.not_found',
-                    'The requested resource does not exist.',
+                    ErrorCatalogue::message('resource.not_found', [], 'The requested resource does not exist.'),
                     404,
                 ),
 
                 $e instanceof HttpExceptionInterface => ApiError::make(
                     'http.'.$e->getStatusCode(),
-                    $e->getMessage() ?: 'Request failed.',
+                    ErrorCatalogue::message('http.'.$e->getStatusCode(), [], $e->getMessage() ?: 'Request failed.'),
                     $e->getStatusCode(),
                 ),
 
@@ -215,7 +225,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'server.error',
                 app()->hasDebugModeEnabled()
                     ? $e->getMessage()
-                    : 'An unexpected error occurred. Quote the request id when contacting support.',
+                    : ErrorCatalogue::message('server.error', [], 'An unexpected error occurred. Quote the request id when contacting support.'),
                 500,
             )->toResponse($request);
         });

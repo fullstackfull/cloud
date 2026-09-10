@@ -10,6 +10,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useIpAssignments, useSetReverseDns } from '@/lib/queries'
 import type { IpAssignment } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -89,7 +90,7 @@ export function IpAddressesPage() {
 
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable

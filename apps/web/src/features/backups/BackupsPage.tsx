@@ -12,6 +12,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatBytes, formatDate } from '@/lib/format'
 import {
@@ -262,7 +263,7 @@ export function BackupsPage() {
           )}
 
           {isPending ? (
-            <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+            <Loading />
           ) : (
             <>
               <DataTable
@@ -549,7 +550,7 @@ function BackupFileBrowser({
 
       <div className="mt-3">
         {isPending ? (
-          <p className="py-6 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading className="py-6" />
         ) : (
           <DataTable
             caption={t('backups.files')}

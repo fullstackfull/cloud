@@ -4,6 +4,7 @@ import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
+import { Loading } from '@/components/Loading'
 import {
   SUCCESSFUL_LOGIN_OUTCOMES,
   useLoginActivity,
@@ -79,7 +80,7 @@ export function LoginActivitySection() {
       <LoadFailure error={readError} />
 
       {isPending ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : (
         <DataTable
           caption={t('security.activityTitle')}

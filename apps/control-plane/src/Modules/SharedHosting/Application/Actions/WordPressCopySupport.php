@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressStagingProvider;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\WordPressRefusedException;
@@ -38,7 +39,8 @@ final readonly class WordPressCopySupport
         try {
             $this->provider($site);
         } catch (WordPressRefusedException $e) {
-            return ['staging' => false, 'clone' => false, 'push_to_production' => false, 'reason' => $e->getMessage()];
+            // The catalogue's sentence in the request's language, never the exception's.
+            return ['staging' => false, 'clone' => false, 'push_to_production' => false, 'reason' => ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage())];
         }
 
         $inFlight = $this->operationInFlight($site);
@@ -47,7 +49,7 @@ final readonly class WordPressCopySupport
             'staging' => ! $inFlight && $site->kind->canBeCopied() && ! $this->hasStagingCopy($site),
             'clone' => ! $inFlight && $site->kind->canBeCopied(),
             'push_to_production' => ! $inFlight && $site->kind->canBePushedToProduction() && $site->parent_site_id !== null,
-            'reason' => $inFlight ? 'A copy or a push involving this site is already running.' : null,
+            'reason' => $inFlight ? ErrorCatalogue::message('wordpress.operation_in_flight') : null,
         ];
     }
 

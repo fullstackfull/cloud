@@ -27,6 +27,7 @@ import type { Locale } from '@/i18n'
 import type { Domain, DomainQuote, DomainSearchResult } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { Loading } from '@/components/Loading'
 import { Link } from 'react-router'
 
 /**
@@ -106,7 +107,7 @@ export function DomainsPage() {
 
       <div className="mt-4">
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : rows.length === 0 ? (
           <EmptyState>{t('domains.none')}</EmptyState>
         ) : (
@@ -333,7 +334,7 @@ function DomainCard({ domain, locale }: { domain: Domain; locale: Locale }) {
       <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
         <div>
           <dt className="text-[var(--text-muted)]">{t('domains.expires')}</dt>
-          <dd className="technical">
+          <dd>
             {domain.expires_at === null ? '—' : formatDate(domain.expires_at, locale)}
           </dd>
         </div>

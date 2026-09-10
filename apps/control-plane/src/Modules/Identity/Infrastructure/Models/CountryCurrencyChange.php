@@ -20,7 +20,7 @@ use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
  * @property string $from_currency
  * @property string $to_currency
  * @property string $reason
- * @property array{facts: array<string, mixed>, blockers: list<string>, warnings: list<string>} $impact
+ * @property array{facts: array<string, mixed>, blockers: list<array{code: string, params: array<string, scalar>}>, warnings: list<array{code: string, params: array<string, scalar>}>} $impact
  * @property ?string $requested_by_user_id
  * @property ?string $decided_by_user_id
  * @property ?string $decision_note

@@ -45,7 +45,7 @@ trait ConfirmsCurrentPassword
             $this->recordConfirmationFailure($request, $user, LoginOutcome::Locked);
 
             throw ValidationException::withMessages([
-                'current_password' => 'Too many failed attempts. Try again later.',
+                'current_password' => __('validation.requests.auth.too_many_password_attempts'),
             ]);
         }
 
@@ -54,7 +54,7 @@ trait ConfirmsCurrentPassword
             $this->recordConfirmationFailure($request, $user, LoginOutcome::FailedPasswordConfirmation);
 
             throw ValidationException::withMessages([
-                'current_password' => 'That password is incorrect.',
+                'current_password' => __('validation.requests.auth.password_incorrect'),
             ]);
         }
 

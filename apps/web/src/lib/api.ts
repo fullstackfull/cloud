@@ -8,6 +8,8 @@
  * what the cookie flow avoids.
  */
 
+import i18n, { isSupportedLocale } from '@/i18n'
+
 export interface ApiErrorBody {
   code: string
   message: string
@@ -59,6 +61,20 @@ export class NetworkError extends Error {
 
 const BASE_URL = (import.meta.env['VITE_API_BASE']) ?? '/api/v1'
 
+/**
+ * The `Accept-Language` value for the active portal language.
+ *
+ * Narrowed to a language the platform serves: the API negotiates the same set
+ * and would fall back to English for anything else, so sending "de" would
+ * silently produce an English answer on a page the customer chose to read in
+ * Arabic. Exported for the test that proves the header follows the switch.
+ */
+export function acceptLanguage(): string {
+  const base = i18n.language.split('-')[0] ?? 'en'
+
+  return isSupportedLocale(base) ? base : 'en'
+}
+
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
   return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null
@@ -88,6 +104,12 @@ export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
   signal?: AbortSignal
+  /**
+   * Overrides the language the request is answered in. Almost never needed:
+   * every request carries the active portal language (see `acceptLanguage`),
+   * and the one legitimate exception is a call made on behalf of a person
+   * whose language differs from the operator's screen.
+   */
   locale?: string
   /**
    * Extra headers for the few endpoints that take one.
@@ -135,9 +157,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     'X-Requested-With': 'XMLHttpRequest',
   }
 
-  if (options.locale !== undefined) {
-    headers['Accept-Language'] = options.locale
-  }
+  /*
+   * The language the screen is in is the language the answer must be in.
+   *
+   * Set here, once, rather than by each hook: the audit found no request
+   * carried the header at all, so every refusal, validation sentence and
+   * localised reason reached an Arabic customer in English. The API reads the
+   * header on every route (SetRequestLocale) and answers in that language; a
+   * language switch changes the header on the very next request because it is
+   * read from the live i18n instance, not captured at module load.
+   */
+  headers['Accept-Language'] = options.locale ?? acceptLanguage()
 
   if (options.idempotencyKey !== undefined) {
     headers['Idempotency-Key'] = options.idempotencyKey

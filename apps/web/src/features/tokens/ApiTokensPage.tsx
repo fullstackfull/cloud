@@ -10,6 +10,7 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/lib/queries'
@@ -155,7 +156,7 @@ export function ApiTokensPage() {
             */}
           <LoadFailure error={readError} />
           {isPending ? (
-            <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+            <Loading />
           ) : readError !== null ? null : (
             <DataTable
               caption={t('nav.apiKeys')}

@@ -51,10 +51,10 @@ trait ReadsIdempotencyKey
     protected function idempotencyKeyMessages(): array
     {
         return [
-            'idempotency_key.required' => 'An Idempotency-Key header is required so a repeated submission cannot run this operation twice.',
-            'idempotency_key.min' => 'The Idempotency-Key header must be at least 8 characters.',
-            'idempotency_key.max' => 'The Idempotency-Key header must not exceed 128 characters.',
-            'idempotency_key.regex' => 'The Idempotency-Key header may contain only letters, digits, dots, colons, hyphens and underscores.',
+            'idempotency_key.required' => __('validation.requests.idempotency_key.required'),
+            'idempotency_key.min' => __('validation.requests.idempotency_key.min'),
+            'idempotency_key.max' => __('validation.requests.idempotency_key.max'),
+            'idempotency_key.regex' => __('validation.requests.idempotency_key.regex'),
         ];
     }
 

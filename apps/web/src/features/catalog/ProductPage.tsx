@@ -8,6 +8,7 @@ import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { newIdempotencyKey } from '@/lib/api'
 import { usePlaceOrder, useProduct } from '@/lib/queries'
 import type { Plan, PlanPrice } from '@/lib/types'
@@ -74,7 +75,7 @@ export function ProductPage() {
   }
 
   if (isPending) {
-    return <p className="py-12 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+    return <Loading className="py-12" />
   }
 
   if (product === undefined) {

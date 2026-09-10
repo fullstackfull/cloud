@@ -12,6 +12,7 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import {
   useAddDnsRecord,
   useApplyZoneImport,
@@ -120,7 +121,7 @@ export function DnsPage() {
       </Card>
 
       {isPending ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : rows.length === 0 ? (
         <EmptyState>{t('dns.noZones')}</EmptyState>
       ) : (
@@ -327,7 +328,7 @@ function ZoneRecords({ zone }: { zone: DnsZone }) {
       <h2 className="mb-3 text-sm font-medium">{t('dns.records')}</h2>
 
       {isPending ? (
-        <p className="py-6 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading className="py-6" />
       ) : (
         <DataTable
           caption={t('dns.records')}

@@ -44,7 +44,7 @@ final class TwoFactorController
         $recoveryCodes = $this->twoFactor->confirmEnrolment($user, $validated['code']);
 
         if ($recoveryCodes === null) {
-            throw ValidationException::withMessages(['code' => 'That code is not valid.']);
+            throw ValidationException::withMessages(['code' => __('validation.requests.auth.code_invalid')]);
         }
 
         return response()->json([
@@ -74,7 +74,7 @@ final class TwoFactorController
 
         if (! $user->hasTwoFactorEnabled()) {
             throw ValidationException::withMessages([
-                'code' => 'Two-factor authentication is not enabled on this account.',
+                'code' => __('validation.requests.auth.two_factor_not_enabled'),
             ]);
         }
 

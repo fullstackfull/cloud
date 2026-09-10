@@ -27,7 +27,7 @@ final class RestoreBackupFilesRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'confirmation.required' => 'Type the machine\'s hostname to confirm. A file restore replaces those files on it.',
+            'confirmation.required' => __('validation.requests.backup.file_restore_confirmation_required'),
         ];
     }
 

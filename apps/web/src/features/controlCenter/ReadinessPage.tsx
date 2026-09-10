@@ -12,6 +12,7 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import {
   READINESS_LADDER,
   READINESS_QUESTIONS,
@@ -67,7 +68,7 @@ export function ReadinessPage() {
       <p className="text-sm text-[var(--text-muted)]">{t('admin.readiness.drillNote')}</p>
 
       {readiness.isPending ? (
-        <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : readiness.error ? (
         <LoadFailure error={readiness.error} />
       ) : (
@@ -84,7 +85,7 @@ export function ReadinessPage() {
         <h2 className="mb-3 text-base font-semibold">{t('admin.readiness.dependenciesHeading')}</h2>
         <p className="mb-3 text-sm text-[var(--text-muted)]">{t('admin.readiness.dependenciesNote')}</p>
         {dependencies.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : dependencies.error ? (
           <LoadFailure error={dependencies.error} />
         ) : (

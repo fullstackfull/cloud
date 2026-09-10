@@ -7,6 +7,7 @@ import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useDatacenters, useRacks, useRegions, useRegisterDatacenter, useRegisterRack } from '@/lib/controlCenterQueries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
@@ -39,7 +40,7 @@ export function SitesPage() {
 
       <Card>
         {datacenters.isPending || racks.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : datacenters.error ? (
           <LoadFailure error={datacenters.error} />
         ) : racks.error ? (

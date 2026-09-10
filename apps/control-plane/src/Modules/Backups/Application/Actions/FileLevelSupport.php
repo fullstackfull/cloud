@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Backups\Domain\Contracts\FileLevelBackupProvider;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupFileRefusedException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
@@ -35,7 +36,8 @@ final readonly class FileLevelSupport
         try {
             $this->provider($backup);
         } catch (BackupFileRefusedException $e) {
-            return ['supported' => false, 'reason' => $e->getMessage()];
+            // The catalogue's sentence in the request's language, never the exception's.
+            return ['supported' => false, 'reason' => ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage())];
         }
 
         return ['supported' => true, 'reason' => null];

@@ -23,16 +23,17 @@ namespace Lynomia\Modules\Identity\Domain\DTOs;
  *   wallet_balance_minor: int,
  *   wallet_currency: string,
  *   target_currency_in_catalogue: bool,
- *   tax_before: string,
- *   tax_after: string,
+ *   tax_before: array{rate: string, name: ?string}|null,
+ *   tax_after: array{rate: string, name: ?string}|null,
  * }
+ * @phpstan-type Line array{code: string, params: array<string, scalar>}
  */
 final readonly class CountryCurrencyImpact
 {
     /**
      * @param  Facts  $facts
-     * @param  list<string>  $blockers  What must change before this can be applied, in words.
-     * @param  list<string>  $warnings  What will be true afterwards and is not a reason to refuse.
+     * @param  list<Line>  $blockers  What must change before this can be applied: a code and its parameters, put into words when answered.
+     * @param  list<Line>  $warnings  What will be true afterwards and is not a reason to refuse.
      */
     public function __construct(
         public array $facts,

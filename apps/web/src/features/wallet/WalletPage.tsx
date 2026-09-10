@@ -4,6 +4,7 @@ import { Card } from '@/components/Card'
 import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useWallet } from '@/lib/queries'
@@ -42,7 +43,7 @@ export function WalletPage() {
       <div className="max-w-sm">
         <Card title={t('wallet.balance')}>
           {isPending ? (
-            <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+            <Loading />
           ) : balances.length === 0 ? (
             <p className="text-sm text-[var(--text-muted)]">{t('wallet.none')}</p>
           ) : (

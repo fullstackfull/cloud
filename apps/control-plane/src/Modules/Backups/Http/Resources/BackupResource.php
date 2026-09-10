@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Backups\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Responses\CustomerFailureReason;
 use Lynomia\Modules\Backups\Application\Actions\FileLevelSupport;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 
@@ -79,7 +80,7 @@ final class BackupResource extends JsonResource
              * it is published because a customer whose backup failed for lack
              * of disk space is owed a better answer than "it failed".
              */
-            'failure_reason' => $this->failure_reason,
+            'failure_reason' => CustomerFailureReason::describe($this->failure_reason, 'backup.operation_failed'),
 
             // Whether this backup can be opened file by file, and if not,
             // why not — the same answer the file routes refuse with, so a

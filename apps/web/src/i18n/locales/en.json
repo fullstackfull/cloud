@@ -49,7 +49,8 @@
     "usage": "Usage",
     "vps": "Cloud VPS",
     "wallet": "Wallet & Credits",
-    "wordpress": "WordPress"
+    "wordpress": "WordPress",
+    "menu": "Menu"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -99,6 +100,7 @@
   },
   "status": {
     "active": "Active",
+    "applied": "Applied",
     "applying": "Applying",
     "auth_failed": "Authentication failed",
     "available": "Available",
@@ -157,12 +159,14 @@
     "preflight": "Preflight",
     "premium": "Premium",
     "preparing": "Preparing",
+    "processing": "Processing",
     "profiled": "Profiled",
     "provider_unavailable": "Provider unavailable",
     "provisioning": "Provisioning",
     "provisioning_failed": "Could not be built",
     "provisioning_timeout": "The platform stopped waiting",
     "pxe_booting": "Booting over the network",
+    "quarantined": "Quarantined",
     "queued": "Queued",
     "queued_for_provisioning": "Waiting to be built",
     "reactivating": "Reactivating",
@@ -176,10 +180,12 @@
     "redeem": "Redemption",
     "redemption": "Redemption",
     "refunded": "Refunded",
+    "refused": "Refused",
     "register": "Registration",
     "registered": "Registered",
     "registration_pending": "Registering",
     "reinstalling": "Rebuilding",
+    "rejected": "Rejected",
     "removing": "Removing",
     "renew": "Renewal",
     "requested": "Requested",
@@ -190,6 +196,7 @@
     "revoked": "Revoked",
     "rotation_due": "Rotation due",
     "running": "Running",
+    "scheduled": "Scheduled",
     "stopped": "Stopped",
     "succeeded": "Succeeded",
     "suspended": "Suspended",
@@ -210,9 +217,6 @@
     "verified": "Verified",
     "verifying": "Verifying",
     "void": "Void",
-    "scheduled": "Scheduled",
-    "applied": "Applied",
-    "rejected": "Rejected",
     "withdrawn": "Withdrawn"
   },
   "account": {

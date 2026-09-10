@@ -11,6 +11,7 @@ import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { newIdempotencyKey } from '@/lib/api'
 import { formatDate } from '@/lib/format'
@@ -135,7 +136,7 @@ export function InvoicesPage() {
 
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable
@@ -161,7 +162,7 @@ export function InvoicesPage() {
         body={
           <div className="flex flex-col gap-3">
             {quote.isPending ? (
-              <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+              <Loading />
             ) : quote.data === undefined ? null : (
               <>
                 <dl className="flex flex-col gap-2 text-sm">

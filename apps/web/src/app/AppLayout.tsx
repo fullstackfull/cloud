@@ -9,89 +9,8 @@ import { useCurrentUser, useLogout } from '@/features/auth/useAuth'
 import { useIsOperator } from '@/features/admin/useIsOperator'
 import { cn } from '@/lib/cn'
 
-interface NavItem {
-  to: string
-  labelKey: string
-  /** Match this route exactly, so a section's index link is not lit on every child. */
-  end?: boolean
-}
-
-/**
- * Only what is actually reachable is listed.
- *
- * The navigation is not a roadmap: a link to a page that does not exist tells a
- * customer the platform can do something it cannot, and they will open a ticket
- * about it. Entries appear here as their endpoints are built.
- */
-const NAV: NavItem[] = [
-  { to: '/', labelKey: 'nav.dashboard' },
-  { to: '/catalogue', labelKey: 'nav.catalogue' },
-  { to: '/services', labelKey: 'nav.services' },
-  { to: '/invoices', labelKey: 'nav.invoices' },
-]
-
-/**
- * Everything else, behind the account menu.
- *
- * The top bar holds what a customer opens most; a bar with fourteen items in it
- * is a bar nobody reads. These are still one click away and still in the
- * navigation landmark, so nothing is hidden from a screen reader.
- */
-const SECONDARY_NAV: NavItem[] = [
-  { to: '/orders', labelKey: 'nav.orders' },
-  { to: '/subscriptions', labelKey: 'nav.subscriptions' },
-  { to: '/wallet', labelKey: 'nav.wallet' },
-  { to: '/vps', labelKey: 'nav.vps' },
-  { to: '/backups', labelKey: 'nav.backups' },
-  { to: '/notifications', labelKey: 'nav.notifications' },
-  { to: '/dedicated', labelKey: 'nav.dedicated' },
-  { to: '/hosting', labelKey: 'nav.hosting' },
-  { to: '/ips', labelKey: 'nav.ips' },
-  { to: '/dns', labelKey: 'nav.dns' },
-  { to: '/domains', labelKey: 'nav.domains' },
-  { to: '/wordpress', labelKey: 'nav.wordpress' },
-  { to: '/api-tokens', labelKey: 'nav.apiKeys' },
-  { to: '/support', labelKey: 'nav.support' },
-  { to: '/settings/team', labelKey: 'nav.team' },
-  { to: '/profile', labelKey: 'nav.profile' },
-  { to: '/security', labelKey: 'nav.security' },
-]
-
-/**
- * Shown only to a login that holds at least one operator permission.
- *
- * Hiding it is a courtesy, not a control: the endpoints behind these screens
- * each check their own permission, and a customer who types the URL gets a 403
- * from every request the page makes.
- */
-const OPERATOR_NAV: NavItem[] = [
-  { to: '/admin/customers', labelKey: 'admin.nav.customers' },
-  { to: '/admin/account-changes', labelKey: 'admin.nav.accountChanges' },
-  { to: '/admin/provisioning', labelKey: 'admin.nav.provisioning' },
-  { to: '/admin/operations', labelKey: 'admin.nav.operations' },
-  { to: '/admin/drift', labelKey: 'admin.nav.drift' },
-  { to: '/admin/support', labelKey: 'admin.nav.support' },
-  { to: '/admin/infrastructure', labelKey: 'admin.nav.infrastructure' },
-  { to: '/admin/payments', labelKey: 'admin.nav.payments' },
-]
-
-/**
- * The Control Center: one navigation area over three bounded concerns —
- * Infrastructure, Providers and Product Readiness. A composition of screens,
- * not a module of its own; each screen's requests go to its own concern's API.
- */
-const CONTROL_CENTER_NAV: NavItem[] = [
-  { to: '/admin/control-center', labelKey: 'admin.nav.overview', end: true },
-  { to: '/admin/control-center/sites', labelKey: 'admin.nav.sites' },
-  { to: '/admin/control-center/machines', labelKey: 'admin.nav.machines' },
-  { to: '/admin/control-center/providers', labelKey: 'admin.nav.providers' },
-  { to: '/admin/control-center/discovery', labelKey: 'admin.nav.discovery' },
-  { to: '/admin/control-center/plans', labelKey: 'admin.nav.plans' },
-  { to: '/admin/control-center/deployments', labelKey: 'admin.nav.deployments' },
-  { to: '/admin/control-center/readiness', labelKey: 'admin.nav.readiness' },
-  { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
-  { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },
-]
+import { MobileNavigation } from './MobileNavigation'
+import { CONTROL_CENTER_NAV, OPERATOR_NAV, PRIMARY_NAV, SECONDARY_NAV, type NavItem } from './navigation'
 
 export function AppLayout() {
   const { t } = useTranslation()
@@ -113,7 +32,7 @@ export function AppLayout() {
           <span className="font-semibold text-[var(--text-primary)]">{t('common.appName')}</span>
 
           <nav className="hidden flex-1 items-center gap-1 sm:flex" aria-label={t('nav.primary')}>
-            {NAV.map((item) => (
+            {PRIMARY_NAV.map((item) => (
               <NavItemLink key={item.to} item={item} />
             ))}
 
@@ -164,10 +83,10 @@ export function AppLayout() {
               type="button"
               className="rounded-md p-2 text-[var(--text-secondary)] sm:hidden"
               aria-expanded={menuOpen}
-              aria-controls="portal-navigation"
+              aria-haspopup="dialog"
               onClick={() => { setMenuOpen((open) => !open); }}
             >
-              <span className="sr-only">{t('nav.dashboard')}</span>
+              <span className="sr-only">{t('nav.menu')}</span>
               <svg viewBox="0 0 20 20" fill="currentColor" className="size-5" aria-hidden="true">
                 <path d="M3 5h14v2H3V5zm0 4h14v2H3V9zm0 4h14v2H3v-2z" />
               </svg>
@@ -175,17 +94,13 @@ export function AppLayout() {
           </div>
         </div>
 
-        {menuOpen ? (
-          <nav
-            id="portal-navigation"
-            className="flex flex-col gap-1 border-t border-[var(--border-subtle)] p-3 sm:hidden"
-          >
-            {NAV.map((item) => (
-              <NavItemLink key={item.to} item={item} onNavigate={() => { setMenuOpen(false); }} />
-            ))}
-            <LocaleSwitcher className="mt-2" />
-          </nav>
-        ) : null}
+        <MobileNavigation
+          open={menuOpen}
+          isOperator={isOperator}
+          signingOut={logout.isPending}
+          onClose={() => { setMenuOpen(false); }}
+          onSignOut={() => void signOut()}
+        />
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">

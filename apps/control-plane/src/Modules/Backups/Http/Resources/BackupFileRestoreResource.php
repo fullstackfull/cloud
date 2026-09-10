@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Backups\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Responses\CustomerFailureReason;
 use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 
 /**
@@ -29,7 +30,7 @@ final class BackupFileRestoreResource extends JsonResource
             'started_at' => $this->started_at?->toIso8601String(),
             'finished_at' => $this->finished_at?->toIso8601String(),
             'created_at' => $this->created_at->toIso8601String(),
-            'failure_reason' => $this->failure_reason,
+            'failure_reason' => CustomerFailureReason::describe($this->failure_reason, 'backup.file_restore_failed'),
         ];
     }
 }

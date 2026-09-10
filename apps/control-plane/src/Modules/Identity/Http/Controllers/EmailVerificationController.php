@@ -7,6 +7,8 @@ namespace Lynomia\Modules\Identity\Http\Controllers;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Lynomia\Http\Responses\ApiError;
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -26,12 +28,11 @@ final class EmailVerificationController
         $user = User::query()->find($id);
 
         if ($user === null || ! hash_equals(sha1($user->getEmailForVerification()), $hash)) {
-            return response()->json([
-                'error' => [
-                    'code' => 'verification.invalid_link',
-                    'message' => 'This verification link is not valid.',
-                ],
-            ], Response::HTTP_FORBIDDEN);
+            return ApiError::make(
+                'verification.invalid_link',
+                ErrorCatalogue::message('verification.invalid_link', [], 'This verification link is not valid.'),
+                Response::HTTP_FORBIDDEN,
+            )->toResponse($request);
         }
 
         if ($user->hasVerifiedEmail()) {

@@ -8,6 +8,7 @@ import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatMoney } from '@/lib/format'
 import { newIdempotencyKey } from '@/lib/api'
@@ -68,7 +69,7 @@ export function PlanChangePage() {
 
       {isPending ? (
         <Card>
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         </Card>
       ) : (
         <div className="grid gap-3">

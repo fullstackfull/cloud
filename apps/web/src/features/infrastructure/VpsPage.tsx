@@ -12,6 +12,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { newIdempotencyKey } from '@/lib/api'
 import { useVirtualMachines, useVpsPower, useVpsReinstall } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
@@ -225,7 +226,7 @@ export function VpsPage() {
 
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable

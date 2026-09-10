@@ -9,6 +9,7 @@ import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -126,12 +127,14 @@ export function SupportPage() {
             * opens a second one.
             */}
           <LoadFailure error={listError} />
-          {listError !== null ? null : (
+          {listError !== null ? null : isPending ? (
+            <Loading />
+          ) : (
             <DataTable
               columns={columns}
-              rows={tickets?.data ?? []}
+              rows={tickets.data}
               rowKey={(row) => row.id}
-              empty={isPending ? t('common.loading') : t('support.noTickets')}
+              empty={t('support.noTickets')}
             />
           )}
         </Card>
@@ -150,7 +153,7 @@ export function SupportPage() {
                         ? t('support.fromSupport', { name: message.author ?? '' })
                         : (message.author ?? t('support.fromYou'))}
                     </span>
-                    <span dir="ltr">{formatDateTime(message.created_at, locale)}</span>
+                    <span>{formatDateTime(message.created_at, locale)}</span>
                   </div>
                   <p className="whitespace-pre-wrap text-sm">{message.body}</p>
                   {message.attachments.length > 0 ? (

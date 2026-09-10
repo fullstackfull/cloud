@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Dns\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Responses\CustomerFailureReason;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
 
 /**
@@ -50,7 +51,7 @@ final class DnsZoneResource extends JsonResource
              * are "somebody else already holds this domain here", which they
              * can act on.
              */
-            'failure_reason' => $this->failure_reason,
+            'failure_reason' => CustomerFailureReason::describe($this->failure_reason, 'dns.zone_operation_failed'),
 
             'record_count' => $this->whenCounted('liveRecords'),
 

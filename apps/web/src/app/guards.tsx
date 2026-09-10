@@ -1,16 +1,10 @@
 import { Navigate, Outlet, useLocation } from 'react-router'
 
+import { Loading } from '@/components/Loading'
 import { useCurrentUser } from '@/features/auth/useAuth'
 
 function LoadingScreen() {
-  return (
-    <div
-      className="flex min-h-dvh items-center justify-center text-sm text-[var(--text-secondary)]"
-      role="status"
-    >
-      <span className="sr-only">Loading</span>
-    </div>
-  )
+  return <Loading size="screen" />
 }
 
 /**

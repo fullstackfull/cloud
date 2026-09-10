@@ -143,63 +143,93 @@ final readonly class AnalyseCountryCurrencyChange
             'tax_after' => $this->describe($taxAfter),
         ];
 
+        /*
+         * Blockers and warnings are stored as codes with parameters, never as
+         * sentences. The sentence is composed when the request is answered,
+         * in the language the request asked for (CountryCurrencyChangeResource
+         * and lang/{locale}/account.php); a sentence stored at analysis time
+         * would be in whichever language the analyser happened to run in.
+         */
         $blockers = [];
         $warnings = [];
 
         if ($currencyChanges) {
             if (! $targetInCatalogue) {
-                $blockers[] = sprintf('Nothing is priced in %s. The catalogue must carry prices in the new currency before an account can be billed in it.', $toCurrency);
+                $blockers[] = self::line('target_currency_not_priced', ['currency' => $toCurrency]);
             }
 
             if ($openInvoices->count() > 0) {
-                $blockers[] = sprintf('%d open invoice(s) in %s must be paid or voided first. An invoice is never converted.', $openInvoices->count(), $fromCurrency);
+                $blockers[] = self::line('open_invoices', ['count' => $openInvoices->count(), 'currency' => $fromCurrency]);
             }
 
             if ($ordersInFlight > 0) {
-                $blockers[] = sprintf('%d order(s) are between placement and provisioning, priced in %s. They must complete or be cancelled first.', $ordersInFlight, $fromCurrency);
+                $blockers[] = self::line('orders_in_flight', ['count' => $ordersInFlight, 'currency' => $fromCurrency]);
             }
 
             if ($domainOperations > 0) {
-                $blockers[] = sprintf('%d domain operation(s) are with the registrar, quoted in %s. They must finish first.', $domainOperations, $fromCurrency);
+                $blockers[] = self::line('domain_operations_in_flight', ['count' => $domainOperations, 'currency' => $fromCurrency]);
             }
 
             if ($subscriptions->count() > 0) {
-                $blockers[] = sprintf(
-                    '%d subscription(s) renew in %s. A renewal is never silently repriced: end them, then order again from the %s price list.',
-                    $subscriptions->count(),
-                    $fromCurrency,
-                    $toCurrency,
-                );
+                $blockers[] = self::line('subscriptions_renew', ['count' => $subscriptions->count(), 'currency' => $fromCurrency, 'to_currency' => $toCurrency]);
             }
 
             if ($walletBalance > 0) {
-                $blockers[] = sprintf('The wallet holds a balance in %s. Credit is never exchanged; spend it or ask for a refund first.', $fromCurrency);
+                $blockers[] = self::line('wallet_holds_balance', ['currency' => $fromCurrency]);
             }
 
-            $warnings[] = sprintf('Every invoice, payment and order already recorded stays in %s. Only what is issued after the change is in %s.', $fromCurrency, $toCurrency);
+            $warnings[] = self::line('history_keeps_currency', ['currency' => $fromCurrency, 'to_currency' => $toCurrency]);
         }
 
         if ($countryChanges) {
-            $warnings[] = sprintf(
-                'Invoices issued after the change carry the tax for the new country (%s instead of %s). Invoices already issued keep the tax they were issued with.',
-                $facts['tax_after'],
-                $facts['tax_before'],
-            );
+            $warnings[] = self::line('tax_changes', [
+                'tax_after' => self::taxCode($taxAfter),
+                'tax_after_rate' => self::taxRate($taxAfter),
+                'tax_after_name' => $taxAfter->name ?? '',
+                'tax_before' => self::taxCode($taxBefore),
+                'tax_before_rate' => self::taxRate($taxBefore),
+                'tax_before_name' => $taxBefore->name ?? '',
+            ]);
 
             if (! $currencyChanges && $openInvoices->count() > 0) {
-                $warnings[] = sprintf('%d open invoice(s) keep the tax they were issued with.', $openInvoices->count());
+                $warnings[] = self::line('open_invoices_keep_tax', ['count' => $openInvoices->count()]);
             }
         }
 
         return new CountryCurrencyImpact($facts, $blockers, $warnings);
     }
 
-    private function describe(TaxRate $rate): string
+    /**
+     * One blocker or warning: a code and the parameters its sentence needs.
+     *
+     * @param  array<string, scalar>  $params
+     * @return array{code: string, params: array<string, scalar>}
+     */
+    private static function line(string $code, array $params): array
+    {
+        return ['code' => $code, 'params' => $params];
+    }
+
+    /** Which tax sentence applies: none, or a rate with a name. */
+    private static function taxCode(TaxRate $rate): string
+    {
+        return $rate->isZero() ? 'none' : 'rate';
+    }
+
+    private static function taxRate(TaxRate $rate): string
+    {
+        return $rate->isZero() ? '0' : rtrim(rtrim($rate->rate, '0'), '.');
+    }
+
+    /**
+     * @return array{rate: string, name: ?string}|null
+     */
+    private function describe(TaxRate $rate): ?array
     {
         if ($rate->isZero()) {
-            return 'no tax';
+            return null;
         }
 
-        return sprintf('%s%% %s', rtrim(rtrim($rate->rate, '0'), '.'), $rate->name ?? 'tax');
+        return ['rate' => self::taxRate($rate), 'name' => $rate->name];
     }
 }

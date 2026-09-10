@@ -10,6 +10,7 @@ import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
@@ -243,12 +244,14 @@ export function TeamPage() {
             * which is the one thing a refused read cannot know.
             */}
           <LoadFailure error={membersError} />
-          {membersError !== null ? null : (
+          {membersError !== null ? null : isPending ? (
+            <Loading />
+          ) : (
             <DataTable
               columns={memberColumns}
-              rows={members?.data ?? []}
+              rows={members.data}
               rowKey={(member) => member.id}
-              empty={isPending ? t('common.loading') : t('team.noMembers')}
+              empty={t('team.noMembers')}
             />
           )}
         </Card>

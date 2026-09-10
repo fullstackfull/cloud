@@ -11,6 +11,7 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -74,7 +75,7 @@ export function WordPressPage() {
       </div>
 
       {isPending ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : rows.length === 0 ? (
         <EmptyState>{t('wordpress.none')}</EmptyState>
       ) : (

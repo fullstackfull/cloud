@@ -10,6 +10,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -133,7 +134,7 @@ export function AdminOperationsPage() {
 
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable

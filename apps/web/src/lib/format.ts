@@ -57,15 +57,54 @@ export function formatMinorUnits(minorUnits: number, currency: string, locale: L
   return format.format(minorUnits / 10 ** digits)
 }
 
+/*
+ * Dates and times.
+ *
+ * Two rules, both learned from the Arabic domains page.
+ *
+ * The month is a word, never a number. Intl's medium Arabic date is
+ * "09‏/03‏/2027" — digits, slashes and three right-to-left marks — and the
+ * moment that string lands inside anything laid out left to right (a
+ * `.technical` cell, a `dir="ltr"` span) the marks and the slashes reorder and
+ * the customer reads "092027/03/". A named month has no separator to reorder:
+ * "09 مارس 2027" reads the same way whatever surrounds it.
+ *
+ * The whole value is wrapped in first-strong isolates (U+2068 … U+2069) so a
+ * date interpolated into a sentence — "renews on 09 مارس 2027" in either
+ * language — is laid out as one unit and cannot borrow direction from the
+ * words around it. The isolates are invisible, and `<time dateTime>` is the
+ * place for a machine-readable copy where one is needed.
+ *
+ * Numerals stay Western in both languages, as everywhere else in the portal:
+ * a date on an invoice must be unambiguous and copy-pasteable.
+ */
+const ISOLATE_START = '\u2068'
+const ISOLATE_END = '\u2069'
+
+function isolate(value: string): string {
+  return `${ISOLATE_START}${value}${ISOLATE_END}`
+}
+
 export function formatDateTime(iso: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(iso))
+  return isolate(
+    new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(iso)),
+  )
 }
 
 export function formatDate(iso: string, locale: Locale): string {
-  return new Intl.DateTimeFormat(`${locale}-u-nu-latn`, { dateStyle: 'medium' }).format(new Date(iso))
+  return isolate(
+    new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date(iso)),
+  )
 }
 
 export function formatRelative(iso: string, locale: Locale): string {

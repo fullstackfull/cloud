@@ -76,8 +76,8 @@ final class PlaceOrderRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'idempotency_key.required' => 'An Idempotency-Key header is required so a repeated submission cannot place a second order.',
-            'items.*.plan_id.distinct' => 'Each plan may appear in the basket only once; use the quantity to order more than one.',
+            'idempotency_key.required' => __('validation.requests.order.idempotency_key_required'),
+            'items.*.plan_id.distinct' => __('validation.requests.order.plan_repeated'),
         ] + $this->idempotencyKeyMessages();
     }
 

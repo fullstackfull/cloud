@@ -49,7 +49,8 @@
     "usage": "الاستهلاك",
     "vps": "الخوادم السحابية",
     "wallet": "المحفظة والرصيد",
-    "wordpress": "ووردبريس"
+    "wordpress": "ووردبريس",
+    "menu": "القائمة"
   },
   "auth": {
     "signInTitle": "تسجيل الدخول إلى لينوميا كلاود",
@@ -99,6 +100,7 @@
   },
   "status": {
     "active": "نشط",
+    "applied": "مُطبَّق",
     "applying": "قيد التطبيق",
     "auth_failed": "فشلت المصادقة",
     "available": "متاح",
@@ -157,12 +159,14 @@
     "preflight": "فحص أولي",
     "premium": "مميّز",
     "preparing": "قيد التحضير",
+    "processing": "قيد المعالجة",
     "profiled": "محدّد الملف",
     "provider_unavailable": "المزوّد غير متاح",
     "provisioning": "قيد التجهيز",
     "provisioning_failed": "تعذّر البناء",
     "provisioning_timeout": "توقّفت المنصة عن الانتظار",
     "pxe_booting": "إقلاع عبر الشبكة",
+    "quarantined": "محجوز مؤقتًا",
     "queued": "في الطابور",
     "queued_for_provisioning": "بانتظار البناء",
     "reactivating": "قيد إعادة التفعيل",
@@ -176,10 +180,12 @@
     "redeem": "استرداد",
     "redemption": "فترة الاسترداد",
     "refunded": "مُرجَعة",
+    "refused": "مرفوض",
     "register": "تسجيل",
     "registered": "مسجّل",
     "registration_pending": "جارٍ التسجيل",
     "reinstalling": "إعادة البناء",
+    "rejected": "مرفوض",
     "removing": "قيد الإزالة",
     "renew": "تجديد",
     "requested": "مطلوب",
@@ -190,6 +196,7 @@
     "revoked": "مُبطَل",
     "rotation_due": "يستحق التدوير",
     "running": "قيد التشغيل",
+    "scheduled": "مجدوَل",
     "stopped": "متوقف",
     "succeeded": "نجحت",
     "suspended": "معلّق",
@@ -210,9 +217,6 @@
     "verified": "مُتحقَّق منه",
     "verifying": "قيد التأكد",
     "void": "ملغاة",
-    "scheduled": "مجدوَل",
-    "applied": "مُطبَّق",
-    "rejected": "مرفوض",
     "withdrawn": "مسحوب"
   },
   "account": {

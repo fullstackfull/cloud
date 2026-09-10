@@ -10,6 +10,7 @@ import { useProducts } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 import { Alert } from '@/components/Alert'
+import { Loading } from '@/components/Loading'
 
 const KINDS = ['vps', 'dedicated', 'shared_hosting'] as const
 
@@ -41,7 +42,7 @@ export function CataloguePage() {
           {displayed.message}
         </Alert>
       ) : isPending ? (
-        <p className="py-12 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading className="py-12" />
       ) : (data?.data.length ?? 0) === 0 ? (
         <EmptyState>{t('catalogue.empty')}</EmptyState>
       ) : (

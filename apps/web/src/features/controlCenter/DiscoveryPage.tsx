@@ -5,6 +5,7 @@ import { Card } from '@/components/Card'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { CapabilityBadge } from '@/features/controlCenter/CapabilityBadge'
 import { useProviders, useServers } from '@/lib/controlCenterQueries'
 import { formatDateTime } from '@/lib/format'
@@ -33,7 +34,7 @@ export function DiscoveryPage() {
       <Card>
         <h2 className="mb-3 text-base font-semibold">{t('admin.discovery.providersHeading')}</h2>
         {providers.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : providers.error ? (
           <LoadFailure error={providers.error} />
         ) : providers.data.data.length === 0 ? (
@@ -76,7 +77,7 @@ export function DiscoveryPage() {
       <Card>
         <h2 className="mb-3 text-base font-semibold">{t('admin.discovery.machinesHeading')}</h2>
         {servers.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : servers.error ? (
           <LoadFailure error={servers.error} />
         ) : servers.data.data.length === 0 ? (

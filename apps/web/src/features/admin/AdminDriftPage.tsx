@@ -9,6 +9,7 @@ import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useDrift, useReviewDrift, type AdminDrift } from '@/lib/adminQueries'
@@ -151,7 +152,7 @@ export function AdminDriftPage() {
 
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable

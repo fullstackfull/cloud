@@ -79,8 +79,8 @@ final class IssueApiTokenRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'current_password.required' => 'Confirm your account password to issue an API token.',
-            'expires_at.after' => 'The expiry date must be in the future.',
+            'current_password.required' => __('validation.requests.api_token.current_password_required'),
+            'expires_at.after' => __('validation.requests.api_token.expires_in_future'),
             'rate_limit_per_minute.max' => sprintf(
                 'A token may not be given a ceiling above %d requests per minute.',
                 IssueApiToken::ceilingPerMinute(),

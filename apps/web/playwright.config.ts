@@ -90,6 +90,20 @@ const apiEnvironment = {
   COMPUTE_FAKE_STATE_PATH: FAKE_COMPUTE_STATE_PATH,
 }
 
+/**
+ * An image that ships a browser rather than downloading one sets
+ * PLAYWRIGHT_CHROMIUM_EXECUTABLE to it. Left unset — on a developer's machine,
+ * and in CI — Playwright uses the build it manages itself, which is the
+ * arrangement that keeps the pinned version and the binary in step. Written as
+ * an override rather than as a hard-coded path because a path in this file
+ * would be a path that only works in one place.
+ */
+function chromiumExecutable(): { launchOptions?: { executablePath: string } } {
+  return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE !== undefined
+    ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+    : {}
+}
+
 export default defineConfig({
   testDir: './e2e',
   // Named `.e2e.ts` and not `.spec.ts` so that vitest, which owns `src/`,
@@ -118,24 +132,48 @@ export default defineConfig({
     video: 'off',
   },
 
+  /*
+   * Four surfaces, three projects.
+   *
+   * `chromium` is the desktop suite as it has always been: every spec, one
+   * project, English unless a describe block asks for Arabic. Two customer
+   * projects sit beside it rather than multiplying it: the phone project runs
+   * only `e2e/mobile/`, on a real phone descriptor (viewport, touch, mobile
+   * user agent — not a desktop window made narrow), and the Arabic project
+   * runs only `e2e/arabic/`, with the browser's own language set to Arabic
+   * so the portal picks it the way a customer's browser would. Each drives
+   * real journeys; neither reruns the Control Center.
+   *
+   * The projects share one database and run one after another (one worker),
+   * so a spec that changes fixtures names its own — a zone the phone claims
+   * is not a zone the Arabic run expects to find absent.
+   */
   projects: [
     {
       name: 'chromium',
+      testIgnore: ['**/mobile/**', '**/arabic/**'],
       use: {
         ...devices['Desktop Chrome'],
-        /*
-         * An image that ships a browser rather than downloading one sets
-         * PLAYWRIGHT_CHROMIUM_EXECUTABLE to it. Left unset — on a developer's
-         * machine, and in CI — Playwright uses the build it manages itself,
-         * which is the arrangement that keeps the pinned version and the
-         * binary in step.
-         *
-         * Written as an override rather than as a hard-coded path because a
-         * path in this file would be a path that only works in one place.
-         */
-        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE !== undefined
-          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
-          : {}),
+        ...chromiumExecutable(),
+      },
+    },
+    {
+      name: 'customer-mobile',
+      testMatch: '**/mobile/*.e2e.ts',
+      use: {
+        // 393 × 851, touch, mobile user agent: the closest descriptor Playwright
+        // ships to the 390 × 844 phone the audit measured against.
+        ...devices['Pixel 5'],
+        ...chromiumExecutable(),
+      },
+    },
+    {
+      name: 'customer-arabic',
+      testMatch: '**/arabic/*.e2e.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        locale: 'ar',
+        ...chromiumExecutable(),
       },
     },
   ],

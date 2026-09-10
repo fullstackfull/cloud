@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Card } from '@/components/Card'
 import { LoadFailure } from '@/components/LoadFailure'
+import { Loading } from '@/components/Loading'
 import { useNotificationPreferences, useUpdateNotificationPreference } from '@/lib/queries'
 import type { NotificationPreference } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -49,7 +50,7 @@ export function NotificationPreferencesSection() {
       )}
 
       {isPending ? (
-        <p className="py-6 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading className="py-6" />
       ) : (
         <ul className="divide-y divide-[var(--border-subtle)]">
           {categories.map((category) => (

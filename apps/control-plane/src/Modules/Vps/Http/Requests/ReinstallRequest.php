@@ -83,8 +83,8 @@ final class ReinstallRequest extends FormRequest
     public function messages(): array
     {
         return $this->idempotencyKeyMessages() + [
-            'confirm_hostname.required' => 'Reinstalling erases every disk on this machine. Send confirm_hostname with the machine\'s hostname to confirm.',
-            'ssh_keys.*.regex' => 'Each entry must be one OpenSSH public key on one line, in the form "type base64-key comment".',
+            'confirm_hostname.required' => __('validation.requests.vps.reinstall_confirmation_required'),
+            'ssh_keys.*.regex' => __('validation.requests.vps.ssh_key_format'),
         ];
     }
 

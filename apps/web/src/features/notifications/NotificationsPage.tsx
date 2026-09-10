@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { cn } from '@/lib/cn'
 import { formatDate } from '@/lib/format'
@@ -95,7 +96,7 @@ export function NotificationsPage() {
         </div>
 
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : rows.length === 0 ? (
           <EmptyState>{t('notifications.empty')}</EmptyState>
         ) : (

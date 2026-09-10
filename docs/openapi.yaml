@@ -17339,7 +17339,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "The provider's own words, with anything credential-shaped removed before it was stored."
+          description: "Whether the last operation failed, said in the language the request asked for. The provider's own words stay with support."
         record_count:
           type:
             - "integer"
@@ -20628,7 +20628,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "The panel's own words, with anything credential-shaped removed before it was stored."
+          description: "Whether the last operation failed, said in the language the request asked for. The panel's own words stay with support."
         hosting_account_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"

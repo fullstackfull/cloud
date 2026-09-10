@@ -8,6 +8,7 @@ import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
+import { Loading } from '@/components/Loading'
 import {
   useRevokeOtherSessions,
   useRevokeSession,
@@ -107,7 +108,7 @@ export function SessionsSection() {
       {/* A failed read is reported, never rendered as "no sessions". */}
       <LoadFailure error={error} />
       {isPending ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : error !== null ? null : (
         <DataTable
           caption={t('security.sessionsTitle')}

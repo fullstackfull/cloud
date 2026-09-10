@@ -27,7 +27,7 @@ final class PushWordPressToProductionRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'confirmation.required' => 'Type the production site\'s domain to confirm. A push overwrites it.',
+            'confirmation.required' => __('validation.requests.wordpress.push_confirmation_required'),
         ];
     }
 

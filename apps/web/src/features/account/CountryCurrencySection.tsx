@@ -7,6 +7,7 @@ import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Field } from '@/components/Field'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -64,7 +65,7 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
       <p className="mt-2 text-sm text-[var(--text-muted)]">{t('account.countryCurrency.policy')}</p>
 
       {isPending ? (
-        <p className="py-4 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading className="py-4" />
       ) : open !== null ? (
         <ChangeRow
           change={open}
