@@ -139,6 +139,22 @@ class E2ESeeder extends Seeder
      */
     public const string LARGE_INVOICE_NUMBER = 'INV-E2E-0003';
 
+    /*
+     * Invoices the Wave 2 money journeys spend.
+     *
+     * Their own, because those journeys pay invoices and the browser projects
+     * share one database: a spec that settles INV-E2E-0003 leaves the Arabic
+     * run looking for an open invoice that is now paid. One invoice per
+     * journey that moves money, named for what it is for.
+     */
+    public const string CREDIT_THEN_CARD_INVOICE_NUMBER = 'INV-E2E-W2-0001';
+
+    public const string DECLINE_INVOICE_NUMBER = 'INV-E2E-W2-0002';
+
+    public const string PHONE_PAYMENT_INVOICE_NUMBER = 'INV-E2E-W2-0003';
+
+    public const string ARABIC_DECLINE_INVOICE_NUMBER = 'INV-E2E-W2-0004';
+
     /**
      * A ticket in mid-conversation, with an internal note on it.
      *
@@ -1168,6 +1184,33 @@ class E2ESeeder extends Seeder
             'issued_at' => now()->subDay(),
             'due_at' => now()->addDays(20),
         ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
+
+        /*
+         * Bigger than the seeded wallet balance, so paying it from credit
+         * leaves a remainder for a card — which is the mixed payment the
+         * portal has to be able to show as two rows.
+         */
+        $this->invoiceWithLines($customer, [
+            'number' => self::CREDIT_THEN_CARD_INVOICE_NUMBER,
+            'status' => InvoiceStatus::Open,
+            'amount_paid_minor' => 0,
+            'issued_at' => now()->subDay(),
+            'due_at' => now()->addDays(20),
+        ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
+
+        foreach ([
+            self::DECLINE_INVOICE_NUMBER,
+            self::PHONE_PAYMENT_INVOICE_NUMBER,
+            self::ARABIC_DECLINE_INVOICE_NUMBER,
+        ] as $number) {
+            $this->invoiceWithLines($customer, [
+                'number' => $number,
+                'status' => InvoiceStatus::Open,
+                'amount_paid_minor' => 0,
+                'issued_at' => now()->subDays(2),
+                'due_at' => now()->addDays(12),
+            ], Money::of('9.000', 'KWD'), 'Cloud VPS — Starter (monthly)');
+        }
 
         $this->invoiceWithLines($customer, [
             'number' => self::PAID_INVOICE_NUMBER,

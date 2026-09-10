@@ -86,12 +86,12 @@ final readonly class RegisterCustomer
          * is cheaper than the invoice that would otherwise be issued in a
          * currency the payment provider cannot take.
          */
-        $country = isset($attributes['country']) && is_string($attributes['country']) && $attributes['country'] !== ''
-            ? strtoupper($attributes['country'])
+        $country = ($attributes['country'] ?? '') !== ''
+            ? strtoupper((string) $attributes['country'])
             : null;
 
-        $currency = isset($attributes['currency']) && is_string($attributes['currency']) && $attributes['currency'] !== ''
-            ? $this->currencies->assertEnabled($attributes['currency'])
+        $currency = ($attributes['currency'] ?? '') !== ''
+            ? $this->currencies->assertEnabled((string) $attributes['currency'])
             : $this->currencies->recommendedFor($country);
 
         // One transaction: a user without their customer account, or a customer

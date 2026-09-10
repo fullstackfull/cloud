@@ -30,6 +30,15 @@ export const fixtures = {
   openInvoice: 'INV-E2E-0001',
   paidInvoice: 'INV-E2E-0002',
   largeInvoice: 'INV-E2E-0003',
+  /*
+   * One invoice per journey that spends money. The browser projects share a
+   * database and run one after another, so a journey that settles a shared
+   * fixture breaks the next project rather than its own spec.
+   */
+  creditThenCardInvoice: 'INV-E2E-W2-0001',
+  declineInvoice: 'INV-E2E-W2-0002',
+  phonePaymentInvoice: 'INV-E2E-W2-0003',
+  arabicDeclineInvoice: 'INV-E2E-W2-0004',
   suspendedHostname: 'e2e-suspended-01',
   reactivatingHostname: 'e2e-reactivating-01',
   vpsAddress: '198.51.100.24',
