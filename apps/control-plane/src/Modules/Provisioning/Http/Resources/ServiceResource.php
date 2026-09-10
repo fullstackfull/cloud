@@ -9,6 +9,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\Provisioning\Application\Queries\CustomerServices;
 use Lynomia\Modules\Provisioning\Domain\Enums\CustomerServiceState;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 
 /**
  * What a customer may see of a service they bought.
@@ -57,6 +58,21 @@ final class ServiceResource extends JsonResource
             'id' => $this->id,
             'kind' => $this->kind,
             'label' => $this->label,
+
+            /*
+             * The name the customer uses for the thing that was created: the
+             * hostname, the primary domain, the serial.
+             *
+             * The label above comes from the catalogue and is the same string
+             * for everyone who bought that plan, which is why the services
+             * index could not tell two servers apart. Resolved through
+             * ServiceIdentities, in one query per kind for a whole page, and
+             * null while the service is still being created — "being created"
+             * is true and useful; a fabricated hostname is not.
+             */
+            'identity' => is_string($identity = $this->resource->getAttribute(ServiceIdentities::ATTRIBUTE))
+                ? $identity
+                : null,
 
             'state' => $this->customerState()->value,
             // Asked of the enum that decides, so a client's "can I use this?"

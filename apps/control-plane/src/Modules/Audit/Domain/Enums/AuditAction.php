@@ -191,6 +191,14 @@ enum AuditAction: string
     case DomainTransferOrdered = 'domain.transfer.ordered';
     case DomainNameserversChanged = 'domain.nameservers.changed';
     case DomainContactsChanged = 'domain.contacts.changed';
+
+    /*
+     * Auto-renew decides whether this platform prepares another term before a
+     * name lapses. Recorded because "nobody turned it off" and "somebody
+     * turned it off in March" are the two answers to a lost-domain complaint,
+     * and only one of them can be established from a column's current value.
+     */
+    case DomainAutoRenewChanged = 'domain.auto_renew.changed';
     case DomainLocked = 'domain.locked';
 
     /*

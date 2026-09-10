@@ -13,11 +13,15 @@ import type {
   DnsRecord as DnsRecordRow,
   DnsZone,
   Domain,
+  DomainContact,
   DomainOperation,
   DomainQuote,
   DomainSearchResult,
   Envelope,
   HostingAccount,
+  HostingUsage,
+  HostingUsageMeta,
+  InstallableTemplate,
   InvitationOffer,
   Invoice,
   IpAssignment,
@@ -31,6 +35,7 @@ import type {
   Product,
   RegistrationOptions,
   Service,
+  ServiceEvent,
   StartedPayment,
   Subscription,
   TeamInvitation,
@@ -138,11 +143,14 @@ export function useOrders(pageNumber = 1) {
   })
 }
 
-export function useOrder(id: string) {
+export function useOrder(id: string | null) {
   return useQuery({
     queryKey: ['orders', 'detail', id],
+    enabled: id !== null && id !== '',
     queryFn: async () => {
-      const response = await api.get<Envelope<Order>>(`/orders/${encodeURIComponent(id)}`)
+      const response = await api.get<Envelope<Order>>(
+        `/orders/${encodeURIComponent(id ?? '')}`,
+      )
       return response.data
     },
   })
@@ -214,6 +222,26 @@ export function useSubscriptions(pageNumber = 1) {
   return useQuery({
     queryKey: ['subscriptions', pageNumber],
     queryFn: () => api.get<Paginated<Subscription>>(`/subscriptions${page({ page: pageNumber })}`),
+  })
+}
+
+/**
+ * One subscription: what it costs, when it renews, what it pays for.
+ *
+ * The resource pages read it to show a machine's or a site's commercial half
+ * without recomputing any of it — the money is the server's, as Wave 2 left
+ * it.
+ */
+export function useSubscription(id: string | null) {
+  return useQuery({
+    queryKey: ['subscriptions', 'detail', id],
+    enabled: id !== null && id !== '',
+    queryFn: async () => {
+      const response = await api.get<Envelope<Subscription>>(
+        `/subscriptions/${encodeURIComponent(id ?? '')}`,
+      )
+      return response.data
+    },
   })
 }
 
@@ -304,17 +332,39 @@ export function useServices(pageNumber = 1, kind?: string) {
   })
 }
 
-export function useService(id: string) {
+export function useService(id: string | null) {
   return useQuery({
     queryKey: ['services', 'detail', id],
+    enabled: id !== null && id !== '',
     queryFn: async () => {
-      const response = await api.get<Envelope<Service>>(`/services/${encodeURIComponent(id)}`)
+      const response = await api.get<Envelope<Service>>(
+        `/services/${encodeURIComponent(id ?? '')}`,
+      )
       return response.data
     },
   })
 }
 
 /* -------------------------------------------------------------------- vps */
+
+/**
+ * What has happened to one service, in the platform's customer vocabulary.
+ *
+ * The endpoint has existed since the provisioning engine was built and had no
+ * caller: the audit found no activity view anywhere in the portal. This is
+ * per-resource only. An account-wide feed is a different thing with a
+ * different endpoint, and neither exists yet.
+ */
+export function useServiceEvents(serviceId: string | null) {
+  return useQuery({
+    queryKey: ['services', 'events', serviceId],
+    enabled: serviceId !== null && serviceId !== '',
+    queryFn: () =>
+      api.get<Paginated<ServiceEvent>>(
+        `/services/${encodeURIComponent(serviceId ?? '')}/events${page({ page: 1 })}`,
+      ),
+  })
+}
 
 export function useVirtualMachines(pageNumber = 1) {
   return useQuery({
@@ -330,6 +380,30 @@ export function useVirtualMachine(id: string) {
       const response = await api.get<Envelope<VirtualMachine>>(`/vps/${encodeURIComponent(id)}`)
       return response.data
     },
+  })
+}
+
+/**
+ * The operating systems this machine may be rebuilt with.
+ *
+ * Asked of the machine rather than of a catalogue: the set depends on what is
+ * staged where this machine runs, and the reinstall endpoint applies exactly
+ * the same rule to whatever id is submitted. Fetched only when the dialogue
+ * that needs it is open, because a list page has no use for it.
+ */
+export function useVpsTemplates(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['vps', 'templates', id],
+    enabled: enabled && id !== '',
+    queryFn: async () => {
+      const response = await api.get<{ data: InstallableTemplate[] }>(
+        `/vps/${encodeURIComponent(id)}/templates`,
+      )
+      return response.data
+    },
+    // Images change when the platform stages one, which is not during a
+    // customer's visit.
+    staleTime: 5 * 60 * 1000,
   })
 }
 
@@ -355,6 +429,20 @@ export function useVpsPower() {
 export interface ReinstallRequest {
   id: string
   confirm_hostname: string
+  /**
+   * The image to build from. Omitted means the same one again, which is what
+   * the endpoint has always done and what a customer who just wants a clean
+   * machine expects.
+   */
+  template_id?: string
+  /**
+   * Public keys to install on first boot. Public keys only — a private key
+   * has no business travelling anywhere, and the platform has no field for
+   * one. Sent only for an image that can be configured on first boot; without
+   * that the platform cannot install them and would be collecting something
+   * it intends to drop.
+   */
+  ssh_keys?: string[]
   idempotencyKey: string
 }
 
@@ -370,8 +458,18 @@ export function useVpsReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_hostname, idempotencyKey }: ReinstallRequest) =>
-      api.post<unknown>(`/vps/${encodeURIComponent(id)}/reinstall`, { confirm_hostname }, { idempotencyKey }),
+    mutationFn: ({ id, confirm_hostname, template_id, ssh_keys, idempotencyKey }: ReinstallRequest) =>
+      api.post<unknown>(
+        `/vps/${encodeURIComponent(id)}/reinstall`,
+        {
+          confirm_hostname,
+          // Absent rather than null: the endpoint treats an omitted template
+          // as "the same image again", and an empty key list as no keys.
+          ...(template_id === undefined ? {} : { template_id }),
+          ...(ssh_keys === undefined || ssh_keys.length === 0 ? {} : { ssh_keys }),
+        },
+        { idempotencyKey },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -618,6 +716,18 @@ export function useDedicatedServers(pageNumber = 1) {
   })
 }
 
+export function useDedicatedServer(id: string) {
+  return useQuery({
+    queryKey: ['dedicated', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<DedicatedServer>>(
+        `/dedicated/${encodeURIComponent(id)}`,
+      )
+      return response.data
+    },
+  })
+}
+
 export function useDedicatedPower() {
   const queryClient = useQueryClient()
 
@@ -661,6 +771,35 @@ export function useHostingAccounts(pageNumber = 1) {
   return useQuery({
     queryKey: ['hosting', pageNumber],
     queryFn: () => api.get<Paginated<HostingAccount>>(`/hosting${page({ page: pageNumber })}`),
+  })
+}
+
+export function useHostingAccount(id: string) {
+  return useQuery({
+    queryKey: ['hosting', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<HostingAccount>>(
+        `/hosting/${encodeURIComponent(id)}`,
+      )
+      return response.data
+    },
+  })
+}
+
+/**
+ * Disk and bandwidth against quota, as of the platform's last sync.
+ *
+ * The envelope carries the freshness contract in `meta`, and it is read as
+ * well as the figures: a usage bar without "as of" is a claim about now that
+ * the platform cannot make.
+ */
+export function useHostingUsage(id: string) {
+  return useQuery({
+    queryKey: ['hosting', 'usage', id],
+    queryFn: () =>
+      api.get<{ data: HostingUsage; meta: HostingUsageMeta }>(
+        `/hosting/${encodeURIComponent(id)}/usage`,
+      ),
   })
 }
 
@@ -1083,6 +1222,18 @@ export function useWordPressSites() {
   })
 }
 
+export function useWordPressSite(id: string) {
+  return useQuery({
+    queryKey: ['wordpress', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<WordPressSite>>(
+        `/wordpress/sites/${encodeURIComponent(id)}`,
+      )
+      return response.data
+    },
+  })
+}
+
 export function useOrderWordPressSite() {
   const queryClient = useQueryClient()
 
@@ -1143,6 +1294,116 @@ export function useOrderDomain() {
       void queryClient.invalidateQueries({ queryKey: ['domains'] })
       // The order issues an invoice, and the customer is about to be asked to
       // pay it. A stale billing list here is a customer who cannot find it.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
+
+/**
+ * One name, by its own name or by its id.
+ *
+ * The portal's address for a domain is the domain — `/domains/example.com` —
+ * and the API resolves either form inside the acting account, so a deep link
+ * works on a cold load with no list behind it.
+ */
+export function useDomain(identity: string) {
+  return useQuery({
+    queryKey: ['domains', 'detail', identity],
+    queryFn: async () => {
+      const response = await api.get<Envelope<Domain>>(
+        `/domains/${encodeURIComponent(identity)}`,
+      )
+      return response.data
+    },
+  })
+}
+
+/**
+ * The registrant on record.
+ *
+ * Its own request rather than a field on the domain: it is personal data
+ * behind a stricter permission, and a list of names has no business carrying
+ * a home address for each one.
+ */
+export function useDomainContacts(identity: string, enabled = true) {
+  return useQuery({
+    queryKey: ['domains', 'contacts', identity],
+    enabled: enabled && identity !== '',
+    queryFn: async () => {
+      const response = await api.get<Envelope<DomainContact>>(
+        `/domains/${encodeURIComponent(identity)}/contacts`,
+      )
+      return response.data
+    },
+    // Not cached across a visit: it is read to fill a form, and a stale copy
+    // would silently re-submit what the customer just corrected.
+    staleTime: 0,
+  })
+}
+
+export interface RegistrantPayload {
+  name: string
+  organisation?: string | null
+  email: string
+  phone: string
+  address_line_one: string
+  address_line_two?: string | null
+  city: string
+  region?: string | null
+  postal_code?: string | null
+  country: string
+}
+
+export function useUpdateDomainContacts(identity: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (registrant: RegistrantPayload) =>
+      api.put<Envelope<Domain>>(`/domains/${encodeURIComponent(identity)}/contacts`, {
+        registrant,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+  })
+}
+
+/**
+ * Whether the platform raises the next invoice before this name lapses.
+ *
+ * A setting, so no idempotency key and no typed confirmation — it is
+ * reversible in one click. What it is not is a cancellation, and the screen
+ * says so beside the switch.
+ */
+export function useSetDomainAutoRenew(identity: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (autoRenew: boolean) =>
+      api.put<Envelope<Domain>>(`/domains/${encodeURIComponent(identity)}/auto-renew`, {
+        auto_renew: autoRenew,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+  })
+}
+
+/**
+ * Bringing a name in from another registrar.
+ *
+ * Not nested under a domain, because the platform does not hold it yet. The
+ * quote is taken first — the transfer costs a term — and the authorisation
+ * code travels once and is never rendered back.
+ */
+export function useTransferDomainIn() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { quote_id: string; authorisation_code: string }) =>
+      api.post<Envelope<DomainOperation>>('/domains/transfers', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
       void queryClient.invalidateQueries({ queryKey: ['invoices'] })
     },
   })
@@ -1245,6 +1506,21 @@ export function useDnsRecords(zoneId: string | null) {
   })
 }
 
+/**
+ * One zone, by its name or its id — the same two forms a domain accepts.
+ */
+export function useDnsZone(identity: string) {
+  return useQuery({
+    queryKey: ['dns', 'zones', 'detail', identity],
+    queryFn: async () => {
+      const response = await api.get<Envelope<DnsZone>>(
+        `/dns/zones/${encodeURIComponent(identity)}`,
+      )
+      return response.data
+    },
+  })
+}
+
 export function useClaimDnsZone() {
   const queryClient = useQueryClient()
 
@@ -1295,6 +1571,37 @@ export function useAddDnsRecord() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    },
+  })
+}
+
+/**
+ * Change a record in place.
+ *
+ * The canonical PATCH, not a remove-and-add: the portal used to offer no edit
+ * at all, and simulating one by deleting the record first would take the name
+ * off the internet for as long as the second request took — and would leave
+ * the zone with nothing at all if that request failed.
+ */
+export function useUpdateDnsRecord() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      zoneId,
+      recordId,
+      changes,
+    }: {
+      zoneId: string
+      recordId: string
+      changes: Partial<Pick<NewDnsRecord, 'content' | 'ttl' | 'priority'>>
+    }) =>
+      api.patch<Envelope<DnsRecordRow>>(
+        `/dns/zones/${encodeURIComponent(zoneId)}/records/${encodeURIComponent(recordId)}`,
+        changes,
+      ),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['dns', 'records', variables.zoneId] })
     },
   })
 }

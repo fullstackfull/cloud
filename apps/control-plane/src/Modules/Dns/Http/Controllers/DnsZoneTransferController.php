@@ -14,12 +14,12 @@ use Lynomia\Modules\Dns\Application\Actions\ApplyZoneImport;
 use Lynomia\Modules\Dns\Application\Actions\ExportZone;
 use Lynomia\Modules\Dns\Application\Actions\PlanZoneImport;
 use Lynomia\Modules\Dns\Domain\DTOs\ZoneImportPlan;
-use Lynomia\Modules\Dns\Domain\Enums\DnsState;
 use Lynomia\Modules\Dns\Domain\Enums\ZoneImportOutcome;
 use Lynomia\Modules\Dns\Domain\Exceptions\ZoneFileRefusedException;
 use Lynomia\Modules\Dns\Http\Requests\ApplyZoneImportRequest;
 use Lynomia\Modules\Dns\Http\Requests\PlanZoneImportRequest;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
+use Lynomia\Modules\Dns\Infrastructure\Queries\CustomerZones;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 
 /**
@@ -136,11 +136,10 @@ final class DnsZoneTransferController
     private function scoped(string $zone): DnsZone
     {
         /** @var DnsZone $found */
-        $found = DnsZone::query()
-            ->where('customer_id', $this->actingCustomer->id())
-            ->where('state', '!=', DnsState::Deleted->value)
-            ->whereKey($zone)
-            ->firstOrFail();
+        $found = CustomerZones::identified(
+            CustomerZones::of((string) $this->actingCustomer->id()),
+            $zone,
+        )->firstOrFail();
 
         return $found;
     }

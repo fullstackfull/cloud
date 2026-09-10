@@ -367,6 +367,12 @@ return [
 
     'api.v1.vps.index' => ['tag' => 'Cloud VPS', 'summary' => 'List machines', 'query' => ['power_state'], 'response' => $many('VirtualMachine')],
     'api.v1.vps.show' => ['tag' => 'Cloud VPS', 'summary' => 'One machine', 'response' => $one('VirtualMachine')],
+    'api.v1.vps.templates' => [
+        'tag' => 'Cloud VPS',
+        'summary' => 'Operating systems this machine can be rebuilt with',
+        'description' => 'Exactly the set the reinstall endpoint will accept for this machine: active, staged at a provider, and either fleet-wide or on the hardware this machine runs on. A client that offered anything else would be offering a rebuild the next request refuses. Not paginated — a cluster carries a handful of images.',
+        'response' => ['envelope' => 'list', 'schema' => 'InstallableTemplate'],
+    ],
     'api.v1.vps.power' => [
         'tag' => 'Cloud VPS',
         'summary' => 'Start, stop, reboot or shut down',
@@ -869,6 +875,19 @@ return [
         'summary' => 'Change the delegation',
         'description' => 'Between two and thirteen hosts, which is what registries enforce. Written at the registry first and recorded second: a stored delegation that ran ahead of the registry would send the customer debugging their own DNS. A registrar that times out leaves the stored copy alone and marks it for reconciliation rather than guessing.',
         'body' => ['nameservers'],
+        'response' => $one('Domain'),
+    ],
+    'api.v1.domains.contacts.show' => [
+        'tag' => 'Domains',
+        'summary' => 'The registrant on record',
+        'description' => "The account's own registrant, read back so a correction does not have to be retyped from memory. Every field is personal data: this needs `service.manage`, not `service.view`, and publishes only the registrant role and only the fields the update accepts.",
+        'response' => $one('DomainContact'),
+    ],
+    'api.v1.domains.auto_renew.update' => [
+        'tag' => 'Domains',
+        'summary' => 'Turn auto-renew on or off',
+        'description' => 'Whether this platform raises the next invoice before the name lapses. It is not the registrar\'s own flag: renewal here is invoice-first, and a second renewal authority at the registrar would mean two systems that can each decide to renew. Turning it off does not cancel the name or shorten the term already paid for.',
+        'body' => ['auto_renew'],
         'response' => $one('Domain'),
     ],
     'api.v1.domains.contacts.update' => [

@@ -8,9 +8,12 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Http\Concerns\AuthorisesWithinAccount;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 
 /**
  * The customer's inbox.
@@ -34,6 +37,7 @@ final class NotificationController
     public function __construct(
         private readonly ActingCustomer $acting,
         private readonly RenderNotification $renderer,
+        private readonly ServiceIdentities $identities,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -59,10 +63,11 @@ final class NotificationController
             ->paginate($perPage);
 
         $locale = $this->locale($request);
+        $handles = $this->resourceHandles($notifications->items());
 
         return response()->json([
             'data' => array_map(
-                fn (Notification $n): array => $this->present($n, $locale),
+                fn (Notification $n): array => $this->present($n, $locale, $handles),
                 $notifications->items(),
             ),
             'meta' => [
@@ -90,7 +95,11 @@ final class NotificationController
             $found->forceFill(['read_at' => now()])->save();
         }
 
-        return response()->json(['data' => $this->present($found->refresh(), $this->locale($request))]);
+        $fresh = $found->refresh();
+
+        return response()->json([
+            'data' => $this->present($fresh, $this->locale($request), $this->resourceHandles([$fresh])),
+        ]);
     }
 
     public function markAllRead(Request $request): JsonResponse
@@ -118,9 +127,46 @@ final class NotificationController
     }
 
     /**
+     * The thing each notification is about, where the platform knows it.
+     *
+     * A notification carries its subject polymorphically — the service that
+     * was built, the invoice that was issued — and until Wave 3 the inbox
+     * published only a hardcoded collection path, so "your server is ready"
+     * landed on the list of services and left the customer to find the row.
+     *
+     * Resolved rather than inferred: the subject is a stored relation, and a
+     * service is turned into its concrete machine, account or site through
+     * ServiceIdentities, one query per family for the whole page. Nothing
+     * here guesses from a title, a timestamp or a type.
+     *
+     * @param  array<int, Notification>  $notifications
+     * @return array<string, array{kind: string, id: string}>
+     */
+    private function resourceHandles(array $notifications): array
+    {
+        $serviceIds = [];
+
+        foreach ($notifications as $notification) {
+            if ($notification->subject_type === (new Service)->getMorphClass()
+                && is_string($notification->subject_id)) {
+                $serviceIds[] = $notification->subject_id;
+            }
+        }
+
+        $handles = [];
+
+        foreach ($this->identities->handlesFor(array_values(array_unique($serviceIds))) as $serviceId => $handle) {
+            $handles[$serviceId] = ['kind' => $handle['kind'], 'id' => $handle['id']];
+        }
+
+        return $handles;
+    }
+
+    /**
+     * @param  array<string, array{kind: string, id: string}>  $handles
      * @return array<string, mixed>
      */
-    private function present(Notification $notification, string $locale): array
+    private function present(Notification $notification, string $locale, array $handles = []): array
     {
         $rendered = $this->renderer->execute($notification, $locale);
 
@@ -134,8 +180,43 @@ final class NotificationController
             // emphasise it without the portal having to know the type list.
             'is_failure' => $notification->type->isFailure(),
             'link' => $notification->link,
+
+            /*
+             * Where this notification actually points, when the platform can
+             * say. `{kind, id}` rather than a path, because the routes belong
+             * to the portal and an API that shipped URLs would have to be
+             * redeployed the day one of them is renamed. Null where the
+             * subject is not something with a page of its own — an account
+             * change, a message about the account itself — and the collection
+             * `link` above remains the answer.
+             */
+            'resource' => $this->resourceFor($notification, $handles),
+
             'read_at' => $notification->read_at?->toIso8601String(),
             'created_at' => $notification->created_at->toIso8601String(),
         ];
+    }
+
+    /**
+     * @param  array<string, array{kind: string, id: string}>  $handles
+     * @return array{kind: string, id: string}|null
+     */
+    private function resourceFor(Notification $notification, array $handles): ?array
+    {
+        $subjectId = $notification->subject_id;
+
+        if (! is_string($subjectId) || $subjectId === '') {
+            return null;
+        }
+
+        /*
+         * An invoice is its own destination: Wave 2 gave it a document at
+         * /invoices/{id}, and the id on the notification is that invoice.
+         */
+        if ($notification->subject_type === (new Invoice)->getMorphClass()) {
+            return ['kind' => 'invoice', 'id' => $subjectId];
+        }
+
+        return $handles[$subjectId] ?? null;
     }
 }

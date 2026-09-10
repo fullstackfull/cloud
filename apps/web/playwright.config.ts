@@ -56,6 +56,20 @@ export const FAKE_COMPUTE_STATE_PATH = path.resolve(
 )
 
 /*
+ * The fake registrar's portfolio, shared between the seeder and the API.
+ *
+ * Without it the seeded name exists in the database and nowhere else, and
+ * every control that asks the registrar something — the transfer code, the
+ * lock, a renewal — answers "e2e-held.test is not held by this account". The
+ * audit recorded that refusal as raw provider text reaching the customer; it
+ * was a fixture with no registrar behind it. See E2ESeeder::domainFixtures.
+ */
+export const FAKE_REGISTRAR_STATE_PATH = path.resolve(
+  import.meta.dirname,
+  '../control-plane/storage/framework/testing/e2e-fake-registrar.dat',
+)
+
+/*
  * The API is served from the control plane with its own database. `APP_ENV` is
  * local rather than testing: the testing environment refuses a fake provider
  * in some paths and, more importantly, a browser suite that ran against a
@@ -114,6 +128,7 @@ const apiEnvironment = {
   LYNOMIA_E2E_REGISTRAR_SECRET: 'not-a-real-secret',
 
   COMPUTE_FAKE_STATE_PATH: FAKE_COMPUTE_STATE_PATH,
+  DOMAINS_FAKE_STATE_PATH: FAKE_REGISTRAR_STATE_PATH,
   PAYMENTS_FAKE_STATE_PATH: FAKE_PAYMENTS_STATE_PATH,
   /*
    * The fake gateway's page lives in the portal, so the redirect the provider

@@ -20,6 +20,7 @@ use Lynomia\Modules\Dns\Http\Requests\ChangeRecordRequest;
 use Lynomia\Modules\Dns\Http\Resources\DnsRecordResource;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsRecord;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
+use Lynomia\Modules\Dns\Infrastructure\Queries\CustomerZones;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 
 /**
@@ -185,11 +186,10 @@ final class DnsRecordController
     private function scopedZone(string $zone): DnsZone
     {
         /** @var DnsZone $found */
-        $found = DnsZone::query()
-            ->where('customer_id', $this->actingCustomer->id())
-            ->where('state', '!=', DnsState::Deleted->value)
-            ->whereKey($zone)
-            ->firstOrFail();
+        $found = CustomerZones::identified(
+            CustomerZones::of((string) $this->actingCustomer->id()),
+            $zone,
+        )->firstOrFail();
 
         return $found;
     }

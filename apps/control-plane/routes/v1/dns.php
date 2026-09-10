@@ -33,6 +33,16 @@ use Lynomia\Modules\Dns\Http\Controllers\DnsZoneTransferController;
  * the customer's next request is a 429 for a reason no client can see.
  */
 Route::prefix('dns')->as('dns.')->group(function (): void {
+    /*
+     * A zone is addressed by its name as well as by its id, for the same
+     * reason a domain is: `/dns/example.com` is the address a customer keeps,
+     * and a ULID is not. The pattern is what a hostname is made of and
+     * nothing else — no slash, so no path can be smuggled through the
+     * parameter — and both forms resolve through CustomerZones, scoped to the
+     * acting account, so another account's zone name 404s like an unknown id.
+     */
+    $zone = '[A-Za-z0-9](?:[A-Za-z0-9.\\-]{0,253}[A-Za-z0-9])?';
+
     Route::get('zones', [DnsZoneController::class, 'index'])->name('zones.index');
 
     Route::post('zones', [DnsZoneController::class, 'store'])
@@ -43,46 +53,46 @@ Route::prefix('dns')->as('dns.')->group(function (): void {
         ->name('zones.store');
 
     Route::get('zones/{zone}', [DnsZoneController::class, 'show'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->name('zones.show');
 
     Route::delete('zones/{zone}', [DnsZoneController::class, 'destroy'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->middleware('throttle:5,1,dns-zone-delete:')
         ->name('zones.destroy');
 
     Route::get('zones/{zone}/export', [DnsZoneTransferController::class, 'export'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->middleware('throttle:20,1,dns-zone-export:')
         ->name('zones.export');
 
     Route::post('zones/{zone}/import/plan', [DnsZoneTransferController::class, 'plan'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->middleware('throttle:20,1,dns-zone-import:')
         ->name('zones.import.plan');
 
     Route::post('zones/{zone}/import', [DnsZoneTransferController::class, 'apply'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->middleware('throttle:10,1,dns-zone-import:')
         ->name('zones.import.apply');
 
     Route::get('zones/{zone}/records', [DnsRecordController::class, 'index'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->name('records.index');
 
     Route::post('zones/{zone}/records', [DnsRecordController::class, 'store'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->middleware('throttle:60,1,dns-record-write:')
         ->name('records.store');
 
     Route::patch('zones/{zone}/records/{record}', [DnsRecordController::class, 'update'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->whereUlid('record')
         ->middleware('throttle:60,1,dns-record-write:')
         ->name('records.update');
 
     Route::delete('zones/{zone}/records/{record}', [DnsRecordController::class, 'destroy'])
-        ->whereUlid('zone')
+        ->where('zone', $zone)
         ->whereUlid('record')
         ->middleware('throttle:60,1,dns-record-write:')
         ->name('records.destroy');

@@ -236,7 +236,13 @@ final class ServiceIndexEndpointTest extends ServiceApiTestCase
         // `parent::toArray()` would publish every one of them under a name no
         // blocklist above could have predicted.
         $this->assertSame([
-            'id', 'kind', 'label', 'state', 'is_usable', 'resources',
+            // `identity` arrived in Wave 3: the hostname, primary domain or
+            // serial the customer knows the thing by, so an index of services
+            // can tell two servers on one plan apart. It is a resource name
+            // and not an operational fact — it is what the customer types
+            // into their own SSH client — and it is resolved in one query per
+            // kind for the whole page rather than one per row.
+            'id', 'kind', 'label', 'identity', 'state', 'is_usable', 'resources',
             'plan_id', 'order_id', 'order_item_id', 'subscription_id',
             'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
             'terminated_at', 'created_at',

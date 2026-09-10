@@ -53,6 +53,14 @@
   --danger-text: oklch(0.50 0.19 25);
   --warning-text: oklch(0.55 0.15 70);
 
+  /*
+   * The edge of a danger zone: enough red to separate the destructive
+   * section from the page, not enough to read as an error that has already
+   * happened. Defined in every theme block, because a colour that exists in
+   * one of them renders as nothing in the other two.
+   */
+  --danger-border: oklch(0.82 0.09 25);
+
   /* Interactive emphasis outside a button: an unread dot, an inline link. */
   --accent: var(--color-brand-600);
 
@@ -78,6 +86,7 @@
 
     --danger-text: oklch(0.75 0.16 25);
     --warning-text: oklch(0.80 0.14 75);
+    --danger-border: oklch(0.40 0.12 25);
     --accent: var(--color-brand-400);
 
     --status-running: oklch(0.72 0.15 150);
@@ -102,6 +111,7 @@
 
   --danger-text: oklch(0.75 0.16 25);
   --warning-text: oklch(0.80 0.14 75);
+  --danger-border: oklch(0.40 0.12 25);
   --accent: var(--color-brand-400);
 
   --status-running: oklch(0.72 0.15 150);

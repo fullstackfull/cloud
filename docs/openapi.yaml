@@ -8918,7 +8918,134 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/auto-renew":
+    put:
+      operationId: "api_v1_domains_auto_renew_update"
+      tags:
+        - "Domains"
+      summary: "Turn auto-renew on or off"
+      description: "Whether this platform raises the next invoice before the name lapses. It is not the registrar's own flag: renewal here is invoice-first, and a second renewal authority at the registrar would mean two systems that can each decide to renew. Turning it off does not cancel the name or shorten the term already paid for."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                auto_renew:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/domains/{domain}/contacts":
+    get:
+      operationId: "api_v1_domains_contacts_show"
+      tags:
+        - "Domains"
+      summary: "The registrant on record"
+      description: "The account's own registrant, read back so a correction does not have to be retyped from memory. Every field is personal data: this needs `service.manage`, not `service.view`, and publishes only the registrant role and only the fields the update accepts."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainContactResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
     put:
       operationId: "api_v1_domains_contacts_update"
       tags:
@@ -14819,6 +14946,69 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/templates":
+    get:
+      operationId: "api_v1_vps_templates"
+      tags:
+        - "Cloud VPS"
+      summary: "Operating systems this machine can be rebuilt with"
+      description: "Exactly the set the reinstall endpoint will accept for this machine: active, staged at a provider, and either fleet-wide or on the hardware this machine runs on. A client that offered anything else would be offering a rebuild the next request refuses. Not paginated — a cluster carries a handful of images."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/InstallableTemplate"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/wallet":
     get:
       operationId: "api_v1_wallet_show"
@@ -17845,6 +18035,52 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DomainAuthorisationCode"
+    DomainContact:
+      type: "object"
+      additionalProperties: false
+      description: "The registrant this platform gave the registry. Personal data: a real name, a home address and a telephone number, encrypted at rest, published only to the account that owns the name and only under `service.manage`. The registrar's own handle for the contact stays behind."
+      properties:
+        role:
+          type: "string"
+          description: "Always `registrant`: the only role the update accepts and therefore the only one a customer can act on."
+        name:
+          type: "string"
+        organisation:
+          type:
+            - "string"
+            - "null"
+        email:
+          type: "string"
+        phone:
+          type: "string"
+        address_line_one:
+          type: "string"
+        address_line_two:
+          type:
+            - "string"
+            - "null"
+        city:
+          type: "string"
+        region:
+          type:
+            - "string"
+            - "null"
+        postal_code:
+          type:
+            - "string"
+            - "null"
+        country:
+          type: "string"
+          description: "ISO 3166-1 alpha-2."
+        updated_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DomainContactResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DomainContact"
     DomainOperation:
       type: "object"
       additionalProperties: false
@@ -18136,6 +18372,16 @@ components:
           type:
             - "string"
             - "null"
+        plan_name:
+          type:
+            - "string"
+            - "null"
+          description: "The catalogue plan the customer is billed for, in the language of the request. The slug beside it is the platform's join key and is not a product name."
+        panel_type:
+          type:
+            - "string"
+            - "null"
+          description: "`cpanel` or `directadmin`: which panel the customer signs into. Null where the platform will not name it — no node assigned yet, or a controlled fake — and a client then says \"hosting control panel\", which is true in every case. Nothing else about the node is published."
         disk_quota_mib:
           type:
             - "integer"
@@ -18323,6 +18569,27 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/InfrastructureOverview"
+    InstallableTemplate:
+      type: "object"
+      additionalProperties: false
+      description: "An operating system this machine may be rebuilt with. The cluster it is staged on, the hypervisor's handle for it and its supply-chain checksum are the platform's business and stay behind."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type: "string"
+          description: "In the language of the request."
+        os_family:
+          type: "string"
+        os_version:
+          type: "string"
+        architecture:
+          type: "string"
+        supports_ssh_keys:
+          type: "boolean"
+          description: "Whether the image can be configured on first boot. Without it the platform cannot install a key, so a form that collected one would be collecting something it intends to drop."
+        requires_licence:
+          type: "boolean"
     InvitationOffer:
       type: "object"
       additionalProperties: false
@@ -18848,7 +19115,17 @@ components:
           type:
             - "string"
             - "null"
-          description: "A portal path, not a URL, so it stays correct when the host changes."
+          description: "A portal path, not a URL, so it stays correct when the host changes. A collection path: the resource below is the precise destination where there is one."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "What this notification is about, as `{kind, id}` — resolved from the notification's stored subject, never inferred from its text. `kind` is a customer-facing family (`vps`, `dedicated`, `hosting`, `wordpress`, `invoice`), and the client owns the route it maps to. Null where the subject has no page of its own."
+        kind:
+          type:
+            - "string"
+            - "null"
         read_at:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
@@ -20391,6 +20668,11 @@ components:
           type:
             - "string"
             - "null"
+        identity:
+          type:
+            - "string"
+            - "null"
+          description: "The name the customer knows this by — a hostname, a primary domain, a serial. The label beside it comes from the catalogue and is the same string for everyone who bought the plan. Null while the service is still being created."
         state:
           type:
             - "string"

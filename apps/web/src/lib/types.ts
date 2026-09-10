@@ -314,6 +314,14 @@ export interface Service {
   id: string
   kind: 'vps' | 'dedicated' | 'shared_hosting'
   label: string | null
+  /**
+   * The name the customer knows this by — a hostname, a primary domain, a
+   * serial. The label beside it comes from the catalogue and is the same
+   * string for everyone who bought the plan, which is why two servers on one
+   * plan used to be two identical rows. Null while the service is being
+   * created.
+   */
+  identity: string | null
   state: string
   is_usable: boolean
   resources: Record<string, unknown>
@@ -385,7 +393,14 @@ export interface AppNotification {
   title: string
   body: string
   is_failure: boolean
+  /** A collection path. The resource below is the precise destination. */
   link: string | null
+  /**
+   * What this notification is about, resolved by the API from the stored
+   * subject — never guessed from the text. The portal owns the route each
+   * kind maps to.
+   */
+  resource: { kind: string; id: string } | null
   read_at: string | null
   created_at: string
 }
@@ -545,6 +560,8 @@ export interface DedicatedServer {
  */
 export interface HostingPackage {
   slug: string
+  /** The catalogue plan, in the reader's language. The slug is a join key. */
+  plan_name: string | null
   disk_quota_mib: number | null
   bandwidth_quota_mib: number | null
   max_addon_domains: number | null
@@ -560,8 +577,66 @@ export interface HostingAccount {
   primary_domain: string | null
   status: string
   package: HostingPackage | null
+  /**
+   * `cpanel` or `directadmin`: which panel the customer is about to sign
+   * into. Null where the platform will not name it — no node yet, or a
+   * controlled fake — and the screen then says "hosting control panel",
+   * which is true in every case.
+   */
+  panel_type: string | null
   disk_quota_mib: number | null
   bandwidth_quota_mib: number | null
+}
+
+/**
+ * A reading of what an account is using, and when it was taken.
+ *
+ * Never a live figure: the panel is asked on its own schedule, so the
+ * timestamp is part of the fact. `null` measures mean the platform has not
+ * been told, which is not the same as zero.
+ */
+export interface HostingUsage {
+  account_id: string
+  username: string
+  disk: HostingUsageMeasure
+  bandwidth: HostingUsageMeasure
+  measured_at: string | null
+}
+
+export interface HostingUsageMeasure {
+  used_mib: number | null
+  quota_mib: number | null
+  unlimited: boolean
+  used_percent: number | null
+}
+
+/** The freshness contract that comes with a usage reading. */
+export interface HostingUsageMeta {
+  measured_at: string | null
+  age_seconds: number | null
+  never_measured: boolean
+  stale: boolean
+  stale_after_seconds: number
+  source: string
+}
+
+/**
+ * An operating system a machine may be rebuilt with.
+ *
+ * The list comes from the platform's own staged images for that machine, not
+ * from a list of distributions written into the portal: a frontend that
+ * offered Ubuntu because Ubuntu is popular would be offering a rebuild the
+ * API refuses.
+ */
+export interface InstallableTemplate {
+  id: string
+  name: string
+  os_family: string
+  os_version: string
+  architecture: string
+  /** Whether a public key can be installed on first boot. */
+  supports_ssh_keys: boolean
+  requires_licence: boolean
 }
 
 export interface WalletBalance {
@@ -874,6 +949,47 @@ export interface WordPressSiteOperation {
   started_at: string | null
   finished_at: string | null
   created_at: string
+}
+
+/**
+ * The registrant on record for a name.
+ *
+ * The customer's own personal data, read back so a correction does not have
+ * to be retyped from memory. Exactly the fields the update accepts.
+ */
+export interface DomainContact {
+  role: string
+  name: string
+  organisation: string | null
+  email: string
+  phone: string
+  address_line_one: string
+  address_line_two: string | null
+  city: string
+  region: string | null
+  postal_code: string | null
+  country: string
+  updated_at: string
+}
+
+/**
+ * One thing that happened to one service, in customer-safe terms.
+ *
+ * The API maps the provisioning job's own state and failure class onto a
+ * customer vocabulary and withholds the attempt log, the provider and the
+ * internal error — see the events endpoint. There is no account-wide feed:
+ * that is a later wave's work, and inventing one here would mean inventing
+ * an endpoint.
+ */
+export interface ServiceEvent {
+  id: string
+  kind: string
+  state: string
+  is_settled: boolean
+  failure_reason: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
 }
 
 export interface DnsZone {

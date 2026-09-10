@@ -1,17 +1,26 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, NavLink, Outlet, useNavigate } from 'react-router'
+import { Link, Outlet, useNavigate } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { LocaleSwitcher } from '@/components/LocaleSwitcher'
 import { useCurrentUser, useLogout } from '@/features/auth/useAuth'
 import { useIsOperator } from '@/features/admin/useIsOperator'
-import { cn } from '@/lib/cn'
 
 import { MobileNavigation } from './MobileNavigation'
-import { CONTROL_CENTER_NAV, OPERATOR_NAV, PRIMARY_NAV, SECONDARY_NAV, type NavItem } from './navigation'
+import { Sidebar } from './Sidebar'
 
+/**
+ * The signed-in shell: a navigation column beside the page.
+ *
+ * Two things decide the arrangement. Below 1024px there is no room for a
+ * column, so the navigation is a drawer and a slim bar carries the way into
+ * it. At 1024px and above the column is always there, and the bar is gone —
+ * with the column holding the language switch and sign-out, a bar would only
+ * repeat them, and two "Sign out" buttons on one screen is the kind of
+ * duplicate the audit found in the top bar.
+ */
 export function AppLayout() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -26,129 +35,89 @@ export function AppLayout() {
   }
 
   return (
-    <div className="min-h-dvh bg-[var(--surface)]">
-      <header className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
-          <span className="font-semibold text-[var(--text-primary)]">{t('common.appName')}</span>
+    <div className="min-h-dvh bg-[var(--surface)] lg:flex">
+      <Sidebar
+        isOperator={isOperator}
+        signingOut={logout.isPending}
+        onSignOut={() => void signOut()}
+      />
 
-          <nav className="hidden flex-1 items-center gap-1 sm:flex" aria-label={t('nav.primary')}>
-            {PRIMARY_NAV.map((item) => (
-              <NavItemLink key={item.to} item={item} />
-            ))}
+      {/* `min-w-0`, or a wide table inside a flex child stretches the shell. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] lg:hidden">
+          <div className="flex items-center gap-4 px-4 py-3 sm:px-6">
+            <Link to="/" className="font-semibold text-[var(--text-primary)]">
+              {t('common.appName')}
+            </Link>
 
-            <details className="relative ms-1">
-              <summary className="cursor-pointer list-none rounded-md px-3 py-2 text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
-                {t('nav.more')}
-              </summary>
-              <div className="absolute z-20 mt-1 flex w-56 flex-col gap-0.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-lg">
-                {SECONDARY_NAV.map((item) => (
-                  <NavItemLink key={item.to} item={item} />
-                ))}
+            <div className="ms-auto flex items-center gap-2">
+              <LocaleSwitcher className="hidden sm:flex" />
 
-                {isOperator ? (
-                  <>
-                    <hr className="my-1 border-[var(--border-subtle)]" />
-                    <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
-                      {t('admin.nav.section')}
-                    </p>
-                    {OPERATOR_NAV.map((item) => (
-                      <NavItemLink key={item.to} item={item} />
-                    ))}
-                    <hr className="my-1 border-[var(--border-subtle)]" />
-                    <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
-                      {t('admin.controlCenter.section')}
-                    </p>
-                    {CONTROL_CENTER_NAV.map((item) => (
-                      <NavItemLink key={item.to} item={item} />
-                    ))}
-                  </>
-                ) : null}
-              </div>
-            </details>
-          </nav>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void signOut()}
+                loading={logout.isPending}
+              >
+                {t('common.signOut')}
+              </Button>
 
-          <div className="ms-auto flex items-center gap-2 sm:ms-0">
-            <LocaleSwitcher className="hidden sm:flex" />
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void signOut()}
-              loading={logout.isPending}
-            >
-              {t('common.signOut')}
-            </Button>
-
-            <button
-              type="button"
-              className="rounded-md p-2 text-[var(--text-secondary)] sm:hidden"
-              aria-expanded={menuOpen}
-              aria-haspopup="dialog"
-              onClick={() => { setMenuOpen((open) => !open); }}
-            >
-              <span className="sr-only">{t('nav.menu')}</span>
-              <svg viewBox="0 0 20 20" fill="currentColor" className="size-5" aria-hidden="true">
-                <path d="M3 5h14v2H3V5zm0 4h14v2H3V9zm0 4h14v2H3v-2z" />
-              </svg>
-            </button>
+              <button
+                type="button"
+                className="rounded-md p-2 text-[var(--text-secondary)]"
+                aria-expanded={menuOpen}
+                aria-haspopup="dialog"
+                onClick={() => { setMenuOpen((open) => !open); }}
+              >
+                <span className="sr-only">{t('nav.menu')}</span>
+                <svg viewBox="0 0 20 20" fill="currentColor" className="size-5" aria-hidden="true">
+                  <path d="M3 5h14v2H3V5zm0 4h14v2H3V9zm0 4h14v2H3v-2z" />
+                </svg>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <MobileNavigation
-          open={menuOpen}
-          isOperator={isOperator}
-          signingOut={logout.isPending}
-          onClose={() => { setMenuOpen(false); }}
-          onSignOut={() => void signOut()}
-        />
-      </header>
+          <MobileNavigation
+            open={menuOpen}
+            isOperator={isOperator}
+            signingOut={logout.isPending}
+            onClose={() => { setMenuOpen(false); }}
+            onSignOut={() => void signOut()}
+          />
+        </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        {user?.email_verified === false ? (
-          <div className="mb-6">
-            <Alert tone="warning" title={t('account.verifyEmailTitle')}>
-              <span className="flex flex-col items-start gap-2">
-                <span>{t('account.verifyEmailBody')}</span>
+        {/*
+          Wider than the 72rem the audit measured 200px of dead space beside at
+          1440. With the column taking 16rem, 80rem of content fills a 1440
+          screen and a data-heavy table finally has room; wider screens keep a
+          gutter, because a line of prose 1900px long is not a line anyone
+          reads.
+        */}
+        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+          {user?.email_verified === false ? (
+            <div className="mb-6">
+              <Alert tone="warning" title={t('account.verifyEmailTitle')}>
+                <span className="flex flex-col items-start gap-2">
+                  <span>{t('account.verifyEmailBody')}</span>
 
-                {/*
-                  A way out of the banner, not just a statement of the
-                  problem. Every screen that spends money refuses an
-                  unverified account, and the verification page is where the
-                  resend button lives — so the banner links to it rather than
-                  leaving the customer to find it.
-                */}
-                <Link to="/verify-email" className="font-medium underline">
-                  {t('account.verifyEmailAction')}
-                </Link>
-              </span>
-            </Alert>
-          </div>
-        ) : null}
+                  {/*
+                    A way out of the banner, not just a statement of the
+                    problem. Every screen that spends money refuses an
+                    unverified account, and the verification page is where the
+                    resend button lives — so the banner links to it rather than
+                    leaving the customer to find it.
+                  */}
+                  <Link to="/verify-email" className="font-medium underline">
+                    {t('account.verifyEmailAction')}
+                  </Link>
+                </span>
+              </Alert>
+            </div>
+          ) : null}
 
-        <Outlet />
-      </main>
+          <Outlet />
+        </main>
+      </div>
     </div>
-  )
-}
-
-function NavItemLink({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
-  const { t } = useTranslation()
-
-  return (
-    <NavLink
-      to={item.to}
-      end={item.end ?? item.to === '/'}
-      onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          'rounded-md px-3 py-2 text-sm font-medium transition-colors',
-          isActive
-            ? 'bg-[var(--surface-sunken)] text-[var(--text-primary)]'
-            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-        )
-      }
-    >
-      {t(item.labelKey)}
-    </NavLink>
   )
 }

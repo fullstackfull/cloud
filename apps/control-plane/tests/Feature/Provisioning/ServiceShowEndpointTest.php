@@ -174,7 +174,11 @@ final class ServiceShowEndpointTest extends ServiceApiTestCase
         // The whole key set, so that the working columns the scoped query hangs
         // on the model cannot arrive under a name this list did not predict.
         $this->assertSame([
-            'id', 'kind', 'label', 'state', 'is_usable', 'resources',
+            // `identity` arrived in Wave 3: the name the customer knows this
+            // by, so a resource page can be titled with the hostname rather
+            // than with a catalogue label shared by every customer on the
+            // plan. A resource name, not an operational fact.
+            'id', 'kind', 'label', 'identity', 'state', 'is_usable', 'resources',
             'plan_id', 'order_id', 'order_item_id', 'subscription_id',
             'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
             'terminated_at', 'created_at',

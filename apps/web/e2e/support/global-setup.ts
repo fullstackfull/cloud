@@ -5,6 +5,7 @@ import path from 'node:path'
 import {
   FAKE_COMPUTE_STATE_PATH,
   FAKE_PAYMENTS_STATE_PATH,
+  FAKE_REGISTRAR_STATE_PATH,
   MAIL_OUTBOX_PATH,
 } from '../../playwright.config'
 
@@ -40,6 +41,13 @@ export default function globalSetup(): void {
   rmSync(fleet, { force: true })
 
   /*
+   * And the registrar's portfolio, for the same reason: a name a previous run
+   * transferred away or renewed must not decide what this run finds.
+   */
+  const registrar = process.env.DOMAINS_FAKE_STATE_PATH ?? FAKE_REGISTRAR_STATE_PATH
+  rmSync(registrar, { force: true })
+
+  /*
    * Last run's mail and last run's payment decisions, gone.
    *
    * Both are files the suite reads: a leftover verification link from the
@@ -54,7 +62,13 @@ export default function globalSetup(): void {
     execFileSync('php', ['artisan', ...args], {
       cwd: controlPlane,
       stdio: 'inherit',
-      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: database, COMPUTE_FAKE_STATE_PATH: fleet },
+      env: {
+        ...process.env,
+        APP_ENV: 'local',
+        DB_DATABASE: database,
+        COMPUTE_FAKE_STATE_PATH: fleet,
+        DOMAINS_FAKE_STATE_PATH: registrar,
+      },
     })
   }
 

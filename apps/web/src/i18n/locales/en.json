@@ -22,7 +22,8 @@
     "pagination": "Pagination",
     "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total",
     "remove": "Remove",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "breadcrumbs": "You are here"
   },
   "nav": {
     "apiKeys": "API Keys",
@@ -36,7 +37,6 @@
     "invoices": "Invoices",
     "ips": "IP Addresses",
     "monitoring": "Monitoring",
-    "more": "More",
     "notifications": "Notifications",
     "orders": "Orders",
     "paymentMethods": "Payment Methods",
@@ -52,7 +52,14 @@
     "wallet": "Wallet & Credits",
     "wordpress": "WordPress",
     "menu": "Menu",
-    "payments": "Payments"
+    "payments": "Payments",
+    "allServices": "All Services",
+    "groups": {
+      "buy": "Buy",
+      "services": "Services",
+      "billing": "Billing",
+      "account": "Account"
+    }
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -1941,5 +1948,11 @@
     "approve": "Approve the payment",
     "decline": "Decline the payment",
     "settlementNote": "Approving here makes the provider tell the platform, server to server. The invoice is marked paid by that message and by nothing this page says."
+  },
+  "resource": {
+    "sections": "Sections",
+    "notAvailable": "Not available",
+    "dangerZone": "Danger zone",
+    "dangerZoneBody": "These actions change what is running or destroy what is on it. Each one asks you to confirm first."
   }
 }

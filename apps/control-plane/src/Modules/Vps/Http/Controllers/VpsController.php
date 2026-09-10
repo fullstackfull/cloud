@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Http\Controllers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -19,6 +20,7 @@ use Lynomia\Modules\Vps\Http\Requests\ListVirtualMachinesRequest;
 use Lynomia\Modules\Vps\Http\Requests\PowerActionRequest;
 use Lynomia\Modules\Vps\Http\Requests\ReinstallRequest;
 use Lynomia\Modules\Vps\Http\Resources\ConsoleSessionResource;
+use Lynomia\Modules\Vps\Http\Resources\InstallableTemplateResource;
 use Lynomia\Modules\Vps\Http\Resources\ProvisioningOperationResource;
 use Lynomia\Modules\Vps\Http\Resources\VirtualMachineResource;
 use Lynomia\Modules\Vps\Infrastructure\Queries\CustomerVirtualMachines;
@@ -139,6 +141,38 @@ final class VpsController
     }
 
     /**
+     * The operating systems this machine may be rebuilt with.
+     *
+     * `service.view`, not `service.manage`: reading the list changes nothing,
+     * and a member who may look at the account's servers may see what they
+     * could be rebuilt with. Requesting the rebuild is the managed action.
+     *
+     * The set is resolved by exactly the predicate the reinstall endpoint
+     * applies to a submitted `template_id` — active, staged at a provider, and
+     * either fleet-wide or on this machine's own cluster — because a list that
+     * was assembled by different rules would offer choices the next request
+     * refuses. It is deliberately not paginated: a cluster carries a handful
+     * of images, and a screen that has to page through operating systems is a
+     * screen nobody finishes.
+     */
+    public function templates(Request $request, string $vm): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.view');
+
+        $machine = $this->machine($vm);
+
+        $templates = $this->installableTemplates($machine)
+            ->orderBy('os_family')
+            ->orderByDesc('os_version')
+            ->get();
+
+        return response()->json([
+            'data' => InstallableTemplateResource::collection($templates),
+            'meta' => ['total' => $templates->count()],
+        ]);
+    }
+
+    /**
      * Start, stop, reboot or shut down.
      *
      * 202, not 200: the hypervisor has been asked, not obeyed. A machine takes
@@ -252,14 +286,28 @@ final class VpsController
         }
 
         /** @var VmTemplate $template */
-        $template = VmTemplate::query()
-            ->installable()
-            ->where(fn ($query) => $query
-                ->whereNull('cluster_id')
-                ->orWhere('cluster_id', $machine->cluster_id))
+        $template = $this->installableTemplates($machine)
             ->whereKey($templateId)
             ->firstOrFail();
 
         return $template;
+    }
+
+    /**
+     * Every image this machine could be built from.
+     *
+     * The one place the rule lives. `templates()` lists what this returns and
+     * `template()` resolves a submitted id inside it, so the offer and the
+     * acceptance cannot drift apart.
+     *
+     * @return Builder<VmTemplate>
+     */
+    private function installableTemplates(VirtualMachine $machine): Builder
+    {
+        return VmTemplate::query()
+            ->installable()
+            ->where(fn ($query) => $query
+                ->whereNull('cluster_id')
+                ->orWhere('cluster_id', $machine->cluster_id));
     }
 }

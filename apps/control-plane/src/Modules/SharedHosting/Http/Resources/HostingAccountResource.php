@@ -6,6 +6,7 @@ namespace Lynomia\Modules\SharedHosting\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 
 /**
@@ -34,6 +35,19 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  *  - **panel_package_name** — the name the *panel* knows the package by. It is
  *    what createacct is given, it is shared across every customer on that
  *    package, and the platform's own slug is what a client should join on.
+ *
+ * Two things ARE published from beyond this row, both deliberately:
+ *
+ *  - **package.plan_name** — the catalogue plan the customer is billed for,
+ *    in the language of the request. The slug is the platform's join key and
+ *    was the only name on the screen, which is how a customer came to be told
+ *    they had bought "hosting-starter".
+ *  - **panel_type** — which control panel they are about to sign into, and
+ *    nothing else about the node it runs on. A customer clicking "Open panel"
+ *    lands in cPanel or in DirectAdmin, and being told which one before they
+ *    leave is the difference between a product and a surprise. The fake panel
+ *    reports nothing at all: it exists for development and the browser suite,
+ *    and naming it would publish the shape of the deployment.
  *
  * `service_id` IS here: it is the acting customer's own service, it is how a
  * client joins this account to its invoices and its subscription, and it names
@@ -79,6 +93,7 @@ final class HostingAccountResource extends JsonResource
              */
             'package' => $package === null ? null : [
                 'slug' => $package->slug,
+                'plan_name' => $package->plan?->nameFor(app()->getLocale()),
                 'disk_quota_mib' => $package->disk_quota_mib,
                 'bandwidth_quota_mib' => $package->bandwidth_quota_mib,
                 'max_addon_domains' => $package->max_addon_domains,
@@ -97,6 +112,14 @@ final class HostingAccountResource extends JsonResource
                 'status' => $account->ssl_status?->value,
                 'expires_at' => $account->ssl_expires_at?->toIso8601String(),
             ],
+
+            /*
+             * The panel the customer signs into, named as the product it is.
+             * Null where the platform will not name it — an account with no
+             * node yet, or a node running the controlled fake — and a screen
+             * then says "hosting control panel", which is true in every case.
+             */
+            'panel_type' => $this->panelType($account),
 
             'suspended_at' => $account->suspended_at?->toIso8601String(),
 
@@ -118,5 +141,21 @@ final class HostingAccountResource extends JsonResource
             'terminated_at' => $account->terminated_at?->toIso8601String(),
             'created_at' => $account->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * The control panel, or null where it must not be named.
+     *
+     * Read from the node the account sits on — the one fact about that node
+     * the customer is entitled to, because they are the one who signs into it.
+     * Nothing else about the node crosses this boundary.
+     */
+    private function panelType(HostingAccount $account): ?string
+    {
+        return match ($account->node?->panel) {
+            HostingPanel::Cpanel => HostingPanel::Cpanel->value,
+            HostingPanel::DirectAdmin => HostingPanel::DirectAdmin->value,
+            default => null,
+        };
     }
 }

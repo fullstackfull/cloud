@@ -2,10 +2,8 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
-import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
-import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { LoadFailure } from '@/components/LoadFailure'
 import { MoneyText } from '@/components/MoneyText'
@@ -15,86 +13,30 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
-import { useCancelSubscription, useSubscriptions } from '@/lib/queries'
+import { useSubscriptions } from '@/lib/queries'
 import type { Subscription } from '@/lib/types'
-import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+
+import { CancelSubscriptionDialog, SubscriptionIdentity } from './CancelSubscriptionDialog'
 
 /**
- * A customer's subscriptions, and the two ways of ending one.
+ * A customer's subscriptions: what each one pays for, and the way out.
  *
- * Cancelling used to be a single click with no explanation. It is the act that
- * decides when somebody's data is destroyed, and a customer is entitled to
- * know both dates — the day the service stops and the day what is on it goes —
- * before they confirm rather than in an email afterwards.
+ * The row names the plan, the product and the service, because two monthly
+ * subscriptions at the same price were two identical rows and cancelling one
+ * of them was a guess with a production machine on the other side. Since
+ * Wave 3 the service is a link: the subscription is the commercial half of a
+ * thing that also has a home of its own.
  *
- * Ending immediately is offered inside the same dialogue rather than as a
- * second button, because the choice is between two forms of one decision. It
- * takes the subscription's own id typed back, which the server checks: it is
- * not a lookup, it is evidence that a person read the sentence about the
- * remainder of the period not being refunded.
+ * Ending one is CancelSubscriptionDialog's job, and the resource pages open
+ * the same dialogue.
  */
-/**
- * The one thing a customer needs to tell two subscriptions apart: the plan,
- * the product it belongs to, and the machine or domain it runs.
- *
- * Every part comes from the server. `identity` is null while a service is
- * still being created, and the screen says that rather than showing a
- * placeholder that looks like a hostname.
- */
-function SubscriptionIdentity({ subscription }: { subscription: Subscription }) {
-  const { t } = useTranslation()
-
-  const services = subscription.services ?? []
-  const planName = subscription.plan?.name ?? null
-  const productName = subscription.product?.name ?? null
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="font-medium text-[var(--text-primary)]">
-        {planName ?? t('subscriptions.unnamedPlan')}
-      </span>
-
-      {productName !== null ? (
-        <span className="text-xs text-[var(--text-muted)]">{productName}</span>
-      ) : null}
-
-      {services.length === 0 ? (
-        <span className="text-xs text-[var(--text-muted)]">{t('subscriptions.noService')}</span>
-      ) : (
-        services.map((service) => (
-          <span key={service.id} className="text-xs text-[var(--text-secondary)]">
-            {service.identity === null ? (
-              t('subscriptions.serviceBeingCreated')
-            ) : (
-              <span className="technical" dir="ltr">
-                {service.identity}
-              </span>
-            )}
-          </span>
-        ))
-      )}
-    </div>
-  )
-}
-
 export function SubscriptionsPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const describeError = useApiErrorMessage()
   const [page, setPage] = useState(1)
   const { data, isPending, error: readError } = useSubscriptions(page)
-  const cancel = useCancelSubscription()
 
   const [ending, setEnding] = useState<Subscription | null>(null)
-  const [immediately, setImmediately] = useState(false)
-
-  const cancelFailure = describeError(cancel.error)
-
-  function close() {
-    setEnding(null)
-    setImmediately(false)
-    cancel.reset()
-  }
 
   const columns: Array<Column<Subscription>> = [
     {
@@ -195,100 +137,14 @@ export function SubscriptionsPage() {
 
       {/*
         * Mounted only while open, so a closed dialogue's confirm button is not
-        * a second "cancel subscription" control sitting in the document.
+        * a second "cancel subscription" control sitting in the document. The
+        * dialogue itself lives beside the resource pages that also offer it —
+        * one implementation of the act that destroys somebody's data.
         */}
       {ending === null ? null : (
-        <ConfirmDialog
-          open
-          title={t('subscriptions.cancelTitle')}
-          body={
-            <div className="flex flex-col gap-2">
-              {/*
-                * Which subscription this is, spelled out inside the dialogue.
-                * A confirmation that says only "cancel this subscription" is
-                * a confirmation of nothing in particular.
-                */}
-              <div className="rounded-lg border border-[var(--border-subtle)] p-3">
-                <SubscriptionIdentity subscription={ending} />
-              </div>
-
-              <p>
-                {immediately
-                  ? t('subscriptions.cancelNowWarning')
-                  : t('subscriptions.cancelWarning', {
-                      date:
-                        ending.current_period_end === null
-                          ? '—'
-                          : formatDate(ending.current_period_end, locale),
-                    })}
-              </p>
-
-              {/* The second date, which is the one customers ring up about. */}
-              <p>
-                {t('subscriptions.dataWarning', { days: ending.data_retention_days ?? 0 })}
-              </p>
-
-              <label className="mt-1 flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={immediately}
-                  onChange={(event) => { setImmediately(event.target.checked) }}
-                />
-                {t('subscriptions.endNowOption', {
-                  date:
-                    ending.current_period_end === null
-                      ? '—'
-                      : formatDate(ending.current_period_end, locale),
-                })}
-              </label>
-
-              {immediately ? (
-                <p className="technical text-xs break-all select-all" dir="ltr">
-                  {ending.id}
-                </p>
-              ) : null}
-            </div>
-          }
-          /*
-           * Spread rather than passed as undefined: under
-           * exactOptionalPropertyTypes an optional prop must be absent, and
-           * the distinction is the whole guard here — a ConfirmDialog with no
-           * requiredPhrase confirms on one click.
-           */
-          {...(immediately
-            ? {
-                requiredPhrase: ending.id,
-                requiredPhraseLabel: t('subscriptions.cancelConfirmLabel'),
-              }
-            : {})}
-          /*
-           * Never the word "Cancel". The dialogue's own dismiss button says
-           * that, and in a dialogue it means "do not do this" — two buttons
-           * reading Cancel, one of which ends the customer's service, is the
-           * kind of thing somebody clicks once and remembers for years.
-           */
-          confirmLabel={
-            immediately ? t('subscriptions.endNowConfirm') : t('subscriptions.confirmEnd')
-          }
-          loading={cancel.isPending}
-          {...(cancelFailure === null ? {} : { error: cancelFailure.message })}
-          onCancel={close}
-          onConfirm={(confirmation) => {
-            cancel.mutate(
-              { id: ending.id, immediately, ...(immediately ? { confirmation } : {}) },
-              { onSuccess: close },
-            )
-          }}
-        />
+        <CancelSubscriptionDialog subscription={ending} onClose={() => { setEnding(null); }} />
       )}
 
-      {cancelFailure === null || ending !== null ? null : (
-        <div className="mt-3">
-          <Alert tone="error" requestId={cancelFailure.requestId}>
-            {cancelFailure.message}
-          </Alert>
-        </div>
-      )}
     </>
   )
 }

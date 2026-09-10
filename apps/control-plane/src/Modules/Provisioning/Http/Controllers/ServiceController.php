@@ -13,6 +13,7 @@ use Lynomia\Modules\Provisioning\Application\Queries\CustomerServices;
 use Lynomia\Modules\Provisioning\Http\Requests\ListServicesRequest;
 use Lynomia\Modules\Provisioning\Http\Resources\ServiceResource;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 
 /**
  * The customer-facing service surface. Read-only, and deliberately so.
@@ -44,6 +45,7 @@ final class ServiceController
 
     public function __construct(
         private readonly ActingCustomer $actingCustomer,
+        private readonly ServiceIdentities $identities,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -77,6 +79,15 @@ final class ServiceController
             ->orderByDesc('services.id')
             ->paginate($request->perPage());
 
+        /*
+         * The hostnames, domains and serials for the whole page, in one query
+         * per kind. Without this the index is a list of catalogue labels, and
+         * two servers on the same plan are two identical rows — which is what
+         * the audit found and what made the index unusable as an ownership
+         * list.
+         */
+        $this->identities->attach($services->getCollection());
+
         return response()->json([
             'data' => ServiceResource::collection($services->getCollection()),
             'meta' => [
@@ -104,6 +115,8 @@ final class ServiceController
         $found = CustomerServices::of($this->actingCustomer->get())
             ->whereKey($service)
             ->firstOrFail();
+
+        $this->identities->attach([$found]);
 
         return (new ServiceResource($found))->response();
     }

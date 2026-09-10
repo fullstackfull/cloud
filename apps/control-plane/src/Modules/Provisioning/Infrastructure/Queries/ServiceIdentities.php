@@ -28,6 +28,20 @@ final class ServiceIdentities
     public const string ATTRIBUTE = 'identity';
 
     /**
+     * Where each kind of service is actually fulfilled: the table, the
+     * customer-facing family it belongs to, and the column holding the name a
+     * customer knows it by.
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    private const array TABLES = [
+        'virtual_machines' => ['vps', 'hostname'],
+        'hosting_accounts' => ['hosting', 'primary_domain'],
+        'dedicated_servers' => ['dedicated', 'serial'],
+        'wordpress_sites' => ['wordpress', 'domain'],
+    ];
+
+    /**
      * Resolves the identities for a set of services and hangs each one on its
      * own model, so a screen serialising a page of rows issues four queries in
      * total rather than four per row.
@@ -65,44 +79,76 @@ final class ServiceIdentities
      */
     public function for(array $serviceIds): array
     {
+        $identities = [];
+
+        foreach ($this->handlesFor($serviceIds) as $serviceId => $handle) {
+            if ($handle['identity'] !== null) {
+                $identities[$serviceId] = $handle['identity'];
+            }
+        }
+
+        return $identities;
+    }
+
+    /**
+     * The concrete resource behind each service: which family it belongs to,
+     * its own id, and the name a customer knows it by.
+     *
+     * The id is what a link to a resource page needs. A notification about a
+     * service carries the service, and a customer clicking it wants the
+     * machine — so something has to turn one into the other, and doing it here
+     * keeps the knowledge of which table fulfils which kind in the one place
+     * that already had it.
+     *
+     * @param  list<string>  $serviceIds
+     * @return array<string, array{kind: string, id: string, identity: string|null}>
+     */
+    public function handlesFor(array $serviceIds): array
+    {
         $ids = array_values(array_unique(array_filter($serviceIds)));
 
         if ($ids === []) {
             return [];
         }
 
-        $identities = [];
+        $handles = [];
 
         /*
          * Read through the query builder rather than four models, because the
-         * only thing wanted from each table is one column and the models each
+         * only thing wanted from each table is two columns and the models each
          * drag a module's worth of casts and relations with them. Every table
          * here holds `service_id`.
+         *
+         * The kind is the customer-facing family — the word in the portal's
+         * own addresses — and not the fulfilling module's name.
          */
-        foreach ([
-            'virtual_machines' => 'hostname',
-            'hosting_accounts' => 'primary_domain',
-            'dedicated_servers' => 'serial',
-            'wordpress_sites' => 'domain',
-        ] as $table => $column) {
+        foreach (self::TABLES as $table => [$kind, $column]) {
             $rows = DB::table($table)
                 ->whereIn('service_id', $ids)
                 ->whereNotNull('service_id')
-                ->get(['service_id', $column]);
+                ->get(['id', 'service_id', $column]);
 
             foreach ($rows as $row) {
-                $value = $row->{$column};
                 $serviceId = (string) $row->service_id;
 
-                // First writer wins: a service belongs to exactly one resource,
-                // and a WordPress site sits on a hosting account whose own
-                // identity is already the better answer for the account.
-                if (is_string($value) && $value !== '' && ! isset($identities[$serviceId])) {
-                    $identities[$serviceId] = $value;
+                // First writer wins: a service belongs to exactly one
+                // resource, and a WordPress site sits on a hosting account
+                // whose own identity is already the better answer for the
+                // account.
+                if (isset($handles[$serviceId])) {
+                    continue;
                 }
+
+                $value = $row->{$column};
+
+                $handles[$serviceId] = [
+                    'kind' => $kind,
+                    'id' => (string) $row->id,
+                    'identity' => is_string($value) && $value !== '' ? $value : null,
+                ];
             }
         }
 
-        return $identities;
+        return $handles;
     }
 }

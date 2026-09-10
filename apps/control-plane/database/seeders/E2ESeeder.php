@@ -30,9 +30,16 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
+use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
+use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Infrastructure\Models\DnsRecord;
+use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
+use Lynomia\Modules\Domains\Domain\Enums\DomainContactRole;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainContact;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
+use Lynomia\Modules\Domains\Infrastructure\Providers\FakeDomainRegistrarProvider;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -236,6 +243,16 @@ class E2ESeeder extends Seeder
     /** A lapsed name in a namespace whose registry has published no policy. */
     private const string LOST_DOMAIN = 'e2e-lost.example';
 
+    /**
+     * A name the money account renews.
+     *
+     * Renewing raises an invoice, so it is not the shared account's name: the
+     * Wave 2 lesson was that a journey which spends money on a shared fixture
+     * breaks whatever reads that fixture next. Its expiry sits inside the
+     * renewal window so the screen has something to say about why.
+     */
+    public const string RENEWABLE_DOMAIN = 'e2e-renew.test';
+
     /** A site that works, one waiting on its customer, one waiting on a person. */
     private const string LIVE_SITE = 'e2e-live-site.test';
 
@@ -267,6 +284,7 @@ class E2ESeeder extends Seeder
         $this->workNobodyCanSettle($customer);
         $this->whatReconciliationFound($customer);
         $this->domains($customer);
+        $this->domainFixtures($customer);
         $this->wordpressSites($customer);
         $this->team($customer);
         $this->ticket($customer);
@@ -965,6 +983,137 @@ class E2ESeeder extends Seeder
      * has to say so — a spinner would leave them refreshing a page while
      * nothing happens, because nothing is going to until they act.
      */
+    /**
+     * What the domain and DNS screens need in order to be driven at all.
+     *
+     * Three gaps, each of which made a real control untestable:
+     *
+     * **The registrar had never heard of the seeded name.** e2e-held.test was
+     * written straight into the database, so every action that asks the
+     * registrar something — the transfer code, the lock, a renewal — came back
+     * "e2e-held.test is not held by this account". That is the fake refusing
+     * correctly; the fixture was the thing that was wrong. The name is
+     * registered in the fake's own portfolio here, which is the same file the
+     * API process reads.
+     *
+     * **There was no registrant.** The contacts screen has nothing to show and
+     * nothing to correct without one.
+     *
+     * **There was no zone behind the name.** The relation from a domain to its
+     * DNS zone is an explicit column, and with nothing in it the domain screen
+     * cannot show where the name is served from.
+     *
+     * The renewable name belongs to the money account rather than the shared
+     * one, because renewing raises an invoice: Wave 2 established that a
+     * journey which spends money on a shared fixture breaks whatever reads
+     * that fixture next.
+     */
+    private function domainFixtures(Customer $customer): void
+    {
+        $registrar = app(FakeDomainRegistrarProvider::class);
+
+        $held = Domain::query()->where('name', self::HELD_DOMAIN)->first();
+
+        if ($held instanceof Domain) {
+            $registrar->seedHolding(
+                name: $held->name,
+                expiresAt: CarbonImmutable::instance($held->expires_at ?? CarbonImmutable::now()->addMonths(6)),
+                nameservers: $held->nameservers ?? [],
+                locked: $held->transfer_locked,
+            );
+
+            DomainContact::query()->firstOrCreate(
+                ['domain_id' => $held->getKey(), 'role' => DomainContactRole::Registrant->value],
+                [
+                    'name' => 'E2E Registrant',
+                    'organisation' => 'Lynomia E2E',
+                    'email' => 'registrant@lynomia.local',
+                    'phone' => '+96522220000',
+                    'address_line_one' => 'Block 1, Street 1, Building 1',
+                    'city' => 'Kuwait City',
+                    'postal_code' => '13001',
+                    'country' => 'KW',
+                ],
+            );
+
+            $zone = DnsZone::query()->firstOrCreate(
+                ['name' => $held->name],
+                [
+                    'customer_id' => $customer->getKey(),
+                    'state' => DnsState::Active,
+                    'provider' => 'fake',
+                    'provider_zone_id' => 'zone-e2e-held',
+                    'nameservers' => $held->nameservers ?? [],
+                    'last_synced_at' => now(),
+                ],
+            );
+
+            /*
+             * Two records, of two kinds. One is enough to render a table and
+             * not enough to prove an edit changed the right row.
+             */
+            DnsRecord::query()->firstOrCreate(
+                ['dns_zone_id' => $zone->getKey(), 'type' => DnsRecordType::A->value, 'name' => $held->name],
+                [
+                    // TEST-NET-3, reserved for documentation.
+                    'content' => '203.0.113.10',
+                    'ttl' => 3600,
+                    'state' => DnsState::Active,
+                    'provider_record_id' => 'record-e2e-a',
+                    'last_published_at' => now(),
+                ],
+            );
+
+            DnsRecord::query()->firstOrCreate(
+                ['dns_zone_id' => $zone->getKey(), 'type' => DnsRecordType::TXT->value, 'name' => $held->name],
+                [
+                    'content' => 'v=spf1 -all',
+                    'ttl' => 300,
+                    'state' => DnsState::Active,
+                    'provider_record_id' => 'record-e2e-txt',
+                    'last_published_at' => now(),
+                ],
+            );
+
+            if ($held->dns_zone_id === null) {
+                $held->dns_zone_id = (string) $zone->getKey();
+                $held->save();
+            }
+        }
+
+        $money = Customer::query()->where('billing_email', self::MONEY_EMAIL)->first();
+
+        if (! $money instanceof Customer) {
+            return;
+        }
+
+        $renewable = Domain::query()->updateOrCreate(
+            ['name' => self::RENEWABLE_DOMAIN],
+            [
+                'customer_id' => $money->getKey(),
+                'tld' => 'test',
+                'state' => DomainState::Active,
+                'provider' => 'fake',
+                'provider_reference' => 'fake-e2e-renew',
+                'term_years' => 1,
+                'auto_renew' => true,
+                'transfer_locked' => true,
+                'nameservers' => ['ns1.lynomia.test', 'ns2.lynomia.test'],
+                'registered_at' => now()->subYear()->addDays(20),
+                // Inside the renewal lead time, so the screen has a reason to
+                // offer the renewal and something true to say about urgency.
+                'expires_at' => now()->addDays(20),
+            ],
+        );
+
+        $registrar->seedHolding(
+            name: $renewable->name,
+            expiresAt: CarbonImmutable::instance($renewable->expires_at ?? CarbonImmutable::now()->addDays(20)),
+            nameservers: $renewable->nameservers ?? [],
+            locked: true,
+        );
+    }
+
     private function wordpressSites(Customer $customer): void
     {
         $account = HostingAccount::query()->where('username', self::HOSTING_USERNAME)->first();

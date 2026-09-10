@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink } from 'react-router'
 
 import { Button } from '@/components/Button'
 import { LocaleSwitcher } from '@/components/LocaleSwitcher'
 import { cn } from '@/lib/cn'
 
-import { CONTROL_CENTER_NAV, CUSTOMER_NAV, OPERATOR_NAV, type NavItem } from './navigation'
+import { NavGroups } from './NavGroups'
+import { CUSTOMER_NAV_GROUPS, OPERATOR_NAV_GROUPS } from './navigation'
 
 interface MobileNavigationProps {
   open: boolean
@@ -84,26 +84,17 @@ export function MobileNavigation({ open, isOperator, signingOut, onClose, onSign
       </div>
 
       <nav aria-label={t('nav.primary')} className="flex flex-1 flex-col gap-0.5 p-3">
-        {CUSTOMER_NAV.map((item) => (
-          <DrawerLink key={item.to} item={item} onNavigate={onClose} />
-        ))}
+        {/*
+          The same groups the sidebar renders, through the same renderer. The
+          drawer must never be the poorer navigation: that was the audit's
+          finding, and one model with one renderer is what stops it recurring.
+        */}
+        <NavGroups groups={CUSTOMER_NAV_GROUPS} onNavigate={onClose} size="touch" />
 
         {isOperator ? (
           <>
             <hr className="my-2 border-[var(--border-subtle)]" />
-            <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
-              {t('admin.nav.section')}
-            </p>
-            {OPERATOR_NAV.map((item) => (
-              <DrawerLink key={item.to} item={item} onNavigate={onClose} />
-            ))}
-            <hr className="my-2 border-[var(--border-subtle)]" />
-            <p className="px-3 py-1 text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase">
-              {t('admin.controlCenter.section')}
-            </p>
-            {CONTROL_CENTER_NAV.map((item) => (
-              <DrawerLink key={item.to} item={item} onNavigate={onClose} />
-            ))}
+            <NavGroups groups={OPERATOR_NAV_GROUPS} onNavigate={onClose} size="touch" />
           </>
         ) : null}
       </nav>
@@ -115,28 +106,5 @@ export function MobileNavigation({ open, isOperator, signingOut, onClose, onSign
         </Button>
       </div>
     </dialog>
-  )
-}
-
-function DrawerLink({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
-  const { t } = useTranslation()
-
-  return (
-    <NavLink
-      to={item.to}
-      end={item.end ?? item.to === '/'}
-      onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          'rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
-          isActive
-            ? 'bg-[var(--surface-sunken)] text-[var(--text-primary)]'
-            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-        )
-      }
-      aria-current={undefined}
-    >
-      {t(item.labelKey)}
-    </NavLink>
   )
 }

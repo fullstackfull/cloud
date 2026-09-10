@@ -1,16 +1,18 @@
 /**
  * The one list of where the portal can take a person.
  *
- * Both renderers — the desktop bar with its "More" menu and the phone drawer —
- * read from here. The audit found the drawer showing four of twenty-one
- * destinations because it had its own, shorter list; two lists that mean the
- * same thing will disagree again the day one of them is edited. There is now
- * one, and a unit test walks it to prove the drawer offers every entry.
+ * Both renderers — the desktop sidebar and the phone drawer — read from here.
+ * The audit found the drawer showing four of twenty-one destinations because it
+ * had its own, shorter list; two lists that mean the same thing will disagree
+ * again the day one of them is edited. There is one, and a unit test walks it
+ * to prove the drawer offers every entry the sidebar does.
  *
  * Only what is actually reachable is listed. The navigation is not a roadmap:
  * a link to a page that does not exist tells a customer the platform can do
  * something it cannot, and they will open a ticket about it. Entries appear
- * here as their routes are built.
+ * here as their routes are built — which is why there is no Activity group,
+ * although the target architecture has one: the account-wide feed it would
+ * point at does not exist yet.
  */
 export interface NavItem {
   to: string
@@ -19,43 +21,99 @@ export interface NavItem {
   end?: boolean
 }
 
-/** What a customer opens most; the desktop bar shows these in the open. */
-export const PRIMARY_NAV: readonly NavItem[] = [
-  { to: '/', labelKey: 'nav.dashboard' },
-  { to: '/catalogue', labelKey: 'nav.catalogue' },
-  { to: '/services', labelKey: 'nav.services' },
-  { to: '/invoices', labelKey: 'nav.invoices' },
+/**
+ * A heading and the destinations under it.
+ *
+ * `labelKey` is null for the groups that are a single destination — Dashboard,
+ * Support, Notifications. They are rendered as one link with no heading,
+ * because a heading over a list of one is furniture.
+ */
+export interface NavGroup {
+  id: string
+  labelKey: string | null
+  items: readonly NavItem[]
+}
+
+/**
+ * The customer's navigation, grouped as the platform is actually shaped:
+ * something to buy, the things you own, what they cost, how to get help, and
+ * your account.
+ *
+ * The order is the order a customer meets them. Services leads with "All
+ * services" because the answer to "what do I have?" should not require knowing
+ * which family a thing belongs to; the families follow for when they do.
+ */
+export const CUSTOMER_NAV_GROUPS: readonly NavGroup[] = [
+  {
+    id: 'home',
+    labelKey: null,
+    items: [{ to: '/', labelKey: 'nav.dashboard' }],
+  },
+  {
+    id: 'buy',
+    labelKey: 'nav.groups.buy',
+    items: [{ to: '/catalogue', labelKey: 'nav.catalogue' }],
+  },
+  {
+    id: 'services',
+    labelKey: 'nav.groups.services',
+    items: [
+      { to: '/services', labelKey: 'nav.allServices' },
+      { to: '/vps', labelKey: 'nav.vps' },
+      { to: '/dedicated', labelKey: 'nav.dedicated' },
+      { to: '/hosting', labelKey: 'nav.hosting' },
+      { to: '/wordpress', labelKey: 'nav.wordpress' },
+      { to: '/domains', labelKey: 'nav.domains' },
+      { to: '/dns', labelKey: 'nav.dns' },
+      { to: '/ips', labelKey: 'nav.ips' },
+      { to: '/backups', labelKey: 'nav.backups' },
+    ],
+  },
+  {
+    id: 'billing',
+    labelKey: 'nav.groups.billing',
+    items: [
+      { to: '/orders', labelKey: 'nav.orders' },
+      { to: '/invoices', labelKey: 'nav.invoices' },
+      // Payment history sits beside the wallet, because the two answer the
+      // same question from different sides: what has been paid, and what is
+      // left.
+      { to: '/payments', labelKey: 'nav.payments' },
+      { to: '/subscriptions', labelKey: 'nav.subscriptions' },
+      { to: '/wallet', labelKey: 'nav.wallet' },
+    ],
+  },
+  {
+    id: 'support',
+    labelKey: null,
+    items: [{ to: '/support', labelKey: 'nav.support' }],
+  },
+  {
+    id: 'notifications',
+    labelKey: null,
+    items: [{ to: '/notifications', labelKey: 'nav.notifications' }],
+  },
+  {
+    id: 'account',
+    labelKey: 'nav.groups.account',
+    items: [
+      { to: '/profile', labelKey: 'nav.profile' },
+      { to: '/settings/team', labelKey: 'nav.team' },
+      { to: '/security', labelKey: 'nav.security' },
+      { to: '/api-tokens', labelKey: 'nav.apiKeys' },
+    ],
+  },
 ]
 
 /**
- * Everything else a customer can reach. On the desktop these sit behind
- * "More"; on a phone they are simply the rest of the drawer.
+ * Every customer destination, flattened.
+ *
+ * Derived rather than written a second time: the groups are the source, and a
+ * renderer or a test that wants the plain list gets it from them.
  */
-export const SECONDARY_NAV: readonly NavItem[] = [
-  { to: '/orders', labelKey: 'nav.orders' },
-  { to: '/subscriptions', labelKey: 'nav.subscriptions' },
-  // Payment history sits beside the wallet, because the two answer the same
-  // question from different sides: what has been paid, and what is left.
-  { to: '/payments', labelKey: 'nav.payments' },
-  { to: '/wallet', labelKey: 'nav.wallet' },
-  { to: '/vps', labelKey: 'nav.vps' },
-  { to: '/backups', labelKey: 'nav.backups' },
-  { to: '/notifications', labelKey: 'nav.notifications' },
-  { to: '/dedicated', labelKey: 'nav.dedicated' },
-  { to: '/hosting', labelKey: 'nav.hosting' },
-  { to: '/ips', labelKey: 'nav.ips' },
-  { to: '/dns', labelKey: 'nav.dns' },
-  { to: '/domains', labelKey: 'nav.domains' },
-  { to: '/wordpress', labelKey: 'nav.wordpress' },
-  { to: '/api-tokens', labelKey: 'nav.apiKeys' },
-  { to: '/support', labelKey: 'nav.support' },
-  { to: '/settings/team', labelKey: 'nav.team' },
-  { to: '/profile', labelKey: 'nav.profile' },
-  { to: '/security', labelKey: 'nav.security' },
-]
-
-/** Every customer destination, in the order a person reads them. */
-export const CUSTOMER_NAV: readonly NavItem[] = [...PRIMARY_NAV, ...SECONDARY_NAV]
+export const CUSTOMER_NAV: readonly NavItem[] = CUSTOMER_NAV_GROUPS.flatMap(
+  (group) => [...group.items],
+)
 
 /**
  * Shown only to a login that holds at least one operator permission.
@@ -91,4 +149,21 @@ export const CONTROL_CENTER_NAV: readonly NavItem[] = [
   { to: '/admin/control-center/readiness', labelKey: 'admin.nav.readiness' },
   { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
   { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },
+]
+
+/**
+ * The operator areas, as groups, so both renderers lay them out the same way.
+ *
+ * The customer groups and these are separate exports rather than one list with
+ * a permission field: an operator's screens are a different product, and the
+ * audit's complaint about the old "More" menu was precisely that it ran the
+ * two together into one undifferentiated list of thirty-five links.
+ */
+export const OPERATOR_NAV_GROUPS: readonly NavGroup[] = [
+  { id: 'operator', labelKey: 'admin.nav.section', items: OPERATOR_NAV },
+  {
+    id: 'control-center',
+    labelKey: 'admin.controlCenter.section',
+    items: CONTROL_CENTER_NAV,
+  },
 ]
