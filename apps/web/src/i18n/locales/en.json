@@ -21,7 +21,8 @@
     "next": "Next",
     "pagination": "Pagination",
     "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total",
-    "remove": "Remove"
+    "remove": "Remove",
+    "dismiss": "Dismiss"
   },
   "nav": {
     "apiKeys": "API Keys",
@@ -50,7 +51,8 @@
     "vps": "Cloud VPS",
     "wallet": "Wallet & Credits",
     "wordpress": "WordPress",
-    "menu": "Menu"
+    "menu": "Menu",
+    "payments": "Payments"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -79,7 +81,14 @@
     "resetTitle": "Choose a new password",
     "resetSubmit": "Set new password",
     "resetDone": "Your password has been changed. You can sign in with it now.",
-    "resetLinkInvalid": "This reset link is missing its token. Request a new one."
+    "resetLinkInvalid": "This reset link is missing its token. Request a new one.",
+    "country": "Billing country",
+    "chooseCountry": "Choose a country",
+    "countryHint": "This decides the currency your invoices are issued in.",
+    "currency": "Billing currency",
+    "currencyAwaitingCountry": "Choose a country first.",
+    "currencyRecommended": "We bill customers in that country in {{currency}}. You can choose another currency we support.",
+    "currencyFallback": "We do not price in that country’s own currency, so we bill in {{currency}}. You can choose another currency we support."
   },
   "errors": {
     "auth.invalid_credentials": "These credentials do not match our records.",
@@ -270,7 +279,8 @@
         "body": "The request to change to {{currency}} is closed and nothing on the account changes. You can send a new request at any time.",
         "confirmLabel": "Withdraw request"
       }
-    }
+    },
+    "verifyEmailAction": "Confirm your email address"
   },
   "security": {
     "subtitle": "Second factor, password, and where your account is signed in.",
@@ -357,7 +367,16 @@
     "placeOrder": "Place order",
     "priceIsServerSide": "The price is resolved on the server from the plan you chose. Nothing on this page can change it.",
     "planCount_one": "{{count}} plan available",
-    "planCount_other": "{{count}} plans available"
+    "planCount_other": "{{count}} plans available",
+    "setupFee": "One-off setup",
+    "discount": "Discount",
+    "discountWithCode": "Discount ({{code}})",
+    "tax": "Tax",
+    "taxNamed": "Tax ({{name}})",
+    "dueNow": "Due now",
+    "thenPerPeriod": "Then {{period}}",
+    "renewalNote": "The renewal figure excludes the one-off setup fee and any discount that applies to this purchase only.",
+    "afterPayment": "Placing the order issues an invoice. Your service is set up once the payment is confirmed."
   },
   "billingPeriod": {
     "hourly": "hourly",
@@ -402,7 +421,17 @@
       "body": "The order and its unpaid invoice are cancelled and nothing is provisioned. Nothing has been charged. If you change your mind, place a new order.",
       "confirmLabel": "Cancel this order",
       "keep": "Keep order"
-    }
+    },
+    "whatHappensNext": "What happens next",
+    "chainInvoice": "Invoice:",
+    "chainInvoicePending": "Being issued",
+    "chainPayment": "Payment:",
+    "chainPaid": "Received",
+    "chainAwaitingPayment": "Not paid yet",
+    "chainService": "What you get:",
+    "chainServiceAfterPayment": "Set up once the payment is confirmed.",
+    "chainServicePreparing": "Being prepared",
+    "viewInvoice": "View the invoice"
   },
   "invoices": {
     "subtitle": "Issued invoices and what is still owed.",
@@ -419,7 +448,34 @@
     "creditApplied": "Applied to this invoice",
     "creditRemaining": "Still to pay",
     "noCreditToApply": "There is no credit in this invoice's currency to apply. Credit is never converted between currencies.",
-    "creditWillNotCoverAll": "Your credit does not cover the whole invoice. The rest stays payable by card."
+    "creditWillNotCoverAll": "Your credit does not cover the whole invoice. The rest stays payable by card.",
+    "view": "View",
+    "documentTitle": "Invoice",
+    "documentSubtitle": "What you bought, what it cost, and what has been paid.",
+    "documentFacts": "This invoice",
+    "addressedTo": "Addressed to",
+    "whatYouBought": "What you bought",
+    "noLines": "This invoice has no lines recorded.",
+    "noSnapshot": "No billing details were recorded on this invoice.",
+    "lineDescription": "Item",
+    "linePeriod": "Period",
+    "lineQuantity": "Quantity",
+    "lineUnit": "Unit price",
+    "lineTax": "Tax",
+    "lineTotal": "Total",
+    "subtotal": "Subtotal",
+    "discount": "Discount",
+    "tax": "Tax",
+    "amountPaid": "Paid",
+    "issuedAt": "Issued",
+    "paidAt": "Paid on",
+    "forOrder": "Order",
+    "viewOrder": "View the order",
+    "forSubscription": "Subscription",
+    "viewSubscription": "View subscriptions",
+    "print": "Print",
+    "backToInvoice": "Back to the invoice",
+    "taxId": "Tax number"
   },
   "subscriptions": {
     "subtitle": "What renews, and when.",
@@ -437,7 +493,11 @@
     "cancelConfirmLabel": "Type the subscription reference below to confirm",
     "confirmEnd": "End subscription",
     "endNowOption": "End it now instead of at {{date}}",
-    "endNowConfirm": "End it now"
+    "endNowConfirm": "End it now",
+    "what": "What it pays for",
+    "unnamedPlan": "Plan",
+    "noService": "Nothing running yet",
+    "serviceBeingCreated": "Being created"
   },
   "services": {
     "subtitle": "Everything running on your account.",
@@ -579,7 +639,21 @@
     "noMovement": "No credit has moved yet.",
     "none": "No wallet yet.",
     "howItFills": "Credit arrives when a payment exceeds what was owed, or when support adds it. You cannot top it up directly.",
-    "accountCurrency": "Your account currency."
+    "accountCurrency": "Your account currency.",
+    "ledger": "Credit history",
+    "ledgerBody": "Every movement of credit on this account, and the balance after it.",
+    "noEntries": "No credit has moved on this account yet.",
+    "entryWhen": "Date",
+    "entryKind": "Type",
+    "entryDescription": "Description",
+    "entryAmount": "Amount",
+    "entryBalanceAfter": "Balance after",
+    "entryInvoice": "Invoice",
+    "appliedToThisInvoice": "Credit applied to this invoice",
+    "direction": {
+      "credit": "added",
+      "debit": "spent"
+    }
   },
   "tokens": {
     "subtitle": "Credentials for the API, bound to this account.",
@@ -1787,5 +1861,85 @@
       "dependency": "Make the provider this one depends on ready first.",
       "notImplemented": "The product's software is not written yet. No setting moves this; it waits for a build."
     }
+  },
+  "payments": {
+    "subtitle": "Every payment on this account, including the ones that did not go through.",
+    "empty": "No payments have been recorded yet.",
+    "when": "Date",
+    "notYetProcessed": "Not settled yet",
+    "kind": "Type",
+    "method": "Method",
+    "amount": "Amount",
+    "status": "Status",
+    "reason": "Reason",
+    "invoice": "Invoice",
+    "viewInvoice": "View the invoice",
+    "onThisInvoice": "Payments on this invoice",
+    "onThisInvoiceBody": "Attempts that failed are kept here, so a declined card is not a silence.",
+    "noneOnInvoice": "No payment has been attempted on this invoice yet.",
+    "redirecting": "Taking you to the payment page.",
+    "confirmHereBody": "Your provider will confirm this payment without leaving the portal.",
+    "amountToConfirm": "Amount:",
+    "confirmPayment": "Confirm the payment",
+    "confirmedWithProvider": "The provider has confirmed the payment. We are recording it now.",
+    "takenByProvider": "The provider says it has taken this payment. The invoice is marked paid once the provider confirms it to us.",
+    "declined": "The payment was refused.",
+    "awaitingProvider": "We are checking this payment with the provider. Do not pay again yet.",
+    "returnTitle": "Your payment",
+    "returnRecorded": "What we have recorded for this payment:",
+    "returnUnknown": "We cannot find that payment on this account.",
+    "returnIsNotProof": "Coming back from the payment page does not settle an invoice on its own. The invoice is marked paid when the provider confirms the payment to us."
+  },
+  "paymentKind": {
+    "charge": "Payment",
+    "refund": "Refund",
+    "chargeback": "Chargeback",
+    "adjustment": "Adjustment"
+  },
+  "paymentProvider": {
+    "wallet": "Account credit",
+    "fake": "Test card",
+    "stripe": "Card",
+    "myfatoorah": "Card or KNET"
+  },
+  "paymentFailure": {
+    "card_declined": "The card was declined by the bank.",
+    "insufficient_funds": "There were not enough funds on the card.",
+    "expired_card": "The card has expired.",
+    "processing_error": "The provider could not process the card. Try again in a few minutes.",
+    "unknown": "The provider refused the payment without saying why."
+  },
+  "walletKind": {
+    "topup": "Top-up",
+    "refund": "Refund",
+    "payment": "Spent on an invoice",
+    "adjustment": "Adjustment",
+    "promotional": "Credit from us"
+  },
+  "verifyEmail": {
+    "title": "Confirm your email address",
+    "waiting": "Open the link we sent you to confirm your address. Ordering and billing stay closed until you do.",
+    "confirmed": "Your email address is confirmed. Everything on the account is open now.",
+    "alreadyConfirmed": "That address was already confirmed. Nothing more to do.",
+    "expired": "That link has expired. Ask for a new one below.",
+    "invalid": "That link is not valid for this address. Ask for a new one below.",
+    "sentTo": "We sent it to",
+    "resend": "Send the link again",
+    "resendIn": "Send again in {{seconds}}s",
+    "resent": "A new link is on its way.",
+    "checkSpam": "If it does not arrive, check your spam folder.",
+    "continue": "Continue to the portal",
+    "signIn": "Sign in"
+  },
+  "gateway": {
+    "title": "Test payment page",
+    "subtitle": "This stands in for a payment provider. No money moves.",
+    "authorisePayment": "Authorise this payment",
+    "notARealProvider": "This is a test gateway, not a real provider. It is refused in production.",
+    "amount": "Amount",
+    "reference": "Reference",
+    "approve": "Approve the payment",
+    "decline": "Decline the payment",
+    "settlementNote": "Approving here makes the provider tell the platform, server to server. The invoice is marked paid by that message and by nothing this page says."
   }
 }

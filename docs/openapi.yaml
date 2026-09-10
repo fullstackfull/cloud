@@ -18989,6 +18989,18 @@ components:
       type: "object"
       additionalProperties: false
       properties:
+        invoice_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        invoice_number:
+          type:
+            - "string"
+            - "null"
+        services:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OrderService"
         id:
           "$ref": "#/components/schemas/Ulid"
         number:
@@ -19178,6 +19190,26 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Order"
+    OrderService:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type:
+            - "string"
+            - "null"
+        identity:
+          type:
+            - "string"
+            - "null"
+        state:
+          type:
+            - "string"
+            - "null"
+        is_usable:
+          type: "boolean"
     PaginationMeta:
       type: "object"
       description: |-

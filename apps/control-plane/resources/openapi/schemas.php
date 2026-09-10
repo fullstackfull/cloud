@@ -1324,6 +1324,17 @@ return [
             'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'OrderService' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => ['string', 'null']],
+            'identity' => ['type' => ['string', 'null']],
+            'state' => ['type' => ['string', 'null']],
+            'is_usable' => ['type' => 'boolean'],
+        ],
+    ],
     'OrderItem' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -1348,6 +1359,14 @@ return [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
+            /*
+             * The chain a customer reads: this order produced that invoice,
+             * and these services now exist because it was paid. Present when
+             * one order is read rather than a page of them.
+             */
+            'invoice_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'invoice_number' => ['type' => ['string', 'null']],
+            'services' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/OrderService']],
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'number' => ['type' => ['string', 'null']],
             'status' => ['type' => ['string', 'null']],

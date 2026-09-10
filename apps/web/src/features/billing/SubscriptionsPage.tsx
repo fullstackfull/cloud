@@ -33,6 +33,50 @@ import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
  * not a lookup, it is evidence that a person read the sentence about the
  * remainder of the period not being refunded.
  */
+/**
+ * The one thing a customer needs to tell two subscriptions apart: the plan,
+ * the product it belongs to, and the machine or domain it runs.
+ *
+ * Every part comes from the server. `identity` is null while a service is
+ * still being created, and the screen says that rather than showing a
+ * placeholder that looks like a hostname.
+ */
+function SubscriptionIdentity({ subscription }: { subscription: Subscription }) {
+  const { t } = useTranslation()
+
+  const services = subscription.services ?? []
+  const planName = subscription.plan?.name ?? null
+  const productName = subscription.product?.name ?? null
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="font-medium text-[var(--text-primary)]">
+        {planName ?? t('subscriptions.unnamedPlan')}
+      </span>
+
+      {productName !== null ? (
+        <span className="text-xs text-[var(--text-muted)]">{productName}</span>
+      ) : null}
+
+      {services.length === 0 ? (
+        <span className="text-xs text-[var(--text-muted)]">{t('subscriptions.noService')}</span>
+      ) : (
+        services.map((service) => (
+          <span key={service.id} className="text-xs text-[var(--text-secondary)]">
+            {service.identity === null ? (
+              t('subscriptions.serviceBeingCreated')
+            ) : (
+              <span className="technical" dir="ltr">
+                {service.identity}
+              </span>
+            )}
+          </span>
+        ))
+      )}
+    </div>
+  )
+}
+
 export function SubscriptionsPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
@@ -53,6 +97,17 @@ export function SubscriptionsPage() {
   }
 
   const columns: Array<Column<Subscription>> = [
+    {
+      /*
+       * What the agreement is for, first, because it is what a customer looks
+       * for. Two monthly subscriptions at the same price used to be two
+       * identical rows, and cancelling one of them was a guess with a
+       * production machine on the other side.
+       */
+      key: 'what',
+      header: t('subscriptions.what'),
+      cell: (s) => <SubscriptionIdentity subscription={s} />,
+    },
     { key: 'status', header: t('subscriptions.status'), cell: (s) => <StatusBadge status={s.status} /> },
     {
       key: 'amount',
@@ -148,6 +203,15 @@ export function SubscriptionsPage() {
           title={t('subscriptions.cancelTitle')}
           body={
             <div className="flex flex-col gap-2">
+              {/*
+                * Which subscription this is, spelled out inside the dialogue.
+                * A confirmation that says only "cancel this subscription" is
+                * a confirmation of nothing in particular.
+                */}
+              <div className="rounded-lg border border-[var(--border-subtle)] p-3">
+                <SubscriptionIdentity subscription={ending} />
+              </div>
+
               <p>
                 {immediately
                   ? t('subscriptions.cancelNowWarning')

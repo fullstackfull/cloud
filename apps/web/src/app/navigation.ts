@@ -34,6 +34,9 @@ export const PRIMARY_NAV: readonly NavItem[] = [
 export const SECONDARY_NAV: readonly NavItem[] = [
   { to: '/orders', labelKey: 'nav.orders' },
   { to: '/subscriptions', labelKey: 'nav.subscriptions' },
+  // Payment history sits beside the wallet, because the two answer the same
+  // question from different sides: what has been paid, and what is left.
+  { to: '/payments', labelKey: 'nav.payments' },
   { to: '/wallet', labelKey: 'nav.wallet' },
   { to: '/vps', labelKey: 'nav.vps' },
   { to: '/backups', labelKey: 'nav.backups' },

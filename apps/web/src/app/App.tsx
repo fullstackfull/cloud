@@ -50,6 +50,11 @@ import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RegisterPage } from '@/features/auth/RegisterPage'
 import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage'
+import { VerifyEmailPage } from '@/features/auth/VerifyEmailPage'
+import { InvoiceDetailPage } from '@/features/billing/InvoiceDetailPage'
+import { InvoicePrintPage } from '@/features/billing/InvoicePrintPage'
+import { ControlledGatewayPage } from '@/features/payments/ControlledGatewayPage'
+import { PaymentsPage } from '@/features/payments/PaymentsPage'
 import { SecurityPage } from '@/features/security/SecurityPage'
 import { applyLocale, isSupportedLocale } from '@/i18n'
 import { ApiError } from '@/lib/api'
@@ -90,6 +95,18 @@ export function App() {
       <LocaleBoundary>
         <BrowserRouter>
           <Routes>
+            {/*
+              Where a verification link lands.
+              
+              Not behind RequireGuest and not behind RequireAuth: the customer
+              may have clicked the link in a different browser from the one
+              they registered in, and they may already be signed in. The page
+              itself decides what to offer.
+            */}
+            <Route element={<PublicLayout />}>
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
+            </Route>
+
             <Route element={<RequireGuest />}>
               <Route element={<PublicLayout />}>
                 <Route path="/sign-in" element={<LoginPage />} />
@@ -97,6 +114,16 @@ export function App() {
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                 <Route path="/reset-password" element={<ResetPasswordPage />} />
               </Route>
+            </Route>
+
+            {/*
+              The printable invoice, authenticated but without the application
+              chrome: a printed page should carry the document and not the
+              navigation. It is a sibling of the layout rather than a child of
+              it for exactly that reason.
+            */}
+            <Route element={<RequireAuth />}>
+              <Route path="/invoices/:id/print" element={<InvoicePrintPage />} />
             </Route>
 
             <Route element={<RequireAuth />}>
@@ -109,9 +136,22 @@ export function App() {
                 <Route path="/orders" element={<OrdersPage />} />
                 <Route path="/orders/:id" element={<OrderDetailPage />} />
                 <Route path="/invoices" element={<InvoicesPage />} />
+                <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+                <Route path="/payments" element={<PaymentsPage />} />
                 <Route path="/subscriptions" element={<SubscriptionsPage />} />
                 <Route path="/subscriptions/:id/plan" element={<PlanChangePage />} />
                 <Route path="/wallet" element={<WalletPage />} />
+
+                {/*
+                  The fake provider's payment page. The endpoints behind it are
+                  refused in production and whenever a real provider is
+                  configured, so in a real deployment this route renders a
+                  refusal rather than a way to authorise anything.
+                */}
+                <Route
+                  path="/fake-gateway/authorise/:reference"
+                  element={<ControlledGatewayPage />}
+                />
 
                 <Route path="/services" element={<ServicesPage />} />
                 <Route path="/vps" element={<VpsPage />} />

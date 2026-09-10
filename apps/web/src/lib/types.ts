@@ -68,6 +68,15 @@ export interface OrderItem {
   total: Money
 }
 
+/** A service an order brought into being, once the order was paid. */
+export interface OrderService {
+  id: string
+  kind: string
+  identity: string | null
+  state: string
+  is_usable: boolean
+}
+
 export interface Order {
   id: string
   number: string
@@ -80,8 +89,16 @@ export interface Order {
   is_paid: boolean
   is_cancellable: boolean
   coupon_code: string | null
-  items_count: number
+  items_count?: number
   items?: OrderItem[]
+  /*
+   * The chain, from the server: the invoice this order produced and the
+   * services that exist because it was paid. Present when one order is read
+   * rather than a page of them, so both are optional.
+   */
+  invoice_id?: string | null
+  invoice_number?: string | null
+  services?: OrderService[]
   placed_at: string | null
   paid_at: string | null
   cancelled_at: string | null

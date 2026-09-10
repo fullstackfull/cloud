@@ -20,6 +20,7 @@ use Lynomia\Modules\Orders\Http\Resources\OrderQuoteResource;
 use Lynomia\Modules\Orders\Http\Resources\OrderResource;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Queries\CustomerOrders;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 use Lynomia\Modules\Shared\Domain\Exceptions\AccountPermissionRequiredException;
 
 /**
@@ -51,6 +52,7 @@ final class OrderController
         private readonly PlaceOrder $placeOrder,
         private readonly CancelOrder $cancelOrder,
         private readonly OrderPricing $pricing,
+        private readonly ServiceIdentities $identities,
     ) {}
 
     /**
@@ -153,9 +155,14 @@ final class OrderController
         $this->authoriseWithinAccount($request, 'billing.view');
 
         $found = CustomerOrders::of($this->acting->get())
-            ->with(['items', 'coupon'])
+            // The invoice and the services as well, so one screen can show the
+            // whole chain: what was ordered, what it was invoiced as, and what
+            // is now running because of it.
+            ->with(['items', 'coupon', 'invoice', 'services'])
             ->whereKey($order)
             ->firstOrFail();
+
+        $this->identities->attach($found->services);
 
         return (new OrderResource($found))->response();
     }

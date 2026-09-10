@@ -10,6 +10,7 @@ use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Orders\Application\Actions\CancelOrder;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 
 /**
  * What a customer may see of their own order.
@@ -72,6 +73,24 @@ final class OrderResource extends JsonResource
                 'items',
                 fn (): array => $this->items
                     ->map(fn (OrderItem $item): OrderItemResource => new OrderItemResource($item, $this->currency))
+                    ->all(),
+            ),
+
+            /*
+             * The chain, in the direction the customer reads it: this order
+             * produced that invoice, and once it was paid it produced these
+             * services. Published as ids and identities rather than left to
+             * the screen to match up by amount and date — an inferred
+             * relationship is a wrong relationship waiting to happen.
+             */
+            'invoice_id' => $this->whenLoaded('invoice', fn (): ?string => $this->invoice?->getKey()),
+            'invoice_number' => $this->whenLoaded('invoice', fn (): ?string => $this->invoice?->number),
+
+            'services' => $this->whenLoaded(
+                'services',
+                fn (): array => $this->services
+                    ->map(fn (Service $service): OrderServiceResource => new OrderServiceResource($service))
+                    ->values()
                     ->all(),
             ),
 

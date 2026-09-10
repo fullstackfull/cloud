@@ -5,7 +5,11 @@ import { Link } from 'react-router'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Field } from '@/components/Field'
+import { SelectField } from '@/components/SelectField'
+import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { api } from '@/lib/api'
+import { countryName, sortByCountryName } from '@/lib/countryNames'
+import { useRegistrationOptions } from '@/lib/queries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 import { useMutation } from '@tanstack/react-query'
 
@@ -16,6 +20,8 @@ interface RegistrationPayload {
   password_confirmation: string
   account_type: 'individual' | 'organization'
   company_name?: string
+  country: string
+  currency: string
   accepts_terms: boolean
 }
 
@@ -30,6 +36,26 @@ export function RegisterPage() {
   const [accountType, setAccountType] = useState<'individual' | 'organization'>('individual')
   const [companyName, setCompanyName] = useState('')
   const [acceptsTerms, setAcceptsTerms] = useState(false)
+
+  /*
+   * The country decides the currency, and both come from the server.
+   *
+   * The portal holds no country-to-currency table of its own: it asks, shows
+   * the recommendation before anything is submitted, and lets the customer
+   * override it with any currency the platform bills in. Registration used to
+   * ask neither question and book every account in the platform's own
+   * currency, which a customer discovered on their first invoice.
+   */
+  const options = useRegistrationOptions()
+  const locale = useActiveLocale()
+
+  const [country, setCountry] = useState('')
+  const [currency, setCurrency] = useState<string | null>(null)
+
+  const countries = sortByCountryName(options.data?.countries ?? [], locale)
+  const chosen = countries.find((row) => row.code === country) ?? null
+  const recommended = chosen?.currency ?? null
+  const effectiveCurrency = currency ?? recommended ?? ''
 
   const register = useMutation({
     mutationFn: (payload: RegistrationPayload) => api.post<unknown>('/register', payload),
@@ -70,6 +96,11 @@ export function RegisterPage() {
           password_confirmation: confirmation,
           account_type: accountType,
           ...(accountType === 'organization' ? { company_name: companyName } : {}),
+          country,
+          // Whatever the screen is showing, which is the recommendation until
+          // the customer changes it. Never blank and never guessed here: the
+          // server refuses a currency it does not bill in.
+          currency: effectiveCurrency,
           accepts_terms: acceptsTerms,
         })
       }}
@@ -136,6 +167,46 @@ export function RegisterPage() {
           error={fieldErrors?.['company_name']?.[0]}
         />
       ) : null}
+
+      {/*
+        Asked before the password, because it changes what the customer is
+        agreeing to: the currency their invoices will be issued in.
+      */}
+      <SelectField
+        label={t('auth.country')}
+        value={country}
+        onChange={(event) => {
+          setCountry(event.target.value)
+          // A new country brings a new recommendation. An override the
+          // customer made for a different country would otherwise be carried
+          // silently into this one.
+          setCurrency(null)
+        }}
+        required
+        options={[
+          { value: '', label: t('auth.chooseCountry') },
+          ...countries.map((row) => ({ value: row.code, label: countryName(row.code, locale) })),
+        ]}
+        hint={t('auth.countryHint')}
+        error={fieldErrors?.['country']?.[0]}
+      />
+
+      <SelectField
+        label={t('auth.currency')}
+        value={effectiveCurrency}
+        onChange={(event) => { setCurrency(event.target.value); }}
+        dir="ltr"
+        disabled={country === ''}
+        options={(options.data?.currencies ?? []).map((code) => ({ value: code, label: code }))}
+        hint={
+          country === ''
+            ? t('auth.currencyAwaitingCountry')
+            : chosen?.currency_is_explicit === true
+              ? t('auth.currencyRecommended', { currency: recommended ?? '' })
+              : t('auth.currencyFallback', { currency: recommended ?? '' })
+        }
+        error={fieldErrors?.['currency']?.[0]}
+      />
 
       <Field
         label={t('common.password')}

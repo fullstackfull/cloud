@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { NavLink, Outlet, useNavigate } from 'react-router'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
@@ -107,7 +107,20 @@ export function AppLayout() {
         {user?.email_verified === false ? (
           <div className="mb-6">
             <Alert tone="warning" title={t('account.verifyEmailTitle')}>
-              {t('account.verifyEmailBody')}
+              <span className="flex flex-col items-start gap-2">
+                <span>{t('account.verifyEmailBody')}</span>
+
+                {/*
+                  A way out of the banner, not just a statement of the
+                  problem. Every screen that spends money refuses an
+                  unverified account, and the verification page is where the
+                  resend button lives — so the banner links to it rather than
+                  leaving the customer to find it.
+                */}
+                <Link to="/verify-email" className="font-medium underline">
+                  {t('account.verifyEmailAction')}
+                </Link>
+              </span>
             </Alert>
           </div>
         ) : null}

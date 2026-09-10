@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
@@ -121,6 +121,66 @@ export function OrderDetailPage() {
             becomes paid when the provider tells the server so, never because a
             browser said it did.
           */}
+        </Card>
+
+        {/*
+          What happens next, and where the rest of it lives.
+
+          The links are the server's: the order carries the id of the invoice it
+          produced and of the services that exist because it was paid. Nothing
+          here matches an invoice to an order by amount and date, which is what
+          a customer had to do before and what gets the wrong invoice paid.
+        */}
+        <Card className="lg:col-span-3" title={t('orders.whatHappensNext')}>
+          <ol className="flex flex-col gap-3 text-sm">
+            <li className="flex flex-wrap items-center gap-2">
+              <span className="text-[var(--text-secondary)]">{t('orders.chainInvoice')}</span>
+              {order.invoice_id != null ? (
+                <Link className="underline" to={`/invoices/${order.invoice_id}`}>
+                  <span className="technical" dir="ltr">
+                    {order.invoice_number ?? t('orders.viewInvoice')}
+                  </span>
+                </Link>
+              ) : (
+                <span className="text-[var(--text-muted)]">{t('orders.chainInvoicePending')}</span>
+              )}
+            </li>
+
+            <li className="flex flex-wrap items-center gap-2">
+              <span className="text-[var(--text-secondary)]">{t('orders.chainPayment')}</span>
+              <span className={order.is_paid ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}>
+                {order.is_paid ? t('orders.chainPaid') : t('orders.chainAwaitingPayment')}
+              </span>
+            </li>
+
+            <li className="flex flex-col gap-1">
+              <span className="text-[var(--text-secondary)]">{t('orders.chainService')}</span>
+              {(order.services ?? []).length === 0 ? (
+                <span className="text-[var(--text-muted)]">
+                  {order.is_paid ? t('orders.chainServicePreparing') : t('orders.chainServiceAfterPayment')}
+                </span>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {(order.services ?? []).map((service) => (
+                    <li key={service.id} className="flex flex-wrap items-center gap-2">
+                      {/*
+                        * The services list, because that is where a service is
+                        * managed. The identity is printed here so the customer
+                        * can see which machine this order produced without
+                        * following the link at all.
+                        */}
+                      <Link className="underline" to="/services">
+                        <span className="technical" dir="ltr">
+                          {service.identity ?? t('orders.chainServicePreparing')}
+                        </span>
+                      </Link>
+                      <StatusBadge status={service.state} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          </ol>
         </Card>
       </div>
     </>
