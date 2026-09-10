@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { pathForResource } from '@/features/resources/resourcePaths'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useCancelSubscription } from '@/lib/queries'
-import type { Subscription } from '@/lib/types'
+import type { Subscription, SubscriptionService } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
 /**
@@ -17,6 +19,24 @@ import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
  * still being created, and the screen says that rather than showing a
  * placeholder that looks like a hostname.
  */
+function ServiceIdentityText({ service }: { service: SubscriptionService }) {
+  const name = (
+    <span className="technical" dir="ltr">
+      {service.identity}
+    </span>
+  )
+
+  const to = service.resource === null
+    ? null
+    : pathForResource(service.resource.kind, service.resource.id)
+
+  return to === null ? name : (
+    <Link to={to} className="hover:underline">
+      {name}
+    </Link>
+  )
+}
+
 export function SubscriptionIdentity({ subscription }: { subscription: Subscription }) {
   const { t } = useTranslation()
 
@@ -42,9 +62,14 @@ export function SubscriptionIdentity({ subscription }: { subscription: Subscript
             {service.identity === null ? (
               t('subscriptions.serviceBeingCreated')
             ) : (
-              <span className="technical" dir="ltr">
-                {service.identity}
-              </span>
+              /*
+               * A link to the thing itself where the API published a handle
+               * for it. The id in that handle is the machine's or the
+               * account's, not the service's — building one from the service
+               * id would send a customer to a page for something that does
+               * not exist.
+               */
+              <ServiceIdentityText service={service} />
             )}
           </span>
         ))

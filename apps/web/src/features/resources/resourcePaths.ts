@@ -98,3 +98,18 @@ export function pathForResource(kind: string, id: string): string | null {
 
   return family?.detail(id) ?? null
 }
+
+/**
+ * The i18n key for a product kind, in the customer's vocabulary.
+ *
+ * The audit's AS-20: the catalogue said "Shared hosting" where the navigation
+ * said "Shared Hosting" and a resource page said something else again, because
+ * each screen had its own word list. The families above are the vocabulary, so
+ * the catalogue reads from them, and a product kind the portal has no family
+ * for falls back to the kind itself rather than to an invented name.
+ */
+export function labelKeyForProductKind(kind: string): string | null {
+  const family = familyForServiceKind(kind)
+
+  return family === null ? null : RESOURCE_FAMILIES[family].labelKey
+}

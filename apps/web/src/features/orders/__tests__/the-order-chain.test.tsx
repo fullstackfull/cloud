@@ -43,6 +43,9 @@ const ORDER = {
       id: '01JSERVICE',
       kind: 'vps',
       identity: 'web-01',
+      // The machine the order produced, as the API resolves it: a service id
+      // is not a machine id, so the handle is what a link is built from.
+      resource: { kind: 'vps', id: '01JVM' },
       state: 'running',
       is_usable: true,
     },
@@ -102,12 +105,20 @@ describe('the order chain', () => {
     expect(screen.getByText(/^received$/i)).toBeInTheDocument()
   })
 
-  it('names the service that exists because the order was paid', async () => {
+  it('names the service that exists because the order was paid, and opens it', async () => {
     vi.stubGlobal('fetch', stubFetch())
 
     renderPage()
 
     expect(await screen.findByText('web-01')).toBeInTheDocument()
+
+    /*
+     * Straight to the machine, at the id the API resolved for it. Before Wave
+     * 3 this went to the services list and left the customer to find the row
+     * again; a link built from the service's own id would have gone to a page
+     * for a machine that does not exist.
+     */
+    expect(screen.getByRole('link', { name: 'web-01' })).toHaveAttribute('href', '/vps/01JVM')
   })
 
   it('says the service follows the payment when the order is not paid yet', async () => {

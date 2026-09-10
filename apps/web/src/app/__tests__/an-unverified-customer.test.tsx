@@ -89,7 +89,7 @@ describe('an unverified customer', () => {
 
     await screen.findByRole('link', { name: /confirm your email address/i })
 
-    expect(screen.getByRole('link', { name: /^catalogue$/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^buy$/i })).toBeInTheDocument()
   })
 
   it('sees no banner once the address is confirmed', async () => {
@@ -97,7 +97,7 @@ describe('an unverified customer', () => {
 
     renderLayout()
 
-    await screen.findByRole('link', { name: /^catalogue$/i })
+    await screen.findByRole('link', { name: /^buy$/i })
 
     expect(screen.queryByRole('link', { name: /confirm your email address/i })).not.toBeInTheDocument()
   })

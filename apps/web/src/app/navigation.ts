@@ -50,9 +50,15 @@ export const CUSTOMER_NAV_GROUPS: readonly NavGroup[] = [
     items: [{ to: '/', labelKey: 'nav.dashboard' }],
   },
   {
+    /*
+     * One destination, so no heading: "Buy" over a list containing only
+     * "Catalogue" was two words for the same act. The customer's word is the
+     * one that survived — a person buys a server; a catalogue is what the
+     * platform calls its own price list.
+     */
     id: 'buy',
-    labelKey: 'nav.groups.buy',
-    items: [{ to: '/catalogue', labelKey: 'nav.catalogue' }],
+    labelKey: null,
+    items: [{ to: '/catalogue', labelKey: 'nav.buy' }],
   },
   {
     id: 'services',

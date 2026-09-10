@@ -89,9 +89,7 @@ export function ServicesPage() {
         // The family's own name in the customer's vocabulary — "Cloud VPS" —
         // falling back to the commercial kind for anything the portal has no
         // family for.
-        return family === null
-          ? t(`catalogue.kinds.${service.kind}`, { defaultValue: service.kind })
-          : t(RESOURCE_FAMILIES[family].labelKey)
+        return family === null ? service.kind : t(RESOURCE_FAMILIES[family].labelKey)
       },
     },
     {

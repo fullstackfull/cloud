@@ -29,7 +29,6 @@
   "nav": {
     "apiKeys": "API Keys",
     "backups": "Backups",
-    "catalogue": "Catalogue",
     "dashboard": "Dashboard",
     "dedicated": "Dedicated Servers",
     "dns": "DNS",
@@ -56,11 +55,11 @@
     "payments": "Payments",
     "allServices": "All Services",
     "groups": {
-      "buy": "Buy",
       "services": "Services",
       "billing": "Billing",
       "account": "Account"
-    }
+    },
+    "buy": "Buy"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -360,11 +359,6 @@
     "subtitle": "What you can buy, priced in your account's currency.",
     "filterByKind": "Filter by product kind",
     "allKinds": "Everything",
-    "kinds": {
-      "vps": "Cloud VPS",
-      "dedicated": "Dedicated servers",
-      "shared_hosting": "Shared hosting"
-    },
     "viewPlans": "View plans",
     "empty": "Nothing is on sale in this category yet.",
     "noPriceInCurrency": "Not priced in your account's currency.",

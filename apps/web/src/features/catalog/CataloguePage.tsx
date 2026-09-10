@@ -6,6 +6,7 @@ import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { EmptyState } from '@/components/EmptyState'
 import { PageHeader } from '@/components/PageHeader'
+import { labelKeyForProductKind } from '@/features/resources/resourcePaths'
 import { useProducts } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -16,6 +17,17 @@ const KINDS = ['vps', 'dedicated', 'shared_hosting'] as const
 
 export function CataloguePage() {
   const { t } = useTranslation()
+
+  /*
+   * One word per family, shared with the navigation and the resource pages.
+   * A kind the portal has no family for is named by the API's own word rather
+   * than by a translation key that does not exist.
+   */
+  const kindName = (kind: string): string => {
+    const key = labelKeyForProductKind(kind)
+
+    return key === null ? kind : t(key)
+  }
   const describeError = useApiErrorMessage()
   const [kind, setKind] = useState<string | undefined>(undefined)
 
@@ -24,7 +36,7 @@ export function CataloguePage() {
 
   return (
     <>
-      <PageHeader title={t('nav.catalogue')} description={t('catalogue.subtitle')} />
+      <PageHeader title={t('nav.buy')} description={t('catalogue.subtitle')} />
 
       <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label={t('catalogue.filterByKind')}>
         <FilterChip active={kind === undefined} onClick={() => { setKind(undefined); }}>
@@ -32,7 +44,7 @@ export function CataloguePage() {
         </FilterChip>
         {KINDS.map((option) => (
           <FilterChip key={option} active={kind === option} onClick={() => { setKind(option); }}>
-            {t(`catalogue.kinds.${option}`)}
+            {kindName(option)}
           </FilterChip>
         ))}
       </div>
@@ -52,7 +64,7 @@ export function CataloguePage() {
               key={product.id}
               title={product.name}
               description={product.description ?? undefined}
-              actions={<Badge tone="info">{t(`catalogue.kinds.${product.kind}`)}</Badge>}
+              actions={<Badge tone="info">{kindName(product.kind)}</Badge>}
             >
               <p className="text-sm text-[var(--text-secondary)]">
                 {t('catalogue.planCount', { count: product.plan_count })}

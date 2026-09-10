@@ -30,6 +30,9 @@ function subscription(id: string, plan: string, hostname: string | null, amount:
         kind: 'vps',
         label: `Cloud VPS — ${plan}`,
         identity: hostname,
+        // The handle the API publishes: the machine's own id, not the
+        // service's, which is what a link to the machine needs.
+        resource: hostname === null ? null : { kind: 'vps', id: `vm-${id}` },
         state: hostname === null ? 'preparing' : 'running',
         is_usable: hostname !== null,
       },
@@ -93,6 +96,9 @@ describe('two subscriptions are tellable apart', () => {
     expect(screen.getByText('web-01')).toBeInTheDocument()
     expect(screen.getByText('db-01')).toBeInTheDocument()
     expect(screen.getAllByText('Cloud VPS')).toHaveLength(2)
+
+    // And each machine is a way into it, at the id the API resolved.
+    expect(screen.getByRole('link', { name: 'web-01' })).toHaveAttribute('href', '/vps/vm-01JFIRST')
   })
 
   it('repeats which one is being ended inside the cancellation dialogue', async () => {

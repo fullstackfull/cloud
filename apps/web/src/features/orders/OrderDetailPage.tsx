@@ -10,9 +10,11 @@ import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Loading } from '@/components/Loading'
+import { pathForResource } from '@/features/resources/resourcePaths'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useCancelOrder, useOrder } from '@/lib/queries'
+import type { OrderService } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
 export function OrderDetailPage() {
@@ -164,16 +166,14 @@ export function OrderDetailPage() {
                   {(order.services ?? []).map((service) => (
                     <li key={service.id} className="flex flex-wrap items-center gap-2">
                       {/*
-                        * The services list, because that is where a service is
-                        * managed. The identity is printed here so the customer
-                        * can see which machine this order produced without
-                        * following the link at all.
+                        * Straight to the thing the order produced, using the
+                        * handle the API resolved — a service's own id is not
+                        * the machine's, so a link built from it would 404. A
+                        * service with nothing created yet says so and links
+                        * nowhere; the services index is the fallback for a
+                        * family the portal has no page for.
                         */}
-                      <Link className="underline" to="/services">
-                        <span className="technical" dir="ltr">
-                          {service.identity ?? t('orders.chainServicePreparing')}
-                        </span>
-                      </Link>
+                      <ServiceLink service={service} />
                       <StatusBadge status={service.state} />
                     </li>
                   ))}
@@ -205,5 +205,29 @@ function Row({
         {children}
       </dd>
     </div>
+  )
+}
+
+/**
+ * One service an order produced, as a link to it where there is something to
+ * open.
+ */
+function ServiceLink({ service }: { service: OrderService }) {
+  const { t } = useTranslation()
+
+  const to = service.resource === null
+    ? null
+    : pathForResource(service.resource.kind, service.resource.id)
+
+  const name = (
+    <span className="technical" dir="ltr">
+      {service.identity ?? t('orders.chainServicePreparing')}
+    </span>
+  )
+
+  return to === null ? name : (
+    <Link className="underline" to={to}>
+      {name}
+    </Link>
   )
 }

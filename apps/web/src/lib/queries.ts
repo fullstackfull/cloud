@@ -30,7 +30,6 @@ import type {
   OrderQuote,
   Paginated,
   Payment,
-  Plan,
   PlanChangeQuote,
   Product,
   RegistrationOptions,
@@ -105,16 +104,16 @@ export function useProduct(slugOrId: string) {
   })
 }
 
-export function usePlan(id: string) {
-  return useQuery({
-    queryKey: ['catalog', 'plan', id],
-    queryFn: async () => {
-      const response = await api.get<Envelope<Plan>>(`/catalog/plans/${encodeURIComponent(id)}`)
-      return response.data
-    },
-    staleTime: 60_000,
-  })
-}
+/*
+ * There is no usePlan.
+ *
+ * The API has a plan endpoint and no screen needs it: a product document
+ * carries its plans, which is how the catalogue and the product page read
+ * them, so a hook for one plan on its own was a hook nobody called. Wave 3
+ * deleted it rather than leave it as a capability the portal appears to have
+ * — see one-mutation-path and the capability gate, which now hold every hook
+ * in this file to being called by something.
+ */
 
 /* ----------------------------------------------------------------- orders */
 
