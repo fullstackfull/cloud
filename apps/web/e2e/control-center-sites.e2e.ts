@@ -33,8 +33,10 @@ test.describe('an operator opening the control centre', () => {
     await page.goto('/admin/control-center/sites')
     await expect(page.getByRole('heading', { name: /^sites$/i })).toBeVisible()
 
-    const datacenter = page.getByRole('listitem', { name: fixtures.datacenter })
-    await expect(datacenter.getByRole('listitem', { name: fixtures.rack })).toBeVisible()
+    // `exact` matters: the rack registered below is named from the clock and
+    // can begin with the fixture's name (E2E-R1PEL once did, on CI).
+    const datacenter = page.getByRole('listitem', { name: fixtures.datacenter, exact: true })
+    await expect(datacenter.getByRole('listitem', { name: fixtures.rack, exact: true })).toBeVisible()
     await expect(datacenter).toContainText(/PDU-1/)
 
     const name = `E2E-R${Date.now().toString(36).slice(-4).toUpperCase()}`
@@ -70,6 +72,7 @@ test.describe('in Arabic', () => {
 
     await page.goto('/admin/control-center/sites')
     await expect(page.getByRole('heading', { name: /المواقع/ })).toBeVisible()
-    await expect(page.getByRole('listitem', { name: fixtures.datacenter }).getByRole('listitem', { name: fixtures.rack })).toBeVisible()
+    const datacenter = page.getByRole('listitem', { name: fixtures.datacenter, exact: true })
+    await expect(datacenter.getByRole('listitem', { name: fixtures.rack, exact: true })).toBeVisible()
   })
 })
