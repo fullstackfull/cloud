@@ -16,6 +16,7 @@ use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -114,6 +115,51 @@ final class AnAccountKnowsWhatHappenedTest extends TestCase
         self::assertSame('vps', $row['resource']['kind']);
         self::assertSame((string) $machine->getKey(), $row['resource']['id']);
         self::assertSame('web-kw-01', $row['resource']['identity']);
+    }
+
+    #[Test]
+    public function marking_every_notification_read_erases_nothing_from_the_history(): void
+    {
+        /*
+         * Notifications are not the activity database. They carry a `read_at`;
+         * history does not, because a customer who clears their inbox has not
+         * undone anything that happened to their account.
+         *
+         * Asserted rather than argued: the same page, before and after the
+         * inbox is emptied, has to be the same page.
+         */
+        [$customer, $user] = $this->account();
+        $machine = $this->machineFor($customer, 'web-kw-09');
+
+        ProvisioningJob::factory()->create([
+            'customer_id' => $customer->id,
+            'service_id' => $machine->service_id,
+            'requested_by_user_id' => $user->id,
+            'kind' => ProvisioningJobKind::Restart,
+            'status' => ProvisioningJobStatus::Succeeded,
+        ]);
+
+        Notification::factory()->count(3)->create([
+            'customer_id' => $customer->id,
+            'read_at' => null,
+        ]);
+
+        $before = $this->actingAs($user)->getJson('/api/v1/activity');
+        $before->assertOk();
+
+        $this->actingAs($user)->postJson('/api/v1/notifications/read-all')->assertOk();
+
+        // The inbox really is empty now, so the second read is a real test.
+        $this->actingAs($user)
+            ->getJson('/api/v1/notifications/unread-count')
+            ->assertOk()
+            ->assertJsonPath('data.unread', 0);
+
+        $after = $this->actingAs($user)->getJson('/api/v1/activity');
+        $after->assertOk();
+
+        self::assertSame($before->json('data'), $after->json('data'));
+        self::assertSame('activity.vps.restarted', $after->json('data.0.message_code'));
     }
 
     #[Test]

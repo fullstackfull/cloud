@@ -102,8 +102,13 @@ describe('country and currency section', () => {
     expect(screen.getByText(/nothing already issued is ever converted/i)).toBeInTheDocument()
 
     await user.click(await screen.findByRole('button', { name: /request a change/i }))
-    await user.clear(screen.getByLabelText(/country/i))
-    await user.type(screen.getByLabelText(/country/i), 'sa')
+    /*
+     * Anchored, because the card itself is now a named region: its heading
+     * labels the section, so a loose /country/i matches both the landmark and
+     * the field inside it.
+     */
+    await user.clear(screen.getByLabelText(/^country \(two letters\)$/i))
+    await user.type(screen.getByLabelText(/^country \(two letters\)$/i), 'sa')
     await user.selectOptions(screen.getByLabelText(/^currency$/i), 'USD')
     await user.type(screen.getByLabelText(/^why$/i), 'Moving to Riyadh.')
     await user.click(screen.getByRole('button', { name: /send the request/i }))

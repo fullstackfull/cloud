@@ -65,7 +65,7 @@ test.describe('the first page answers what needs doing', () => {
     const positions = await page.evaluate(() => {
       const regions = Array.from(document.querySelectorAll('section'))
       const index = (name: string) =>
-        regions.findIndex((section) => section.querySelector('h2')?.textContent?.includes(name))
+        regions.findIndex((section) => section.querySelector('h2')?.textContent.includes(name))
 
       return { attention: index('Needs your attention'), held: index('What you have') }
     })
