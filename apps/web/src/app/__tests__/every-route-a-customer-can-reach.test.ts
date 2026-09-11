@@ -279,6 +279,47 @@ describe('the routes a customer can reach', () => {
     }
   })
 
+  it('turns a server-published resource handle into a path in one place', () => {
+    /*
+     * §13. The API publishes `{kind, id}` and deliberately not a path, because
+     * routes belong to the portal — so exactly one module knows both, and
+     * every screen that renders a handle asks it. A second map is how
+     * "your server is ready" ends up linking to the list of servers on one
+     * screen and to the server on another.
+     *
+     * Asserted by the import rather than by the absence of a switch, because
+     * the absence of something is hard to state and easy to satisfy by
+     * accident: these are the screens that receive handles, and each one has
+     * to be reading from the map.
+     */
+    const readers = [
+      'features/activity/ActivityPage.tsx',
+      'features/account/DashboardPage.tsx',
+      'features/notifications/NotificationsPage.tsx',
+      'features/services/ServicesPage.tsx',
+      'features/orders/OrderDetailPage.tsx',
+      'features/billing/CancelSubscriptionDialog.tsx',
+    ]
+
+    for (const reader of readers) {
+      const source = readFileSync(path.join(SOURCE, reader), 'utf8')
+
+      expect(
+        /from '@\/features\/resources\/resourcePaths'/.test(source),
+        `${reader} renders a resource handle without the one route map`,
+      ).toBe(true)
+    }
+
+    /*
+     * The support context is the odd one: it carries the handle into a query
+     * string rather than into a path, and the screen it lands on renders the
+     * link. What matters there is that it does not invent a path of its own.
+     */
+    const supportContext = readFileSync(path.join(SOURCE, 'features/support/supportContext.ts'), 'utf8')
+
+    expect(/\/vps\/|\/domains\/|\/dedicated\//.test(supportContext)).toBe(false)
+  })
+
   it('keeps the operator area out of the customer navigation', () => {
     expect(CUSTOMER_NAV.filter((item) => isOperator(item.to)).map((item) => item.to)).toEqual([])
 
