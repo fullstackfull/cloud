@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
@@ -10,6 +11,11 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Loading } from '@/components/Loading'
+import {
+  draftBody,
+  draftSubject,
+  readSupportContext,
+} from '@/features/support/supportContext'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -55,8 +61,24 @@ export function SupportPage() {
   const reply = useReplyToTicket()
   const close = useCloseTicket()
 
-  const [subject, setSubject] = useState('')
-  const [body, setBody] = useState('')
+  /*
+   * AS-14. A link from the thing that went wrong arrives with the thing that
+   * went wrong in it.
+   *
+   * Read once, as the initial value of the fields, rather than pushed into
+   * them by an effect: an effect that wrote to a field the customer was
+   * already typing in would overwrite their sentence on every render, and a
+   * draft that fights the person writing it is worse than an empty form.
+   * Nothing is submitted — this is a filled-in form, and the send button is
+   * still theirs to press.
+   */
+  const [searchParams] = useSearchParams()
+  const [context] = useState(() => readSupportContext(searchParams))
+
+  const [subject, setSubject] = useState(() =>
+    context === null ? '' : draftSubject(context, t),
+  )
+  const [body, setBody] = useState(() => (context === null ? '' : draftBody(context, t)))
   const [category, setCategory] = useState('technical')
   const [priority, setPriority] = useState<TicketPriority>('normal')
   const [files, setFiles] = useState<File[]>([])
@@ -227,13 +249,36 @@ export function SupportPage() {
         ) : null}
 
         <Card title={t('support.newTitle')} description={t('support.newSubtitle')}>
+          {/*
+            Said out loud, because a form that is already full when you arrive
+            at it is confusing until somebody explains why.
+          */}
+          {context === null ? null : (
+            <div className="mb-3">
+              <Alert tone="info">{t('support.contextNotice')}</Alert>
+            </div>
+          )}
+
           <form
             className="flex max-w-2xl flex-col gap-3"
             noValidate
             onSubmit={(event) => {
               event.preventDefault()
               openTicket.mutate(
-                { subject, body, category, priority, files },
+                {
+                  subject,
+                  body,
+                  category,
+                  priority,
+                  files,
+                  /*
+                   * Attached only when the link carried one. The endpoint
+                   * resolves it against the acting account and answers 404 for
+                   * anything else, so a hand-edited link cannot point a ticket
+                   * at another tenant's machine.
+                   */
+                  ...(context?.serviceId === undefined ? {} : { service_id: context.serviceId }),
+                },
                 {
                   onSuccess: (created) => {
                     setSubject('')

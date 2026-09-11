@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { useWatchOperations } from '@/features/operations/watchChannel'
+import { RESOURCE_FAMILIES } from '@/features/resources/resourcePaths'
 import { newIdempotencyKey } from '@/lib/api'
 import { useDedicatedReinstall } from '@/lib/queries'
 import type { DedicatedServer } from '@/lib/types'
@@ -24,6 +26,7 @@ export function DedicatedReinstallAction({ server }: { server: DedicatedServer }
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
   const reinstall = useDedicatedReinstall()
+  const { watch } = useWatchOperations()
 
   const [open, setOpen] = useState(false)
 
@@ -72,7 +75,17 @@ export function DedicatedReinstallAction({ server }: { server: DedicatedServer }
               confirm_serial: phrase,
               idempotencyKey: newIdempotencyKey(),
             },
-            { onSuccess: close },
+            {
+              onSuccess: (accepted) => {
+                watch(accepted, {
+                  actionKey: 'operations.actions.rebuild',
+                  href: RESOURCE_FAMILIES.dedicated.detail(server.id),
+                  invalidate: ['dedicated', 'services', 'activity', 'overview'],
+                })
+
+                close()
+              },
+            },
           )
         }}
         onCancel={close}

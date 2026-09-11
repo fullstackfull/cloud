@@ -10,6 +10,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { Loading } from '@/components/Loading'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { useWatchOperations } from '@/features/operations/watchChannel'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import {
@@ -51,6 +52,7 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
   const { data, isPending, error: readError } = useBackups(vm.id, page)
 
   const create = useCreateBackup()
+  const { acknowledge } = useWatchOperations()
   const restore = useRestoreBackup()
   const remove = useDeleteBackup()
   const keep = useKeepBackup()
@@ -186,7 +188,23 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
         actions={
           <Button
             loading={create.isPending}
-            onClick={() => { create.mutate({ vmId: vm.id }); }}
+            onClick={() => {
+              create.mutate(
+                { vmId: vm.id },
+                {
+                  /*
+                   * Acknowledged rather than watched. A backup's progress is a
+                   * property of the backup row, which this list reads and the
+                   * mutation invalidates; there is no provisioning operation
+                   * behind it to poll. "Backup requested" is the truth, and it
+                   * is more than the silence there was before.
+                   */
+                  onSuccess: () => {
+                    acknowledge(`backup:${vm.id}`, { actionKey: 'operations.actions.backup' })
+                  },
+                },
+              )
+            }}
           >
             {t('backups.takeOne')}
           </Button>
@@ -271,7 +289,15 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
           onConfirm={(confirmation) => {
             restore.mutate(
               { vmId: vm.id, backupId: restoring.id, confirmation },
-              { onSuccess: () => { setRestoring(null); } },
+              {
+                onSuccess: () => {
+                  acknowledge(`restore:${restoring.id}`, {
+                    actionKey: 'operations.actions.restore',
+                  })
+
+                  setRestoring(null)
+                },
+              },
             )
           }}
         />

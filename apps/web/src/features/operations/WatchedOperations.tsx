@@ -9,8 +9,9 @@ import {
   WatchContext,
   type OperationWatch,
   type WatchChannel,
+  type WatchableReceipt,
 } from '@/features/operations/watchChannel'
-import type { AcceptedOperation, CustomerOperationState } from '@/lib/types'
+import type { CustomerOperationState } from '@/lib/types'
 import { useWatchedOperation } from '@/lib/watchOperation'
 
 /**
@@ -106,7 +107,7 @@ export function WatchedOperationsProvider({ children }: { children: ReactNode })
   }, [])
 
   const watch = useCallback(
-    (receipt: AcceptedOperation, options: Omit<OperationWatch, 'id'>) => {
+    (receipt: WatchableReceipt, options: Omit<OperationWatch, 'id'>) => {
       const label = t(options.actionKey)
 
       /*
@@ -152,7 +153,21 @@ export function WatchedOperationsProvider({ children }: { children: ReactNode })
     [t, toasts],
   )
 
-  const channel = useMemo<WatchChannel>(() => ({ watch }), [watch])
+  const acknowledge = useCallback(
+    (subject: string, options: Omit<OperationWatch, 'id'>) => {
+      toasts.announce({
+        id: subject,
+        tone: 'info',
+        title: t('operations.requested', { action: t(options.actionKey) }),
+        ...(options.href === undefined
+          ? {}
+          : { action: { label: t('operations.view'), to: options.href } }),
+      })
+    },
+    [t, toasts],
+  )
+
+  const channel = useMemo<WatchChannel>(() => ({ watch, acknowledge }), [watch, acknowledge])
 
   return (
     <WatchContext.Provider value={channel}>

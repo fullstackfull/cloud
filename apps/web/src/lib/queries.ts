@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
+import { nextListPollDelay } from '@/lib/watchOperation'
 import type {
+  AcceptedOperation,
+  AcceptedReinstall,
+  AccountOverview,
+  ActivityCategory,
+  ActivityPage,
   ApiToken,
   AppNotification,
   Backup,
@@ -417,8 +423,21 @@ export function useVpsPower() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, action, idempotencyKey }: PowerRequest) =>
-      api.post<unknown>(`/vps/${encodeURIComponent(id)}/power`, { action }, { idempotencyKey }),
+    /*
+     * The receipt is returned rather than discarded. A 202 names the operation
+     * the platform has accepted, and the screen hands that name to the
+     * observation layer — which is the whole of AR-12: before this the id came
+     * back and nothing in the portal could do anything with it.
+     */
+    mutationFn: async ({ id, action, idempotencyKey }: PowerRequest) => {
+      const response = await api.post<Envelope<AcceptedOperation>>(
+        `/vps/${encodeURIComponent(id)}/power`,
+        { action },
+        { idempotencyKey },
+      )
+
+      return response.data
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -457,8 +476,14 @@ export function useVpsReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_hostname, template_id, ssh_keys, idempotencyKey }: ReinstallRequest) =>
-      api.post<unknown>(
+    mutationFn: async ({
+      id,
+      confirm_hostname,
+      template_id,
+      ssh_keys,
+      idempotencyKey,
+    }: ReinstallRequest) => {
+      const response = await api.post<Envelope<AcceptedOperation>>(
         `/vps/${encodeURIComponent(id)}/reinstall`,
         {
           confirm_hostname,
@@ -468,7 +493,10 @@ export function useVpsReinstall() {
           ...(ssh_keys === undefined || ssh_keys.length === 0 ? {} : { ssh_keys }),
         },
         { idempotencyKey },
-      ),
+      )
+
+      return response.data
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -576,6 +604,33 @@ export function useMarkAllNotificationsRead() {
   })
 }
 
+/**
+ * How many unread notifications, and nothing else.
+ *
+ * AS-11. The badge is drawn on every page, and the only way to know the number
+ * used to be to fetch a page of the inbox and read its meta — which downloads
+ * twenty-five notifications to render a digit, on every navigation. This is
+ * one integer from one endpoint.
+ *
+ * Keyed under `notifications`, so marking one read invalidates the count along
+ * with the list and the badge cannot sit at 3 after the customer has just
+ * cleared it.
+ */
+export function useUnreadNotificationCount() {
+  return useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: async () => {
+      const response = await api.get<Envelope<{ unread: number }>>('/notifications/unread-count')
+
+      return response.data.unread
+    },
+
+    // A minute is short enough that the badge is not stale for long and long
+    // enough that moving between eight screens is not eight requests.
+    staleTime: 60_000,
+  })
+}
+
 export function useNotificationPreferences() {
   return useQuery({
     queryKey: ['notification-preferences'],
@@ -611,6 +666,18 @@ export function useBackups(vmId: string | null, pageNumber = 1) {
     queryFn: () =>
       api.get<Paginated<Backup>>(
         `/vps/${encodeURIComponent(vmId ?? '')}/backups${page({ page: pageNumber })}`,
+      ),
+
+    /*
+     * Polled while any row is still being worked on, through the same rule the
+     * operation watcher uses. A backup takes minutes and a restore longer; a
+     * screen that only updated on reload is a screen a customer reloads, or
+     * opens a ticket about.
+     */
+    refetchInterval: (query) =>
+      nextListPollDelay(
+        (query.state.data?.data ?? []).filter((backup) => backup.is_in_flight).length,
+        query.state.dataUpdateCount,
       ),
   })
 }
@@ -650,6 +717,13 @@ export function useBackupFileRestores(vmId: string | null, backupId: string | nu
     queryFn: () =>
       api.get<{ data: BackupFileRestore[] }>(
         `/vps/${encodeURIComponent(vmId ?? '')}/backups/${encodeURIComponent(backupId ?? '')}/file-restores`,
+      ),
+
+    // A file restore is minutes of work on somebody's live disk. Same rule.
+    refetchInterval: (query) =>
+      nextListPollDelay(
+        (query.state.data?.data ?? []).filter((restore) => restore.is_in_flight).length,
+        query.state.dataUpdateCount,
       ),
   })
 }
@@ -756,8 +830,20 @@ export function useDedicatedReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_serial, idempotencyKey }: DedicatedReinstallRequest) =>
-      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/reinstall`, { confirm_serial }, { idempotencyKey }),
+    mutationFn: async ({ id, confirm_serial, idempotencyKey }: DedicatedReinstallRequest) => {
+      /*
+       * A shorter receipt than the VPS one — no service, no verb — and the
+       * same three fields the observation layer needs: what to watch, what it
+       * says now, and whether there is anything left to wait for.
+       */
+      const response = await api.post<Envelope<AcceptedReinstall>>(
+        `/dedicated/${encodeURIComponent(id)}/reinstall`,
+        { confirm_serial },
+        { idempotencyKey },
+      )
+
+      return response.data
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dedicated'] })
     },
@@ -1221,11 +1307,18 @@ export function useWordPressSites() {
      * steps that finish minutes apart, and a customer watching a screen that
      * only updates on reload is a customer who refreshes it, or opens a
      * ticket.
+     *
+     * This was the portal's only polling interval before Wave 4, with its own
+     * hard-coded fifteen seconds and no backoff. It now asks the same rule as
+     * everything else, so there is one answer to "how often, and when do we
+     * stop" rather than one per screen.
      */
     refetchInterval: (query) =>
-      (query.state.data?.data ?? []).some((site) => !site.is_verified && !site.needs_attention)
-        ? 15_000
-        : false,
+      nextListPollDelay(
+        (query.state.data?.data ?? []).filter((site) => !site.is_verified && !site.needs_attention)
+          .length,
+        query.state.dataUpdateCount,
+      ),
   })
 }
 
@@ -1875,5 +1968,58 @@ export function useControlledGatewayDecision() {
       void queryClient.invalidateQueries({ queryKey: ['payments'] })
       void queryClient.invalidateQueries({ queryKey: ['wallet'] })
     },
+  })
+}
+
+/* ------------------------------------------------------- what is happening
+ |
+ | AR-6 and AR-13: the dashboard and the account-wide feed. Both are single
+ | server reads by design — the browser does not assemble a dashboard from nine
+ | list endpoints, and it does not assemble a history from each resource's own
+ | events.
+ */
+
+/**
+ * The first page of the portal, in one request.
+ *
+ * One call rather than four, because the priority order between an unpaid
+ * invoice, an expiring domain and a rebuild that stopped is a product
+ * decision, and a decision made in the browser is a decision every client has
+ * to make again.
+ */
+export function useAccountOverview() {
+  return useQuery({
+    queryKey: ['overview'],
+    queryFn: async () => {
+      const response = await api.get<Envelope<AccountOverview>>('/me/overview')
+
+      return response.data
+    },
+  })
+}
+
+/**
+ * One page of the account's activity.
+ *
+ * Cursor-paginated rather than numbered, because the feed is a union over ten
+ * tables ordered by time: page 4 of a list that gains rows while you read it
+ * is not a stable address, and an offset into it costs the server the whole
+ * history to skip.
+ *
+ * The filter is a server parameter, never a client-side trim. `?category=`
+ * chooses which sources are read, so asking about support reads one table
+ * instead of ten — and a filtered page holds a full page of matching rows
+ * rather than whatever survived filtering the unfiltered one.
+ */
+export function useActivity(category: ActivityCategory | null, cursor: string | null) {
+  return useQuery({
+    queryKey: ['activity', category ?? 'all', cursor ?? 'first'],
+    queryFn: () =>
+      api.get<ActivityPage>(
+        `/activity${page({
+          ...(category === null ? {} : { category }),
+          ...(cursor === null ? {} : { cursor }),
+        })}`,
+      ),
   })
 }

@@ -7,6 +7,7 @@ import { CONTROL_CENTER_NAV, CUSTOMER_NAV, OPERATOR_NAV } from '@/app/navigation
 import i18n from '@/i18n'
 import ar from '@/i18n/locales/ar.json'
 import en from '@/i18n/locales/en.json'
+import { SHELL_ROUTES } from '@/test-fixtures'
 
 /**
  * The phone drawer offers every destination the desktop does, and only the
@@ -50,6 +51,7 @@ function stubFetch(routes: Record<string, StubbedResponse>) {
 
 function me(permissions: string[]): Record<string, StubbedResponse> {
   return {
+    ...SHELL_ROUTES,
     '/me': {
       status: 200,
       body: {

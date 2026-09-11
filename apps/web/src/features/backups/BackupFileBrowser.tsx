@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Loading } from '@/components/Loading'
 import { StatusBadge } from '@/components/StatusBadge'
+import { useWatchOperations } from '@/features/operations/watchChannel'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatBytes, formatDate } from '@/lib/format'
 import {
@@ -67,6 +68,7 @@ export function BackupFileBrowser({
   const { data: restores } = useBackupFileRestores(vmId, backup.id)
   const download = useIssueBackupFileDownload()
   const restore = useRestoreBackupFiles()
+  const { acknowledge } = useWatchOperations()
 
   const listFailure = describeError(listError)
   const downloadFailure = describeError(download.error)
@@ -278,6 +280,10 @@ export function BackupFileBrowser({
               { vmId, backupId: backup.id, paths: chosen, confirmation },
               {
                 onSuccess: () => {
+                  acknowledge(`file-restore:${backup.id}`, {
+                    actionKey: 'operations.actions.fileRestore',
+                  })
+
                   setConfirming(false)
                   setChosen([])
                 },

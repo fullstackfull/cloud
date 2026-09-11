@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { DashboardPage } from '@/features/account/DashboardPage'
+import { ActivityPage } from '@/features/activity/ActivityPage'
 import { AdminAccountChangesPage } from '@/features/admin/AdminAccountChangesPage'
 import { AdminCustomersPage } from '@/features/admin/AdminCustomersPage'
 import { AdminDriftPage } from '@/features/admin/AdminDriftPage'
@@ -256,7 +257,8 @@ export function App() {
                     </Route>
 
                     <Route path="/backups" element={<BackupsPage />} />
-                    <Route path="/notifications" element={<NotificationsPage />} />
+                    <Route path="/activity" element={<ActivityPage />} />
+                  <Route path="/notifications" element={<NotificationsPage />} />
 
                     <Route path="/dedicated" element={<DedicatedPage />} />
                     <Route path="/dedicated/:id" element={<DedicatedDetailPage />}>

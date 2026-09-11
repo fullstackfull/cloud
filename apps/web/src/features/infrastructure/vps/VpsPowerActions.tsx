@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { useWatchOperations } from '@/features/operations/watchChannel'
+import { RESOURCE_FAMILIES } from '@/features/resources/resourcePaths'
 import { newIdempotencyKey } from '@/lib/api'
 import { useVpsPower } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
@@ -46,6 +48,7 @@ export function VpsPowerActions({
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
   const power = useVpsPower()
+  const { watch } = useWatchOperations()
 
   /**
    * Pulling the plug is the one power control that costs data: it does not ask
@@ -79,14 +82,30 @@ export function VpsPowerActions({
                 return
               }
 
-              power.mutate({
-                id: vm.id,
-                action,
-                // A fresh key per press: two deliberate reboots are two
-                // operations, and only a retry of the same press should
-                // collapse into one.
-                idempotencyKey: newIdempotencyKey(),
-              })
+              power.mutate(
+                {
+                  id: vm.id,
+                  action,
+                  // A fresh key per press: two deliberate reboots are two
+                  // operations, and only a retry of the same press should
+                  // collapse into one.
+                  idempotencyKey: newIdempotencyKey(),
+                },
+                {
+                  /*
+                   * The 202 is handed straight to the observation layer, which
+                   * acknowledges it, follows it, and says how it ended — from
+                   * whatever screen the customer is on by then.
+                   */
+                  onSuccess: (accepted) => {
+                    watch(accepted, {
+                      actionKey: `operations.actions.${action}`,
+                      href: RESOURCE_FAMILIES.vps.detail(vm.id),
+                      invalidate: ['vps', 'services', 'activity', 'overview'],
+                    })
+                  },
+                },
+              )
             }}
           >
             {t(`vps.actions.${action}`)}
@@ -118,7 +137,16 @@ export function VpsPowerActions({
         onConfirm={() => {
           power.mutate(
             { id: vm.id, action: 'stop', idempotencyKey: newIdempotencyKey() },
-            { onSettled: () => { setForcingOff(false); } },
+            {
+              onSuccess: (accepted) => {
+                watch(accepted, {
+                  actionKey: 'operations.actions.stop',
+                  href: RESOURCE_FAMILIES.vps.detail(vm.id),
+                  invalidate: ['vps', 'services', 'activity', 'overview'],
+                })
+              },
+              onSettled: () => { setForcingOff(false); },
+            },
           )
         }}
         onCancel={() => { setForcingOff(false); }}

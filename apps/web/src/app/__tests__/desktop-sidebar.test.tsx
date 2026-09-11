@@ -6,6 +6,7 @@ import { CUSTOMER_NAV, CUSTOMER_NAV_GROUPS, OPERATOR_NAV } from '@/app/navigatio
 import i18n from '@/i18n'
 import ar from '@/i18n/locales/ar.json'
 import en from '@/i18n/locales/en.json'
+import { SHELL_ROUTES } from '@/test-fixtures'
 
 /**
  * The desktop sidebar: every destination, always, with nothing behind a
@@ -56,6 +57,7 @@ function stubFetch(routes: Record<string, StubbedResponse>) {
 
 function me(permissions: string[]): Record<string, StubbedResponse> {
   return {
+    ...SHELL_ROUTES,
     '/me': {
       status: 200,
       body: {

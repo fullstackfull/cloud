@@ -10,15 +10,23 @@
  * Only what is actually reachable is listed. The navigation is not a roadmap:
  * a link to a page that does not exist tells a customer the platform can do
  * something it cannot, and they will open a ticket about it. Entries appear
- * here as their routes are built — which is why there is no Activity group,
- * although the target architecture has one: the account-wide feed it would
- * point at does not exist yet.
+ * here as their routes are built — Activity joined in Wave 4, the wave that
+ * built the account-wide feed it points at.
  */
 export interface NavItem {
   to: string
   labelKey: string
   /** Match this route exactly, so a section's index link is not lit on every child. */
   end?: boolean
+  /**
+   * A count to show beside the label.
+   *
+   * `unread` is the notification inbox's. Named rather than passed as a number
+   * because this file is a static description of where the portal can take a
+   * person: a number here would make the navigation definition something that
+   * has to be fetched before it can be rendered.
+   */
+  badge?: 'unread'
 }
 
 /**
@@ -90,6 +98,18 @@ export const CUSTOMER_NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    /*
+     * What has happened to the account, as opposed to what the platform chose
+     * to tell you about it. The two are deliberately separate destinations:
+     * the inbox is messages, which can be marked read; the feed is history,
+     * which cannot be marked anything. Wave 4's whole point is that reading a
+     * notification does not erase the event.
+     */
+    id: 'activity',
+    labelKey: null,
+    items: [{ to: '/activity', labelKey: 'nav.activity' }],
+  },
+  {
     id: 'support',
     labelKey: null,
     items: [{ to: '/support', labelKey: 'nav.support' }],
@@ -97,7 +117,7 @@ export const CUSTOMER_NAV_GROUPS: readonly NavGroup[] = [
   {
     id: 'notifications',
     labelKey: null,
-    items: [{ to: '/notifications', labelKey: 'nav.notifications' }],
+    items: [{ to: '/notifications', labelKey: 'nav.notifications', badge: 'unread' }],
   },
   {
     id: 'account',

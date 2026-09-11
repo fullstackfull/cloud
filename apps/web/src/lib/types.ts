@@ -1123,6 +1123,24 @@ export interface AcceptedOperation {
   finished_at: string | null
 }
 
+/**
+ * The receipt a dedicated-server rebuild returns.
+ *
+ * Shorter than the VPS one because there is less to say: a physical rebuild
+ * has no `action` verb to echo and its service is the machine the request was
+ * addressed to. The state vocabulary is the same one, from the same mapping.
+ */
+export interface AcceptedReinstall {
+  id: string
+  state: CustomerOperationState
+  is_terminal: boolean
+  needs_attention: boolean
+  retry_advice: RetryAdvice
+  requested_at: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
 /** A handle the portal turns into an address through one function. */
 export interface ResourceHandle {
   kind: string

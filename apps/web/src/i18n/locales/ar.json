@@ -59,7 +59,8 @@
       "billing": "الفواتير والدفع",
       "account": "الحساب"
     },
-    "buy": "شراء"
+    "buy": "شراء",
+    "activity": "النشاط"
   },
   "auth": {
     "signInTitle": "تسجيل الدخول إلى لينوميا كلاود",
@@ -234,6 +235,140 @@
     "verifying": "قيد التأكد",
     "void": "ملغاة",
     "withdrawn": "مسحوب"
+  },
+  "activity": {
+    "vps": {
+      "created": "تم إنشاء الخادم السحابي",
+      "destroyed": "تم حذف الخادم السحابي",
+      "started": "تم تشغيل الخادم السحابي",
+      "stopped": "تم إيقاف الخادم السحابي",
+      "restarted": "تمت إعادة تشغيل الخادم السحابي",
+      "reinstalled": "تمت إعادة تهيئة الخادم السحابي",
+      "resized": "تم تغيير خطة الخادم السحابي"
+    },
+    "dedicated": {
+      "provisioned": "تم تجهيز الخادم المخصص",
+      "reinstalled": "تمت إعادة تهيئة الخادم المخصص"
+    },
+    "hosting": {
+      "created": "تم إنشاء حساب الاستضافة",
+      "planChanged": "تم تغيير خطة الاستضافة"
+    },
+    "wordpress": {
+      "installed": "تم تثبيت موقع ووردبريس",
+      "stagingCreated": "تم إنشاء موقع تجريبي",
+      "cloned": "تم نسخ الموقع",
+      "pushed": "تم نقل النسخة إلى الإنتاج"
+    },
+    "domain": {
+      "registered": "تم تسجيل النطاق",
+      "renewed": "تم تجديد النطاق",
+      "transferred": "تم نقل النطاق",
+      "redeemed": "تم استرداد النطاق"
+    },
+    "backup": {
+      "taken": "تم أخذ نسخة احتياطية",
+      "filesRestored": "تمت استعادة الملفات"
+    },
+    "dns": {
+      "zoneImported": "تم استيراد سجلات DNS"
+    },
+    "order": {
+      "changed": "تم تحديث الطلب"
+    },
+    "invoice": {
+      "issued": "تم إصدار الفاتورة",
+      "paid": "تم دفع الفاتورة"
+    },
+    "support": {
+      "opened": "تم فتح تذكرة دعم"
+    },
+    "kinds": {
+      "create_vps": "إنشاء خادم سحابي",
+      "destroy_vps": "حذف خادم سحابي",
+      "start": "تشغيل",
+      "stop": "إيقاف",
+      "restart": "إعادة تشغيل",
+      "reinstall_vps": "إعادة تهيئة خادم سحابي",
+      "reinstall_dedicated": "إعادة تهيئة خادم مخصص",
+      "resize": "تغيير الخطة",
+      "create_hosting_account": "إنشاء حساب استضافة",
+      "change_hosting_package": "تغيير خطة الاستضافة",
+      "install_wordpress": "تثبيت ووردبريس",
+      "copy_wordpress_site": "نسخ الموقع",
+      "push_wordpress_to_production": "نقل النسخة إلى الإنتاج",
+      "provision_dedicated": "تجهيز خادم مخصص"
+    },
+    "feed": {
+      "title": "النشاط",
+      "subtitle": "ما حدث في هذا الحساب، الأحدث أولًا — ومن قام به من فريقك.",
+      "empty": "لم يحدث شيء في هذا الحساب بعد.",
+      "emptyFiltered": "لا يوجد شيء في هذا الجزء من الحساب بعد.",
+      "loadMore": "عرض الأقدم",
+      "when": "الوقت",
+      "what": "ما حدث",
+      "who": "من",
+      "outcome": "النتيجة",
+      "all": "الكل",
+      "actorSystem": "لينوميا",
+      "actorUnknown": "غير مُسجَّل",
+      "askSupport": "اسأل الدعم عن هذا"
+    },
+    "categories": {
+      "cloud": "الخوادم السحابية",
+      "hosting": "الاستضافة",
+      "domains": "النطاقات",
+      "billing": "الفواتير",
+      "support": "الدعم",
+      "backups": "النسخ الاحتياطية"
+    }
+  },
+  "attention": {
+    "title": "يحتاج إلى انتباهك",
+    "body": "قائمة الحساب نفسه، بالترتيب الذي تراه المنصة مهمًا.",
+    "none": "لا يوجد ما يحتاج إلى انتباهك.",
+    "invoice": {
+      "overdue": "هناك فاتورة متأخرة",
+      "dueSoon": "هناك فاتورة تستحق قريبًا"
+    },
+    "operation": {
+      "needsReview": "توقف العمل ونحن نراجعه"
+    },
+    "domain": {
+      "uncertain": "نتيجة طلب نطاق غير مؤكدة"
+    },
+    "backup": {
+      "needsReview": "توقفت عملية استعادة ونحن نراجعها"
+    },
+    "support": {
+      "waitingForYou": "هناك تذكرة دعم تنتظر ردك"
+    },
+    "severity": {
+      "critical": "عاجل",
+      "warning": "قريبًا",
+      "info": "للعلم"
+    }
+  },
+  "dashboard": {
+    "title": "حسابك",
+    "subtitle": "ما يحتاج إلى إجراء، وما تملكه، وما حدث للتو.",
+    "servicesTitle": "ما تملكه",
+    "servicesTotal": "الخدمات: {{count}}",
+    "servicesEmpty": "لم تشترِ أي شيء بعد.",
+    "servicesBrowse": "استعرض الكتالوج",
+    "billingTitle": "ما عليك دفعه",
+    "billingNothing": "لا يوجد مبلغ مستحق.",
+    "billingInvoices": "الفواتير: {{count}}",
+    "billingOpen": "الفواتير المفتوحة",
+    "renewalsTitle": "يتجدد قريبًا",
+    "renewalsNone": "لا يوجد ما يتجدد في الأسابيع القادمة.",
+    "renewalsPriceAtRenewal": "يُحدَّد السعر عند التجديد",
+    "recentTitle": "أُضيف حديثًا",
+    "activityTitle": "حدث للتو",
+    "activityAll": "عرض كل النشاط",
+    "newAccountTitle": "مرحبًا بك في لينوميا",
+    "newAccountBody": "لا يوجد شيء يعمل بعد. اختر خادمًا أو خطة استضافة أو اسم نطاق، وسيظهر هنا.",
+    "unreadTitle": "الإشعارات"
   },
   "account": {
     "welcome": "أهلاً، {{name}}",
@@ -1530,7 +1665,7 @@
     "empty": "لا يوجد شيء بعد.",
     "unread": "غير مقروء",
     "unreadOnly": "غير المقروء فقط",
-    "unreadCount": "{{count}} غير مقروء",
+    "unreadCount": "{{count}} غير مقروءة",
     "markRead": "تعليم كمقروء",
     "markAllRead": "تعليم الكل كمقروء",
     "open": "فتح",
@@ -1580,7 +1715,10 @@
       "fileRestore": "استعادة الملفات",
       "backup": "النسخ الاحتياطي",
       "copy": "النسخ",
-      "publish": "النشر"
+      "publish": "النشر",
+      "on": "التشغيل",
+      "off": "إيقاف التغذية",
+      "cycle": "إعادة تدوير الطاقة"
     },
     "retryAdvice": {
       "safe_to_retry": "يمكنك المحاولة مرة أخرى.",
@@ -1745,7 +1883,11 @@
       "other": "شيء آخر",
       "provisioning": "طلب لم يصل",
       "technical": "شيء لا يعمل"
-    }
+    },
+    "contextIntro": "بخصوص: {{what}}",
+    "contextResource": "المورد: {{identity}}",
+    "contextReference": "المرجع: {{reference}}",
+    "contextNotice": "تم تعبئة هذا النموذج مما كنت تنظر إليه. أضف أي تفاصيل أخرى تساعدنا، ثم أرسله."
   },
   "dns": {
     "subtitle": "نطاقاتك، وإلى أين تشير.",

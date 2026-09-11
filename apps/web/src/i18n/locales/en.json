@@ -59,7 +59,8 @@
       "billing": "Billing",
       "account": "Account"
     },
-    "buy": "Buy"
+    "buy": "Buy",
+    "activity": "Activity"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -234,6 +235,140 @@
     "verifying": "Verifying",
     "void": "Void",
     "withdrawn": "Withdrawn"
+  },
+  "activity": {
+    "vps": {
+      "created": "Cloud server created",
+      "destroyed": "Cloud server destroyed",
+      "started": "Cloud server started",
+      "stopped": "Cloud server stopped",
+      "restarted": "Cloud server restarted",
+      "reinstalled": "Cloud server rebuilt",
+      "resized": "Cloud server plan changed"
+    },
+    "dedicated": {
+      "provisioned": "Dedicated server set up",
+      "reinstalled": "Dedicated server rebuilt"
+    },
+    "hosting": {
+      "created": "Hosting account created",
+      "planChanged": "Hosting plan changed"
+    },
+    "wordpress": {
+      "installed": "WordPress site installed",
+      "stagingCreated": "Staging site created",
+      "cloned": "Site copied",
+      "pushed": "Copy pushed to production"
+    },
+    "domain": {
+      "registered": "Domain registered",
+      "renewed": "Domain renewed",
+      "transferred": "Domain transferred",
+      "redeemed": "Domain redeemed"
+    },
+    "backup": {
+      "taken": "Backup taken",
+      "filesRestored": "Files restored"
+    },
+    "dns": {
+      "zoneImported": "DNS records imported"
+    },
+    "order": {
+      "changed": "Order updated"
+    },
+    "invoice": {
+      "issued": "Invoice issued",
+      "paid": "Invoice paid"
+    },
+    "support": {
+      "opened": "Support ticket opened"
+    },
+    "kinds": {
+      "create_vps": "Create cloud server",
+      "destroy_vps": "Destroy cloud server",
+      "start": "Start",
+      "stop": "Stop",
+      "restart": "Restart",
+      "reinstall_vps": "Rebuild cloud server",
+      "reinstall_dedicated": "Rebuild dedicated server",
+      "resize": "Change plan",
+      "create_hosting_account": "Create hosting account",
+      "change_hosting_package": "Change hosting plan",
+      "install_wordpress": "Install WordPress",
+      "copy_wordpress_site": "Copy site",
+      "push_wordpress_to_production": "Push copy to production",
+      "provision_dedicated": "Set up dedicated server"
+    },
+    "feed": {
+      "title": "Activity",
+      "subtitle": "What has happened to this account, newest first — whoever on your team did it.",
+      "empty": "Nothing has happened on this account yet.",
+      "emptyFiltered": "Nothing in this part of the account yet.",
+      "loadMore": "Show older",
+      "when": "When",
+      "what": "What happened",
+      "who": "Who",
+      "outcome": "Outcome",
+      "all": "Everything",
+      "actorSystem": "Lynomia",
+      "actorUnknown": "Not recorded",
+      "askSupport": "Ask support about this"
+    },
+    "categories": {
+      "cloud": "Cloud servers",
+      "hosting": "Hosting",
+      "domains": "Domains",
+      "billing": "Billing",
+      "support": "Support",
+      "backups": "Backups"
+    }
+  },
+  "attention": {
+    "title": "Needs your attention",
+    "body": "The account's own list, in the order the platform thinks matters.",
+    "none": "Nothing needs your attention.",
+    "invoice": {
+      "overdue": "An invoice is overdue",
+      "dueSoon": "An invoice is due soon"
+    },
+    "operation": {
+      "needsReview": "Work stopped and we are looking at it"
+    },
+    "domain": {
+      "uncertain": "A domain request has an uncertain outcome"
+    },
+    "backup": {
+      "needsReview": "A restore stopped and we are looking at it"
+    },
+    "support": {
+      "waitingForYou": "A support ticket is waiting for your reply"
+    },
+    "severity": {
+      "critical": "Urgent",
+      "warning": "Soon",
+      "info": "For information"
+    }
+  },
+  "dashboard": {
+    "title": "Your account",
+    "subtitle": "What needs doing, what you have, and what has just happened.",
+    "servicesTitle": "What you have",
+    "servicesTotal": "Services: {{count}}",
+    "servicesEmpty": "You have not bought anything yet.",
+    "servicesBrowse": "See the catalogue",
+    "billingTitle": "What you owe",
+    "billingNothing": "Nothing is owed.",
+    "billingInvoices": "Invoices: {{count}}",
+    "billingOpen": "Open invoices",
+    "renewalsTitle": "Renewing soon",
+    "renewalsNone": "Nothing renews in the next few weeks.",
+    "renewalsPriceAtRenewal": "Priced at renewal",
+    "recentTitle": "Recently added",
+    "activityTitle": "Just happened",
+    "activityAll": "See all activity",
+    "newAccountTitle": "Welcome to Lynomia",
+    "newAccountBody": "Nothing is running yet. Choose a server, a hosting plan or a domain name, and it will appear here.",
+    "unreadTitle": "Notifications"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -1548,7 +1683,10 @@
       "fileRestore": "File restore",
       "backup": "Backup",
       "copy": "Copy",
-      "publish": "Publish"
+      "publish": "Publish",
+      "on": "Power on",
+      "off": "Power off",
+      "cycle": "Power cycle"
     },
     "retryAdvice": {
       "safe_to_retry": "You can try this again.",
@@ -1713,7 +1851,11 @@
       "other": "Something else",
       "provisioning": "An order that has not arrived",
       "technical": "Something is broken"
-    }
+    },
+    "contextIntro": "About: {{what}}",
+    "contextResource": "Resource: {{identity}}",
+    "contextReference": "Reference: {{reference}}",
+    "contextNotice": "This form has been filled in from what you were looking at. Add anything else that would help, then send it."
   },
   "dns": {
     "subtitle": "Your domains, and what they point at.",

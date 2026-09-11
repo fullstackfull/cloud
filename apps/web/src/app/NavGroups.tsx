@@ -3,6 +3,8 @@ import { NavLink } from 'react-router'
 
 import { cn } from '@/lib/cn'
 
+import { UnreadBadge } from './UnreadBadge'
+
 import type { NavGroup, NavItem } from './navigation'
 
 /**
@@ -79,7 +81,7 @@ export function NavItemLink({
       onClick={onNavigate}
       className={({ isActive }) =>
         cn(
-          'rounded-md text-sm font-medium transition-colors',
+          'flex items-center gap-2 rounded-md text-sm font-medium transition-colors',
           size === 'touch' ? 'px-3 py-2.5' : 'px-3 py-2',
           isActive
             ? 'bg-[var(--surface-sunken)] text-[var(--text-primary)]'
@@ -88,6 +90,13 @@ export function NavItemLink({
       }
     >
       {t(item.labelKey)}
+
+      {/*
+        Inside the link, so the count is part of its accessible name: a badge
+        beside a link is a second thing to find, and a customer using a screen
+        reader hears "Notifications" and no number at all.
+      */}
+      {item.badge === 'unread' ? <UnreadBadge /> : null}
     </NavLink>
   )
 }

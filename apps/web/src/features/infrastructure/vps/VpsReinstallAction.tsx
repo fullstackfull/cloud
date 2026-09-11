@@ -5,6 +5,8 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { SelectField } from '@/components/SelectField'
+import { useWatchOperations } from '@/features/operations/watchChannel'
+import { RESOURCE_FAMILIES } from '@/features/resources/resourcePaths'
 import { newIdempotencyKey } from '@/lib/api'
 import { useVpsReinstall, useVpsTemplates } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
@@ -39,6 +41,7 @@ export function VpsReinstallAction({ vm }: { vm: VirtualMachine }) {
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
   const reinstall = useVpsReinstall()
+  const { watch } = useWatchOperations()
 
   const [open, setOpen] = useState(false)
   const [templateId, setTemplateId] = useState('')
@@ -146,7 +149,24 @@ export function VpsReinstallAction({ vm }: { vm: VirtualMachine }) {
               ...(keysAllowed && sshKeys.length > 0 ? { ssh_keys: sshKeys } : {}),
               idempotencyKey: newIdempotencyKey(),
             },
-            { onSuccess: close },
+            {
+              onSuccess: (accepted) => {
+                /*
+                 * A rebuild takes minutes and the customer will not sit on
+                 * this page for them. The watcher follows it from wherever
+                 * they go, and says `needs_review` as itself if it stops for
+                 * a person — never as a failure, which would invite a second
+                 * rebuild of a half-built machine.
+                 */
+                watch(accepted, {
+                  actionKey: 'operations.actions.rebuild',
+                  href: RESOURCE_FAMILIES.vps.detail(vm.id),
+                  invalidate: ['vps', 'services', 'activity', 'overview'],
+                })
+
+                close()
+              },
+            },
           )
         }}
         onCancel={close}

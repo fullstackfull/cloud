@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { useWatchOperations } from '@/features/operations/watchChannel'
+import { RESOURCE_FAMILIES } from '@/features/resources/resourcePaths'
 import { newIdempotencyKey } from '@/lib/api'
 import { useDedicatedPower } from '@/lib/queries'
 import type { DedicatedServer } from '@/lib/types'
@@ -37,6 +39,7 @@ export function DedicatedPowerActions({
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
   const power = useDedicatedPower()
+  const { acknowledge } = useWatchOperations()
 
   /*
    * Cutting power at the chassis does not ask the operating system to close
@@ -68,7 +71,25 @@ export function DedicatedPowerActions({
                 return
               }
 
-              power.mutate({ id: server.id, action, idempotencyKey: newIdempotencyKey() })
+              power.mutate(
+                { id: server.id, action, idempotencyKey: newIdempotencyKey() },
+                {
+                  /*
+                   * Acknowledged, not watched. A chassis's power state is
+                   * reported by its controller and shown on the machine's own
+                   * page, and this endpoint returns the machine rather than an
+                   * operation — so there is nothing to poll and nothing to
+                   * claim. What the customer gets is "Stop requested", which
+                   * is exactly what happened.
+                   */
+                  onSuccess: () => {
+                    acknowledge(`dedicated-power:${server.id}`, {
+                      actionKey: `operations.actions.${action}`,
+                      href: RESOURCE_FAMILIES.dedicated.detail(server.id),
+                    })
+                  },
+                },
+              )
             }}
           >
             {t(`dedicated.actions.${action}`)}
@@ -104,7 +125,15 @@ export function DedicatedPowerActions({
         onConfirm={() => {
           power.mutate(
             { id: server.id, action: 'off', idempotencyKey: newIdempotencyKey() },
-            { onSettled: () => { setForcingOff(false); } },
+            {
+              onSuccess: () => {
+                acknowledge(`dedicated-power:${server.id}`, {
+                  actionKey: 'operations.actions.off',
+                  href: RESOURCE_FAMILIES.dedicated.detail(server.id),
+                })
+              },
+              onSettled: () => { setForcingOff(false); },
+            },
           )
         }}
         onCancel={() => { setForcingOff(false); }}

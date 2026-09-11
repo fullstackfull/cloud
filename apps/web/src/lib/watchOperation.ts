@@ -122,6 +122,39 @@ export function nextPollDelay(
 }
 
 /**
+ * The same rule, for a list whose rows carry work in flight.
+ *
+ * Some things a customer starts are not provisioning operations: a backup and
+ * a file restore have their own durable rows with their own states, and the
+ * thing to read again is the list rather than an operation endpoint. They get
+ * the same schedule rather than a second one — a `setInterval` in the backups
+ * screen and another in the WordPress screen is exactly how five screens end
+ * up with five answers to "how often, and when do we stop".
+ *
+ * The server decides what "in flight" means: every one of these resources
+ * publishes a predicate of its own state (`is_in_flight`) so the browser never
+ * has to hold a list of which states are finished — which would be a second
+ * copy of a vocabulary that lives on the server.
+ *
+ * `false` when nothing is unfinished, which is the stop condition: a page of
+ * completed backups is not polled at all.
+ */
+export function nextListPollDelay(unfinished: number, readsTaken: number): number | false {
+  if (unfinished === 0) return false
+
+  return Math.min(LIST_FLOOR_MS * (1 + readsTaken * BACKOFF_PER_READ), MAX_INTERVAL_MS)
+}
+
+/**
+ * The floor for a list, which is longer than an operation's.
+ *
+ * A reboot is watched by somebody looking at the screen and is worth three
+ * seconds; a backup takes long enough that the same interval would be a
+ * hundred requests nobody reads the answer to.
+ */
+const LIST_FLOOR_MS = 10_000
+
+/**
  * How long this operation has been going, measured from the customer's press.
  *
  * `requested_at` rather than a timestamp taken when this hook mounted: the
