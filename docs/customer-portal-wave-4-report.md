@@ -31,10 +31,10 @@ wave.
 ## B. Ending code HEAD
 
 ```text
-71d85ba  Wave 4: the feed answered 500 for any account that had placed an order
+8334897  Wave 4: the closure run, and the history a cleared inbox must not erase
 ```
 
-Six commits, in the order they were made:
+Seven commits, in the order they were made:
 
 | Commit | What it did |
 | --- | --- |
@@ -44,6 +44,7 @@ Six commits, in the order they were made:
 | `228c46a` | The dashboard, the activity page, the badge, contextual support |
 | `7003f0d` | The tests, and the three defects they found |
 | `71d85ba` | The feed's 500 on any account with an order, and failed payments as a source |
+| `8334897` | The closure run: the history a cleared inbox must not erase, and two test-only slips the final suites found |
 
 Report HEAD is recorded in the verdict block at the end of this document.
 
@@ -1128,3 +1129,503 @@ plain run exactly as in Waves 0–3.
 Twenty of those journeys are this wave's: thirteen desktop (AK), three phone
 (AL) and four Arabic (AM). The other 222 are Waves 0–3 and the operator
 surface, all green — the regression evidence for AO through AR.
+
+## AV. Clean room
+
+A fresh `git clone` of the pushed branch into an empty directory, then the
+whole toolchain from nothing, against fresh databases.
+
+```text
+HEAD 83348979777fb3394aa04f3f192bd392c51354f9
+```
+
+| Step | Result |
+| --- | --- |
+| `git clone --branch claude/hv-t6hq1p --single-branch` | OK |
+| `composer install --no-interaction --prefer-dist` | OK |
+| `php artisan key:generate` | OK |
+| `php artisan migrate:fresh --seed --env=testing` | OK (fresh `lynomia_cleanroom_w4`) |
+| `./vendor/bin/pint --test` | OK |
+| `php artisan test --compact` | OK — **2974 tests, 137875 assertions, 0 failures** |
+| PHPStan | OK — **0 errors** (see the toolchain note below) |
+| `npm ci` | OK |
+| `npm run typecheck` | OK |
+| `npm run lint` | OK |
+| unit tests | OK — **54 files, 243 tests** |
+| `npm run build` | OK |
+| `npm run openapi:lint` | OK — valid |
+| browser suite, all three projects | OK — **242 passed, 6 skipped (11.7m)** |
+
+Fourteen steps, fourteen green, from a clone with no build products in it.
+
+### The one toolchain that was not installed inside the clean room
+
+**Stated explicitly, because it is the one thing in this run that did not come
+from the clone.** `tools/phpstan` has its own `composer.json`, and installing
+it needs `github.com`. Inside this sandbox it cannot authenticate, and the
+failure was reproduced deliberately for this report rather than assumed from
+Wave 3:
+
+```text
+Failed to download larastan/larastan from dist: Could not authenticate against github.com
+  ...
+In AuthHelper.php line 132:
+  Could not authenticate against github.com
+```
+
+So the clean room's PHPStan ran against an analysis toolchain **copied from the
+working copy's own lockfile-installed `vendor` directory**. Nothing else was
+copied: the application's own `composer install` and `npm ci` both ran inside
+the clean room from its own lockfiles and succeeded.
+
+This is an environmental egress limit, recorded identically in the Wave 1,
+Wave 2 and Wave 3 reports, and it is not a property of the code. CI installs
+the same toolchain from its own runner and PHPStan passes there too — run 146's
+"Static analysis" job, whose "Install analysis toolchain" step succeeded on its
+own (AW).
+
+## AW. CI
+
+Observed to completion, on the ending code HEAD.
+
+| | |
+| --- | --- |
+| Workflow | `CI` (`.github/workflows/ci.yml`) |
+| Run number | **146** |
+| Run id | **34554263844** |
+| Attempt | **1** (no re-runs) |
+| HEAD SHA | **83348979777fb3394aa04f3f192bd392c51354f9** |
+| Event | `push` on `claude/hv-t6hq1p` |
+| Started | 2026-09-11T02:20:52Z |
+| URL | https://github.com/fullstackfull/cloud/actions/runs/34554263844 |
+
+All nine jobs, with their conclusions:
+
+| Job | Conclusion |
+| --- | --- |
+| Backend (PHP 8.4, PostgreSQL 18) | **success** |
+| Backend (PHP 8.4, PostgreSQL 16) | **success** |
+| Frontend | **success** |
+| Browser end-to-end | **success** |
+| Static analysis | **success** |
+| Security checks | **success** |
+| Production guards | **success** |
+| Infrastructure validation | **success** |
+| API description | **success** |
+
+Nine of nine green on the first attempt. `CI_BLOCKED_BUDGET` is not claimed:
+CI ran.
+
+Two earlier runs on this branch failed, and both are part of this wave's
+honest record rather than something to omit:
+
+| Run | SHA | Failing jobs | Cause | Fixed in |
+| --- | --- | --- | --- | --- |
+| 144 | `228c46a` | Frontend, Browser end-to-end | The implementation commit, before its tests existed; the frontend suite had not yet been updated for the new dashboard | `7003f0d` |
+| 145 | `7003f0d` | Frontend (Lint), Browser end-to-end | The unnecessary optional chain in a new spec, and the feed's 500 on any account with an order — which only the browser suite could reach, because no backend fixture had an order and an activity read on the same account | `71d85ba`, `8334897` |
+
+Both backend matrices passed at run 145, which is exactly why the 500 mattered:
+the defect was invisible to 2970 backend tests and visible to one browser
+journey that happened to shop first. The gate and the one-of-everything fixture
+described in AS exist so that stays true in the other direction.
+
+---
+
+## AX. New defects
+
+Every defect this wave found, including the ones its own tests found in its own
+code, classified as the brief asks.
+
+| # | Defect | Class | Status |
+| --- | --- | --- | --- |
+| 1 | **The account feed and the dashboard answered 500 for any account that had ever placed an order.** The hydration pass reads the name a customer knows each resource by out of that family's own table, and the orders entry in that map named a `reference` column. Orders carry a `number`. `SQLSTATE[42703] Undefined column` inside the identity resolution takes down the whole page, not one row | W4-BLOCKER | FIXED in `71d85ba` |
+| 2 | **`attention.domain.lapsed` and `attention.domain.expiring` had no strings.** They rendered as their own dotted keys, at the top of the first page of the portal, in both languages | W4-BLOCKER | FIXED in `7003f0d` |
+| 3 | **Three customer-facing vocabularies for one provisioning job** — the 202 receipt's raw engine status, the service-event list's own enum, and the operation contract's seven words — and `in_progress` from the second had no Arabic string at all, because the translation gate did not know that enum existed | W4-BLOCKER | FIXED in `10dca0c`; third enum deleted |
+| 4 | **The one source the pre-implementation inventory marked USE and the implementation skipped**: `payment_attempts`. A declined card was invisible in the feed of the account whose card was declined | W4-RELATED | FIXED in `71d85ba` |
+| 5 | **The unread badge's count was not in the link's accessible name.** A coloured circle beside "Notifications" announces as "Notifications" | W4-RELATED (accessibility) | FIXED in `7003f0d` |
+| 6 | **`Card` rendered a `<section>` with no accessible name**, so no card anywhere in the portal was exposed as a landmark — a Wave 3 shell defect this wave's tests surfaced | W4-RELATED (accessibility) | FIXED in `7003f0d` |
+| 7 | **The attention list published a provisioning job's ULID as a customer-quotable `reference`** | W4-RELATED | FIXED in `ce72667` |
+| 8 | An existing unit test matched `getByLabelText(/country/i)`, which became ambiguous once cards had accessible names | TEST-ONLY | FIXED |
+| 9 | Two existing browser specs had locator collisions once the dashboard added a second heading containing "welcome" and a second "1 unread" string | TEST-ONLY | FIXED in `7003f0d` |
+| 10 | An unnecessary optional chain in a new browser spec failed `@typescript-eslint/no-unnecessary-condition` | TEST-ONLY | FIXED |
+| 11 | Four of this wave's own browser journeys assumed seeded rows were on page one of an account other specs also shop on | TEST-ONLY | FIXED in `7003f0d` |
+
+One non-defect, recorded because it cost time and will recur: a 21-failure
+backend cascade that reproduced nowhere in isolation. Two PHPUnit processes
+were running against the one test database, and
+`ConcurrentDedicatedReservationTest` commits real rows outside a transaction by
+design. Running the suite once, alone, is green. **Environmental, not a
+defect.**
+
+Nothing found in this wave was left unfixed, so there is no W4-BLOCKER
+outstanding.
+
+## AY. Deferred items
+
+| Item | Why deferred | Where it is recorded |
+| --- | --- | --- |
+| Dedicated power idempotency | §85 says out of scope. No durable operation row exists for it; the wave neither added one nor changed the architecture | D, F |
+| `login_activities` as an activity source | Security already shows sign-in history; a second surface would publish IP and user agent for no new answer | E |
+| Country/currency changes, team membership as activity sources | Both already have their own history screens; the second has no durable "removed" event | E |
+| DNS record and reverse-DNS change history | **GAP**: no history table exists to source it from. Reported rather than invented | E |
+| Intermediate subscription changes | **PARTIAL**: the cancellation date is durable, plan changes in between are not | E |
+| An actor on `domain_operations` | The rows are created by orders and by the renewal scheduler; the person is already on the order transition | K |
+| Backwards cursor pagination | The API is forwards-only; the page walks the cursors it has already seen rather than claiming an API that does not exist | L |
+| An `operator` actor type | Deliberate, not deferred: operator action is `audit_log`, which is not a customer source | K, AJ |
+
+## AZ. Provider and hardware blockers
+
+Unchanged from Wave 3, and nothing in this wave needed a provider:
+
+| Blocker | Effect on this wave |
+| --- | --- |
+| No real hypervisor, registrar, payment gateway, BMC or DNS provider | None. Every operation observed in this wave was produced by the controlled fake providers, and the wave's subject is reading operation state rather than executing it |
+| `composer` cannot authenticate to `github.com` through this sandbox's egress proxy | The `tools/phpstan` toolchain cannot be installed inside the clean room. See AV for exactly what was done instead |
+
+No claim of real infrastructure, payment, hosting or registrar verification is
+made anywhere in this report.
+
+## BA. P1 closure status
+
+All fifteen P1 findings of the product and UX audit are closed.
+
+| Finding | Closed in | Evidence |
+| --- | --- | --- |
+| AR-1 Idempotency-Key transport | Wave 0 | Wave 0 report; this wave's receipts ride that transport |
+| AR-2 2FA needs current password | Wave 0 | Wave 0 report |
+| AR-3 VPS resources read from the wrong place | Wave 0 | Wave 0 report |
+| AR-4 Mobile navigation exposed 4 of 21 destinations | Wave 1 | Wave 1 report; this wave added `/activity` to the same shared source |
+| AR-5 Backend messages reached Arabic customers in English | Wave 1 | Wave 1 report; this wave's codes are inside the same gate |
+| **AR-6 No operational dashboard** | **Wave 4** | V, W, X, Y, Z, AA; journeys 1, 2 |
+| AR-7 No per-resource page | Wave 3 | Wave 3 report; this wave's deep links land on those pages |
+| AR-8 Destructive actions without confirmation | Wave 0 | Wave 0 report |
+| AR-9 Subscriptions did not name the plan | Wave 2 | Wave 2 report |
+| AR-10 No invoice detail, no card flow | Wave 2 | Wave 2 report |
+| AR-11 Registration collected no country or currency | Wave 2 | Wave 2 report |
+| **AR-12 No refresh model for long-running operations** | **Wave 4** | M, N, O, P, Q, R, S, T, U; journeys 8, 9, 10, 11, 12 |
+| **AR-13 No customer activity view** | **Wave 4** | G, H, I, J, K, L; journeys 3, 4, 7 |
+| AR-14 Five undefined design tokens | Wave 0 | Wave 0 report |
+| AR-15 Catalogue ignored product readiness | Wave 0 | Wave 0 report |
+
+**15 / 15 closed. 0 remaining.**
+
+The four supporting findings this wave also took: AS-11 (AB, journey 13),
+AS-14 (AC, journey 6), AS-17 (AE, AF) and AT-3 (T, U).
+
+## BB. Wave 5 prerequisites
+
+Not started (§87, §95). What Wave 4 leaves in place for whoever picks it up:
+
+- **One activity read model.** A new source is a branch in `ActivitySources`
+  plus an arm in `ActivityProjection`'s `match`, and the message-code gate
+  refuses the commit until both languages have the sentence. The four `DEFER`
+  and two `GAP` rows of section E are the shortlist.
+- **One operation vocabulary.** `CustomerOperationState` and `RetryAdvice` are
+  both inside the translation parity gate, so extending them is safe and
+  extending them silently is impossible.
+- **One observation layer.** Any future screen that needs to watch work calls
+  `useWatchedOperation`, and the source gate in Q means a second polling
+  mechanism fails the build.
+- **One feedback channel.** `announce` and `acknowledge` are the only ways to
+  tell a customer something happened, and they are mounted above the routes.
+- **One time zone.** `applyTimeZone` is called once; every formatter reads it
+  at call time.
+- **Boundedness is measured, not asserted.** `TheDashboardAndFeedStayBounded`
+  compares query counts at two account sizes, so a future N+1 in any of these
+  reads fails a test rather than a customer's page.
+
+What Wave 5 will still have to decide, none of which this wave prejudged:
+whether `login_activities` belongs in the feed, whether DNS changes deserve a
+history table, whether domain operations should record a requester, and how
+dedicated power gets a durable operation row (§85).
+
+---
+
+## BC. Final questions
+
+The forty-two questions of §93, each with the evidence that answers it.
+
+| # | Question | Answer | Evidence |
+| --- | --- | --- | --- |
+| 1 | Can a customer open one page and see everything currently requiring their attention? | **YES** | `/` leads with the attention list: seven sources, severity-ranked server-side, capped per class and overall. W; `an_overdue_invoice_outranks_a_name_expiring_next_month`; desktop journey 1 |
+| 2 | Does Dashboard use a bounded server aggregate rather than many browser list calls? | **YES** | One read, `GET /me/overview`. V; 23 queries at 5 machines and 23 at 45 (AG) |
+| 3 | Can Dashboard safely display financial totals when historical data contains multiple currencies? | **YES — by never totalling them** | One row per currency and no total in the owed section. Y; `money_owed_in_two_currencies_is_never_added_together`; `shows two currencies as two amounts and never adds them up` |
+| 4 | Can a new account understand what to do next? | **YES** | One sentence and the catalogue link when services, attention and activity are all empty. AA; `a_new_account_is_told_it_has_nothing_rather_than_shown_fake_numbers` |
+| 5 | Can an account see recent meaningful activity? | **YES** | `/activity` over eleven durable sources, and the dashboard's own rows come from the same class. G, Z; `the_dashboards_recent_activity_is_the_account_feeds_own_rows` |
+| 6 | Can a team member see who performed an operation when the actor is known? | **YES** | `provisioning_jobs` gained `requested_by_user_id`; the feed publishes a typed actor and a display name. K; `a_reboot_says_what_happened_to_which_machine_and_who_asked`; desktop journey 3 drives two people through two reboots |
+| 7 | Is Activity independent of whether a notification was read? | **YES** | `notifications` is not a source. H; `marking_every_notification_read_erases_nothing_from_the_history` |
+| 8 | Is raw operator audit excluded from Customer Activity? | **YES** | `audit_log` is not a source and there is no operator actor type. H, AJ, K |
+| 9 | Can another tenant retrieve my Activity? | **NO** | Scoped from the session, no account parameter, `where customer_id` on every branch. AI; `another_accounts_history_is_not_readable`; `another_tenants_overview_is_unreachable`; `another_tenants_operation_is_not_found_rather_than_refused` |
+| 10 | Can Activity scale without one query per resource? | **YES** | Batched hydration reusing `ServiceIdentities::handlesFor`; 7 queries at 5 machines/15 events and 7 at 45 machines/450 events. AG, L |
+| 11 | When the customer requests a reboot, do they immediately know the request was accepted? | **YES** | The 202 receipt is announced as "Reboot requested" before any poll. T; `acknowledges the request in the lifecycle s own words`; desktop journey 8 |
+| 12 | Does the page update without manual reload? | **YES** | `useWatchedOperation` refetches on the server's hint and invalidates the resource queries on settlement. P; desktop journey 8 |
+| 13 | Does polling stop once the operation reaches a terminal state? | **YES** | `poll_after_ms` is null when terminal and the client's `refetchInterval` returns `false`. M, P; `finished_work_tells_the_client_to_stop_asking`; desktop journey 11 counts requests for twelve seconds after settlement and finds none |
+| 14 | Does a polling network failure avoid falsely marking the operation failed? | **YES** | The last server-reported state stays; the failure is reported as a failure to read. P; `does not turn a failed read into a failed operation` |
+| 15 | Can a browser reload recover the real operation status? | **YES** | What is watched is in `sessionStorage` (id and label only); the state comes from the next read. R; desktop journey 10 |
+| 16 | Can the customer navigate away and return without losing business truth? | **YES** | The watcher and the channel are mounted above the routes; the resource is authoritative either way. R; desktop journey 9 |
+| 17 | Can an indeterminate operation ever become "failed" merely because the frontend stopped polling? | **NO** | Past the window the message is "taking longer than usual" and the state shown is the last one the server reported. P, S; `gives up asking once the work has outrun the observation window`; `never reports an unknown outcome as either a failure or a success` |
+| 18 | Can an indeterminate operation be blindly retried from the portal? | **NO** | `retry_advice` is `support_required`, no retry control is drawn, no generic retry endpoint exists, and mutations are never auto-retried. O; `there_is_no_generic_retry_endpoint` |
+| 19 | Is a failed operation linked to contextual Support? | **YES** | `needs_attention` rows carry "Ask support about this"; the terminal failure message offers the resource and support. AC, U; desktop journey 6 |
+| 20 | Is needs_review linked to Support? | **YES** | Same path, and its advice is `support_required` rather than a retry. O, U; `never reports work waiting on a person as a failure`; desktop journeys 5 and 12 |
+| 21 | Does the Support ticket identify the correct resource without exposing internal infrastructure? | **YES** | Kind, id, identity and a customer-quotable reference; the server re-resolves any `service_id` against the acting customer. AC; `support_context_pointed_at_another_tenants_service_is_refused`; journey 5 asserts no node name or provider word on the page |
+| 22 | Does an unread-notification badge exist on desktop? | **YES** | In the notifications link in the shared navigation source. AB; `puts the count inside the link that opens the inbox`; desktop journey 13 |
+| 23 | Does it exist on mobile? | **YES** | Same definition renders the drawer, so the badge is there too. AB; the phone navigation spec reaches `/activity` and the notifications link in the drawer |
+| 24 | Does marking notifications read update the badge? | **YES** | The count shares the `['notifications']` key family. AB; `marking_one_read_moves_the_count`; journey 13 follows the badge and watches it clear |
+| 25 | Does the global feedback system acknowledge actions without treating acceptance as completion? | **YES** | "Reboot requested" from the receipt; the result is a separate later message. T; the Arabic acknowledgement journey asserts the same in Arabic |
+| 26 | Can polling generate duplicate completion toasts? | **NO** | Messages are keyed by the operation's own id and transitions are tracked per operation in a ref. T; `keeps asking while the work is unfinished and stops when it is over` asserts one message per state |
+| 27 | Are timestamps displayed in the customer's configured timezone? | **YES** | `applyTimeZone(user.timezone)` during render in `AppLayout`; every formatter reads it at call time. AE; `reads an instant in the zone the customer chose` |
+| 28 | Are date-only values protected from timezone shifting? | **YES** | `^\d{4}-\d{2}-\d{2}$` formats in UTC. AE; `never moves a date that has no time in it`, asserted in Asia/Kuwait, America/Los_Angeles and Pacific/Kiritimati |
+| 29 | Does relative time work in English? | **YES** | `Intl.RelativeTimeFormat` with `numeric: 'auto'`. AF; `says how long ago in the reader s own language` |
+| 30 | Does relative time work in Arabic? | **YES** | Same formatter, Arabic locale, six plural forms from the language. AF; the Arabic feed journey asserts Arabic script inside `<time>` |
+| 31 | Does Dashboard work at 393 px? | **YES** | Attention first, no sideways scroll measured from `scrollWidth - clientWidth`, cards stacking rather than squeezing. AL |
+| 32 | Does Activity work at 393 px? | **YES** | Reads and filters with a thumb; filter controls at least 32 px; no sideways scroll before or after filtering. AL |
+| 33 | Do Dashboard, Activity and operation feedback work in RTL? | **YES** | Four Arabic journeys, including one that asserts no translation key shows through anywhere in `main`. AM |
+| 34 | Did Wave 0 remain green? | **YES** | AO; the whole browser suite and both backend matrices pass at the ending HEAD |
+| 35 | Did Wave 1 remain green? | **YES** | AP; extended (navigation, translation gates) rather than altered |
+| 36 | Did Wave 2 remain green? | **YES** | AQ; two locators tightened, no assertion changed |
+| 37 | Did Wave 3 remain green? | **YES** | AR; the routing map, identity resolver and resource pages are all reused |
+| 38 | Are all original P1 findings now closed? | **YES — 15 / 15** | BA |
+| 39 | Did this wave start Wave 5? | **NO** | D; no Account & Polish work, no API-token expansion, no dark mode, no account deletion or export |
+| 40 | Did this wave change Dedicated power idempotency architecture? | **NO** | D, F; dedicated power remains RES_STATE with no durable operation row, and nothing in this wave touched its path |
+| 41 | Did this wave claim real infrastructure verification? | **NO** | AZ; fake providers throughout, and `REAL_INFRA_VERIFIED` is not claimed |
+| 42 | Did this wave claim real provider verification? | **NO** | AZ; no registrar, gateway, hosting or BMC was contacted, and none of the `REAL_*_VERIFIED` claims is made |
+
+---
+
+## BD. Final verdict
+
+```text
+Customer Portal Wave 4 — Know What Is Happening
+
+Status:
+CLOSED
+
+Starting HEAD:
+f115205 (Add the customer portal Wave 3 closure report)
+
+Ending code HEAD:
+8334897 (Wave 4: the closure run, and the history a cleared inbox must not erase)
+
+Report HEAD:
+the commit that adds the rest of this file; its parent is 8334897 and it
+changes no code
+
+AR-6 Operational Dashboard:
+CLOSED. GET /me/overview, one bounded aggregate. Attention first, in
+server-decided severity order, capped per class and overall, every row
+linking the exact resource. Services by state, money grouped by currency
+with no total, renewals with an amount only where the platform has an
+authoritative one, unread count, and recent activity read from the same
+account feed as /activity. A new account gets one sentence and one way
+forward rather than six empty cards.
+
+AR-12 Async Operations / Feedback:
+CLOSED. GET /operations/{id} in the customer vocabulary, with retry
+advice the server decides and a poll hint that is null once terminal.
+One observation layer in the browser, gated over source text. Every
+asynchronous action a customer can start is acknowledged on acceptance
+and reported on settlement, from wherever they have navigated to, across
+a reload. No automatic mutation retries anywhere.
+
+AR-13 Account-wide Activity:
+CLOSED. GET /activity over eleven durable sources as a query-time union,
+cursor-paginated with a deterministic tie-breaker, typed actors, no
+operator audit, no provider text, and the dashboard's rows are the same
+class's own output.
+
+AS-11 Notifications:
+CLOSED. GET /notifications/unread-count returns one integer; the badge
+is inside the notifications link in the one navigation source, so it is
+part of the link's accessible name on desktop and in the phone drawer;
+it caps at 99+ with the true number still announced; it moves when a
+notification is marked read; and notification deep links point at
+resources rather than collections.
+
+AS-14 Contextual Support:
+CLOSED. "Ask support about this" carries what it is about in the URL as
+a translation key, so the draft is written in the reader's language and
+the link survives a copy, a bookmark and a reload. Prefilled, never
+submitted, key-validated against two namespaces, and every resource id
+re-resolved against the acting customer server-side.
+
+AS-17 Timezone / Relative Time:
+CLOSED. The customer's IANA zone applied in one place during render;
+date-only values never shifted; relative time from
+Intl.RelativeTimeFormat in both languages.
+
+AT-3 Global Feedback:
+CLOSED. One polite live region above the routes, keyed by what each
+message is about, acknowledging in the lifecycle's own words. Good news
+clears itself; a warning or a failure waits to be dismissed.
+
+Activity architecture:
+Query-time union over eleven existing durable tables, each branch its
+own select/predicate/order/limit inside fromSub, merged by an outer
+fromSub. Chosen over a projection table so that no fact exists twice and
+there is nothing for a read model to drift from.
+
+Activity source of truth:
+Derived read model. Allow-listed columns only, no model hydration, no
+select *, exhaustive match with no default arm for every source state.
+notifications is not a source, so marking a message read cannot alter
+history. audit_log is not a source, so no operator note can reach a
+customer.
+
+Operation-status contract:
+GET /api/v1/operations/{operation}: id, kind, action, state, is_terminal,
+needs_attention, retry_advice, failure_reason (bounded), resource,
+requested_at, started_at, updated_at, finished_at, poll_after_ms.
+Absent by design: last_error, payload, result, provider, remote_job_id,
+failure_class, attempts, max_attempts, timeout_seconds, next_attempt_at.
+Another tenant's operation is 404, not 403.
+
+Polling strategy:
+One module. The server's poll_after_ms is the floor (3 s settling, 10 s
+after) and null once terminal; each read widens the gap to a 30 s
+ceiling; an unfocused tab does not poll; focus and reconnect read
+immediately; a read failure is reported as a read failure beside the
+last state the server gave; past a 15-minute window measured from the
+operation's own requested_at the polling stops and the customer is told
+the work is taking longer than usual. Asserted structurally by a source
+gate and measured in the browser by counting requests after settlement.
+
+Indeterminate semantics:
+A first-class state, never collapsed. Its retry advice is
+support_required; the portal's terminal-message switch has its own arm
+with no default arm to fall through into; giving up polling cannot turn
+it into a failure; and there is no path from the portal that repeats the
+mutation.
+
+Dashboard aggregate:
+One read. Capped lists, one grouped count, one grouped sum per currency,
+and resource handles for the whole response resolved in a single pass.
+
+Query boundedness:
+Measured, not asserted. Activity 7 queries, dashboard 23, unread count 2
+— identical at 5 machines / 15 events and at 45 machines / 450 events.
+Nine times the machines, thirty times the events, no extra query.
+
+Unread notifications:
+One integer endpoint, 2 queries with 60 unread. Badge in the link's
+accessible name, 99+ cap, nothing at all at zero, invalidated with the
+list.
+
+Contextual support:
+Prefilled from a key, never auto-submitted, key-validated client-side
+against the activity and attention namespaces, resource ownership
+validated server-side with a 404 for another tenant's service.
+
+Timezone:
+Customer IANA zone from the profile, applied once during render, read at
+call time by every formatter; date-only values formatted in UTC so a
+renewal date is never a day out; an unresolvable zone degrades to the
+browser rather than blanking the page.
+
+English:
+Desktop 13 Wave 4 journeys plus the full Wave 0–3 suite, all passing.
+
+Arabic:
+4 Wave 4 journeys in a browser set to Arabic, including an assertion that
+no translation key shows through anywhere in main, and Arabic relative
+time asserted as Arabic script inside <time>.
+
+Mobile:
+3 Wave 4 journeys at 393 px, with sideways overflow measured rather than
+eyeballed and a 32 px minimum on the feed's filter controls.
+
+Accessibility:
+Named live region for feedback; every Card is now a named landmark
+(aria-labelledby from a generated id), which it was not before this
+wave; the unread count is in the notifications link's accessible name;
+filters are buttons with aria-pressed; times are <time dateTime> with
+the exact instant in title; no state is conveyed by colour alone.
+
+P1 findings closed:
+15 / 15
+
+P1 remaining:
+NONE
+
+Backend:
+2974 tests, 137869 assertions, 0 failures. Pint clean.
+
+Frontend:
+54 test files, 243 tests, 0 failures. tsc -b clean, eslint clean with
+zero warnings, production build clean.
+
+Browser:
+242 passed, 6 skipped (the opt-in visual-record spec), across chromium
+desktop, customer-mobile at 393 px and customer-arabic.
+
+PHPStan:
+0 errors.
+
+OpenAPI:
+247 operations. Regenerated by the specification test and valid to
+redocly with the 6 pre-existing warnings Waves 0–3 carried.
+
+Clean room:
+PASS. Fresh clone of 8334897, 14 steps, 14 green, fresh databases.
+One stated exception: the tools/phpstan analysis toolchain could not be
+installed inside the clean room because composer cannot authenticate
+against github.com through this sandbox's egress proxy (the failure is
+quoted in AV), so it was copied from the working copy's own
+lockfile-installed vendor directory. Nothing else was copied; the
+application's composer install and npm ci both ran from the clone's own
+lockfiles.
+
+CI:
+PASS. Workflow CI, run number 146, run id 34554263844, attempt 1, HEAD
+83348979777fb3394aa04f3f192bd392c51354f9. All nine jobs success on the
+first attempt: Backend (PostgreSQL 18), Backend (PostgreSQL 16),
+Frontend, Browser end-to-end, Static analysis, Security checks,
+Production guards, Infrastructure validation, API description.
+
+Wave 0 regressions:
+NONE
+
+Wave 1 regressions:
+NONE
+
+Wave 2 regressions:
+NONE
+
+Wave 3 regressions:
+NONE
+
+New findings:
+11, all fixed inside this wave. Four in this wave's own code — the feed's
+500 on any account with an order, two untranslated attention codes, and
+the failed-payment source the pre-implementation inventory had marked
+USE. Three pre-existing and found by this wave's tests — three customer
+vocabularies for one operation, the unread badge's accessible name, and
+Card rendering a section with no accessible name. Four test-only. None
+outstanding. Full table in AX.
+
+Dedicated power idempotency:
+DEFERRED — ARCHITECTURE ITEM
+
+REAL_INFRA_VERIFIED:
+NOT CLAIMED
+
+REAL_PAYMENT_VERIFIED:
+NOT CLAIMED
+
+REAL_REGISTRAR_VERIFIED:
+NOT CLAIMED
+
+Wave 5 started:
+NO
+
+Recommended next action:
+Review this wave. All fifteen P1 findings of the product and UX audit are
+now closed, which was the goal the wave sequence was built around, so the
+right next step is a read of the closure rather than more building. When
+Wave 5 is wanted, BB lists what is in place for it and the four decisions
+it will have to make — none of which this wave prejudged.
+```
+
+---
+
+*Wave 4 is closed. Wave 5 has not been started, and per §95 no work beyond
+this report was begun.*
