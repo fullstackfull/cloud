@@ -124,6 +124,40 @@ final readonly class ActivityIdentities
     }
 
     /**
+     * Where each resource family keeps the name a customer knows it by.
+     *
+     * Hoisted out of the method that uses it so that a test can walk it
+     * against the schema — which is the failure this constant exists to
+     * prevent. The orders entry named a `reference` column that does not
+     * exist; orders carry a `number`. The whole feed answered 500 for any
+     * account that had ever placed an order, and it was reachable only with an
+     * order transition on the page, which no unit fixture had. The browser
+     * suite found it on an account the other specs had shopped on.
+     *
+     * @var array<string, array{0: string, 1: string}>
+     */
+    private const array NAME_COLUMNS = [
+        'vps' => ['virtual_machines', 'hostname'],
+        'dedicated' => ['dedicated_servers', 'serial'],
+        'hosting' => ['hosting_accounts', 'primary_domain'],
+        'wordpress' => ['wordpress_sites', 'domain'],
+        'domain' => ['domains', 'name'],
+        'dns' => ['dns_zones', 'name'],
+        'order' => ['orders', 'number'],
+        'invoice' => ['invoices', 'number'],
+    ];
+
+    /**
+     * The same map, for the gate that checks it against the database.
+     *
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function nameColumns(): array
+    {
+        return self::NAME_COLUMNS;
+    }
+
+    /**
      * Names for rows that already know their resource but not its identity.
      *
      * One query per family present, and only for the families present. The
@@ -148,20 +182,10 @@ final readonly class ActivityIdentities
         $names = [];
 
         foreach ($wanted as $kind => $ids) {
-            $table = match ($kind) {
-                'vps' => ['virtual_machines', 'hostname'],
-                'dedicated' => ['dedicated_servers', 'serial'],
-                'hosting' => ['hosting_accounts', 'primary_domain'],
-                'wordpress' => ['wordpress_sites', 'domain'],
-                'domain' => ['domains', 'name'],
-                'dns' => ['dns_zones', 'name'],
-                'order' => ['orders', 'reference'],
-                'invoice' => ['invoices', 'number'],
-                // A kind with no name column of its own — a support request is
-                // identified by the subject its own branch already published.
-                default => null,
-            };
+            $table = self::NAME_COLUMNS[$kind] ?? null;
 
+            // A family with no name column of its own — a support request is
+            // identified by the subject its own branch already published.
             if ($table === null) {
                 continue;
             }

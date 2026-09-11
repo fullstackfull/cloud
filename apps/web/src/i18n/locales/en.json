@@ -280,6 +280,9 @@
       "issued": "Invoice issued",
       "paid": "Invoice paid"
     },
+    "payment": {
+      "failed": "Payment did not go through"
+    },
     "support": {
       "opened": "Support ticket opened"
     },

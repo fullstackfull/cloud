@@ -152,7 +152,10 @@ test('the notification inbox shows what the platform has told this account', asy
    */
   await page.goto('/notifications')
 
-  await expect(page.getByText(/1 unread/i)).toBeVisible()
+  // Scoped to the page. Since Wave 4 the navigation carries the same
+  // count in the badge inside the notifications link, so an unscoped
+  // match finds three of them.
+  await expect(page.locator('main').getByText(/1 unread/i)).toBeVisible()
 
   /*
    * Title and body, both rendered by the API in the reader's language with the

@@ -93,6 +93,7 @@ final readonly class ActivityProjection
             'order_transition' => 'activity.order.changed',
             'invoice_issued' => 'activity.invoice.issued',
             'invoice_paid' => 'activity.invoice.paid',
+            'payment_failed' => 'activity.payment.failed',
             'support_ticket' => 'activity.support.opened',
 
             default => throw new \LogicException(sprintf('Unmapped activity source "%s".', $source)),
@@ -208,6 +209,17 @@ final readonly class ActivityProjection
 
             // Both are facts rather than work in progress.
             'invoice_issued', 'invoice_paid' => CustomerOperationState::Succeeded,
+
+            /*
+             * A payment that did not go through. `abandoned` is the customer
+             * leaving the gateway page rather than a refusal, and both are
+             * safe to try again from the invoice — which is what the state
+             * says, and why neither is a review.
+             */
+            'payment_failed' => match ($sourceState) {
+                'failed', 'abandoned' => CustomerOperationState::Failed,
+                default => throw new \LogicException(sprintf('Unmapped payment attempt status "%s".', $sourceState)),
+            },
 
             /*
              * A support request's status, and the one case where "waiting for

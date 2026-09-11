@@ -302,6 +302,53 @@ final readonly class ActivitySources
     }
 
     /**
+     * A payment that did not go through.
+     *
+     * Only the failures. A successful payment is already in the feed as the
+     * invoice being paid — the event the customer recognises — and adding the
+     * attempt beside it would put two rows in the history for one act of
+     * paying. What is missing without this branch is the other half: a card
+     * that was declined is a thing that happened to the account, and reading
+     * the history and finding nothing there is how a customer concludes the
+     * money left and the invoice is wrong.
+     *
+     * `failure_code` is not selected and neither is `failure_message`: the
+     * first is the gateway's vocabulary and the second is its prose. The
+     * customer-safe version of why lives on the invoice's own page, which is
+     * where the row points.
+     *
+     * The scope is a join through the invoice, which is what holds the
+     * customer: an attempt belongs to an invoice, and the invoice belongs to
+     * an account.
+     */
+    public function paymentsFailed(string $customerId): QueryBuilder
+    {
+        return DB::table('payment_attempts')
+            ->join('invoices', 'invoices.id', '=', 'payment_attempts.invoice_id')
+            ->select([
+                DB::raw('payment_attempts.created_at as occurred_at'),
+                DB::raw("'payment_failed:' || payment_attempts.id as activity_id"),
+                DB::raw("'".ActivityCategory::Billing->value."' as category"),
+                DB::raw("'payment_failed' as source_kind"),
+                DB::raw('payment_attempts.status as source_state'),
+                DB::raw("'invoice' as resource_kind"),
+                DB::raw('payment_attempts.invoice_id as resource_id'),
+                DB::raw('invoices.number as resource_identity'),
+                /*
+                 * No actor. An attempt row records no requester, and the
+                 * retries the platform makes against a subscription are its
+                 * own — so naming the person who first pressed pay would be
+                 * attributing the platform's work to a customer.
+                 */
+                DB::raw("'".ActorType::Unknown->value."' as actor_type"),
+                DB::raw('null::text as actor_user_id'),
+                DB::raw('invoices.number as reference'),
+            ])
+            ->where('invoices.customer_id', $customerId)
+            ->whereIn('payment_attempts.status', ['failed', 'abandoned']);
+    }
+
+    /**
      * A support request being opened.
      *
      * Its later replies are the thread's own history and are read there; what
@@ -345,6 +392,7 @@ final readonly class ActivitySources
             $this->orderTransitions($customerId),
             $this->invoicesIssued($customerId),
             $this->invoicesPaid($customerId),
+            $this->paymentsFailed($customerId),
             $this->supportTickets($customerId),
         ];
     }
@@ -389,6 +437,7 @@ final readonly class ActivitySources
                 $this->orderTransitions($customerId),
                 $this->invoicesIssued($customerId),
                 $this->invoicesPaid($customerId),
+                $this->paymentsFailed($customerId),
             ],
             ActivityCategory::Support => [
                 $this->supportTickets($customerId),

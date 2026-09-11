@@ -20,6 +20,22 @@ import { fixtures, signIn, users } from './support/helpers'
 /** The one operation whose outcome the platform does not know. */
 const STRANDED_MACHINE = fixtures.vpsHostname
 
+/** Reboots the operable machine, as whoever is signed in. */
+async function reboot(page: Page): Promise<void> {
+  await page.goto('/vps')
+  await page.getByRole('link', { name: fixtures.operableHostname, exact: true }).first().click()
+  await page.getByRole('button', { name: 'Reboot' }).first().click()
+
+  await expect(
+    page.getByRole('region', { name: 'Updates' }).getByText(/Reboot requested/),
+  ).toBeVisible()
+}
+
+async function signOut(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Sign out' }).first().click()
+  await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible()
+}
+
 async function openActivity(page: Page): Promise<void> {
   await page.getByRole('navigation', { name: /main navigation/i }).getByRole('link', { name: 'Activity' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Activity' })).toBeVisible()
@@ -83,14 +99,32 @@ test.describe('the first page answers what needs doing', () => {
 })
 
 test.describe('the account can read its own history', () => {
-  test('shows what happened, who asked for it, and filters on the server', async ({ page }) => {
+  test('names the person who asked, for each of two people on one account', async ({ page }) => {
+    /*
+     * Driven rather than read off a fixture. The specs before this one leave
+     * their own work on the shared account, so a seeded row is not reliably on
+     * the newest page — and a test that asserted it was would be asserting the
+     * order of the suite. Two people reboot the same machine here, and the two
+     * newest rows have to name them.
+     */
+    await signIn(page, { email: fixtures.teammateEmail, password: 'password' })
+    await reboot(page)
+    await signOut(page)
+
     await signIn(page, users.customer)
+    await reboot(page)
+
     await openActivity(page)
 
-    // Two people on one account, from the actor column rather than from a
-    // correlation with whoever was signed in.
-    await expect(page.getByText('Sara Teammate').first()).toBeVisible()
+    // From the actor column on the row, not from a correlation between a
+    // timestamp and whoever happened to be signed in.
     await expect(page.getByText('Sample Customer').first()).toBeVisible()
+    await expect(page.getByText('Sara Teammate').first()).toBeVisible()
+  })
+
+  test('filters on the server rather than trimming the page it has', async ({ page }) => {
+    await signIn(page, users.customer)
+    await openActivity(page)
 
     const requests: string[] = []
     page.on('request', (request) => {
@@ -111,20 +145,27 @@ test.describe('the account can read its own history', () => {
     )
   })
 
-  test('never calls an unknown outcome a failure, and offers support instead of a retry', async ({
+  test('never calls work that stopped for a person a failure, and offers support', async ({
     page,
   }) => {
     await signIn(page, users.customer)
-    await openActivity(page)
 
     /*
-     * The mandatory case. The seeded account holds a rebuild that timed out
-     * mid-flight: the disk may be gone or it may not, and the platform does
-     * not know. The row says it needs review and points at support.
+     * The mandatory case, read from the dashboard's attention list rather than
+     * from the feed's newest page. The seeded account holds a rebuild that
+     * timed out mid-flight — the disk may be gone or it may not, and the
+     * platform does not know — and the attention list is capped and ordered by
+     * severity, so it holds that row whatever the rest of the suite has done
+     * to the account since.
      */
-    const stopped = page.getByRole('listitem').filter({ hasText: 'Needs review' }).first()
-    await expect(stopped).toBeVisible()
+    const attention = page.getByRole('region', { name: 'Needs your attention' })
 
+    const stopped = attention
+      .getByRole('listitem')
+      .filter({ hasText: 'Work stopped and we are looking at it' })
+      .first()
+
+    await expect(stopped).toBeVisible()
     await expect(stopped.getByRole('link', { name: 'Ask support about this' })).toBeVisible()
 
     // And nowhere on the page is there an invitation to do it again.
@@ -135,10 +176,15 @@ test.describe('the account can read its own history', () => {
 
   test('carries what it is about into a support draft, and does not send it', async ({ page }) => {
     await signIn(page, users.customer)
-    await openActivity(page)
 
-    const stopped = page.getByRole('listitem').filter({ hasText: 'Needs review' }).first()
-    await stopped.getByRole('link', { name: 'Ask support about this' }).click()
+    const attention = page.getByRole('region', { name: 'Needs your attention' })
+
+    await attention
+      .getByRole('listitem')
+      .filter({ hasText: 'Work stopped and we are looking at it' })
+      .first()
+      .getByRole('link', { name: 'Ask support about this' })
+      .click()
 
     await expect(page).toHaveURL(/\/support\?/)
 

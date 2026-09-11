@@ -82,7 +82,10 @@ test('a country change is asked for by the customer, approved by an operator, an
   await expect(unread).toHaveCount(1)
   await unread.first().click()
   await expect(unread).toHaveCount(0)
-  await expect(customerPage.getByText(/1 unread/i)).toBeVisible()
+  // Scoped to the page. Since Wave 4 the navigation carries the same
+  // count in the badge inside the notifications link, so an unscoped
+  // match finds three of them.
+  await expect(customerPage.locator('main').getByText(/1 unread/i)).toBeVisible()
 
   await customer.close()
   await operator.close()

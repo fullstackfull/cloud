@@ -59,7 +59,9 @@ test.describe('journey A — a new customer registers, verifies, and reads price
     await page.locator('input[type="password"]').fill('correct-horse-9')
     await page.locator('form').getByRole('button').first().click()
 
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible()
+    // Level one: the dashboard's own greeting. Since Wave 4 a brand-new
+    // account also gets a "Welcome to Lynomia" card, which is an h2.
+    await expect(page.getByRole('heading', { level: 1, name: /welcome/i })).toBeVisible()
 
     await page.goto('/catalogue')
     await expect(page.getByRole('heading', { name: /^buy$/i })).toBeVisible()
@@ -87,7 +89,9 @@ test.describe('journey B — an unverified customer may look and may not buy', (
     await page.locator('input[type="password"]').fill('correct-horse-9')
     await page.locator('form').getByRole('button').first().click()
 
-    await expect(page.getByRole('heading', { name: /welcome/i })).toBeVisible()
+    // Level one: the dashboard's own greeting. Since Wave 4 a brand-new
+    // account also gets a "Welcome to Lynomia" card, which is an h2.
+    await expect(page.getByRole('heading', { level: 1, name: /welcome/i })).toBeVisible()
 
     // Prices: readable.
     await page.goto('/catalogue')
