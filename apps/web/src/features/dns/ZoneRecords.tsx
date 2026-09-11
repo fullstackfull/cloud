@@ -7,6 +7,7 @@ import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { Loading } from '@/components/Loading'
 import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -26,7 +27,7 @@ export function ZoneRecords({ zone }: { zone: DnsZone }) {
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
 
-  const { data, isPending } = useDnsRecords(zone.id)
+  const { data, isPending, error: readError } = useDnsRecords(zone.id)
   const add = useAddDnsRecord()
   const remove = useRemoveDnsRecord()
 
@@ -109,13 +110,21 @@ export function ZoneRecords({ zone }: { zone: DnsZone }) {
     <Card>
       <h2 className="mb-3 text-sm font-medium">{t('dns.records')}</h2>
 
+      {/*
+        "No records" and "we could not read your records" are opposite facts,
+        and this is the screen where confusing them is expensive: a customer
+        who believes the zone is empty adds the records again, and now the zone
+        has each of them twice.
+      */}
+      <LoadFailure error={readError} />
+
       {isPending ? (
         <Loading className="py-6" />
-      ) : (
+      ) : readError !== null ? null : (
         <DataTable
           caption={t('dns.records')}
           columns={columns}
-          rows={data?.data ?? []}
+          rows={data.data}
           rowKey={(r) => r.id}
           empty={t('dns.noRecords')}
         />

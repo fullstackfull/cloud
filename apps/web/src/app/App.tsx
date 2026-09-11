@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
@@ -101,46 +101,17 @@ import { ControlledGatewayPage } from '@/features/payments/ControlledGatewayPage
 import { PaymentsPage } from '@/features/payments/PaymentsPage'
 import { SecurityPage } from '@/features/security/SecurityPage'
 import { applyLocale, isSupportedLocale } from '@/i18n'
-import { ApiError } from '@/lib/api'
 
 import { ToastProvider } from '@/components/Toasts'
 import { WatchedOperationsProvider } from '@/features/operations/WatchedOperations'
+
+import { createQueryClient } from './queryClient'
 
 import { AppLayout } from './AppLayout'
 import { NotFoundPage } from './NotFoundPage'
 import { PublicLayout } from './PublicLayout'
 import { RequireAuth, RequireGuest, RequireOperator } from './guards'
 
-function createQueryClient(): QueryClient {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        refetchOnWindowFocus: false,
-        retry: (failureCount, error) => {
-          // Client errors will not become correct by being repeated.
-          if (error instanceof ApiError && error.status < 500) return false
-          return failureCount < 2
-        },
-      },
-
-      /*
-       * Mutations are never retried automatically, and this says so out loud.
-       *
-       * TanStack's own default is already no retries, so this line changes
-       * nothing today — it exists so that nobody can turn one on without
-       * deleting a comment that explains why they must not. A retried mutation
-       * is a second reboot, a second registration, a second payment attempt,
-       * and the request whose answer was lost is exactly the one where a
-       * repeat is most likely to do the thing twice. Retrying is a deliberate
-       * press by a person, with a new idempotency key, on a state the server
-       * has said is safe to retry.
-       */
-      mutations: {
-        retry: false,
-      },
-    },
-  })
-}
 
 export function App() {
   /*

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { LoadFailure } from '@/components/LoadFailure'
 import { SelectField } from '@/components/SelectField'
 import { TextareaField } from '@/components/TextareaField'
 import { useWatchOperations } from '@/features/operations/watchChannel'
@@ -50,7 +51,7 @@ export function VpsReinstallAction({ vm }: { vm: VirtualMachine }) {
 
   // Asked for only while the dialogue is open: a list page has no use for a
   // machine's image catalogue.
-  const { data: templates } = useVpsTemplates(vm.id, open)
+  const { data: templates, error: templatesError } = useVpsTemplates(vm.id, open)
 
   const failure = describeError(reinstall.error)
   const chosen = templates?.find((template) => template.id === templateId)
@@ -88,6 +89,16 @@ export function VpsReinstallAction({ vm }: { vm: VirtualMachine }) {
           <div className="flex flex-col gap-3">
             <p className="font-medium text-[var(--danger-text)]">{t('vps.reinstall.warning')}</p>
             <p>{t('vps.reinstall.advice')}</p>
+
+            {/*
+              A failed template read leaves this list holding only "the same
+              image as now". That is a real and safe option, which is exactly
+              why its absence of company is misleading: the list reads as "this
+              machine can only be rebuilt onto what it already runs", and a
+              customer who came here to move from one OS to another concludes
+              the platform will not let them.
+            */}
+            <LoadFailure error={templatesError} />
 
             <SelectField
               label={t('vps.reinstall.templateLabel')}

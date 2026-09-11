@@ -47,7 +47,7 @@ export function ResourceBillingPanel({ serviceId }: { serviceId: string | null }
     error: subscriptionError,
   } = useSubscription(subscriptionId)
 
-  const { data: order } = useOrder(orderId)
+  const { data: order, error: orderError } = useOrder(orderId)
 
   if (serviceId === null) {
     return (
@@ -164,6 +164,12 @@ export function ResourceBillingPanel({ serviceId }: { serviceId: string | null }
       >
         <LoadFailure error={serviceError} />
         <LoadFailure error={subscriptionError} />
+        {/*
+          The order is the last link in the chain and the one that carries the
+          invoice. Its failure left the row simply absent, which reads as "this
+          resource did not come from an order" — a different and wrong fact.
+        */}
+        <LoadFailure error={orderError} />
 
         {subscription === undefined && subscriptionId === null ? (
           <p className="text-sm text-[var(--text-muted)]">{t('resource.noSubscription')}</p>

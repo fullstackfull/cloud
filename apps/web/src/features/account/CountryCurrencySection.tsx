@@ -6,6 +6,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Loading } from '@/components/Loading'
@@ -35,7 +36,7 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
 
-  const { data, isPending } = useCountryCurrencyChanges()
+  const { data, isPending, error: readError } = useCountryCurrencyChanges()
   const request = useRequestCountryCurrencyChange()
   const recheck = useReanalyseCountryCurrencyChange()
   const withdraw = useWithdrawCountryCurrencyChange()
@@ -64,6 +65,15 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
         {t('account.countryCurrency.current', { currency: customer.currency, country: where(customer.country) })}
       </p>
       <p className="mt-2 text-sm text-[var(--text-muted)]">{t('account.countryCurrency.policy')}</p>
+
+      {/*
+        An open request that fails to load reads as "you have none open", and
+        the remedy for having none is to raise one — so the customer ends up
+        asking twice for the same change.
+      */}
+      <div className="mt-3">
+        <LoadFailure error={readError} />
+      </div>
 
       {isPending ? (
         <Loading className="py-4" />

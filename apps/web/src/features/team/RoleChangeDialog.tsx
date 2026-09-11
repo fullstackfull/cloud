@@ -8,6 +8,17 @@ interface RoleChangeDialogProps {
   /** The role the owner has picked, which has not been sent anywhere yet. */
   to: TeamRole | null
   roles: TeamRoleCapabilities[]
+  /**
+   * True when the capability matrix could not be read.
+   *
+   * Without it this dialogue makes its worst possible mistake. `roles` arrives
+   * empty on a failed read, both lookups miss, both diffs come back empty, and
+   * the dialogue renders "This changes nothing about what they can do" — a
+   * confident, specific, false statement, in the one place whose entire job is
+   * telling the owner what they are about to change. Saying "we could not
+   * check" is worth more than saying nothing, and far more than saying that.
+   */
+  capabilitiesUnknown?: boolean
   loading: boolean
   error?: string | undefined
   onConfirm: () => void
@@ -48,6 +59,7 @@ export function RoleChangeDialog({
   member,
   to,
   roles,
+  capabilitiesUnknown = false,
   loading,
   error,
   onConfirm,
@@ -107,7 +119,9 @@ export function RoleChangeDialog({
             </div>
           )}
 
-          {gained.length === 0 && lost.length === 0 ? (
+          {capabilitiesUnknown ? (
+            <p className="text-[var(--warning-text)]">{t('team.roleChange.unknownEffect')}</p>
+          ) : gained.length === 0 && lost.length === 0 ? (
             <p>{t('team.roleChange.noChange')}</p>
           ) : null}
 

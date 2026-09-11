@@ -106,6 +106,36 @@
   --tone-success-text: oklch(0.40 0.12 155);
 }
 
+/*
+ * The dark theme.
+ *
+ * ## What exists, stated precisely
+ *
+ * A dark-theme path is **present and reachable in the shipped product**: the
+ * block below activates for any customer whose operating system asks for dark,
+ * and the `[data-theme='dark']` block after it activates for an explicit
+ * choice. Every theme-dependent token is defined in all three states, and a
+ * test asserts it.
+ *
+ * What does **not** exist is an in-product control. Nothing in the portal
+ * writes `data-theme`, so a customer reaches the dark theme through their
+ * system setting and by no other route.
+ *
+ * ## What Wave 5 did and did not do
+ *
+ * Wave 5 did not add dark mode; dark mode was already here and remains out of
+ * scope per §51. What Wave 5 did was repair this path's semantic-token
+ * consistency: it added the twelve `--tone-*` tokens to all three blocks, and
+ * it fixed `--danger-surface` and `--danger-surface-strong`, which had been
+ * defined in `:root` and in the media query but not in the stamp — so a
+ * customer who had chosen dark explicitly read every destructive button in the
+ * light theme's red.
+ *
+ * The honest sentence for a report is therefore "a pre-existing dark-theme
+ * path was found and its token consistency repaired", not "dark mode is
+ * implemented" and not "dark mode is not implemented". Both of those are
+ * wrong, in opposite directions.
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --surface: oklch(0.17 0.008 250);

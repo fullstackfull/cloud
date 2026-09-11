@@ -8,6 +8,7 @@ import { Card } from '@/components/Card'
 import { CheckboxField } from '@/components/CheckboxField'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
+import { LoadFailure } from '@/components/LoadFailure'
 import { Loading } from '@/components/Loading'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useWatchOperations } from '@/features/operations/watchChannel'
@@ -66,7 +67,7 @@ export function BackupFileBrowser({
   const [confirming, setConfirming] = useState(false)
 
   const { data, isPending, error: listError } = useBackupFiles(vmId, backup.id, path)
-  const { data: restores } = useBackupFileRestores(vmId, backup.id)
+  const { data: restores, error: restoresError } = useBackupFileRestores(vmId, backup.id)
   const download = useIssueBackupFileDownload()
   const restore = useRestoreBackupFiles()
   const { acknowledge } = useWatchOperations()
@@ -231,6 +232,14 @@ export function BackupFileBrowser({
       )}
 
       <h3 className="mt-5 text-sm font-medium">{t('backups.browser.restores')}</h3>
+
+      {/*
+        A restore already running must not read as none running: the customer's
+        remedy for "nothing is happening" is to start another one, over the
+        files the first is still writing.
+      */}
+      <LoadFailure error={restoresError} />
+
       {restores === undefined || restores.data.length === 0 ? (
         <p className="mt-1 text-sm text-[var(--text-muted)]">{t('backups.browser.noRestores')}</p>
       ) : (

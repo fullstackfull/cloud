@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Field } from '@/components/Field'
+import { LoadFailure } from '@/components/LoadFailure'
 import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -41,7 +42,7 @@ export function SiteCopies({ site }: { site: WordPressSite }) {
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
 
-  const { data: operations } = useWordPressSiteOperations(site.id)
+  const { data: operations, error: operationsError } = useWordPressSiteOperations(site.id)
   const staging = useCreateWordPressStaging()
   const clone = useCloneWordPressSite()
   const impact = useWordPressPushImpact()
@@ -54,6 +55,7 @@ export function SiteCopies({ site }: { site: WordPressSite }) {
   const failure = describeError(staging.error ?? clone.error ?? impact.error)
   const pushFailure = describeError(push.error)
 
+  // A copy already in progress must not read as none in progress.
   const rows = operations?.data ?? []
   const canDoAnything = site.copies.staging || site.copies.clone || site.copies.push_to_production
 
@@ -138,6 +140,13 @@ export function SiteCopies({ site }: { site: WordPressSite }) {
           </Alert>
         </div>
       )}
+
+      {/*
+        Above the list, not inside it: the case that matters is the empty one,
+        where "no copies running" and "we could not check" look identical and
+        the remedy for the first is to start another copy.
+      */}
+      <LoadFailure error={operationsError} />
 
       {rows.length === 0 ? null : (
         <ul className="mt-3 flex flex-col gap-1.5" aria-label={t('wordpress.operations.title')}>

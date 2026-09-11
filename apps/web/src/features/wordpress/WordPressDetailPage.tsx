@@ -170,21 +170,41 @@ export function WordPressCopiesSection() {
  *
  * Two requests rather than one because the site row carries the account's id
  * and not the service's, and only the sections that need the chain pay for it.
+ *
+ * The failure is returned rather than swallowed. This hop is not a surface of
+ * its own — nothing on the page is *about* the hosting account — but a broken
+ * hop leaves the panels downstream with a null id, which is the same shape as
+ * "this site has no service", and they would then say so. The id and the
+ * reason it is missing travel together so the panel can tell those apart.
  */
-function useSiteServiceId(site: WordPressSite): string | null {
-  const { data: account } = useHostingAccount(site.hosting_account_id)
+function useSiteServiceId(site: WordPressSite): { serviceId: string | null; error: unknown } {
+  const { data: account, error } = useHostingAccount(site.hosting_account_id)
 
-  return account?.service_id ?? null
+  return { serviceId: account?.service_id ?? null, error }
 }
 
 export function WordPressActivitySection() {
   const site = useResource<WordPressSite>()
 
-  return <ResourceActivity serviceId={useSiteServiceId(site)} />
+  const { serviceId, error } = useSiteServiceId(site)
+
+  return (
+    <>
+      <LoadFailure error={error} />
+      <ResourceActivity serviceId={serviceId} />
+    </>
+  )
 }
 
 export function WordPressBillingSection() {
   const site = useResource<WordPressSite>()
 
-  return <ResourceBillingPanel serviceId={useSiteServiceId(site)} />
+  const { serviceId, error } = useSiteServiceId(site)
+
+  return (
+    <>
+      <LoadFailure error={error} />
+      <ResourceBillingPanel serviceId={serviceId} />
+    </>
+  )
 }

@@ -30,6 +30,7 @@ import {
 } from '@/lib/queries'
 import type { Ticket, TicketPriority, TicketStatus } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 
 /**
  * A ticket waiting on the customer is the one they can do something about, and
@@ -58,7 +59,7 @@ export function SupportPage() {
 
   const { data: tickets, isPending, error: listError } = useTickets()
   const [openId, setOpenId] = useState<string | null>(null)
-  const { data: opened } = useTicket(openId)
+  const { data: opened, error: openedError } = useTicket(openId)
 
   const openTicket = useOpenTicket()
   const reply = useReplyToTicket()
@@ -88,6 +89,10 @@ export function SupportPage() {
   const [replyBody, setReplyBody] = useState('')
 
   const displayed = describeError(openTicket.error ?? reply.error ?? close.error)
+
+  // A described fault and a half-written reply are both worth a prompt before
+  // the browser discards them.
+  useUnsavedChanges(subject.trim() !== '' || body.trim() !== '' || replyBody.trim() !== '')
   const ticket = opened?.data ?? null
 
   const columns: Array<Column<Ticket>> = [
@@ -163,6 +168,13 @@ export function SupportPage() {
             />
           )}
         </Card>
+
+        {/*
+          A request the customer opened and cannot read is not a request that
+          does not exist. Without this the panel simply does not appear, and
+          the obvious reading is that the ticket went away.
+        */}
+        <LoadFailure error={openedError} />
 
         {ticket !== null ? (
           <Card title={ticket.subject} description={ticket.reference}>

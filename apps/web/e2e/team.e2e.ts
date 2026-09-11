@@ -38,9 +38,20 @@ test.describe('as the owner', () => {
     await expect(ownerRow.getByRole('combobox')).toHaveCount(0)
   })
 
-  test('a colleague can be moved between roles from the list', async ({
+  test('a colleague is moved between roles only after the owner confirms it', async ({
     page,
   }) => {
+    /*
+     * Wave 5 changed this deliberately, and the journey is longer than it was
+     * on purpose. Picking a role used to send the change on the dropdown's
+     * change event: a colleague's access altered on a stray scroll wheel, with
+     * no statement of what had happened and no confirmation that it had.
+     *
+     * So the pick now opens a dialogue that says what the person gains and
+     * loses — diffed from the server's own capability matrix — and the select
+     * stays on the role they still hold until the server has agreed. Both of
+     * those are asserted below; the old version of this test asserted neither.
+     */
     await page.goto('/settings/team')
 
     const teammateRow = page
@@ -51,21 +62,48 @@ test.describe('as the owner', () => {
     await expect(role).toHaveValue('technical')
     await role.selectOption('billing')
 
-    // Reloaded rather than asserted on the optimistic value: the point is that
+    // Nothing has been sent yet: the dropdown still reads what is still true.
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await expect(role).toHaveValue('technical')
+
+    // And the dialogue states the consequence in capabilities, not in role
+    // names, because the role name is the thing the owner does not understand.
+    await expect(dialog).toContainText(/see billing/i)
+    await expect(dialog).toContainText(/pay invoices/i)
+    await expect(dialog).toContainText(/manage services/i)
+
+    // Backing out changes nothing.
+    await page.getByRole('button', { name: /^cancel$/i }).click()
+    await expect(dialog).toHaveCount(0)
+    await page.reload()
+    await expect(
+      page.getByRole('row').filter({ hasText: fixtures.teammateEmail }).getByRole('combobox'),
+    ).toHaveValue('technical')
+
+    // Now deliberately.
+    await page
+      .getByRole('row')
+      .filter({ hasText: fixtures.teammateEmail })
+      .getByRole('combobox')
+      .selectOption('billing')
+    await page.getByRole('button', { name: /change the role/i }).click()
+
+    // Reloaded rather than asserted on an optimistic value: the point is that
     // the server took it, not that the select changed.
     await page.reload()
     await expect(
-      page
-        .getByRole('row')
-        .filter({ hasText: fixtures.teammateEmail })
-        .getByRole('combobox'),
+      page.getByRole('row').filter({ hasText: fixtures.teammateEmail }).getByRole('combobox'),
     ).toHaveValue('billing')
 
+    // Put it back, so the next project finds the fixture as it expects.
     await page
       .getByRole('row')
       .filter({ hasText: fixtures.teammateEmail })
       .getByRole('combobox')
       .selectOption('technical')
+    await page.getByRole('button', { name: /change the role/i }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
   })
 
   test('the invitation form says what the offer is worth before it is sent', async ({

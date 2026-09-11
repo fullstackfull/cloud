@@ -24,6 +24,7 @@ import type {
   ZoneImportPlan,
 } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 
 /** The server refuses anything over this; the screen says so before uploading it. */
 const MAX_ZONE_FILE_BYTES = 262_144
@@ -65,6 +66,10 @@ export function ZoneTransfer({ zone }: { zone: DnsZone }) {
   const fileInput = useRef<HTMLInputElement>(null)
 
   const planFailure = describeError(plan.error)
+
+  // A pasted zone file is the largest single thing a customer types into this
+  // portal, and it is usually pasted from somewhere they cannot paste twice.
+  useUnsavedChanges(text.trim() !== '')
   const applyFailure = describeError(apply.error)
   const exportFailure = describeError(exporter.error)
 

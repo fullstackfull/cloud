@@ -81,7 +81,7 @@ export function TeamPage() {
 
   const { data: members, isPending, error: membersError } = useTeamMembers()
   const { data: invitations, error: invitationsError } = useTeamInvitations(canManage)
-  const { data: roleMatrix } = useTeamRoles()
+  const { data: roleMatrix, error: roleMatrixError } = useTeamRoles()
 
   const invite = useInviteMember()
   const resend = useResendInvitation()
@@ -453,6 +453,7 @@ export function TeamPage() {
         member={changing?.member ?? null}
         to={changing?.to ?? null}
         roles={roleMatrix?.data ?? []}
+        capabilitiesUnknown={roleMatrixError !== null}
         loading={changeRole.isPending}
         error={describeError(changeRole.error)?.message}
         onCancel={() => { setChanging(null); }}

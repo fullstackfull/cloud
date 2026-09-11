@@ -229,9 +229,19 @@ test.describe('journey E — one invoice paid from credit and a card', () => {
     const payments = page.getByRole('table', { name: /payments on this invoice/i })
     await expect(payments).toBeVisible()
 
-    // Two payment rows: the wallet and the provider, each named.
-    await expect(payments.getByText(/account credit/i)).toBeVisible()
-    await expect(payments.getByText(/test card/i)).toBeVisible()
+    /*
+     * Two payment rows, each saying where the money came from. Wave 5 changed
+     * what names them: the row used to print the gateway's own provider slug
+     * ("test card"), which is an operator-facing identifier and a promise the
+     * platform should not make about which gateway it uses. What a customer
+     * needs from this table is whether the money came out of their credit
+     * balance or off an instrument, and that is what the two rows now say.
+     */
+    await expect(payments.getByText(/from account credit/i)).toBeVisible()
+    await expect(payments.getByText(/from a payment method/i)).toBeVisible()
+
+    // And no provider identifier reaches the page.
+    await expect(payments.getByText(/test card|fake|provider/i)).toHaveCount(0)
   })
 })
 

@@ -185,13 +185,24 @@ test('a customer cannot switch off billing email, and is told so', async ({ page
    * immovable categories out would leave a customer wondering whether they had
    * been switched off silently; the honest answer is that we will always tell
    * them their card was declined.
+   *
+   * A switch rather than a checkbox since Wave 5, and the distinction is
+   * behavioural rather than visual: a checkbox is part of a form and does
+   * nothing until a submit, while flicking a switch *is* the submit. These
+   * preferences save themselves, so they are switches — and a screen reader is
+   * told "on"/"off" rather than "ticked", which is what the setting means.
    */
   await page.goto('/profile')
 
   const billing = page.locator('li').filter({ hasText: /^Billing/ })
 
   await expect(billing.getByText(/always sent/i).first()).toBeVisible()
-  await expect(billing.getByRole('checkbox').first()).toBeDisabled()
+
+  const control = billing.getByRole('switch').first()
+  await expect(control).toBeDisabled()
+
+  // On, and saying so: a disabled control with no state is not an answer.
+  await expect(control).toHaveAttribute('aria-checked', 'true')
 })
 
 test('the VPS list shows the machine and its address', async ({ page }) => {

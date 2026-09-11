@@ -460,7 +460,7 @@
     "passwordRevokesSessions": "Changing your password signs out every other device and revokes every API token.",
     "sessionsTitle": "Signed-in devices",
     "sessionsSubtitle": "Every browser session currently signed in to this account.",
-    "noSessions": "No active sessions.",
+    "noSessions": "No sessions recorded.",
     "revoke": "Sign out",
     "revokeOthers": "Sign out other devices",
     "thisDevice": "This device",
@@ -573,7 +573,7 @@
     "status": "Status",
     "total": "Total",
     "placed": "Placed",
-    "empty": "No orders yet.",
+    "empty": "No orders yet. An order is made when you buy something, and keeps the record of what was bought and paid.",
     "detailTitle": "Order {{number}}",
     "items": "Items",
     "summary": "Summary",
@@ -649,7 +649,7 @@
     "renews": "Renews",
     "endsOn": "Ends {{date}}",
     "cancel": "Cancel",
-    "empty": "No subscriptions.",
+    "empty": "No subscriptions. Anything you buy that renews gets one, and this is where you stop it renewing.",
     "changePlan": "Change plan",
     "cancelTitle": "End this subscription?",
     "cancelWarning": "It will run until {{date}}, which you have already paid for, and will not renew after that.",
@@ -671,7 +671,7 @@
     "state": "State",
     "activated": "Since",
     "unnamed": "Unnamed service",
-    "empty": "Nothing is running yet.",
+    "empty": "Nothing is running yet. Anything you buy — a server, a hosting plan, a domain — appears here.",
     "dataUntil": "Data kept until",
     "resource": "Resource",
     "beingBuilt": "Being created"
@@ -750,7 +750,7 @@
     "status": "Status",
     "power": "Power",
     "since": "Since",
-    "empty": "No dedicated servers.",
+    "empty": "No dedicated servers on this account. Dedicated machines are ordered from the catalogue and built by hand, so they take longer to arrive than a VPS.",
     "actions": {
       "on": "Power on",
       "off": "Force off",
@@ -807,7 +807,7 @@
     "status": "Status",
     "package": "Package",
     "openPanel": "Open panel",
-    "empty": "No hosting accounts.",
+    "empty": "No hosting accounts. Buy a hosting plan and its panel details appear here.",
     "diskQuota": "{{gib}} GiB disk",
     "username": "Username",
     "panelType": "Control panel",
@@ -843,7 +843,7 @@
     "setReverseDns": "Set reverse DNS",
     "hostname": "Hostname",
     "reverseDnsHint": "Published out of band. The change is queued, not immediate.",
-    "empty": "No addresses assigned.",
+    "empty": "No addresses assigned. Every server comes with its own address, which appears here once the server is running.",
     "version": "Version"
   },
   "wallet": {
@@ -880,7 +880,7 @@
     "lastUsed": "Last used",
     "neverUsed": "Never used",
     "revoke": "Revoke",
-    "empty": "No tokens.",
+    "empty": "No tokens. Create one above if you need to reach the API from your own code or a build server.",
     "copyItNow": "Copy this token now",
     "shownOnce": "This is the only time it is shown. It cannot be retrieved again.",
     "revokeDialog": {
@@ -1881,7 +1881,8 @@
       "membershipWarning": "This role can invite and remove people, including you.",
       "whenItApplies": "It takes effect on their next request. You can change it back at any time.",
       "confirm": "Change the role",
-      "done": "{{name}} is now {{role}}."
+      "done": "{{name}} is now {{role}}.",
+      "unknownEffect": "We could not load what each role can do, so this list may be incomplete. The change itself will still be applied exactly as the server decides."
     }
   },
   "invitation": {
@@ -2286,7 +2287,7 @@
     "returnUnknown": "We cannot find that payment on this account.",
     "returnIsNotProof": "Coming back from the payment page does not settle an invoice on its own. The invoice is marked paid when the provider confirms the payment to us.",
     "fromCredit": "From account credit",
-    "fromOutside": "Paid in"
+    "fromOutside": "From a payment method"
   },
   "paymentKind": {
     "charge": "Payment",
@@ -2379,7 +2380,11 @@
     "expiredBody": "You have been signed out, so this page can no longer be updated. Sign in again to carry on from here.",
     "expiredNotRepeated": "Nothing you had started has been repeated. If you were part-way through an action, please ask for it again after signing in.",
     "expiredSignIn": "Sign in",
-    "expiredDismiss": "Keep reading"
+    "expiredDismiss": "Keep reading",
+    "unknownTitle": "We could not confirm your sign-in",
+    "unknownBody": "The platform did not answer when we asked who you are. Your session has probably not ended — we simply could not check. Try again in a moment.",
+    "unknownRetry": "Try again",
+    "unknownSignIn": "Sign in again"
   },
   "vocabulary": {
     "unknownValue": "Not recognised",
