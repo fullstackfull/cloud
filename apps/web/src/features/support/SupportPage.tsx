@@ -8,9 +8,12 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { FileField } from '@/components/FileField'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Loading } from '@/components/Loading'
+import { SelectField } from '@/components/SelectField'
+import { TextareaField } from '@/components/TextareaField'
 import {
   draftBody,
   draftSubject,
@@ -215,15 +218,12 @@ export function SupportPage() {
                   )
                 }}
               >
-                <label className="flex flex-col gap-1 text-sm">
-                  <span>{t('support.yourReply')}</span>
-                  <textarea
-                    className="min-h-24 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                    value={replyBody}
-                    onChange={(event) => { setReplyBody(event.target.value) }}
-                    required
-                  />
-                </label>
+                <TextareaField
+                  label={t('support.yourReply')}
+                  value={replyBody}
+                  onChange={(event) => { setReplyBody(event.target.value) }}
+                  required
+                />
 
                 <div className="flex gap-2">
                   <Button type="submit" loading={reply.isPending}>
@@ -299,63 +299,52 @@ export function SupportPage() {
             />
 
             <div className="flex flex-wrap gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span>{t('support.category')}</span>
-                <select
-                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                  value={category}
-                  onChange={(event) => { setCategory(event.target.value) }}
-                >
-                  {['technical', 'billing', 'provisioning', 'abuse', 'other'].map((option) => (
-                    <option key={option} value={option}>
-                      {t(`support.categories.${option}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                label={t('support.category')}
+                value={category}
+                onChange={(event) => { setCategory(event.target.value) }}
+                options={['technical', 'billing', 'provisioning', 'abuse', 'other'].map((option) => ({
+                  value: option,
+                  label: t(`support.categories.${option}`),
+                }))}
+              />
 
-              <label className="flex flex-col gap-1 text-sm">
-                <span>{t('support.priority')}</span>
-                {/*
-                  Three options, not four. Urgent is what pages somebody out of
-                  hours, and a priority a customer can select for themselves
-                  stops meaning anything within a month — so it is an
-                  operator's judgement, and the backend refuses it here.
-                */}
-                <select
-                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                  value={priority}
-                  onChange={(event) => { setPriority(event.target.value as TicketPriority) }}
-                >
-                  {(['low', 'normal', 'high'] as const).map((option) => (
-                    <option key={option} value={option}>
-                      {t(`support.priorities.${option}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/*
+                Three options, not four. Urgent is what pages somebody out of
+                hours, and a priority a customer can select for themselves
+                stops meaning anything within a month — so it is an operator's
+                judgement, and the backend refuses it here.
+              */}
+              <SelectField
+                label={t('support.priority')}
+                value={priority}
+                onChange={(event) => { setPriority(event.target.value as TicketPriority) }}
+                options={(['low', 'normal', 'high'] as const).map((option) => ({
+                  value: option,
+                  label: t(`support.priorities.${option}`),
+                }))}
+              />
             </div>
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{t('support.describe')}</span>
-              <textarea
-                className="min-h-32 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                value={body}
-                onChange={(event) => { setBody(event.target.value) }}
-                required
-              />
-            </label>
+            {/*
+              A support request is prose, so it follows the page's own
+              direction: an Arabic customer writes it right to left.
+            */}
+            <TextareaField
+              label={t('support.describe')}
+              rows={6}
+              value={body}
+              onChange={(event) => { setBody(event.target.value) }}
+              required
+              error={displayed?.fields?.['body']?.[0]}
+            />
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{t('support.attachments')}</span>
-              <input
-                type="file"
-                multiple
-                className="text-sm"
-                onChange={(event) => { setFiles(Array.from(event.target.files ?? [])) }}
-              />
-              <span className="text-xs text-[var(--text-muted)]">{t('support.attachmentsHint')}</span>
-            </label>
+            <FileField
+              label={t('support.attachments')}
+              hint={t('support.attachmentsHint')}
+              multiple
+              onChange={(event) => { setFiles(Array.from(event.target.files ?? [])) }}
+            />
 
             <div>
               <Button type="submit" loading={openTicket.isPending}>

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
+import { TextareaField } from '@/components/TextareaField'
 import { useSetDomainNameservers } from '@/lib/queries'
 import type { Domain } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -40,17 +41,16 @@ export function DomainNameserversForm({ domain }: { domain: Domain }) {
           })
         }}
       >
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium">{t('domains.nameservers')}</span>
-          <textarea
-            dir="ltr"
-            rows={4}
-            value={hosts}
-            onChange={(event) => { setHosts(event.target.value); }}
-            className="technical rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 py-2 text-sm"
-          />
-        </label>
-        <span className="text-sm text-[var(--text-muted)]">{t('domains.nameserversHint')}</span>
+        {/* Host names, so left to right on an Arabic page too. */}
+        <TextareaField
+          label={t('domains.nameservers')}
+          hint={t('domains.nameserversHint')}
+          dir="ltr"
+          rows={4}
+          className="technical"
+          value={hosts}
+          onChange={(event) => { setHosts(event.target.value); }}
+        />
 
         <div>
           <Button type="submit" disabled={!domain.is_manageable} loading={nameservers.isPending}>

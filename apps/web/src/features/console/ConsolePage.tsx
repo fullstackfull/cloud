@@ -5,6 +5,7 @@ import { useParams } from 'react-router'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { Field } from '@/components/Field'
 import { PageHeader } from '@/components/PageHeader'
 import { useConsoleSession } from '@/lib/queries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -181,12 +182,21 @@ export function ConsolePage() {
           {lines.join('')}
         </pre>
 
-        <label className="mt-3 block">
-          <span className="sr-only">{t('console.input')}</span>
-          <input
-            type="text"
+        {/*
+          Uncontrolled on purpose: a terminal line is submitted and cleared on
+          Enter, and routing every keystroke through React state would put a
+          re-render between the customer and a console they are typing into.
+
+          The label is hidden rather than absent — the box sits directly under
+          a terminal that visibly explains it, but a screen reader reaching the
+          control on its own still needs to be told what it is.
+        */}
+        <div className="mt-3">
+          <Field
+            label={t('console.input')}
+            labelHidden
             dir="ltr"
-            className="technical w-full rounded border border-[var(--border)] bg-[var(--surface)] p-2 text-sm"
+            className="technical w-full"
             placeholder={t('console.inputPlaceholder')}
             disabled={state !== 'open'}
             onKeyDown={(event) => {
@@ -197,7 +207,7 @@ export function ConsolePage() {
               field.value = ''
             }}
           />
-        </label>
+        </div>
 
         <p className="mt-3 text-xs text-[var(--text-muted)]">{t('console.textOnly')}</p>
       </Card>

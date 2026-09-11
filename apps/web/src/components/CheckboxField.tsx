@@ -8,6 +8,15 @@ interface CheckboxFieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   label: ReactNode
   hint?: ReactNode
   error?: string | undefined
+  /**
+   * Keeps the label for assistive technology and out of the layout.
+   *
+   * For a box in a table cell, where the row already names what is being
+   * ticked and repeating it beside every box would be noise — but where a
+   * screen reader, reading the cell on its own, still needs the control to say
+   * which row it belongs to.
+   */
+  labelHidden?: boolean
 }
 
 /**
@@ -30,6 +39,7 @@ export function CheckboxField({
   label,
   hint,
   error,
+  labelHidden = false,
   className,
   ...props
 }: CheckboxFieldProps) {
@@ -39,7 +49,15 @@ export function CheckboxField({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="flex items-start gap-2 text-sm text-[var(--text-primary)]">
+      <label
+        htmlFor={id}
+        className={cn(
+          'flex items-start gap-2 text-sm text-[var(--text-primary)]',
+          // With no visible sentence there is nothing to sit beside, so the
+          // box stops being nudged down onto a first line that is not there.
+          labelHidden && 'items-center',
+        )}
+      >
         <input
           id={id}
           type="checkbox"
@@ -51,13 +69,14 @@ export function CheckboxField({
           className={cn(
             // Sized so the box itself is a reasonable target, and nudged down
             // to sit on the first line of a sentence that wraps.
-            'mt-0.5 size-4 shrink-0 rounded border-[var(--border-strong)]',
+            'size-4 shrink-0 rounded border-[var(--border-strong)]',
+            labelHidden ? '' : 'mt-0.5',
             'accent-[var(--accent)]',
             className,
           )}
           {...props}
         />
-        <span>{label}</span>
+        <span className={labelHidden ? 'sr-only' : undefined}>{label}</span>
       </label>
 
       {hint === undefined || hint === null ? null : (

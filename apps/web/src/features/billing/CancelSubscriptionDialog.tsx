@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
+import { CheckboxField } from '@/components/CheckboxField'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { pathForResource } from '@/features/resources/resourcePaths'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -144,19 +145,18 @@ export function CancelSubscriptionDialog({
                 {t('subscriptions.dataWarning', { days: subscription.data_retention_days ?? 0 })}
               </p>
 
-              <label className="mt-1 flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <div className="mt-1">
+                <CheckboxField
+                  label={t('subscriptions.endNowOption', {
+                    date:
+                      subscription.current_period_end === null
+                        ? '—'
+                        : formatDate(subscription.current_period_end, locale),
+                  })}
                   checked={immediately}
                   onChange={(event) => { setImmediately(event.target.checked) }}
                 />
-                {t('subscriptions.endNowOption', {
-                  date:
-                    subscription.current_period_end === null
-                      ? '—'
-                      : formatDate(subscription.current_period_end, locale),
-                })}
-              </label>
+              </div>
 
               {immediately ? (
                 <p className="technical text-xs break-all select-all" dir="ltr">

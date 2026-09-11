@@ -4,11 +4,21 @@ import { cn } from '@/lib/cn'
 
 type Tone = 'error' | 'warning' | 'info' | 'success'
 
+/**
+ * One line per meaning, all three slots from the same tone family.
+ *
+ * These were raw palette classes until Wave 5 — which meant the red in an
+ * alert was not the red in the badge beside it, neither was the red a field
+ * error uses, and none of them moved when the theme did.
+ */
 const TONES: Record<Tone, string> = {
-  error: 'border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200',
-  warning: 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200',
-  info: 'border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-200',
-  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
+  error:
+    'border-[var(--tone-danger-border)] bg-[var(--tone-danger-surface)] text-[var(--tone-danger-text)]',
+  warning:
+    'border-[var(--tone-warning-border)] bg-[var(--tone-warning-surface)] text-[var(--tone-warning-text)]',
+  info: 'border-[var(--tone-info-border)] bg-[var(--tone-info-surface)] text-[var(--tone-info-text)]',
+  success:
+    'border-[var(--tone-success-border)] bg-[var(--tone-success-surface)] text-[var(--tone-success-text)]',
 }
 
 interface AlertProps {

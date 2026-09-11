@@ -320,21 +320,21 @@ export function TeamPage() {
                   error={displayed?.fields?.['email']?.[0]}
                 />
 
-                <label className="flex flex-col gap-1 text-sm">
-                  <span>{t('team.role')}</span>
-                  <select
-                    className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                    value={role}
-                    onChange={(event) => { setRole(event.target.value as TeamRole); }}
-                  >
-                    {assignable.map((option) => (
-                      <option key={option} value={option}>
-                        {t(`team.roles.${option}`)}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-[var(--text-muted)]">{t(`team.roleHints.${role}`)}</span>
-                </label>
+                {/*
+                  The hint changes with the choice, so the owner reads what the
+                  role means before sending the invitation rather than after
+                  the colleague finds out.
+                */}
+                <SelectField
+                  label={t('team.role')}
+                  hint={t(`team.roleHints.${role}`)}
+                  value={role}
+                  onChange={(event) => { setRole(event.target.value as TeamRole); }}
+                  options={assignable.map((option) => ({
+                    value: option,
+                    label: t(`team.roles.${option}`),
+                  }))}
+                />
 
                 <div>
                   <Button type="submit" loading={invite.isPending}>

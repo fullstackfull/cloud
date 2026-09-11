@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { CheckboxField } from '@/components/CheckboxField'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Loading } from '@/components/Loading'
@@ -95,9 +96,9 @@ export function BackupFileBrowser({
       key: 'select',
       header: '',
       cell: (e) => (
-        <input
-          type="checkbox"
-          aria-label={t('backups.browser.select', { name: e.name })}
+        <CheckboxField
+          label={t('backups.browser.select', { name: e.name })}
+          labelHidden
           disabled={! e.restorable}
           checked={chosen.includes(e.path)}
           onChange={() => { toggle(e) }}

@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
 import { Loading } from '@/components/Loading'
+import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import {
   useAddDnsRecord,
@@ -187,21 +188,14 @@ export function ZoneRecords({ zone }: { zone: DnsZone }) {
           )
         }}
       >
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium">{t('dns.type')}</span>
-          <select
-            value={type}
-            onChange={(event) => { setType(event.target.value) }}
-            dir="ltr"
-            className="technical h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-          >
-            {TYPES.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField
+          label={t('dns.type')}
+          value={type}
+          onChange={(event) => { setType(event.target.value) }}
+          dir="ltr"
+          className="technical"
+          options={TYPES.map((option) => ({ value: option, label: option }))}
+        />
 
         <div className="min-w-[10rem]">
           {/*
@@ -219,21 +213,17 @@ export function ZoneRecords({ zone }: { zone: DnsZone }) {
         </div>
 
         {type === 'CAA' ? (
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium">{t('dns.caaTag')}</span>
-            <select
-              value={caaTag}
-              onChange={(event) => { setCaaTag(event.target.value) }}
-              dir="ltr"
-              className="technical h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-            >
-              {['issue', 'issuewild', 'iodef'].map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectField
+            label={t('dns.caaTag')}
+            value={caaTag}
+            onChange={(event) => { setCaaTag(event.target.value) }}
+            dir="ltr"
+            className="technical"
+            options={['issue', 'issuewild', 'iodef'].map((option) => ({
+              value: option,
+              label: option,
+            }))}
+          />
         ) : null}
 
         {type === 'MX' ? (

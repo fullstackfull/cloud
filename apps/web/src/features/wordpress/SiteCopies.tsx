@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Field } from '@/components/Field'
+import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
@@ -163,20 +164,15 @@ export function SiteCopies({ site }: { site: WordPressSite }) {
           title={t('wordpress.push.title', { staging: site.domain, production: pushing.impact.production_domain })}
           body={
             <>
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="font-medium">{t('wordpress.push.scope')}</span>
-                <select
-                  value={pushing.scope}
-                  onChange={(event) => { void openPush(event.target.value) }}
-                  className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-                >
-                  {['both', 'files', 'database'].map((scope) => (
-                    <option key={scope} value={scope}>
-                      {t(`wordpress.push.scopes.${scope}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                label={t('wordpress.push.scope')}
+                value={pushing.scope}
+                onChange={(event) => { void openPush(event.target.value) }}
+                options={['both', 'files', 'database'].map((scope) => ({
+                  value: scope,
+                  label: t(`wordpress.push.scopes.${scope}`),
+                }))}
+              />
               <ul className="mt-3 list-disc ps-5 text-sm" aria-label={t('wordpress.push.scope')}>
                 {pushing.impact.warnings.map((line) => (
                   <li key={line}>{line}</li>

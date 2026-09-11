@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { SelectField } from '@/components/SelectField'
+import { TextareaField } from '@/components/TextareaField'
 import { useWatchOperations } from '@/features/operations/watchChannel'
 import { RESOURCE_FAMILIES } from '@/features/resources/resourcePaths'
 import { newIdempotencyKey } from '@/lib/api'
@@ -103,22 +104,17 @@ export function VpsReinstallAction({ vm }: { vm: VirtualMachine }) {
             />
 
             {keysAllowed ? (
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-[var(--text-primary)]">
-                  {t('vps.reinstall.sshLabel')}
-                </span>
-                <textarea
-                  className="min-h-24 rounded-md border border-[var(--border)] bg-[var(--surface-base)] p-2 font-mono text-xs text-[var(--text-primary)]"
-                  dir="ltr"
-                  value={keys}
-                  spellCheck={false}
-                  onChange={(event) => { setKeys(event.target.value); }}
-                  placeholder="ssh-ed25519 AAAA…"
-                />
-                <span className="text-xs text-[var(--text-muted)]">
-                  {t('vps.reinstall.sshHint')}
-                </span>
-              </label>
+              <TextareaField
+                label={t('vps.reinstall.sshLabel')}
+                hint={t('vps.reinstall.sshHint')}
+                dir="ltr"
+                rows={4}
+                className="technical text-xs"
+                value={keys}
+                spellCheck={false}
+                onChange={(event) => { setKeys(event.target.value); }}
+                placeholder="ssh-ed25519 AAAA…"
+              />
             ) : chosen === undefined ? null : (
               <p className="text-xs text-[var(--text-muted)]">{t('vps.reinstall.noSsh')}</p>
             )}

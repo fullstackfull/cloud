@@ -7,6 +7,9 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { DataTable, type Column } from '@/components/DataTable'
+import { FileField } from '@/components/FileField'
+import { SelectField } from '@/components/SelectField'
+import { TextareaField } from '@/components/TextareaField'
 import {
   useApplyZoneImport,
   useExportZone,
@@ -136,50 +139,44 @@ export function ZoneTransfer({ zone }: { zone: DnsZone }) {
           plan.mutate({ zoneId: zone.id, text, mode })
         }}
       >
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium">{t('dns.import.file')}</span>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".zone,.txt,.db,text/plain"
-            className="text-sm"
-            onChange={(event) => { readFile(event.target.files?.[0]) }}
-          />
-          <span className="text-xs text-[var(--text-muted)]">{t('dns.import.fileHint')}</span>
-        </label>
+        <FileField
+          ref={fileInput}
+          label={t('dns.import.file')}
+          hint={t('dns.import.fileHint')}
+          accept=".zone,.txt,.db,text/plain"
+          onChange={(event) => { readFile(event.target.files?.[0]) }}
+        />
 
         {fileTooLarge ? <Alert tone="error">{t('dns.import.tooLarge')}</Alert> : null}
 
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium">{t('dns.import.text')}</span>
-          <textarea
-            dir="ltr"
-            spellCheck={false}
-            className="technical min-h-40 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 py-2 text-xs"
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value)
-              plan.reset()
-              apply.reset()
-            }}
-          />
-        </label>
+        {/*
+          A zone file is a technical value, so it stays left to right even on
+          an Arabic page: the records in it are not prose.
+        */}
+        <TextareaField
+          label={t('dns.import.text')}
+          dir="ltr"
+          spellCheck={false}
+          rows={10}
+          className="technical text-xs"
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value)
+            plan.reset()
+            apply.reset()
+          }}
+        />
 
         <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium">{t('dns.import.mode')}</span>
-            <select
-              value={mode}
-              onChange={(event) => { setMode(event.target.value as ZoneImportMode) }}
-              className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-            >
-              {(['merge', 'replace'] as const).map((option) => (
-                <option key={option} value={option}>
-                  {t(`dns.import.modes.${option}`)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectField
+            label={t('dns.import.mode')}
+            value={mode}
+            onChange={(event) => { setMode(event.target.value as ZoneImportMode) }}
+            options={(['merge', 'replace'] as const).map((option) => ({
+              value: option,
+              label: t(`dns.import.modes.${option}`),
+            }))}
+          />
           <p className="max-w-prose text-xs text-[var(--text-muted)]">{t(`dns.import.modeHint.${mode}`)}</p>
 
           <Button type="submit" variant="secondary" loading={plan.isPending} disabled={text.trim() === ''}>

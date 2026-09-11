@@ -42,11 +42,15 @@ import { cn } from '@/lib/cn'
 /** How long a piece of good news stays on screen. */
 const TRANSIENT_MS = 6_000
 
+/** The same four tone families the alerts and badges read. */
 const TONES: Record<ToastTone, string> = {
-  info: 'border-blue-500/30 bg-blue-500/10 text-blue-900 dark:text-blue-100',
-  success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-900 dark:text-emerald-100',
-  warning: 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-100',
-  danger: 'border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-100',
+  info: 'border-[var(--tone-info-border)] bg-[var(--tone-info-surface)] text-[var(--tone-info-text)]',
+  success:
+    'border-[var(--tone-success-border)] bg-[var(--tone-success-surface)] text-[var(--tone-success-text)]',
+  warning:
+    'border-[var(--tone-warning-border)] bg-[var(--tone-warning-surface)] text-[var(--tone-warning-text)]',
+  danger:
+    'border-[var(--tone-danger-border)] bg-[var(--tone-danger-surface)] text-[var(--tone-danger-text)]',
 }
 
 /** Tones that clear themselves. A warning and a failure wait to be read. */

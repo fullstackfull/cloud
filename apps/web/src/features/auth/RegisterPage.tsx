@@ -4,7 +4,9 @@ import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
+import { CheckboxField } from '@/components/CheckboxField'
 import { Field } from '@/components/Field'
+import { RadioGroup } from '@/components/RadioGroup'
 import { SelectField } from '@/components/SelectField'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { api } from '@/lib/api'
@@ -137,25 +139,17 @@ export function RegisterPage() {
         error={fieldErrors?.['email']?.[0]}
       />
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium text-[var(--text-primary)]">
-          {t('auth.accountType')}
-        </legend>
-        <div className="flex gap-4 text-sm">
-          {(['individual', 'organization'] as const).map((option) => (
-            <label key={option} className="flex items-center gap-2 text-[var(--text-secondary)]">
-              <input
-                type="radio"
-                name="account_type"
-                value={option}
-                checked={accountType === option}
-                onChange={() => { setAccountType(option); }}
-              />
-              {t(`auth.accountTypes.${option}`)}
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <RadioGroup
+        label={t('auth.accountType')}
+        name="account_type"
+        value={accountType}
+        onChange={(picked) => { setAccountType(picked as 'individual' | 'organization'); }}
+        error={fieldErrors?.['account_type']?.[0]}
+        options={(['individual', 'organization'] as const).map((option) => ({
+          value: option,
+          label: t(`auth.accountTypes.${option}`),
+        }))}
+      />
 
       {accountType === 'organization' ? (
         <Field
@@ -227,21 +221,13 @@ export function RegisterPage() {
         required
       />
 
-      <label className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
-        <input
-          type="checkbox"
-          checked={acceptsTerms}
-          onChange={(event) => { setAcceptsTerms(event.target.checked); }}
-          className="mt-0.5"
-          required
-        />
-        <span>{t('auth.acceptTerms')}</span>
-      </label>
-      {fieldErrors?.['accepts_terms']?.[0] !== undefined ? (
-        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
-          {fieldErrors['accepts_terms'][0]}
-        </p>
-      ) : null}
+      <CheckboxField
+        label={t('auth.acceptTerms')}
+        checked={acceptsTerms}
+        onChange={(event) => { setAcceptsTerms(event.target.checked); }}
+        error={fieldErrors?.['accepts_terms']?.[0]}
+        required
+      />
 
       <Button type="submit" loading={register.isPending} className="w-full">
         {t('common.register')}

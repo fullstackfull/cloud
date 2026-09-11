@@ -6,6 +6,7 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Field } from '@/components/Field'
+import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
@@ -96,21 +97,20 @@ export function CountryCurrencySection({ customer }: { customer: CustomerSummary
             error={requestFailure?.fields?.['country']?.[0]}
           />
 
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium">{t('account.countryCurrency.currency')}</span>
-            <select
-              value={currency}
-              onChange={(event) => { setCurrency(event.target.value) }}
-              dir="ltr"
-              className="technical h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-            >
-              {[...new Set([customer.currency, ...currencies])].map((code) => (
-                <option key={code} value={code}>
-                  {code}
-                </option>
-              ))}
-            </select>
-          </label>
+          <SelectField
+            label={t('account.countryCurrency.currency')}
+            value={currency}
+            onChange={(event) => { setCurrency(event.target.value) }}
+            dir="ltr"
+            className="technical"
+            error={requestFailure?.fields?.['currency']?.[0]}
+            // The customer's own currency first and always present: a request
+            // to change it must be able to start from where they are.
+            options={[...new Set([customer.currency, ...currencies])].map((code) => ({
+              value: code,
+              label: code,
+            }))}
+          />
 
           <Field
             label={t('account.countryCurrency.reason')}

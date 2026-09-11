@@ -11,6 +11,7 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { Loading } from '@/components/Loading'
 import { PageHeader } from '@/components/PageHeader'
+import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useOrderWordPressSite, useWordPressSites } from '@/lib/queries'
 import type { WordPressSite } from '@/lib/types'
@@ -108,25 +109,21 @@ function OrderForm({ onDone }: { onDone: () => void }) {
           required
         />
 
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium">{t('wordpress.domainSource')}</span>
-          <select
-            value={fields.domain_source}
-            onChange={set('domain_source')}
-            className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-          >
-            {/*
-              * Four options because there are four, and each one changes what
-              * the customer will be waiting for. A default of "external" is
-              * the honest one: it promises the least.
-              */}
-            <option value="external">{t('wordpress.sources.external')}</option>
-            <option value="existing">{t('wordpress.sources.existing')}</option>
-            <option value="register">{t('wordpress.sources.register')}</option>
-            <option value="transfer">{t('wordpress.sources.transfer')}</option>
-          </select>
-          <span className="text-sm text-[var(--text-muted)]">{t('wordpress.domainSourceHint')}</span>
-        </label>
+        {/*
+          * Four options because there are four, and each one changes what the
+          * customer will be waiting for. A default of "external" is the honest
+          * one: it promises the least.
+          */}
+        <SelectField
+          label={t('wordpress.domainSource')}
+          hint={t('wordpress.domainSourceHint')}
+          value={fields.domain_source}
+          onChange={set('domain_source')}
+          options={['external', 'existing', 'register', 'transfer'].map((source) => ({
+            value: source,
+            label: t(`wordpress.sources.${source}`),
+          }))}
+        />
 
         <Field
           label={t('wordpress.adminUsername')}

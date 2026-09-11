@@ -126,7 +126,9 @@ export function NotificationsPage() {
                       className={cn(
                         'mt-1.5 size-2 shrink-0 rounded-full',
                         n.read_at === null
-                          ? n.is_failure ? 'bg-red-500' : 'bg-[var(--accent)]'
+                          ? n.is_failure
+                            ? 'bg-[var(--danger-text)]'
+                            : 'bg-[var(--accent)]'
                           : 'bg-transparent',
                       )}
                     />
