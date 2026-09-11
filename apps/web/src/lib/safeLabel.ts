@@ -62,6 +62,11 @@ const FALLBACKS: Record<string, string> = {
   resources: 'vocabulary.unknownAttribute',
   'vps.blocked': 'vocabulary.unknownBlocker',
   'dedicated.blocked': 'vocabulary.unknownBlocker',
+  'vps.serviceState': 'vocabulary.unknownState',
+  'vps.reinstallState': 'vocabulary.unknownState',
+  'dedicated.reinstallState': 'vocabulary.unknownState',
+  walletKind: 'vocabulary.unknownEntry',
+  activity: 'vocabulary.unknownEvent',
 }
 
 /** The sentence used when a namespace has no fallback of its own. */
@@ -87,6 +92,18 @@ export function safeLabel(namespace: string, value: string | null | undefined): 
   // The fallback itself is a written key, so a missing one is a build failure
   // in the parity gate rather than a key path on a customer's screen.
   return i18n.exists(fallback) ? i18n.t(fallback) : i18n.t(LAST_RESORT)
+}
+
+/**
+ * The fallback key a namespace uses.
+ *
+ * Exported for the parity gate: the sentence `safeLabel` returns is resolved
+ * in whichever language is active, so a test that compared the returned string
+ * against the Arabic catalogue would only ever be checking English. The key is
+ * the thing both catalogues must carry.
+ */
+export function fallbackKey(namespace: string): string {
+  return FALLBACKS[namespace] ?? LAST_RESORT
 }
 
 /**

@@ -9,6 +9,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useServiceEvents } from '@/lib/queries'
 import type { ServiceEvent } from '@/lib/types'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * What has happened to this one resource.
@@ -39,7 +40,7 @@ export function ResourceActivity({ serviceId }: { serviceId: string | null }) {
     {
       key: 'what',
       header: t('resource.activityWhat'),
-      cell: (event) => t(`activity.${event.kind}`, { defaultValue: event.kind }),
+      cell: (event) => safeLabel('activity', event.kind),
     },
     {
       key: 'outcome',
@@ -49,7 +50,7 @@ export function ResourceActivity({ serviceId }: { serviceId: string | null }) {
           <StatusBadge status={event.state} />
           {event.failure_reason === null ? null : (
             <span className="text-xs text-[var(--text-secondary)]">
-              {t(`errors.${event.failure_reason}`, { defaultValue: event.failure_reason })}
+              {safeLabel('errors', event.failure_reason)}
             </span>
           )}
         </div>

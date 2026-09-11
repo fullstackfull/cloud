@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
+import { SelectField } from '@/components/SelectField'
 import { PageHeader } from '@/components/PageHeader'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { NotificationPreferencesSection } from '@/features/notifications/NotificationPreferencesSection'
 import { SUPPORTED_LOCALES, changeLocale, isSupportedLocale } from '@/i18n'
+import { canFormatIn, timeZones } from '@/lib/timezones'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
 import { useUpdateProfile } from './useProfile'
@@ -37,6 +39,14 @@ export function ProfilePage() {
     setTimezone(user.timezone)
     setPhone(user.phone ?? '')
   }, [user])
+
+  /*
+   * Recomputed only when the stored zone changes: `supportedValuesOf` returns
+   * several hundred strings and there is no reason to build that array on
+   * every keystroke in the name field.
+   */
+  const zones = useMemo(() => timeZones(timezone), [timezone])
+  const usable = timezone === '' || canFormatIn(timezone)
 
   const displayed = describeError(update.error)
   const fieldErrors = displayed?.fields ?? null
@@ -99,34 +109,46 @@ export function ProfilePage() {
               hint={t('account.emailImmutable')}
             />
 
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="profile-locale"
-                className="text-sm font-medium text-[var(--text-primary)]"
-              >
-                {t('common.language')}
-              </label>
-              <select
-                id="profile-locale"
-                value={locale}
-                onChange={(event) => { setLocale(event.target.value); }}
-                className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 text-sm text-[var(--text-primary)]"
-              >
-                {SUPPORTED_LOCALES.map((code) => (
-                  <option key={code} value={code} lang={code}>
-                    {LOCALE_LABELS[code] ?? code}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SelectField
+              label={t('common.language')}
+              value={locale}
+              onChange={(event) => { setLocale(event.target.value); }}
+            >
+              {/*
+                Children rather than `options`, because each option carries its
+                own `lang`: "العربية" inside an English page has to be marked
+                as Arabic or a screen reader pronounces it with English rules.
+              */}
+              {SUPPORTED_LOCALES.map((code) => (
+                <option key={code} value={code} lang={code}>
+                  {LOCALE_LABELS[code] ?? code}
+                </option>
+              ))}
+            </SelectField>
 
-            <Field
+            {/*
+              Chosen, not typed. The customer used to have to know that the
+              string is `Asia/Kuwait` and not "Kuwait", "GMT+3" or "Arabia
+              Standard Time"; three of those four were refused by a validator
+              that could not explain itself.
+
+              The list is the browser's own IANA database — the same one that
+              formats every date the customer then reads — so a zone picked
+              here is by construction a zone the formatter can use.
+            */}
+            <SelectField
               label={t('account.timezone')}
+              hint={
+                usable
+                  ? t('account.timezoneHint')
+                  : t('account.timezoneUnknown', { zone: timezone })
+              }
+              dir="ltr"
+              className="technical"
               value={timezone}
               onChange={(event) => { setTimezone(event.target.value); }}
-              dir="ltr"
-              hint={t('account.timezoneHint')}
               error={fieldErrors?.['timezone']?.[0]}
+              options={zones.map((zone) => ({ value: zone, label: zone }))}
             />
 
             <Field

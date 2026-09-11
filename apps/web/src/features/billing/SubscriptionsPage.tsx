@@ -15,6 +15,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useSubscriptions } from '@/lib/queries'
 import type { Subscription } from '@/lib/types'
+import { safeLabel } from '@/lib/safeLabel'
 
 import { CancelSubscriptionDialog, SubscriptionIdentity } from './CancelSubscriptionDialog'
 
@@ -58,7 +59,7 @@ export function SubscriptionsPage() {
         <span>
           <MoneyText value={s.recurring_amount} />{' '}
           <span className="text-xs text-[var(--text-muted)]">
-            {t(`billingPeriod.${s.billing_period}`, { defaultValue: s.billing_period })}
+            {safeLabel('billingPeriod', s.billing_period)}
           </span>
         </span>
       ),

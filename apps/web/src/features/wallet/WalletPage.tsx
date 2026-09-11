@@ -13,6 +13,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate, formatDateTime } from '@/lib/format'
 import { useWallet, useWalletTransactions } from '@/lib/queries'
 import type { WalletTransaction } from '@/lib/types'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * Every balance the account holds, one per currency.
@@ -51,7 +52,7 @@ export function WalletPage() {
     {
       key: 'kind',
       header: t('wallet.entryKind'),
-      cell: (entry) => t(`walletKind.${entry.kind}`, { defaultValue: entry.kind }),
+      cell: (entry) => safeLabel('walletKind', entry.kind),
     },
     { key: 'description', header: t('wallet.entryDescription'), cell: (entry) => entry.description },
     {

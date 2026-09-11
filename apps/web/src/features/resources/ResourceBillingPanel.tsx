@@ -13,6 +13,7 @@ import { CancelSubscriptionDialog } from '@/features/billing/CancelSubscriptionD
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useOrder, useService, useSubscription } from '@/lib/queries'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * What this resource costs, and the papers behind it.
@@ -76,9 +77,7 @@ export function ResourceBillingPanel({ serviceId }: { serviceId: string | null }
           <span>
             <MoneyText value={subscription.recurring_amount} />{' '}
             <span className="text-xs text-[var(--text-muted)]">
-              {t(`billingPeriod.${subscription.billing_period}`, {
-                defaultValue: subscription.billing_period,
-              })}
+              {safeLabel('billingPeriod', subscription.billing_period)}
             </span>
           </span>
         ),

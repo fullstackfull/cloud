@@ -1281,6 +1281,18 @@ export function useCreateApiToken() {
     mutationFn: async (payload: {
       name: string
       current_password: string
+      /**
+       * The three restrictions the server actually enforces, each omitted
+       * rather than sent null when the customer left it alone.
+       *
+       * `abilities` is deliberately absent and must stay absent: nothing in
+       * the platform checks a token's abilities, so a scope field here would
+       * be a restriction that reads as one and enforces nothing. The request
+       * refuses the field for the same reason.
+       */
+      expires_at?: string
+      allowed_ip_ranges?: string[]
+      rate_limit_per_minute?: number
     }): Promise<{ token: ApiToken; plain_text_token: string }> => {
       const response = await api.post<Envelope<{ token: ApiToken; plain_text_token: string }>>(
         '/me/api-tokens',

@@ -109,6 +109,7 @@
     "validation.failed": "Please correct the highlighted fields.",
     "resource.not_found": "The requested resource does not exist.",
     "server.error": "Something went wrong on our side.",
+    "unknown": "This did not succeed, and we do not have a description of why.",
     "network": "We could not reach the server. Check your connection and try again.",
     "rateLimited": "Too many attempts. Please wait a moment and try again.",
     "referenceId": "Reference: {{requestId}}",
@@ -428,7 +429,8 @@
         "confirmLabel": "Withdraw request"
       }
     },
-    "verifyEmailAction": "Confirm your email address"
+    "verifyEmailAction": "Confirm your email address",
+    "timezoneUnknown": "This browser does not know the zone {{zone}}, so dates are shown in the browser’s own zone until you pick another."
   },
   "security": {
     "subtitle": "Second factor, password, and where your account is signed in.",
@@ -484,7 +486,7 @@
     },
     "revokeSessionDialog": {
       "title": "Sign out this device?",
-      "body": "The session at {{ip}} ends now. Whoever is using it is signed out and has to sign in again. Your own session here is not affected.",
+      "body": "The session on {{device}}, last seen from {{ip}}, ends now. Whoever is using it is signed out and has to sign in again. Your own session here is not affected.",
       "confirmLabel": "Sign out that device"
     },
     "revokeOthersDialog": {
@@ -494,7 +496,27 @@
     },
     "enableTwoFactorHint": "Your password is required so that a stolen session cannot change the way you sign in.",
     "enableContinue": "Continue",
-    "recoveryCodesSaved": "I have saved these codes"
+    "recoveryCodesSaved": "I have saved these codes",
+    "deviceOn": "{{browser}} on {{platform}}",
+    "unknownBrowser": "Unknown browser",
+    "unknownPlatform": "an unknown system",
+    "browsers": {
+      "edge": "Edge",
+      "opera": "Opera",
+      "samsung": "Samsung Internet",
+      "firefox": "Firefox",
+      "chrome": "Chrome",
+      "safari": "Safari"
+    },
+    "platforms": {
+      "iphone": "iPhone",
+      "ipad": "iPad",
+      "android": "Android",
+      "windows": "Windows",
+      "chromeos": "ChromeOS",
+      "macos": "macOS",
+      "linux": "Linux"
+    }
   },
   "catalogue": {
     "subtitle": "What you can buy, priced in your account's currency.",
@@ -866,7 +888,21 @@
       "body": "Anything using it stops being able to reach the API immediately. This cannot be undone; create a new token if you need access again.",
       "confirmLabel": "Revoke token"
     },
-    "loadFailed": "The token list could not be loaded."
+    "loadFailed": "The token list could not be loaded.",
+    "expires": "Expires",
+    "expiresHint": "A token that outlives the integration it was made for is the one still working when a laptop is sold.",
+    "expiryDays_one": "In {{count}} day",
+    "expiryDays_other": "In {{count}} days",
+    "expiryNever": "Never",
+    "ipRanges": "Only from these addresses",
+    "ipRangesHint": "One address or CIDR block per line. Leave empty to allow any address. The platform refuses the token from anywhere else.",
+    "rateLimit": "Requests a minute",
+    "rateLimitHint": "Leave empty for the account default. A lower ceiling limits what a leaked token can do before you notice.",
+    "restrictions": "Restrictions",
+    "unrestricted": "None",
+    "fromAddresses_one": "{{count}} address",
+    "fromAddresses_other": "{{count}} addresses",
+    "perMinute": "{{count}}/min"
   },
   "admin": {
     "nav": {

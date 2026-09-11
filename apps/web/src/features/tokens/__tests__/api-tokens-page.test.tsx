@@ -7,18 +7,41 @@ import { ApiTokensPage } from '@/features/tokens/ApiTokensPage'
 import '@/i18n'
 
 /**
- * The API token list: a revoke that asks first, and a failed read that says
- * so instead of claiming there are no tokens.
+ * The API token list: a revoke that asks first, a failed read that says so
+ * instead of claiming there are no tokens, and a restrictions column that
+ * reports what the platform actually enforces on the credential.
+ *
+ * Every field `ApiTokenResource` publishes is present on these fixtures, in
+ * the shape it publishes them. A fixture that carries a subset compiles, and
+ * then a column reading a field the fixture omits crashes on `undefined`
+ * while the types say it cannot — which is exactly how the restrictions
+ * column shipped its first draft.
  */
 
 const TOKEN = {
   id: '01JTOKEN',
   name: 'deploy-bot',
   status: 'active',
+  abilities: ['*'],
+  // Null rather than [], because that is what the serialiser normalises an
+  // empty list to: "from anywhere", one answer rather than two.
+  allowed_ip_ranges: null,
+  rate_limit_per_minute: null,
   last_used_at: null,
   last_used_ip: null,
+  expires_at: null,
   revoked_at: null,
+  revoked_reason: null,
   created_at: '2026-03-01T00:00:00+00:00',
+}
+
+const RESTRICTED = {
+  ...TOKEN,
+  id: '01JPINNED',
+  name: 'build-server',
+  allowed_ip_ranges: ['203.0.113.4/32', '198.51.100.0/24'],
+  rate_limit_per_minute: 60,
+  expires_at: '2026-06-01T00:00:00+00:00',
 }
 
 function stubFetch(routes: {
@@ -51,6 +74,14 @@ function stubFetch(routes: {
       text: () => Promise.resolve(body === null ? '' : JSON.stringify(body)),
     } as Response)
   })
+}
+
+async function rowFor(name: string): Promise<HTMLElement> {
+  const row = (await screen.findByText(name)).closest('tr')
+
+  if (row === null) throw new Error(`No row for ${name}`)
+
+  return row
 }
 
 function renderPage() {
@@ -103,6 +134,31 @@ describe('the API tokens page', () => {
     await waitFor(() => {
       expect(revoked).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it('summarises what is actually enforced on each credential', async () => {
+    /*
+     * The question this column answers is "which of these is the one pinned to
+     * the build server?", and until it existed the list could not tell a
+     * customer apart from their own credentials. The abilities field is
+     * deliberately not summarised: it holds the wildcard on every token and is
+     * checked by nothing, so printing "full access" from it would be reading a
+     * field as a promise.
+     */
+    vi.stubGlobal('fetch', stubFetch({ list: { status: 200, body: { data: [TOKEN, RESTRICTED] } } }))
+
+    renderPage()
+
+    const pinned = await rowFor('build-server')
+    expect(within(pinned).getByText('2 addresses · 60/min')).toBeInTheDocument()
+
+    const anywhere = await rowFor('deploy-bot')
+    expect(within(anywhere).getByText('None')).toBeInTheDocument()
+
+    // Not a promise the platform keeps: the abilities field holds the wildcard
+    // on every token and is checked by nothing, so no row claims access from it.
+    expect(screen.queryByText(/full access/i)).not.toBeInTheDocument()
+    expect(screen.queryByText('*')).not.toBeInTheDocument()
   })
 
   it('reports a refused read instead of rendering "No tokens"', async () => {

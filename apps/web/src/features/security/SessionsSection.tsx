@@ -18,11 +18,13 @@ import {
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useDeviceName } from '@/lib/useDeviceName'
 
 export function SessionsSection() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
+  const describe = useDeviceName()
 
   const { data: sessions, isPending, error } = useSessions()
   const revoke = useRevokeSession()
@@ -43,11 +45,19 @@ export function SessionsSection() {
     {
       key: 'device',
       header: t('security.device'),
-      ltr: true,
+      /*
+       * A browser and an operating system, from a bounded parser — never a
+       * device model, never a place, and "Unknown browser" where the string
+       * does not say. The column used to print the raw header truncated at
+       * 22rem, which is the same sixty characters on every desktop session a
+       * customer has, so the one control that matters here could not be aimed.
+       *
+       * The header itself stays available in `title`: it is the value somebody
+       * quotes to support, and hiding it entirely would trade one problem for
+       * another.
+       */
       cell: (session) => (
-        <span className="block max-w-[22rem] truncate" title={session.user_agent ?? ''}>
-          {session.user_agent ?? t('security.unknownDevice')}
-        </span>
+        <span title={session.user_agent ?? ''}>{describe(session.user_agent)}</span>
       ),
     },
     {
@@ -122,7 +132,14 @@ export function SessionsSection() {
       <ConfirmDialog
         open={revoking !== null}
         title={t('security.revokeSessionDialog.title')}
-        body={<p>{t('security.revokeSessionDialog.body', { ip: revoking?.ip_address ?? '—' })}</p>}
+        body={
+          <p>
+            {t('security.revokeSessionDialog.body', {
+              device: describe(revoking?.user_agent ?? null),
+              ip: revoking?.ip_address ?? '—',
+            })}
+          </p>
+        }
         confirmLabel={t('security.revokeSessionDialog.confirmLabel')}
         loading={revoke.isPending}
         onConfirm={() => {

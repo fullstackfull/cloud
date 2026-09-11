@@ -4,9 +4,11 @@ import { Alert } from '@/components/Alert'
 import { Card } from '@/components/Card'
 import { LoadFailure } from '@/components/LoadFailure'
 import { Loading } from '@/components/Loading'
+import { Switch } from '@/components/Switch'
 import { useNotificationPreferences, useUpdateNotificationPreference } from '@/lib/queries'
 import type { NotificationPreference } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { hasLabel, safeLabel } from '@/lib/safeLabel'
 
 /**
  * Which optional messages this person wants.
@@ -56,41 +58,39 @@ export function NotificationPreferencesSection() {
           {categories.map((category) => (
             <li key={category} className="py-4">
               <p className="text-sm font-medium">
-                {t(`notifications.category.${category}`, { defaultValue: category })}
+                {safeLabel('notifications.category', category)}
               </p>
               <p className="mb-2 text-xs text-[var(--text-muted)]">
-                {t(`notifications.categoryHint.${category}`, { defaultValue: '' })}
+                {hasLabel('notifications.categoryHint', category)
+                  ? t(`notifications.categoryHint.${category}`)
+                  : null}
               </p>
 
-              <div className="flex flex-wrap gap-4">
+              {/*
+                Switches, not checkboxes. Each of these saves the moment it is
+                flicked: a checkbox looks like part of a form, so a customer
+                turns email off, looks for the Save button, does not find one,
+                and assumes it did not work. A switch announces as on/off and
+                says what it is — a setting.
+              */}
+              <div className="flex flex-wrap gap-x-6 gap-y-2">
                 {rows
                   .filter((row: NotificationPreference) => row.category === category)
                   .map((row) => (
-                    <label key={row.channel} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={row.enabled}
-                        disabled={! row.changeable || update.isPending}
-                        onChange={(event) => {
-                          update.mutate({
-                            category: row.category,
-                            channel: row.channel,
-                            enabled: event.target.checked,
-                          })
-                        }}
-                        className="size-4 rounded border-[var(--border-subtle)]"
-                      />
-                      <span className={row.changeable ? '' : 'text-[var(--text-muted)]'}>
-                        {t(`notifications.channel.${row.channel}`, { defaultValue: row.channel })}
-                      </span>
-                      {row.changeable ? null : (
-                        // Stated, not implied by a greyed box. "Always sent"
-                        // is a policy the customer can read.
-                        <span className="text-xs text-[var(--text-muted)]">
-                          {t('notifications.preferences.always')}
-                        </span>
-                      )}
-                    </label>
+                    <Switch
+                      key={row.channel}
+                      label={safeLabel('notifications.channel', row.channel)}
+                      checked={row.enabled}
+                      disabled={! row.changeable || update.isPending}
+                      note={row.changeable ? undefined : t('notifications.preferences.always')}
+                      onChange={(next) => {
+                        update.mutate({
+                          category: row.category,
+                          channel: row.channel,
+                          enabled: next,
+                        })
+                      }}
+                    />
                   ))}
               </div>
             </li>

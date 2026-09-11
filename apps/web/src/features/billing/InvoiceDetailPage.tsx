@@ -21,6 +21,7 @@ import type {
   InvoiceWalletCreditRow,
 } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { safeLabel } from '@/lib/safeLabel'
 
 import { PaymentNextAction } from '../payments/PaymentNextAction'
 import { usePaymentLaunch } from '../payments/usePaymentLaunch'
@@ -113,7 +114,7 @@ export function InvoiceDetailPage() {
     {
       key: 'kind',
       header: t('wallet.entryKind'),
-      cell: (entry) => t(`walletKind.${entry.kind}`, { defaultValue: entry.kind }),
+      cell: (entry) => safeLabel('walletKind', entry.kind),
     },
     { key: 'amount', header: t('wallet.entryAmount'), cell: (entry) => <MoneyText value={entry.amount} /> },
     {

@@ -8,6 +8,7 @@ import { MoneyText } from '@/components/MoneyText'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useInvoice } from '@/lib/queries'
+import { safeLabel } from '@/lib/safeLabel'
 
 import { BillingSnapshotView } from './InvoiceDetailPage'
 
@@ -61,7 +62,7 @@ export function InvoicePrintPage() {
             {t('invoices.dueAt')}: {invoice.due_at === null ? '—' : formatDate(invoice.due_at, locale)}
           </p>
           <p>
-            {t('invoices.status')}: {t(`status.${invoice.status}`, { defaultValue: invoice.status })}
+            {t('invoices.status')}: {safeLabel('status', invoice.status)}
           </p>
         </div>
       </div>

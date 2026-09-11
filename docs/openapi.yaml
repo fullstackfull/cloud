@@ -17207,7 +17207,9 @@ components:
           items:
             type: "string"
         allowed_ip_ranges:
-          type: "array"
+          type:
+            - "array"
+            - "null"
           items:
             type: "string"
         rate_limit_per_minute:

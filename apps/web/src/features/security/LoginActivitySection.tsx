@@ -12,6 +12,8 @@ import {
 } from '@/features/account/useProfile'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
+import { safeLabel } from '@/lib/safeLabel'
+import { useDeviceName } from '@/lib/useDeviceName'
 
 /**
  * Failed attempts are shown alongside successful ones on purpose: the whole
@@ -30,6 +32,7 @@ export function LoginActivitySection() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
   const { data: activity, isPending, error: readError } = useLoginActivity()
+  const describe = useDeviceName()
 
   const columns: Array<Column<LoginActivityEntry>> = [
     {
@@ -37,7 +40,7 @@ export function LoginActivitySection() {
       header: t('security.outcome'),
       cell: (entry) => (
         <Badge tone={toneFor(entry.outcome)}>
-          {t(`security.outcomes.${entry.outcome}`, { defaultValue: entry.outcome })}
+          {safeLabel('security.outcomes', entry.outcome)}
         </Badge>
       ),
     },
@@ -61,12 +64,9 @@ export function LoginActivitySection() {
     {
       key: 'device',
       header: t('security.device'),
-      ltr: true,
-      cell: (entry) => (
-        <span className="block max-w-[22rem] truncate" title={entry.user_agent ?? ''}>
-          {entry.user_agent ?? t('security.unknownDevice')}
-        </span>
-      ),
+      // The same sentence the sessions table uses, so a sign-in and the
+      // session it opened are described by the same words.
+      cell: (entry) => <span title={entry.user_agent ?? ''}>{describe(entry.user_agent)}</span>,
     },
   ]
 

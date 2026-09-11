@@ -12,6 +12,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Loading } from '@/components/Loading'
 import { useVirtualMachines } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
+import { safeLabel } from '@/lib/safeLabel'
 
 import { VpsPowerActions } from './vps/VpsPowerActions'
 
@@ -74,7 +75,7 @@ export function VpsPage() {
             */}
           {vm.service_status === 'active' ? null : (
             <Badge tone={vm.service_status === 'reactivating' ? 'warning' : 'danger'}>
-              {t(`vps.serviceState.${vm.service_status}`, { defaultValue: vm.service_status })}
+              {safeLabel('vps.serviceState', vm.service_status)}
             </Badge>
           )}
           {/*
@@ -90,7 +91,7 @@ export function VpsPage() {
             */}
           {vm.actions.blocked_reason === null || vm.actions.blocked_reason === 'service_not_active' ? null : (
             <span className="text-xs text-[var(--warning-text)]">
-              {t(`vps.blocked.${vm.actions.blocked_reason}`, { defaultValue: vm.actions.blocked_reason })}
+              {safeLabel('vps.blocked', vm.actions.blocked_reason)}
             </span>
           )}
         </div>
@@ -110,7 +111,7 @@ export function VpsPage() {
                 : 'text-xs text-[var(--text-muted)]'
             }
           >
-            {t(`vps.reinstallState.${vm.reinstall.state}`, { defaultValue: vm.reinstall.state })}
+            {safeLabel('vps.reinstallState', vm.reinstall.state)}
           </span>
         ),
     },

@@ -863,7 +863,18 @@ export interface ApiToken {
   id: string
   name: string
   status: string
+  /**
+   * Always `["*"]` today, and checked by nothing.
+   *
+   * Typed because the API publishes it, and deliberately not rendered: a
+   * screen that printed "full access" from this field would be describing a
+   * restriction the platform does not enforce.
+   */
   abilities: string[]
+  /** Null means "from anywhere". Enforced at authentication. */
+  allowed_ip_ranges: string[] | null
+  /** Null means the tier default. Replaces it in the API limiter. */
+  rate_limit_per_minute: number | null
   last_used_at: string | null
   last_used_ip: string | null
   expires_at: string | null

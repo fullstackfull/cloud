@@ -109,6 +109,7 @@
     "validation.failed": "يرجى تصحيح الحقول المحددة.",
     "resource.not_found": "المورد المطلوب غير موجود.",
     "server.error": "حدث خطأ لدينا.",
+    "unknown": "لم تنجح هذه العملية، وليس لدينا وصف للسبب.",
     "network": "تعذّر الوصول إلى الخادم. تحقق من اتصالك وحاول مجددًا.",
     "rateLimited": "محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.",
     "referenceId": "الرقم المرجعي: {{requestId}}",
@@ -428,7 +429,8 @@
         "confirmLabel": "سحب الطلب"
       }
     },
-    "verifyEmailAction": "أكّد بريدك الإلكتروني"
+    "verifyEmailAction": "أكّد بريدك الإلكتروني",
+    "timezoneUnknown": "لا يعرف هذا المتصفّح المنطقة {{zone}}، لذا تُعرض التواريخ بمنطقة المتصفّح نفسه حتى تختار منطقة أخرى."
   },
   "security": {
     "subtitle": "العامل الثاني، وكلمة المرور، وأين سُجّل الدخول إلى حسابك.",
@@ -484,7 +486,7 @@
     },
     "revokeSessionDialog": {
       "title": "تسجيل الخروج من هذا الجهاز؟",
-      "body": "تنتهي الجلسة على {{ip}} الآن. يُسجَّل خروج من يستخدمها وعليه تسجيل الدخول مجددًا. جلستك هنا لا تتأثر.",
+      "body": "تنتهي الآن الجلسة على {{device}}، والتي شوهدت آخر مرة من {{ip}}. ومن يستخدمها يُسجَّل خروجه ويجب أن يسجّل الدخول من جديد. أما جلستك هنا فلا تتأثر.",
       "confirmLabel": "تسجيل الخروج من ذلك الجهاز"
     },
     "revokeOthersDialog": {
@@ -494,7 +496,27 @@
     },
     "enableTwoFactorHint": "كلمة مرورك مطلوبة حتى لا تتمكن جلسة مسروقة من تغيير طريقة تسجيل دخولك.",
     "enableContinue": "متابعة",
-    "recoveryCodesSaved": "لقد حفظت هذه الرموز"
+    "recoveryCodesSaved": "لقد حفظت هذه الرموز",
+    "deviceOn": "{{browser}} على {{platform}}",
+    "unknownBrowser": "متصفّح غير معروف",
+    "unknownPlatform": "نظام غير معروف",
+    "browsers": {
+      "edge": "Edge",
+      "opera": "Opera",
+      "samsung": "Samsung Internet",
+      "firefox": "Firefox",
+      "chrome": "Chrome",
+      "safari": "Safari"
+    },
+    "platforms": {
+      "iphone": "iPhone",
+      "ipad": "iPad",
+      "android": "Android",
+      "windows": "Windows",
+      "chromeos": "ChromeOS",
+      "macos": "macOS",
+      "linux": "Linux"
+    }
   },
   "catalogue": {
     "subtitle": "ما يمكنك شراؤه، مُسعَّراً بعملة حسابك.",
@@ -870,7 +892,29 @@
       "body": "يتوقف كل ما يستخدمه عن الوصول إلى الواجهة البرمجية فورًا. لا يمكن التراجع عن هذا؛ أنشئ رمزًا جديدًا إن احتجت الوصول مجددًا.",
       "confirmLabel": "إبطال الرمز"
     },
-    "loadFailed": "تعذّر تحميل قائمة الرموز."
+    "loadFailed": "تعذّر تحميل قائمة الرموز.",
+    "expires": "تنتهي صلاحيته",
+    "expiresHint": "الرمز الذي يبقى بعد انتهاء الغرض الذي أُنشئ من أجله هو الرمز الذي يظل صالحًا عند بيع جهاز محمول.",
+    "expiryDays_zero": "خلال أقل من يوم",
+    "expiryDays_one": "خلال يوم واحد",
+    "expiryDays_two": "خلال يومين",
+    "expiryDays_few": "خلال {{count}} أيام",
+    "expiryDays_many": "خلال {{count}} يومًا",
+    "expiryDays_other": "خلال {{count}} يوم",
+    "expiryNever": "لا تنتهي",
+    "ipRanges": "من هذه العناوين فقط",
+    "ipRangesHint": "عنوان واحد أو نطاق CIDR في كل سطر. اتركه فارغًا للسماح بأي عنوان. وترفض المنصّة الرمز من أي مكان آخر.",
+    "rateLimit": "عدد الطلبات في الدقيقة",
+    "rateLimitHint": "اتركه فارغًا لاستخدام الحد الافتراضي للحساب. والحد الأقل يقلّص ما يمكن لرمز مسرَّب فعله قبل أن تلاحظ.",
+    "restrictions": "القيود",
+    "unrestricted": "لا قيود",
+    "fromAddresses_zero": "لا عناوين",
+    "fromAddresses_one": "عنوان واحد",
+    "fromAddresses_two": "عنوانان",
+    "fromAddresses_few": "{{count}} عناوين",
+    "fromAddresses_many": "{{count}} عنوانًا",
+    "fromAddresses_other": "{{count}} عنوان",
+    "perMinute": "{{count}}/دقيقة"
   },
   "admin": {
     "nav": {

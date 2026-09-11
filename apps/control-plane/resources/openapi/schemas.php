@@ -27,7 +27,7 @@ return [
             'name' => ['type' => ['string', 'null']],
             'status' => ['type' => ['string', 'null']],
             'abilities' => ['type' => 'array', 'items' => ['type' => 'string']],
-            'allowed_ip_ranges' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'allowed_ip_ranges' => ['type' => ['array', 'null'], 'items' => ['type' => 'string']],
             'rate_limit_per_minute' => ['type' => ['integer', 'null']],
             'last_used_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'last_used_ip' => ['type' => ['string', 'null']],

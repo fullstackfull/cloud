@@ -19,6 +19,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useVirtualMachine } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
+import { safeLabel } from '@/lib/safeLabel'
 
 import { VpsPowerActions } from './vps/VpsPowerActions'
 import { VpsReinstallAction } from './vps/VpsReinstallAction'
@@ -76,7 +77,7 @@ export function VpsDetailPage() {
         badges={
           <>
             <StatusBadge status={vm.power_state} />
-            {vm.service_status === 'active' ? null : <Badge tone="warning">{t(`status.${vm.service_status}`, { defaultValue: vm.service_status })}</Badge>}
+            {vm.service_status === 'active' ? null : <Badge tone="warning">{safeLabel('status', vm.service_status)}</Badge>}
             {vm.actions.blocked_reason === null ? null : (
               <span className="text-xs text-[var(--text-secondary)]">
                 {t(`vps.blocked.${vm.actions.blocked_reason}`, {
@@ -172,9 +173,7 @@ export function VpsOverviewSection() {
                       vm.reinstall.needs_attention ? 'text-[var(--danger-text)]' : undefined
                     }
                   >
-                    {t(`vps.reinstallState.${vm.reinstall.state}`, {
-                      defaultValue: vm.reinstall.state,
-                    })}
+                    {safeLabel('vps.reinstallState', vm.reinstall.state)}
                   </span>
                 ),
               },

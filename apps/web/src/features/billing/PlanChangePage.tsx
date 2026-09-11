@@ -15,6 +15,7 @@ import { newIdempotencyKey } from '@/lib/api'
 import { useChangePlan, usePlanOptions } from '@/lib/queries'
 import type { PlanChangeQuote } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * Changing plan.
@@ -96,14 +97,14 @@ export function PlanChangePage() {
 
                   {quote.refusals.map((reason) => (
                     <p key={reason} className="mt-1 text-sm text-[var(--danger-text)]">
-                      {t(`planChange.refusal.${reason}`, { defaultValue: reason })}
+                      {safeLabel('planChange.refusal', reason)}
                     </p>
                   ))}
 
                   {quote.is_available
                     ? quote.warnings.map((warning) => (
                         <p key={warning} className="mt-1 text-sm text-[var(--warning-text)]">
-                          {t(`planChange.warning.${warning}`, { defaultValue: warning })}
+                          {safeLabel('planChange.warning', warning)}
                         </p>
                       ))
                     : null}

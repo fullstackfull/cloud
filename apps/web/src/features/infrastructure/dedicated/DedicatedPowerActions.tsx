@@ -10,6 +10,7 @@ import { newIdempotencyKey } from '@/lib/api'
 import { useDedicatedPower } from '@/lib/queries'
 import type { DedicatedServer } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { safeLabel } from '@/lib/safeLabel'
 
 const POWER_ACTIONS = ['on', 'off', 'cycle'] as const
 
@@ -103,9 +104,7 @@ export function DedicatedPowerActions({
         */}
       {server.actions.blocked_reason === null ? null : (
         <span className="text-xs text-[var(--warning-text)]">
-          {t(`dedicated.blocked.${server.actions.blocked_reason}`, {
-            defaultValue: server.actions.blocked_reason,
-          })}
+          {safeLabel('dedicated.blocked', server.actions.blocked_reason)}
         </span>
       )}
 

@@ -14,6 +14,7 @@ import { useOrderQuote, usePlaceOrder, useProduct } from '@/lib/queries'
 import type { Plan, PlanPrice } from '@/lib/types'
 import { cn } from '@/lib/cn'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * One product, its plans, and the checkout.
@@ -141,7 +142,7 @@ export function ProductPage() {
               {Object.entries(plan.resources).map(([key, value]) => (
                 <div key={key} className="flex justify-between gap-3">
                   <dt className="text-[var(--text-secondary)]">
-                    {t(`resources.${key}`, { defaultValue: key.replace(/_/g, ' ') })}
+                    {safeLabel('resources', key)}
                   </dt>
                   <dd dir="ltr" className="tabular-nums text-[var(--text-primary)]">
                     {String(value)}
@@ -164,7 +165,7 @@ export function ProductPage() {
                       : 'border-[var(--border-subtle)] hover:border-[var(--border-strong)]',
                   )}
                 >
-                  <span>{t(`billingPeriod.${price.billing_period}`, { defaultValue: price.billing_period })}</span>
+                  <span>{safeLabel('billingPeriod', price.billing_period)}</span>
                   <MoneyText value={price.recurring} />
                 </button>
               ))}
@@ -273,9 +274,7 @@ export function ProductPage() {
                   <div className="flex justify-between gap-4">
                     <dt className="text-[var(--text-secondary)]">
                       {t('catalogue.thenPerPeriod', {
-                        period: t(`billingPeriod.${quote.data.renewal.billing_period}`, {
-                          defaultValue: quote.data.renewal.billing_period,
-                        }),
+                        period: safeLabel('billingPeriod', quote.data.renewal.billing_period),
                       })}
                     </dt>
                     <dd>

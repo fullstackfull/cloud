@@ -17,6 +17,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useDedicatedServer } from '@/lib/queries'
 import type { DedicatedServer } from '@/lib/types'
+import { safeLabel } from '@/lib/safeLabel'
 
 import { DedicatedPowerActions } from './dedicated/DedicatedPowerActions'
 import { DedicatedReinstallAction } from './dedicated/DedicatedReinstallAction'
@@ -68,7 +69,7 @@ export function DedicatedDetailPage() {
             <StatusBadge status={server.power_state} />
             {server.status === 'active' ? null : (
               <Badge tone="warning">
-                {t(`status.${server.status}`, { defaultValue: server.status })}
+                {safeLabel('status', server.status)}
               </Badge>
             )}
           </>
@@ -127,9 +128,7 @@ export function DedicatedOverviewSection() {
             facts={[
               {
                 label: t('services.state'),
-                value: t(`dedicated.reinstallState.${server.reinstall.state}`, {
-                  defaultValue: server.reinstall.state,
-                }),
+                value: safeLabel('dedicated.reinstallState', server.reinstall.state),
               },
               {
                 label: t('dedicated.rebuildRequested'),
