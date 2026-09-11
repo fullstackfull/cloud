@@ -17859,6 +17859,9 @@ components:
             - "null"
           additionalProperties: true
           description: "What to watch once this finishes, so the client does not infer it."
+        requested_at:
+          "$ref": "#/components/schemas/Timestamp"
+          description: "When the customer asked. A client measures \"this is taking longer than usual\" from here rather than from when its own tab opened, so a reload does not restart the clock on work that has been stuck for an hour."
         started_at:
           "$ref": "#/components/schemas/Timestamp"
         updated_at:
@@ -20610,11 +20613,13 @@ components:
             - "string"
             - "null"
         state:
-          type:
-            - "string"
-            - "null"
-        is_settled:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
           type: "boolean"
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
         failure_reason:
           type:
             - "string"
@@ -20640,6 +20645,7 @@ components:
     ProvisioningOperation:
       type: "object"
       additionalProperties: false
+      description: "The receipt a 202 returns for a VPS power action or rebuild. It reports the same state, in the same vocabulary, as GET /operations/{operation} — which is what a client polls afterwards, and where the poll hint lives."
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
@@ -20655,15 +20661,16 @@ components:
           type:
             - "string"
             - "null"
-        status:
-          type:
-            - "string"
-            - "null"
-        is_settled:
+          description: "The customer's own verb where there is one — `restart`, not the kind."
+        state:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
           type: "boolean"
         needs_attention:
           type: "boolean"
-        created_at:
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
+        requested_at:
           "$ref": "#/components/schemas/Timestamp"
         finished_at:
           "$ref": "#/components/schemas/Timestamp"
@@ -20786,11 +20793,13 @@ components:
         id:
           "$ref": "#/components/schemas/Ulid"
         state:
-          type:
-            - "string"
-            - "null"
-        is_settled:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
           type: "boolean"
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
         requested_at:
           "$ref": "#/components/schemas/Timestamp"
         started_at:

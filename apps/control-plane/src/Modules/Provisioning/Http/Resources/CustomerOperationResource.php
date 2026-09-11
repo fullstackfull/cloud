@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Provisioning\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\Provisioning\Domain\Enums\CustomerFailureReason;
-use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
 
@@ -69,7 +68,7 @@ final class CustomerOperationResource extends JsonResource
         /** @var ProvisioningJob $job */
         $job = $this->resource;
 
-        $state = $this->state($job->status);
+        $state = $job->status->customerState();
 
         /** @var array<string, mixed> $payload */
         $payload = $job->payload ?? [];
@@ -100,6 +99,15 @@ final class CustomerOperationResource extends JsonResource
              */
             'resource' => self::watching($job),
 
+            /*
+             * When the customer asked, not when a worker picked it up. The
+             * client measures "this is taking longer than usual" from here, so
+             * the window is a property of the operation rather than of how
+             * long this browser tab has been open — a reload must not restart
+             * the clock on a build that has been stuck for an hour.
+             */
+            'requested_at' => $job->created_at?->toIso8601String(),
+
             'started_at' => $job->started_at?->toIso8601String(),
             'updated_at' => $job->updated_at?->toIso8601String(),
             'finished_at' => $job->finished_at?->toIso8601String(),
@@ -125,24 +133,6 @@ final class CustomerOperationResource extends JsonResource
         }
 
         return ['service_id' => (string) $job->service_id];
-    }
-
-    /**
-     * The engine's status, in the customer's words.
-     *
-     * No default arm: a status added to the engine fails here rather than
-     * being reported as something it is not.
-     */
-    private function state(ProvisioningJobStatus $status): CustomerOperationState
-    {
-        return match ($status) {
-            ProvisioningJobStatus::Queued => CustomerOperationState::Queued,
-            ProvisioningJobStatus::Running => CustomerOperationState::Processing,
-            ProvisioningJobStatus::Succeeded => CustomerOperationState::Succeeded,
-            ProvisioningJobStatus::Failed => CustomerOperationState::Failed,
-            ProvisioningJobStatus::NeedsReview => CustomerOperationState::NeedsReview,
-            ProvisioningJobStatus::Cancelled => CustomerOperationState::Cancelled,
-        };
     }
 
     /**

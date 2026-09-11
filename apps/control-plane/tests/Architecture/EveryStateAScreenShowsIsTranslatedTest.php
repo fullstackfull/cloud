@@ -56,7 +56,9 @@ use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
+use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
 use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
+use Lynomia\Modules\Shared\Domain\Enums\RetryAdvice;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
@@ -133,6 +135,16 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             DedicatedReinstallState::class,
 
             /*
+             * The one vocabulary for asynchronous work, which every screen
+             * that shows a reboot, a rebuild, a build or a feed row renders
+             * through the same badge. `indeterminate` and `needs_review` are
+             * the two the wave exists for, and both must read as themselves in
+             * both languages: a missing Arabic string here would render
+             * "needs_review" to the customer it matters most to.
+             */
+            CustomerOperationState::class,
+
+            /*
              * Domains render three enums through the same badge: what the
              * platform holds, what a registrar answered about a name, and what
              * an attempt to buy one is doing. All three reach a customer, and
@@ -193,6 +205,13 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.drift.kinds' => [DriftKind::class],
         'admin.drift.severities' => [DriftSeverity::class],
         'admin.drift.statuses' => [DriftStatus::class],
+        /*
+         * What the customer may do next, rendered as a sentence beside the
+         * state rather than as a badge. `support_required` is the one that
+         * must never fall back to English: it is the answer on an operation
+         * whose result nobody knows.
+         */
+        'operations.retryAdvice' => [RetryAdvice::class],
         'admin.provisioning.kinds' => [ProvisioningJobKind::class],
         'admin.provisioning.failureClass' => [FailureClass::class],
     ];

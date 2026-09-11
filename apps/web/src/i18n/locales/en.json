@@ -1524,6 +1524,39 @@
       "always": "always sent"
     }
   },
+  "operations": {
+    "channel": "Updates",
+    "dismiss": "Dismiss",
+    "view": "View",
+    "requested": "{{action}} requested",
+    "succeeded": "{{action}} completed",
+    "failed": "{{action}} did not finish",
+    "needsReview": "{{action}} stopped and we are looking at it",
+    "indeterminate": "We could not confirm the result of {{action}}",
+    "cancelled": "{{action}} cancelled",
+    "slow": "{{action}} is taking longer than usual",
+    "slowBody": "We have stopped checking automatically. Open the page to see where it stands.",
+    "readFailed": "We could not check on this just now. The last thing we heard is shown.",
+    "actions": {
+      "reboot": "Reboot",
+      "start": "Start",
+      "stop": "Stop",
+      "shutdown": "Shutdown",
+      "rebuild": "Rebuild",
+      "build": "Setup",
+      "restore": "Restore",
+      "fileRestore": "File restore",
+      "backup": "Backup",
+      "copy": "Copy",
+      "publish": "Publish"
+    },
+    "retryAdvice": {
+      "safe_to_retry": "You can try this again.",
+      "wait": "Nothing to do — we are still working on it.",
+      "support_required": "Please contact support before trying again.",
+      "not_retryable": "Nothing left to do."
+    }
+  },
   "console": {
     "title": "Console",
     "subtitle": "A direct connection to your server, for when it will not answer any other way.",

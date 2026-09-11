@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Provisioning\Domain\Enums;
 
+use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
+
 /**
  * Where a unit of provisioning work stands.
  *
@@ -44,5 +46,39 @@ enum ProvisioningJobStatus: string
     public function needsAttention(): bool
     {
         return $this === self::NeedsReview;
+    }
+
+    /**
+     * The same state, in the one vocabulary the customer surface speaks.
+     *
+     * Written here, once, because the portal used to be told three different
+     * things about one job: this enum raw from the power and reinstall
+     * receipts, a `scheduled`/`in_progress`/`completed`/`under_review` set
+     * from the service event list, and the canonical seven words from the
+     * operation endpoint. Three vocabularies for one concept is three chances
+     * for a screen to render a word it has no translation for, and it is how a
+     * customer reads "completed" in one place and "succeeded" in another about
+     * the same reboot.
+     *
+     * No default arm, and that is the safety property: a status added to the
+     * engine stops the build here rather than reaching a customer as whichever
+     * of the seven words happened to be first.
+     *
+     * There is no mapping onto `indeterminate`. This engine always knows
+     * whether it ran its own work — a job that lost contact with a provider is
+     * parked as `needs_review` by the worker rather than guessed at — so the
+     * unknown-result state belongs to the operations that genuinely have one,
+     * which are the ones that call out to a registry or a controller.
+     */
+    public function customerState(): CustomerOperationState
+    {
+        return match ($this) {
+            self::Queued => CustomerOperationState::Queued,
+            self::Running => CustomerOperationState::Processing,
+            self::Succeeded => CustomerOperationState::Succeeded,
+            self::Failed => CustomerOperationState::Failed,
+            self::NeedsReview => CustomerOperationState::NeedsReview,
+            self::Cancelled => CustomerOperationState::Cancelled,
+        };
     }
 }

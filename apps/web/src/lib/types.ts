@@ -1038,12 +1038,161 @@ export interface DomainContact {
 export interface ServiceEvent {
   id: string
   kind: string
-  state: string
-  is_settled: boolean
+  state: CustomerOperationState
+  is_terminal: boolean
+  needs_attention: boolean
+  retry_advice: RetryAdvice
   failure_reason: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
+}
+
+/**
+ * The seven words the API uses for a piece of asynchronous work, and the only
+ * ones a screen ever sees.
+ *
+ * Written as a union rather than as `string` because the two that matter are
+ * the two a component would otherwise be free to lump in with `failed`:
+ *
+ *  - `needs_review` means it stopped and a person at Lynomia has to look. A
+ *    customer told it failed will press the button again, on a machine that
+ *    may be half-built.
+ *  - `indeterminate` means the platform asked something outside itself and
+ *    never heard back. The result is genuinely unknown, and presenting either
+ *    guess as fact is how a name gets bought twice.
+ *
+ * A `switch` over this union with a missing arm is a type error, which is the
+ * point: the compiler is the thing that stops the collapse.
+ */
+export type CustomerOperationState =
+  | 'queued'
+  | 'processing'
+  | 'succeeded'
+  | 'failed'
+  | 'needs_review'
+  | 'indeterminate'
+  | 'cancelled'
+
+/**
+ * What the customer may safely do next, decided by the server.
+ *
+ * A retry control is drawn from `safe_to_retry` and from nothing else. The
+ * portal never derives this from the state, because the derivation is exactly
+ * where "failed, so offer a retry" creeps back in and takes `indeterminate`
+ * with it.
+ */
+export type RetryAdvice = 'safe_to_retry' | 'wait' | 'support_required' | 'not_retryable'
+
+/**
+ * One piece of work in flight, as `GET /operations/{id}` reports it.
+ *
+ * `poll_after_ms` is the server's hint about when to read again and is null
+ * once the state is terminal, which is what makes "polling stops when the work
+ * stops" a property of the contract rather than a promise about a component.
+ */
+export interface CustomerOperation {
+  id: string
+  kind: string | null
+  /** The customer's own verb where there is one — `reboot`, not `restart`. */
+  action: string | null
+  state: CustomerOperationState
+  is_terminal: boolean
+  needs_attention: boolean
+  retry_advice: RetryAdvice
+  failure_reason: string | null
+  resource: { service_id: string } | null
+  requested_at: string | null
+  started_at: string | null
+  updated_at: string | null
+  finished_at: string | null
+  poll_after_ms: number | null
+}
+
+/** The 202 receipt a power action or a rebuild returns. */
+export interface AcceptedOperation {
+  id: string
+  service_id: string | null
+  kind: string | null
+  action: string | null
+  state: CustomerOperationState
+  is_terminal: boolean
+  needs_attention: boolean
+  retry_advice: RetryAdvice
+  requested_at: string | null
+  finished_at: string | null
+}
+
+/** A handle the portal turns into an address through one function. */
+export interface ResourceHandle {
+  kind: string
+  id: string
+  identity: string | null
+}
+
+/**
+ * One row of the account-wide feed.
+ *
+ * `message_code` is a translation key, not a sentence: the server says what
+ * happened and the portal says it in the reader's language. The actor is typed
+ * — `customer_user`, `system` or `unknown` — and `unknown` is the honest answer
+ * where the source row records no requester rather than a guess at whoever was
+ * signed in at the time.
+ */
+export interface ActivityItem {
+  id: string
+  occurred_at: string
+  category: ActivityCategory
+  message_code: string
+  state: CustomerOperationState
+  is_terminal: boolean
+  needs_attention: boolean
+  retry_advice: RetryAdvice
+  actor: { type: 'customer_user' | 'system' | 'unknown'; display_name: string | null }
+  resource: ResourceHandle | null
+  reference: string | null
+}
+
+export type ActivityCategory = 'cloud' | 'hosting' | 'domains' | 'billing' | 'support' | 'backups'
+
+/** The cursor page the feed returns. Opaque cursors, walked forwards only. */
+export interface ActivityPage {
+  data: ActivityItem[]
+  meta: { per_page: number; next_cursor: string | null; has_more: boolean }
+}
+
+/** One thing the account should look at, in the server's priority order. */
+export interface AttentionItem {
+  id: string
+  kind: string
+  severity: 'critical' | 'warning' | 'info'
+  occurred_at: string
+  resource: ResourceHandle | null
+  reference: string | null
+}
+
+/**
+ * The dashboard, in one read.
+ *
+ * `billing.due` is one entry per currency and there is deliberately no total:
+ * an account billed in two currencies has two amounts owing, and a single
+ * number would be arithmetic nobody can perform.
+ */
+export interface AccountOverview {
+  attention: AttentionItem[]
+  services: { total: number; by_state: Record<string, number> }
+  billing: { due: Array<{ invoices: number; amount: Money }> }
+  renewals: Array<{
+    kind: string
+    resource: { kind: string | null; id: string; identity: string | null }
+    at: string
+    amount: Money | null
+  }>
+  unread_notifications: number
+  recent: {
+    services: Array<{ kind: string; id: string; identity: string | null; state: string }>
+    activity: ActivityItem[]
+  }
 }
 
 export interface DnsZone {

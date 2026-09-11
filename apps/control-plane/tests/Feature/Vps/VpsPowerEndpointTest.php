@@ -11,6 +11,8 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
+use Lynomia\Modules\Shared\Domain\Enums\RetryAdvice;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -56,7 +58,17 @@ final class VpsPowerEndpointTest extends VpsApiTestCase
             ->assertStatus(202)
             ->assertJsonPath('data.kind', $expectedKind)
             ->assertJsonPath('data.action', $action)
-            ->assertJsonPath('data.status', ProvisioningJobStatus::Queued->value)
+            /*
+             * The canonical customer word, not the engine's. The receipt and
+             * `GET /operations/{id}` are two classes — module layering keeps
+             * them apart — and they share one vocabulary through the enum, so
+             * this is the same string the poll will report.
+             */
+            ->assertJsonPath('data.state', CustomerOperationState::Queued->value)
+            ->assertJsonPath('data.is_terminal', false)
+            // Ours to finish: nothing for the customer to do, and no retry
+            // control to draw.
+            ->assertJsonPath('data.retry_advice', RetryAdvice::Wait->value)
             ->assertJsonPath('data.service_id', $machine->service_id);
 
         Queue::assertPushed(RunProvisioningJob::class, 1);

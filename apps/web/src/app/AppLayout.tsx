@@ -7,6 +7,7 @@ import { Button } from '@/components/Button'
 import { LocaleSwitcher } from '@/components/LocaleSwitcher'
 import { useCurrentUser, useLogout } from '@/features/auth/useAuth'
 import { useIsOperator } from '@/features/admin/useIsOperator'
+import { applyTimeZone } from '@/lib/format'
 
 import { MobileNavigation } from './MobileNavigation'
 import { Sidebar } from './Sidebar'
@@ -28,6 +29,22 @@ export function AppLayout() {
   const logout = useLogout()
   const isOperator = useIsOperator()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  /*
+   * AS-17. Every date below this point is rendered in the customer's own time
+   * zone rather than the browser's.
+   *
+   * Applied during render rather than in an effect, and that is the whole
+   * reason it is a line of code here instead of a `useEffect`: an effect runs
+   * after the first paint, so every date in the tree would be drawn once in
+   * whatever zone the machine is set to and then corrected — which on a laptop
+   * still set to Europe/London is a visible flicker between two different
+   * times for the same reboot. The children of this layout render after this
+   * function returns, so they see the right zone on their first pass.
+   *
+   * Idempotent, and cheap: it validates the name and assigns a string.
+   */
+  applyTimeZone(user?.timezone)
 
   async function signOut() {
     await logout.mutateAsync().catch(() => undefined)

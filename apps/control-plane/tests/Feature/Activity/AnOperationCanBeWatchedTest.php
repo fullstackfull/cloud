@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Activity;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
+use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -294,6 +296,60 @@ final class AnOperationCanBeWatchedTest extends TestCase
             0,
             $this->actingAs($user)->getJson('/api/v1/notifications/unread-count')->json('data.unread'),
         );
+    }
+
+    #[Test]
+    public function the_receipt_and_the_poll_say_the_same_thing(): void
+    {
+        /*
+         * The 202 a power action returns and the operation endpoint a client
+         * polls afterwards are two different resource classes: the module
+         * layering gate will not let the VPS endpoints reach into the
+         * Provisioning module's HTTP surface. They share the vocabulary
+         * through `ProvisioningJobStatus::customerState()` instead, and this
+         * is the assertion that keeps them honest.
+         *
+         * It is worth a test because the receipt used to publish the engine's
+         * own `status` and a separate `is_settled`, so a customer was told
+         * three different words about one reboot depending on which screen
+         * they were looking at.
+         */
+        Queue::fake();
+
+        [$customer, $user] = $this->account();
+        $machine = $this->machineFor($customer);
+        $machine->update(['power_state' => PowerState::Running]);
+
+        $receipt = $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'receipt-and-poll-agree')
+            ->postJson('/api/v1/vps/'.$machine->id.'/power', ['action' => 'reboot']);
+
+        $receipt->assertStatus(202);
+
+        $accepted = $receipt->json('data');
+        self::assertIsString($accepted['id']);
+
+        $polled = $this->actingAs($user)
+            ->getJson('/api/v1/operations/'.$accepted['id'])
+            ->assertOk()
+            ->json('data');
+
+        foreach (['id', 'kind', 'action', 'state', 'is_terminal', 'needs_attention', 'retry_advice'] as $field) {
+            self::assertSame(
+                $accepted[$field],
+                $polled[$field],
+                sprintf('The receipt and the operation endpoint disagree about "%s".', $field),
+            );
+        }
+
+        // The customer's own verb survives the round trip: `reboot`, which
+        // is what they pressed, not the `restart` kind the engine recorded.
+        self::assertSame('reboot', $accepted['action']);
+
+        // And the receipt speaks the canonical vocabulary rather than the
+        // engine's: there is no `status` field to mistake for one.
+        self::assertArrayNotHasKey('status', $accepted);
+        self::assertSame(CustomerOperationState::Queued->value, $accepted['state']);
     }
 
     #[Test]

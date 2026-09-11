@@ -24,17 +24,34 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  *  - **last_error / failure_class** — a provider's message, quoted verbatim
  *    from a hypervisor. It routinely names nodes, storage pools and cluster
  *    internals. A customer needs to know that their reboot failed, and that is
- *    what `status` says; why it failed is a support conversation.
+ *    what `state` says; why it failed is a support conversation.
  *  - **attempts / max_attempts / timeout_seconds** — retry policy. Publishing
  *    it invites a client to implement its own retry on top, which is how a
  *    timed-out operation gets retried from the outside after the engine
  *    carefully declined to retry it from the inside.
  *
- * `status` is the engine's own vocabulary rather than a simplification.
- * `needs_review` in particular is worth showing as itself: it means a person
- * has to look, and a client that rendered it as "failed" would invite the
- * customer to press the button again — which for a timed-out operation is
- * exactly what must not happen.
+ * ---------------------------------------------------------------------------
+ * One vocabulary, shared through the enum rather than through this class
+ * ---------------------------------------------------------------------------
+ *
+ * This used to publish `status` straight off the row — the engine's own word,
+ * chosen to say which worker may touch the job next. A customer read `queued`
+ * from here, `scheduled` from the service event list, and `queued` again from
+ * the operation endpoint, about one reboot.
+ *
+ * Now it publishes the canonical customer state, and it gets it from
+ * `ProvisioningJobStatus::customerState()` — the one mapping in the platform.
+ * It cannot get it from `CustomerOperationResource`, which publishes the same
+ * words on `GET /operations/{operation}`: the layering gate forbids one
+ * module reaching into another's HTTP surface, and a receipt issued by the
+ * VPS endpoints belongs to the VPS module. So the two classes share the
+ * vocabulary rather than the code, and a contract test asserts that the state
+ * this receipt reports is the state the operation endpoint reports for the
+ * same job.
+ *
+ * `retry_advice` is published for the same reason it is published there: a
+ * screen must never derive what may be done next from the state it happens to
+ * be looking at.
  *
  * @mixin ProvisioningJob
  */
@@ -45,14 +62,19 @@ final class ProvisioningOperationResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        /** @var ProvisioningJob $job */
+        $job = $this->resource;
+
         /** @var array<string, mixed> $payload */
-        $payload = $this->payload ?? [];
+        $payload = $job->payload ?? [];
+
+        $state = $job->status->customerState();
 
         return [
-            'id' => $this->id,
-            'service_id' => $this->service_id,
+            'id' => $job->id,
+            'service_id' => $job->service_id,
 
-            'kind' => $this->kind->value,
+            'kind' => $job->kind->value,
 
             /*
              * The customer's own verb, echoed from the payload. The kind
@@ -62,12 +84,13 @@ final class ProvisioningOperationResource extends JsonResource
              */
             'action' => is_string($payload['power_action'] ?? null) ? $payload['power_action'] : null,
 
-            'status' => $this->status->value,
-            'is_settled' => $this->status->isSettled(),
-            'needs_attention' => $this->status->needsAttention(),
+            'state' => $state->value,
+            'is_terminal' => $state->isTerminal(),
+            'needs_attention' => $state->needsAttention(),
+            'retry_advice' => $state->retryAdvice()->value,
 
-            'created_at' => $this->created_at?->toIso8601String(),
-            'finished_at' => $this->finished_at?->toIso8601String(),
+            'requested_at' => $job->created_at?->toIso8601String(),
+            'finished_at' => $job->finished_at?->toIso8601String(),
         ];
     }
 }
