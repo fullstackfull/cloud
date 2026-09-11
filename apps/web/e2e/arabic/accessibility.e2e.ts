@@ -193,3 +193,44 @@ test.describe('the automated pass, in Arabic', () => {
     await expectAccessible(page, 'security (Arabic)')
   })
 })
+
+test.describe('the address bar, in Arabic', () => {
+  test.beforeEach(async ({ page }) => {
+    await signInArabic(page)
+  })
+
+  test('keeps the chosen filter in the address, and Back returns to it', async ({ page }) => {
+    /*
+     * W5.7 in the other direction. The parameter names are the product's and
+     * stay Latin — `?category=billing` is not translated, because a URL is
+     * not prose — while the button that writes it and the page it returns to
+     * are Arabic. What is asserted is that the mechanism is the same one:
+     * the filter survives a reload and the browser's own Back.
+     */
+    await page.goto('/activity')
+
+    await page.getByRole('button', { name: 'الفواتير', exact: true }).click()
+    await expect(page).toHaveURL(/category=billing/)
+
+    const filtered = page.url()
+
+    await page.reload()
+    await expect(page.getByRole('button', { name: 'الفواتير', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    await page.getByRole('navigation', { name: 'التنقّل الرئيسي' }).getByRole('link', { name: 'الفواتير' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
+    await page.goBack()
+    await expect(page).toHaveURL(filtered)
+  })
+
+  test('reads a page number out of the address on a right-to-left page', async ({ page }) => {
+    await page.goto('/invoices?page=1')
+
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    expect(await documentLanguage(page)).toEqual({ lang: 'ar', dir: 'rtl' })
+  })
+})

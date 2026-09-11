@@ -7,6 +7,7 @@ import { useControlledGatewayDecision } from '@/lib/queries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
 import type { PaymentLaunchState } from './usePaymentLaunch'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * What the customer is told after they ask to pay.
@@ -82,9 +83,7 @@ export function PaymentNextAction({ state }: { state: PaymentLaunchState }) {
           <span>{t('payments.declined')}</span>
           {state.failureCode !== null ? (
             <span className="text-xs">
-              {t(`paymentFailure.${state.failureCode}`, {
-                defaultValue: t('paymentFailure.unknown'),
-              })}
+              {safeLabel('paymentFailure', state.failureCode)}
             </span>
           ) : null}
         </span>

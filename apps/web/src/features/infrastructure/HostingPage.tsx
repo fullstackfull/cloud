@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -11,6 +10,7 @@ import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useHostingAccounts } from '@/lib/queries'
 import type { HostingAccount } from '@/lib/types'
+import { useUrlPage } from '@/lib/urlState'
 
 import { HostingPanelButton } from './hosting/HostingPanelButton'
 
@@ -24,7 +24,10 @@ import { HostingPanelButton } from './hosting/HostingPanelButton'
  */
 export function HostingPage() {
   const { t } = useTranslation()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useHostingAccounts(page)
 
   const columns: Array<Column<HostingAccount>> = [

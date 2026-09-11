@@ -66,6 +66,7 @@ const FALLBACKS: Record<string, string> = {
   'vps.reinstallState': 'vocabulary.unknownState',
   'dedicated.reinstallState': 'vocabulary.unknownState',
   walletKind: 'vocabulary.unknownEntry',
+  productKind: 'vocabulary.unknownProduct',
   activity: 'vocabulary.unknownEvent',
 }
 

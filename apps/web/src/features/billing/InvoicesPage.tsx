@@ -19,6 +19,7 @@ import { formatDate } from '@/lib/format'
 import { useInvoices, usePayFromWalletCredit, useWalletCreditQuote } from '@/lib/queries'
 import type { Invoice } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUrlPage } from '@/lib/urlState'
 
 import { PaymentNextAction } from '../payments/PaymentNextAction'
 import { usePaymentLaunch } from '../payments/usePaymentLaunch'
@@ -42,7 +43,10 @@ export function InvoicesPage() {
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
 
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useInvoices(page)
   /*
    * The launcher handles all five answers the server can give — a redirect, a

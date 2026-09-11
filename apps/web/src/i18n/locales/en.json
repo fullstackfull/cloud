@@ -310,11 +310,8 @@
       "subtitle": "What has happened to this account, newest first — whoever on your team did it.",
       "empty": "Nothing has happened on this account yet.",
       "emptyFiltered": "Nothing in this part of the account yet.",
+      "newest": "Show newest",
       "loadMore": "Show older",
-      "when": "When",
-      "what": "What happened",
-      "who": "Who",
-      "outcome": "Outcome",
       "all": "Everything",
       "actorSystem": "Lynomia",
       "actorUnknown": "Not recorded",
@@ -699,7 +696,6 @@
       "advice": "Take a backup first if there is anything on this server you still need. The address, the specification and the hostname stay the same.",
       "confirmLabel": "Reinstall this server",
       "phraseLabel": "Type the hostname to confirm",
-      "started": "The rebuild has been queued. This page will show its progress.",
       "templateLabel": "Operating system",
       "templateHint": "Only images this platform has prepared for this machine are listed.",
       "sameImage": "Keep the current image",
@@ -890,7 +886,6 @@
       "body": "Anything using it stops being able to reach the API immediately. This cannot be undone; create a new token if you need access again.",
       "confirmLabel": "Revoke token"
     },
-    "loadFailed": "The token list could not be loaded.",
     "expires": "Expires",
     "expiresHint": "A token that outlives the integration it was made for is the one still working when a laptop is sold.",
     "expiryDays_one": "In {{count}} day",
@@ -2214,7 +2209,6 @@
       "cloneSubmit": "Clone",
       "unavailable": "{{reason}}",
       "requested": "Asked for. The toolkit is copying the site; this page updates as it goes.",
-      "copiedFrom": "Copied from {{domain}}",
       "title": "Copies",
       "body": "A staging copy, clones, and pushing a copy back over the live site."
     },
@@ -2229,12 +2223,10 @@
       },
       "confirmLabel": "Type {{production}} to confirm",
       "confirm": "Push to production",
-      "loadingImpact": "Working out what this would overwrite…",
       "needsReview": "The toolkit did not confirm this push. The live site may be partly updated. Please do not push again; our team is looking at it."
     },
     "operations": {
       "title": "Copies and pushes",
-      "none": "Nothing has been copied or pushed yet.",
       "kinds": {
         "create_staging": "Staging copy",
         "clone": "Clone",
@@ -2296,12 +2288,6 @@
     "refund": "Refund",
     "chargeback": "Chargeback",
     "adjustment": "Adjustment"
-  },
-  "paymentProvider": {
-    "wallet": "Account credit",
-    "fake": "Test card",
-    "stripe": "Card",
-    "myfatoorah": "Card or KNET"
   },
   "paymentFailure": {
     "card_declined": "The card was declined by the bank.",
@@ -2389,6 +2375,7 @@
     "unknownSignIn": "Sign in again"
   },
   "vocabulary": {
+    "unknownProduct": "Another product",
     "unknownValue": "Not recognised",
     "unknownState": "An unrecognised state",
     "unknownPeriod": "An unrecognised billing period",

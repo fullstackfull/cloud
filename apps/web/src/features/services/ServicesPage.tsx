@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -18,6 +17,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useServices } from '@/lib/queries'
 import type { Service } from '@/lib/types'
+import { useUrlPage } from '@/lib/urlState'
 
 /**
  * Everything this account owns, in one list, with a way into each.
@@ -38,7 +38,10 @@ import type { Service } from '@/lib/types'
 export function ServicesPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useServices(page)
 
   const columns: Array<Column<Service>> = [

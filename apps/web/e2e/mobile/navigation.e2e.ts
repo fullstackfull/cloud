@@ -125,3 +125,30 @@ test.describe('a customer on a phone', () => {
     await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible()
   })
 })
+
+test.describe('the address bar on a phone', () => {
+  test('keeps a list\u2019s page in the address and the drawer still opens', async ({ page }) => {
+    /*
+     * W5.7. The page number moved into the URL for every list; on a phone the
+     * navigation is a drawer, and the two mechanisms have to coexist — a
+     * drawer that opened over a filtered list must not reset it, and a
+     * reload must land on the same page of the same list.
+     */
+    await signIn(page)
+
+    await page.goto('/invoices?page=1')
+    await expect(page.getByRole('heading', { level: 1, name: /invoices/i })).toBeVisible()
+
+    const listed = page.url()
+
+    const drawer = await openMenu(page)
+    await expect(drawer).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    await expect(page, 'opening the drawer did not change where the customer was').toHaveURL(listed)
+
+    await page.reload()
+    await expect(page).toHaveURL(listed)
+    await expect(page.getByRole('heading', { level: 1, name: /invoices/i })).toBeVisible()
+  })
+})

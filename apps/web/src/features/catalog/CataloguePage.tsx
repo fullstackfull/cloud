@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -10,8 +9,10 @@ import { labelKeyForProductKind } from '@/features/resources/resourcePaths'
 import { useProducts } from '@/lib/queries'
 import { cn } from '@/lib/cn'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUrlParams } from '@/lib/urlState'
 import { Alert } from '@/components/Alert'
 import { Loading } from '@/components/Loading'
+import { safeLabel } from '@/lib/safeLabel'
 
 const KINDS = ['vps', 'dedicated', 'shared_hosting'] as const
 
@@ -20,16 +21,32 @@ export function CataloguePage() {
 
   /*
    * One word per family, shared with the navigation and the resource pages.
-   * A kind the portal has no family for is named by the API's own word rather
-   * than by a translation key that does not exist.
+   *
+   * W5.7: a kind the portal has no family for used to be named by the API's
+   * own word — `shared_hosting`, in English, on an Arabic page, in a heading.
+   * Unreachable today, because `familyForServiceKind` covers every case of
+   * the server's `ProductKind` and a gate holds it there, but it was one
+   * enum case away from shipping. The fallback is now a written sentence,
+   * which is a vague catalogue rather than a leaking one.
    */
   const kindName = (kind: string): string => {
     const key = labelKeyForProductKind(kind)
 
-    return key === null ? kind : t(key)
+    return key === null ? safeLabel('productKind', kind) : t(key)
   }
   const describeError = useApiErrorMessage()
-  const [kind, setKind] = useState<string | undefined>(undefined)
+  /*
+   * The chosen family is in the address bar, so that a refresh keeps it, a
+   * link to "the VPS plans" is a link anybody can send, and pressing Back
+   * after opening a plan returns to the list the customer was reading rather
+   * than to the unfiltered one. `undefined` — the absence of the parameter —
+   * is "everything", so the plain address is still the whole catalogue.
+   */
+  const params = useUrlParams()
+  const kind = params.choice('kind', KINDS) ?? undefined
+  const setKind = (next: (typeof KINDS)[number] | undefined): void => {
+    params.set({ kind: next ?? null })
+  }
 
   const { data, isPending, error } = useProducts(kind)
   const displayed = describeError(error)

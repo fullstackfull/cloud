@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -15,6 +14,7 @@ import { formatDate } from '@/lib/format'
 import { safeLabel } from '@/lib/safeLabel'
 import { usePayments } from '@/lib/queries'
 import type { Payment } from '@/lib/types'
+import { useUrlPage } from '@/lib/urlState'
 
 /**
  * Every payment on the account, including the ones that failed and the ones
@@ -28,7 +28,10 @@ import type { Payment } from '@/lib/types'
 export function PaymentsPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
 
   const { data, isPending, error } = usePayments(page)
 
@@ -65,7 +68,7 @@ export function PaymentsPage() {
       cell: (payment) =>
         payment.failure_code === null
           ? '—'
-          : t(`paymentFailure.${payment.failure_code}`, { defaultValue: t('paymentFailure.unknown') }),
+          : safeLabel('paymentFailure', payment.failure_code),
     },
     {
       key: 'invoice',

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -21,6 +20,7 @@ import {
 } from '@/lib/queries'
 import type { AppNotification } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUrlPage, useUrlParams } from '@/lib/urlState'
 
 /**
  * Everything the platform has told this account.
@@ -48,8 +48,20 @@ export function NotificationsPage() {
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
 
-  const [page, setPage] = useState(1)
-  const [unreadOnly, setUnreadOnly] = useState(false)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
+
+  /*
+   * The filter is in the address bar for the same reasons as the page number,
+   * and it is written together with the page so that turning it on lands on
+   * the first page of the filtered inbox — a page three that existed only in
+   * the unfiltered list is not a page of this one — and so that Back undoes
+   * the filter in one press rather than two.
+   */
+  const params = useUrlParams()
+  const unreadOnly = params.flag('unread')
 
   const { data, isPending, error: readError } = useNotifications(page, unreadOnly)
   const markRead = useMarkNotificationRead()
@@ -80,10 +92,7 @@ export function NotificationsPage() {
             <Button
               size="sm"
               variant={unreadOnly ? 'primary' : 'ghost'}
-              onClick={() => {
-                setUnreadOnly((only) => ! only)
-                setPage(1)
-              }}
+              onClick={() => { params.set({ unread: ! unreadOnly, page: null }); }}
               aria-pressed={unreadOnly}
             >
               {t('notifications.unreadOnly')}

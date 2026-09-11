@@ -428,6 +428,14 @@ export function useSetTicketPriority() {
   )
 }
 
+/**
+ * Hands a ticket to a member of staff.
+ *
+ * W5.7 dead-code audit: no screen calls this yet. `PUT
+ * /support/tickets/{id}/assignee` is shipped and audited; the operator support
+ * screen replies and resolves, and assignment is queue management the product
+ * has not designed a surface for. Classified FUTURE_PREPARED, not dead.
+ */
 export function useAssignTicket() {
   return useTicketMutation((payload: { id: string; user_id: string | null }) =>
     admin.put<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(payload.id)}/assignee`, {

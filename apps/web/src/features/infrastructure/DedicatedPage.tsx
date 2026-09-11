@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -13,6 +12,7 @@ import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useDedicatedServers } from '@/lib/queries'
 import type { DedicatedServer } from '@/lib/types'
+import { useUrlPage } from '@/lib/urlState'
 
 import { DedicatedPowerActions } from './dedicated/DedicatedPowerActions'
 
@@ -28,7 +28,10 @@ import { DedicatedPowerActions } from './dedicated/DedicatedPowerActions'
 export function DedicatedPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useDedicatedServers(page)
 
   const columns: Array<Column<DedicatedServer>> = [

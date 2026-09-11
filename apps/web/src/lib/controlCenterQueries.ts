@@ -249,6 +249,14 @@ export function useServers(page: number, environment?: Environment | '') {
   })
 }
 
+/**
+ * One machine, read on its own.
+ *
+ * W5.7 dead-code audit: no screen calls this yet. The machines screen renders
+ * the selected row out of the page it already has, which is one request rather
+ * than two. Kept because a machine's own page is the obvious next screen and
+ * the endpoint is shipped. Classified FUTURE_PREPARED, not dead.
+ */
 export function useServer(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'servers', 'one', id],
@@ -521,6 +529,15 @@ export function useDisableProvider() {
   })
 }
 
+/**
+ * Re-runs a provider's readiness assessment.
+ *
+ * W5.7 dead-code audit: no screen calls this yet. Kept rather than deleted —
+ * `POST /providers/{id}/assess` is a shipped operator endpoint, and the
+ * Providers screen offers "test connection" (which proves the credential)
+ * without yet offering "assess" (which re-derives what the account can do).
+ * Classified FUTURE_PREPARED, not dead.
+ */
 export function useAssessProvider() {
   const queryClient = useQueryClient()
 

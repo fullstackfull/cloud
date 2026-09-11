@@ -14,12 +14,16 @@ import { Loading } from '@/components/Loading'
 import { useIpAssignments, useSetReverseDns } from '@/lib/queries'
 import type { IpAssignment } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUrlPage } from '@/lib/urlState'
 
 export function IpAddressesPage() {
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
 
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const [editing, setEditing] = useState<string | null>(null)
   const [hostname, setHostname] = useState('')
 

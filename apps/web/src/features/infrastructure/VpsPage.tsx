@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
@@ -13,12 +12,16 @@ import { Loading } from '@/components/Loading'
 import { useVirtualMachines } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
 import { safeLabel } from '@/lib/safeLabel'
+import { useUrlPage } from '@/lib/urlState'
 
 import { VpsPowerActions } from './vps/VpsPowerActions'
 
 export function VpsPage() {
   const { t } = useTranslation()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useVirtualMachines(page)
 
   const columns: Array<Column<VirtualMachine>> = [

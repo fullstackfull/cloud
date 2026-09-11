@@ -106,7 +106,7 @@ export function InvoiceDetailPage() {
       cell: (payment) =>
         payment.failure_code === null
           ? '—'
-          : t(`paymentFailure.${payment.failure_code}`, { defaultValue: t('paymentFailure.unknown') }),
+          : safeLabel('paymentFailure', payment.failure_code),
     },
   ]
 

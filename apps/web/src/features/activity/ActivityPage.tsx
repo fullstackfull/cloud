@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -14,6 +13,7 @@ import { supportPathFor } from '@/features/support/supportContext'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import { useActivity } from '@/lib/queries'
+import { useUrlCursor, useUrlParams } from '@/lib/urlState'
 import type { ActivityCategory, ActivityItem } from '@/lib/types'
 
 /**
@@ -54,15 +54,23 @@ export function ActivityPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
 
-  const [category, setCategory] = useState<ActivityCategory | null>(null)
-
   /*
-   * The cursors walked so far, so "Show older" can go forward and the browser
-   * back button is not the only way back. The last element is the page being
-   * shown; `null` is the newest page.
+   * The filter and the page being read are both in the address bar, and the
+   * browser's own history is the trail.
+   *
+   * W5.7. This page used to hold the category in component state and keep an
+   * array of the cursors it had walked, so that "Show older" could be undone
+   * by a button of its own. Three things were wrong with that and one thing
+   * was right. Wrong: refreshing a filtered feed returned the unfiltered
+   * newest page; opening the invoice a row mentioned and pressing Back
+   * returned the unfiltered newest page; and "the billing events on my
+   * account" could not be sent to anybody. Right: walking forward through an
+   * opaque cursor needs a record of where you have been — and the browser
+   * keeps one, which is why the array is gone and Back is the way back.
    */
-  const [trail, setTrail] = useState<Array<string | null>>([null])
-  const cursor = trail[trail.length - 1] ?? null
+  const params = useUrlParams()
+  const category = params.choice('category', CATEGORIES)
+  const [cursor, showFrom] = useUrlCursor()
 
   const { data, isPending, error } = useActivity(category, cursor)
 
@@ -71,11 +79,16 @@ export function ActivityPage() {
   const nextCursor = data?.meta.next_cursor ?? null
 
   function choose(next: ActivityCategory | null): void {
-    setCategory(next)
-
-    // A filter is a different feed, so it starts at its own newest page rather
-    // than at a cursor that named a row in the unfiltered one.
-    setTrail([null])
+    /*
+     * Both parameters in one write, for two separate reasons. A filter is a
+     * different feed, so it starts at its own newest page rather than at a
+     * cursor that named a row in the unfiltered one — the server would treat
+     * that cursor as unreadable and quietly answer with the newest page
+     * anyway, but an address that says something untrue about what is on
+     * screen is its own defect. And one write is one history entry, so Back
+     * undoes the filter in one press rather than two.
+     */
+    params.set({ category: next, cursor: null })
   }
 
   return (
@@ -129,13 +142,20 @@ export function ActivityPage() {
             </ul>
 
             <div className="mt-4 flex items-center justify-between gap-3">
+              {/*
+                "Newest" rather than "Previous". Walking back one page is the
+                browser's Back button now, and a control beside it that did
+                the same thing in a different way would be two answers to one
+                question; this one goes to the top of the feed, which is the
+                thing Back cannot do in one press.
+              */}
               <Button
                 size="sm"
                 variant="ghost"
-                disabled={trail.length === 1}
-                onClick={() => { setTrail((walked) => walked.slice(0, -1)); }}
+                disabled={cursor === null}
+                onClick={() => { showFrom(null); }}
               >
-                {t('common.previous')}
+                {t('activity.feed.newest')}
               </Button>
 
               <Button
@@ -143,7 +163,7 @@ export function ActivityPage() {
                 variant="ghost"
                 disabled={!hasMore || nextCursor === null}
                 onClick={() => {
-                  if (nextCursor !== null) setTrail((walked) => [...walked, nextCursor])
+                  if (nextCursor !== null) showFrom(nextCursor)
                 }}
               >
                 {t('activity.feed.loadMore')}

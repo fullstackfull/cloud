@@ -16,6 +16,7 @@ import { formatDate } from '@/lib/format'
 import { useSubscriptions } from '@/lib/queries'
 import type { Subscription } from '@/lib/types'
 import { safeLabel } from '@/lib/safeLabel'
+import { useUrlPage } from '@/lib/urlState'
 
 import { CancelSubscriptionDialog, SubscriptionIdentity } from './CancelSubscriptionDialog'
 
@@ -34,7 +35,10 @@ import { CancelSubscriptionDialog, SubscriptionIdentity } from './CancelSubscrip
 export function SubscriptionsPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useSubscriptions(page)
 
   const [ending, setEnding] = useState<Subscription | null>(null)

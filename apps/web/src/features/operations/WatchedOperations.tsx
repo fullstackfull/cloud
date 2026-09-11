@@ -13,6 +13,7 @@ import {
 } from '@/features/operations/watchChannel'
 import type { CustomerOperationState } from '@/lib/types'
 import { useWatchedOperation } from '@/lib/watchOperation'
+import i18n from '@/i18n'
 
 /**
  * What the portal is currently watching, and what it says about it.
@@ -73,7 +74,20 @@ function readStored(): OperationWatch[] {
           typeof entry === 'object' &&
           entry !== null &&
           typeof (entry as OperationWatch).id === 'string' &&
-          typeof (entry as OperationWatch).actionKey === 'string',
+          typeof (entry as OperationWatch).actionKey === 'string' &&
+          /*
+           * W5.7. The shape check is not enough: `actionKey` is rendered
+           * through `t()`, and session storage is a place a customer can edit
+           * and an older build can leave things. A key the catalogue does not
+           * carry would put `vps.actions.stop` — or whatever somebody typed —
+           * into the title of a message about their machine.
+           *
+           * A watch that cannot be described is dropped rather than
+           * described badly. It costs the resumption of one operation across
+           * a reload; the state itself is on the server and the resource's
+           * own page reads it fresh.
+           */
+          i18n.exists((entry as OperationWatch).actionKey),
       )
       .slice(0, MAX_WATCHED)
   } catch {
