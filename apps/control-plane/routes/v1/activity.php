@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Activity\Http\Controllers\ActivityController;
+use Lynomia\Modules\Activity\Http\Controllers\OverviewController;
+use Lynomia\Modules\Provisioning\Http\Controllers\OperationController;
 
 /*
  * activity — customer surface.
@@ -44,4 +46,30 @@ use Lynomia\Modules\Activity\Http\Controllers\ActivityController;
 Route::middleware('throttle:reads')->group(function (): void {
     Route::get('activity', [ActivityController::class, 'index'])
         ->name('activity.index');
+
+    /*
+     * `GET /operations/{operation}` — the read that turns a 202 back into a
+     * state. It lives here beside activity rather than under `/vps` or
+     * `/domains` because it is not a property of any one product: a customer
+     * watching a rebuild, a hosting build and an order's provisioning is
+     * watching three rows of the same table.
+     *
+     * Read-only. There is no retry endpoint, because retrying is re-asking the
+     * product for the same thing through its own idempotency key and its own
+     * guards, not a verb on an operation.
+     */
+    Route::get('operations/{operation}', [OperationController::class, 'show'])
+        ->name('operations.show');
+
+    /*
+     * `GET /me/overview` — the dashboard's one read.
+     *
+     * Declared here rather than beside the other `/me` routes because it needs
+     * the acting customer: the identity routes describe the signed-in user,
+     * and this describes their account. The path keeps the `/me` shape the
+     * audit proposed, since what it answers is "how is my account", and the
+     * route file it lives in is not part of the contract.
+     */
+    Route::get('me/overview', [OverviewController::class, 'show'])
+        ->name('me.overview');
 });

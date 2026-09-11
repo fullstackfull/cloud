@@ -64,6 +64,7 @@ tags:
     description: "Credentials for integrations. Shown once at creation; the platform stores a hash."
   - name: "Account"
     description: "The signed-in person: their profile, their password, their second factor and the devices they are signed in on."
+  - name: "Activity"
   - name: "Authentication"
     description: "Signing in and out, verifying an address, resetting a password. Rate-limited harder than anything else here."
   - name: "Backups"
@@ -7255,6 +7256,69 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/activity":
+    get:
+      operationId: "api_v1_activity_index"
+      tags:
+        - "Activity"
+      summary: "What has happened on this account"
+      description: "The account-wide history: builds, power actions, rebuilds, registrar operations, WordPress copies, backups, zone imports, orders, invoices and support requests, newest first. A read over the durable tables that already hold the truth rather than a second copy of them, so it cannot drift and needs no backfill. Cursor-paginated with no total: history grows at the newest end, so page numbers would show one row twice and hide another. Filtering by category chooses which sources are read rather than trimming a page. Separate from notifications, which are read/unread — marking one read does not erase history."
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "category"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "cursor"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ActivityItemPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/backups/downloads/{token}":
     get:
       operationId: "api_v1_backups_downloads_show"
@@ -11259,6 +11323,57 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/me/overview":
+    get:
+      operationId: "api_v1_me_overview"
+      tags:
+        - "Account"
+      summary: "The dashboard, in one read"
+      description: "What needs attention, what the account holds, what it owes grouped by currency, what renews next, how many notifications are unread, and what happened recently. One aggregate rather than a browser fanning out across four product endpoints and deciding between the results which matters."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AccountOverviewResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/me/password":
     put:
       operationId: "api_v1_me_password"
@@ -11860,6 +11975,57 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/notifications/unread-count":
+    get:
+      operationId: "api_v1_notifications_unread_count"
+      tags:
+        - "Notifications"
+      summary: "How many notifications are unread"
+      description: "The shell draws a badge on every page; asking the inbox for it would render a page of notifications to print one integer. Kept beside the inbox's own unread count rather than replacing it, so a screen that has just fetched the list needs no second request."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/NotificationUnreadCountResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/notifications/{notification}/read":
     post:
       operationId: "api_v1_notifications_read"
@@ -11885,6 +12051,62 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/NotificationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/operations/{operation}":
+    get:
+      operationId: "api_v1_operations_show"
+      tags:
+        - "Activity"
+      summary: "What became of something you asked for"
+      description: "A 202 means the request was accepted and nothing more. This turns the operation it returned back into a state, in the customer vocabulary, with the retry advice the server decides and a poll hint that is null once there is nothing left to wait for. Read-only: retrying is re-asking the product through its own idempotency key and guards, not a verb on an operation. Another account's operation id answers 404 rather than 403, because a refusal would confirm the id names real work."
+      parameters:
+        - name: "operation"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CustomerOperationResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -15781,6 +16003,100 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AcceptedInvitation"
+    AccountOverview:
+      type: "object"
+      additionalProperties: true
+      description: "The dashboard in one read: attention items in server-decided priority order, a service summary, money owed grouped by currency, upcoming renewals, the unread count, and recent services and activity. Money is never summed across currencies — an account billed in two has two amounts owing, and a single total would be arithmetic nobody can perform."
+      properties:
+        attention:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+          description: "Ordered by severity, then how long it has been true, then a stable id. Ordered by the server so an Arabic dashboard and an English one agree, and capped so a first page cannot become a billing history."
+        services:
+          type: "object"
+          additionalProperties: true
+        billing:
+          type: "object"
+          additionalProperties: true
+          description: "{due: [{invoices, amount}]} — one entry per currency, and no total."
+        renewals:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+          description: "Amount is null where the platform has no authoritative one: a domain's renewal price comes from the catalogue at renewal time, and printing one here would be quoting a guess."
+        unread_notifications:
+          type: "integer"
+        recent:
+          type: "object"
+          additionalProperties: true
+          description: "A few services, and the newest activity rows — from the same account feed as /activity, so the dashboard has no history logic of its own."
+    AccountOverviewResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AccountOverview"
+    ActivityItem:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          type: "string"
+          description: "source:rowId — unique across the sources the feed unions, and the cursor's tie-breaker. Opaque to clients."
+        occurred_at:
+          "$ref": "#/components/schemas/Timestamp"
+        category:
+          type: "string"
+          enum:
+            - "cloud"
+            - "hosting"
+            - "domains"
+            - "billing"
+            - "support"
+            - "backups"
+          description: "The part of the account this belongs to. The only values ?category= accepts, and the filter chooses which sources are read rather than trimming a page."
+        message_code:
+          type: "string"
+          description: "A translation key, not a sentence: the server says what happened and the client says it in the reader's language."
+        state:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
+        actor:
+          type: "object"
+          additionalProperties: true
+          description: "{type, display_name}. `type` is customer_user, system or unknown. A name appears only for customer_user; unknown is the honest answer where the source records no requester, and is never guessed."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "{kind, id, identity} for rows about something the portal has a page for, else null. A handle rather than a path, so the client owns the routing map."
+        reference:
+          type:
+            - "string"
+            - "null"
+          description: "Something the customer can quote to support — an invoice number, a ticket reference. Never an internal id chosen for uniqueness alone."
+    ActivityItemPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ActivityItem"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
     AdminAdoptedJob:
       type: "object"
       additionalProperties: false
@@ -17508,6 +17824,70 @@ components:
           type:
             - "string"
             - "null"
+    CustomerOperation:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type:
+            - "string"
+            - "null"
+        action:
+          type:
+            - "string"
+            - "null"
+          description: "The customer's own verb where there is one — `restart`, not the kind. `stop` and `shutdown` are one kind, and reporting the kind would tell a customer the plug was pulled on a graceful shutdown."
+        state:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
+          type: "boolean"
+          description: "The client polls while this is false and stops when it is true."
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+          description: "The customer's bounded version of why, never the provider's sentence."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "What to watch once this finishes, so the client does not infer it."
+        started_at:
+          "$ref": "#/components/schemas/Timestamp"
+        updated_at:
+          "$ref": "#/components/schemas/Timestamp"
+        finished_at:
+          "$ref": "#/components/schemas/Timestamp"
+        poll_after_ms:
+          type:
+            - "integer"
+            - "null"
+          description: "When to read again, or null once there is nothing left to wait for. A client that schedules only from this field cannot poll a finished operation."
+    CustomerOperationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/CustomerOperation"
+    CustomerOperationState:
+      type: "string"
+      enum:
+        - "queued"
+        - "processing"
+        - "succeeded"
+        - "failed"
+        - "needs_review"
+        - "indeterminate"
+        - "cancelled"
+      description: "The seven words a customer is told about asynchronous work. needs_review is not failed: it stopped and a person at Lynomia must look. indeterminate is neither failed nor succeeded: the platform asked something outside itself and never heard back, so the result is genuinely unknown. Neither is ever collapsed into failed. Provider execution states are not published."
     Datacenter:
       type: "object"
       additionalProperties: false
@@ -19174,6 +19554,19 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Notification"
+    NotificationUnreadCount:
+      type: "object"
+      additionalProperties: false
+      properties:
+        unread:
+          type: "integer"
+    NotificationUnreadCountResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/NotificationUnreadCount"
     NotificationsMarkedRead:
       type: "object"
       additionalProperties: false
@@ -20411,6 +20804,14 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ReinstallRequest"
+    RetryAdvice:
+      type: "string"
+      enum:
+        - "safe_to_retry"
+        - "wait"
+        - "support_required"
+        - "not_retryable"
+      description: "Whether the customer may ask again. Clients draw a retry control from safe_to_retry and from nothing else — which is what stops one appearing beside an operation whose result nobody knows."
     ReverseDnsRecord:
       type: "object"
       additionalProperties: false

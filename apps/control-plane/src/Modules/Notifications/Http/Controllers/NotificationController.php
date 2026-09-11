@@ -82,6 +82,29 @@ final class NotificationController
         ]);
     }
 
+    /**
+     * How many are unread, and nothing else.
+     *
+     * The shell draws a badge on every page. Asking `index` for it would
+     * download a page of rendered notifications — every subject resolved,
+     * every deep link built — to print one integer, on every navigation.
+     *
+     * Kept beside `index`'s own `meta.unread` deliberately rather than
+     * replacing it: a screen that has just fetched the inbox already knows the
+     * count and must not need a second request to draw the badge. Both read
+     * the same scoped query, so they cannot disagree.
+     */
+    public function unreadCount(Request $request): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.view');
+
+        return response()->json([
+            'data' => [
+                'unread' => $this->scoped()->whereNull('read_at')->count(),
+            ],
+        ]);
+    }
+
     public function markRead(Request $request, string $notification): JsonResponse
     {
         $this->authoriseWithinAccount($request, 'service.view');

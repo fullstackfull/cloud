@@ -85,6 +85,64 @@ function isolate(value: string): string {
   return `${ISOLATE_START}${value}${ISOLATE_END}`
 }
 
+/*
+ * The customer's own clock.
+ *
+ * AS-17. Every instant the API sends is UTC, and the portal used to render it
+ * in whatever zone the browser happened to be in. A customer in Kuwait
+ * checking a reboot from a laptop still set to Europe/London read that it
+ * happened two hours before they pressed the button, and a support
+ * conversation about "the 3pm outage" had two different 3pms in it.
+ *
+ * The zone is the one on the customer's own profile — an IANA name they chose
+ * and can change — applied in one place so that no screen has to remember to
+ * pass it. `applyTimeZone` is called once when the signed-in user is known,
+ * the same way `applyLocale` sets the document's language, and every formatter
+ * below reads it at call time so a change on the profile page takes effect on
+ * the next render rather than the next reload.
+ *
+ * A zone Intl cannot resolve is ignored rather than thrown: the server
+ * validates the name, but a stored value from an older tzdata must degrade to
+ * the browser's own zone instead of blanking every date on the page.
+ */
+let activeTimeZone: string | undefined
+
+export function applyTimeZone(zone: string | null | undefined): void {
+  if (zone === null || zone === undefined || zone === '') {
+    activeTimeZone = undefined
+
+    return
+  }
+
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: zone }).format(0)
+    activeTimeZone = zone
+  } catch {
+    activeTimeZone = undefined
+  }
+}
+
+/** The zone the formatters are currently applying, if any. Exported for tests. */
+export function activeZone(): string | undefined {
+  return activeTimeZone
+}
+
+/**
+ * A date with no time in it: `2027-03-09`, not an instant.
+ *
+ * A subscription term, a domain's expiry date and an invoice's due date are
+ * calendar facts rather than moments. `new Date('2027-03-09')` is midnight
+ * UTC, so rendering it in a zone behind UTC moves it to the 8th — a renewal
+ * date that is wrong by a day, on the screen that says when money is taken.
+ * These are read in UTC, which is the only zone in which they mean what they
+ * say.
+ */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
+
+function zoneFor(iso: string): string | undefined {
+  return DATE_ONLY.test(iso) ? 'UTC' : activeTimeZone
+}
+
 export function formatDateTime(iso: string, locale: Locale): string {
   return isolate(
     new Intl.DateTimeFormat(`${locale}-u-nu-latn`, {
@@ -93,6 +151,7 @@ export function formatDateTime(iso: string, locale: Locale): string {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: zoneFor(iso),
     }).format(new Date(iso)),
   )
 }
@@ -103,10 +162,23 @@ export function formatDate(iso: string, locale: Locale): string {
       day: '2-digit',
       month: 'short',
       year: 'numeric',
+      timeZone: zoneFor(iso),
     }).format(new Date(iso)),
   )
 }
 
+/**
+ * How long ago, or how long until.
+ *
+ * Deliberately not zone-aware: the distance between two instants is the same
+ * number of seconds in every time zone, and "3 hours ago" is the one date
+ * format that cannot be wrong because the browser's clock is set elsewhere.
+ * Arabic comes from Intl rather than from a translated string, so the plural
+ * rules — which Arabic has six of — are the language's own.
+ *
+ * `numeric: 'auto'` is what produces "yesterday" and "أمس" instead of "1 day
+ * ago", which is what a reader expects of a feed.
+ */
 export function formatRelative(iso: string, locale: Locale): string {
   const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
   const deltaSeconds = (new Date(iso).getTime() - Date.now()) / 1000

@@ -678,6 +678,31 @@ return [
         'description' => 'Priced by the platform, through the same proration the confirmation performs. Plans that cannot be taken are listed with their reasons and without their prices — a smaller disk is refused outright, because shrinking one destroys data.',
         'response' => $many('PlanChangeQuote'),
     ],
+    'api.v1.activity.index' => [
+        'tag' => 'Activity',
+        'summary' => 'What has happened on this account',
+        'description' => 'The account-wide history: builds, power actions, rebuilds, registrar operations, WordPress copies, backups, zone imports, orders, invoices and support requests, newest first. A read over the durable tables that already hold the truth rather than a second copy of them, so it cannot drift and needs no backfill. Cursor-paginated with no total: history grows at the newest end, so page numbers would show one row twice and hide another. Filtering by category chooses which sources are read rather than trimming a page. Separate from notifications, which are read/unread — marking one read does not erase history.',
+        'query' => ['category', 'cursor'],
+        'response' => $many('ActivityItem'),
+    ],
+    'api.v1.operations.show' => [
+        'tag' => 'Activity',
+        'summary' => 'What became of something you asked for',
+        'description' => 'A 202 means the request was accepted and nothing more. This turns the operation it returned back into a state, in the customer vocabulary, with the retry advice the server decides and a poll hint that is null once there is nothing left to wait for. Read-only: retrying is re-asking the product through its own idempotency key and guards, not a verb on an operation. Another account\'s operation id answers 404 rather than 403, because a refusal would confirm the id names real work.',
+        'response' => $one('CustomerOperation'),
+    ],
+    'api.v1.me.overview' => [
+        'tag' => 'Account',
+        'summary' => 'The dashboard, in one read',
+        'description' => 'What needs attention, what the account holds, what it owes grouped by currency, what renews next, how many notifications are unread, and what happened recently. One aggregate rather than a browser fanning out across four product endpoints and deciding between the results which matters.',
+        'response' => $one('AccountOverview'),
+    ],
+    'api.v1.notifications.unread_count' => [
+        'tag' => 'Notifications',
+        'summary' => 'How many notifications are unread',
+        'description' => 'The shell draws a badge on every page; asking the inbox for it would render a page of notifications to print one integer. Kept beside the inbox\'s own unread count rather than replacing it, so a screen that has just fetched the list needs no second request.',
+        'response' => $one('NotificationUnreadCount'),
+    ],
     'api.v1.notifications.index' => [
         'tag' => 'Notifications',
         'summary' => 'The customer\'s inbox',

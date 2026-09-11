@@ -57,10 +57,7 @@ final class ActivityItemResource extends JsonResource
             'needs_attention' => $item->state->needsAttention(),
             'retry_advice' => $item->state->retryAdvice()->value,
 
-            'actor' => [
-                'type' => $item->actorType->value,
-                'display_name' => $item->actorName,
-            ],
+            'actor' => self::actor($item),
 
             /*
              * Null where the row is not about something the portal has a page
@@ -68,13 +65,45 @@ final class ActivityItemResource extends JsonResource
              * reason Wave 3 did: the client turns `{kind, id}` into an address
              * through one function, so there is one resource routing map.
              */
-            'resource' => $item->resourceKind === null || $item->resourceId === null ? null : [
-                'kind' => $item->resourceKind,
-                'id' => $item->resourceId,
-                'identity' => $item->resourceIdentity,
-            ],
+            'resource' => self::handle($item),
 
             'reference' => $item->reference,
+        ];
+    }
+
+    /**
+     * Who asked for this, as a type and a name.
+     *
+     * A name appears only for a person on the account. `system` is the
+     * platform's own scheduled work and `unknown` is the honest answer where
+     * the source row records no requester — never a guess, and never a
+     * correlation with whoever happened to be logged in at the time.
+     *
+     * @return array{type: string, display_name: ?string}
+     */
+    private static function actor(ActivityItem $item): array
+    {
+        return [
+            'type' => $item->actorType->value,
+            'display_name' => $item->actorName,
+        ];
+    }
+
+    /**
+     * What the row is about, as `{kind, id, identity}`, or null.
+     *
+     * @return ?array{kind: string, id: string, identity: ?string}
+     */
+    private static function handle(ActivityItem $item): ?array
+    {
+        if ($item->resourceKind === null || $item->resourceId === null) {
+            return null;
+        }
+
+        return [
+            'kind' => $item->resourceKind,
+            'id' => $item->resourceId,
+            'identity' => $item->resourceIdentity,
         ];
     }
 }

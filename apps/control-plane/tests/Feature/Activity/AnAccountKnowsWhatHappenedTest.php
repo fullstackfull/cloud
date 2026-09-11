@@ -6,6 +6,7 @@ namespace Tests\Feature\Activity;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Activity\Domain\Enums\ActorType;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
@@ -159,7 +160,7 @@ final class AnAccountKnowsWhatHappenedTest extends TestCase
         ]);
 
         DB::table('domain_operations')->insert([
-            'id' => (string) \Illuminate\Support\Str::ulid(),
+            'id' => (string) Str::ulid(),
             'domain_id' => $domain->id,
             'customer_id' => $customer->id,
             'name' => 'example.test',
@@ -200,7 +201,7 @@ final class AnAccountKnowsWhatHappenedTest extends TestCase
         ]);
 
         DB::table('domain_operations')->insert([
-            'id' => (string) \Illuminate\Support\Str::ulid(),
+            'id' => (string) Str::ulid(),
             'domain_id' => $domain->id,
             'customer_id' => $customer->id,
             'name' => 'unsure.test',
@@ -389,7 +390,7 @@ final class AnAccountKnowsWhatHappenedTest extends TestCase
         ]);
 
         DB::table('domain_operations')->insert([
-            'id' => (string) \Illuminate\Support\Str::ulid(),
+            'id' => (string) Str::ulid(),
             'domain_id' => $domain->id,
             'customer_id' => $customer->id,
             'name' => 'filtered.test',
