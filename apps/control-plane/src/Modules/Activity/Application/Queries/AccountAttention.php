@@ -163,7 +163,14 @@ final readonly class AccountAttention
             occurredAt: CarbonImmutable::parse((string) ($row->finished_at ?? $row->created_at)),
             resourceKind: null,
             resourceId: (string) $row->service_id,
-            reference: (string) $row->id,
+            /*
+             * No reference. An operation's id is a ULID chosen for uniqueness,
+             * and the field is for something a customer can quote — an invoice
+             * number, a ticket reference. Printing the id beside a hostname on
+             * the dashboard is twenty-six characters of noise, and the support
+             * link this row carries already names the resource the operation
+             * belongs to.
+             */
         ))->all();
     }
 

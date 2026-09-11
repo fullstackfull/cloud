@@ -290,6 +290,9 @@ class E2ESeeder extends Seeder
         $this->domainFixtures($customer);
         $this->wordpressSites($customer);
         $this->team($customer);
+        // After the team: the two people in the feed are the owner and the
+        // teammate the previous line creates.
+        $this->whoAskedForWhat($customer);
         $this->ticket($customer);
         $this->credentials();
         $this->licences();
@@ -1301,6 +1304,59 @@ class E2ESeeder extends Seeder
                 'last_sent_at' => now(),
             ],
         );
+    }
+
+    /**
+     * Two finished operations, asked for by two different people.
+     *
+     * AR-13's whole question is "who rebooted the server at 3am", and a feed
+     * seeded only with work the platform started answers it with "not
+     * recorded" every time — which would let a browser spec pass while proving
+     * nothing about attribution. So one of these names the account owner and
+     * the other names the teammate, and the activity spec reads both.
+     *
+     * Succeeded, both of them, and old enough to sit below the stranded work
+     * the account already carries: these exist to be read, not to be acted on.
+     */
+    private function whoAskedForWhat(Customer $customer): void
+    {
+        $machine = VirtualMachine::query()->where('hostname', self::OPERABLE_HOSTNAME)->first();
+
+        if ($machine === null) {
+            return;
+        }
+
+        $owner = User::query()->where('email', 'customer@lynomia.local')->first();
+        $teammate = User::query()->where('email', self::TEAMMATE_EMAIL)->first();
+
+        if ($owner === null || $teammate === null) {
+            return;
+        }
+
+        foreach ([
+            ['user' => $owner, 'kind' => ProvisioningJobKind::Restart, 'action' => 'reboot', 'minutes' => 90],
+            ['user' => $teammate, 'kind' => ProvisioningJobKind::Start, 'action' => 'start', 'minutes' => 120],
+        ] as $entry) {
+            $key = sprintf('e2e-activity:%s:%s', $entry['kind']->value, $entry['user']->getKey());
+
+            if (ProvisioningJob::query()->where('idempotency_key', $key)->exists()) {
+                continue;
+            }
+
+            ProvisioningJob::factory()->create([
+                'kind' => $entry['kind'],
+                'customer_id' => $customer->getKey(),
+                'service_id' => $machine->service_id,
+                'requested_by_user_id' => $entry['user']->getKey(),
+                'status' => ProvisioningJobStatus::Succeeded,
+                'idempotency_key' => $key,
+                'payload' => ['power_action' => $entry['action']],
+                'provider' => 'fake',
+                'created_at' => now()->subMinutes($entry['minutes']),
+                'started_at' => now()->subMinutes($entry['minutes']),
+                'finished_at' => now()->subMinutes($entry['minutes'] - 1),
+            ]);
+        }
     }
 
     /**

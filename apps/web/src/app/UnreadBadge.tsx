@@ -47,7 +47,17 @@ export function UnreadBadge() {
         {shown}
       </span>
 
-      <span className="sr-only">{t('notifications.unreadCount', { count: unread })}</span>
+      {/*
+        The comma is deliberate and load-bearing.
+
+        Without a separator the accessible name computes as
+        "Notifications3 unread": the label and this text are adjacent nodes,
+        JSX drops the whitespace-only line between them, and the name
+        algorithm trims each node before joining — so a leading space does not
+        survive either. A comma does, it reads as a pause, and the link
+        announces as "Notifications, 3 unread".
+      */}
+      <span className="sr-only">{`, ${t('notifications.unreadCount', { count: unread })}`}</span>
     </span>
   )
 }

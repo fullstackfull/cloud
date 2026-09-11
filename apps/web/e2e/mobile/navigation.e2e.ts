@@ -28,7 +28,13 @@ const DESTINATIONS: Array<{ link: RegExp; heading: RegExp; path: string }> = [
   { link: /^security$/i, heading: /^security$/i, path: '/security' },
   { link: /^team$/i, heading: /^team$/i, path: '/settings/team' },
   { link: /^api keys$/i, heading: /^api (keys|tokens)$/i, path: '/api-tokens' },
-  { link: /^notifications$/i, heading: /^notifications$/i, path: '/notifications' },
+  /*
+   * Not anchored at the end: since Wave 4 the link carries the unread count in
+   * its accessible name — "Notifications, 3 unread" — which is the point of
+   * putting the count inside the link rather than beside it.
+   */
+  { link: /^notifications/i, heading: /^notifications$/i, path: '/notifications' },
+  { link: /^activity$/i, heading: /^activity$/i, path: '/activity' },
   { link: /^orders$/i, heading: /^orders$/i, path: '/orders' },
   { link: /^ip addresses$/i, heading: /^ip addresses$/i, path: '/ips' },
   // "All Services" in the drawer, because the group it sits in is Services:

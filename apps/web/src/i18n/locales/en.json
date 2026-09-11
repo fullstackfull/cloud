@@ -335,7 +335,9 @@
       "needsReview": "Work stopped and we are looking at it"
     },
     "domain": {
-      "uncertain": "A domain request has an uncertain outcome"
+      "uncertain": "A domain request has an uncertain outcome",
+      "lapsed": "A domain has lapsed and is in redemption",
+      "expiring": "A domain expires soon"
     },
     "backup": {
       "needsReview": "A restore stopped and we are looking at it"
