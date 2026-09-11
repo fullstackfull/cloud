@@ -48,16 +48,18 @@ export function UnreadBadge() {
       </span>
 
       {/*
-        The comma is deliberate and load-bearing.
+        No punctuation. The leading comma this used to carry was added against
+        a joining problem that the `aria-hidden` digit above had already
+        solved: with the digit excluded from the name computation, the label
+        and this text are the two remaining nodes and the algorithm joins them
+        with a space of its own. The comma therefore arrived *on top of* that
+        space, and the link's real accessible name — read out of the browser's
+        own accessibility tree, not guessed — was "Notifications , 1 unread",
+        which a screen reader announces with an audible "comma" in it.
 
-        Without a separator the accessible name computes as
-        "Notifications3 unread": the label and this text are adjacent nodes,
-        JSX drops the whitespace-only line between them, and the name
-        algorithm trims each node before joining — so a leading space does not
-        survive either. A comma does, it reads as a pause, and the link
-        announces as "Notifications, 3 unread".
+        Measured after the change: "Notifications 1 unread".
       */}
-      <span className="sr-only">{`, ${t('notifications.unreadCount', { count: unread })}`}</span>
+      <span className="sr-only">{t('notifications.unreadCount', { count: unread })}</span>
     </span>
   )
 }

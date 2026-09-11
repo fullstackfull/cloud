@@ -170,12 +170,32 @@ export function ConsolePage() {
           <span className="text-xs text-[var(--text-muted)]">{t(`console.state.${state}`)}</span>
         </div>
 
+        {/*
+          The terminal's transcript.
+
+          `tabIndex={0}` is what makes it usable without a mouse, and its
+          absence was a real defect rather than a missing nicety: a scrollable
+          region that cannot take focus cannot be scrolled by keyboard at all.
+          Page Up, Page Down, Home and End do nothing to an unfocusable box, so
+          everything above the last screenful of a rebuild's output was
+          unreachable to somebody not using a pointer — on the screen whose
+          whole purpose is reading output.
+
+          `role="log"` rather than a bare region, because that is what this is:
+          an append-only record where the new lines are at the end. Assistive
+          technology treats it as a polite live region, so output arriving
+          while the customer reads is announced without interrupting, and
+          arriving output does not re-announce the whole transcript.
+
+          Left to right whatever the page's direction, and monospaced: console
+          output aligned by spaces is unreadable in a proportional font, and
+          mirrored it is worse than unreadable.
+        */}
         <pre
           ref={output}
           dir="ltr"
-          // A terminal is left to right whatever the page is, and monospaced:
-          // console output aligned by spaces is unreadable in a proportional
-          // font, and mirrored it is worse than unreadable.
+          tabIndex={0}
+          role="log"
           className="technical h-96 overflow-auto whitespace-pre-wrap rounded bg-[var(--surface-sunken)] p-3 text-xs"
           aria-label={t('console.output')}
         >

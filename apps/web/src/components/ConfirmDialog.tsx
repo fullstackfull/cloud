@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/Button'
+import { useModalDialog } from '@/lib/useModalDialog'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -93,23 +94,13 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDialogElement>(null)
+
+  // Opens, closes, and hands focus back to the control that opened it.
+  useModalDialog(ref, open, onCancel)
+
   const [typed, setTyped] = useState('')
   const [evidence, setEvidence] = useState('')
   const inputId = useId()
-
-  useEffect(() => {
-    const dialog = ref.current
-
-    if (dialog === null) return
-
-    if (open && ! dialog.open) {
-      // showModal, not show: the difference is the focus trap and the inert
-      // background, which is the entire reason for using the element.
-      dialog.showModal()
-    } else if (! open && dialog.open) {
-      dialog.close()
-    }
-  }, [open])
 
   useEffect(() => {
     // Cleared on every open, so a phrase typed for one machine can never be
@@ -130,10 +121,6 @@ export function ConfirmDialog({
     <dialog
       ref={ref}
       aria-labelledby={`${inputId}-title`}
-      onCancel={(event) => {
-        event.preventDefault()
-        onCancel()
-      }}
       className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-0 text-[var(--text-primary)] backdrop:bg-black/50"
     >
       <form

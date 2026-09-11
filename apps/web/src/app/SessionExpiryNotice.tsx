@@ -6,6 +6,7 @@ import { Button } from '@/components/Button'
 import { buttonClasses } from '@/components/buttonStyles'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { watchSessionExpiry } from '@/lib/sessionExpiry'
+import { useModalDialog } from '@/lib/useModalDialog'
 
 /**
  * What happens when the session ends while somebody is reading.
@@ -38,6 +39,10 @@ export function SessionExpiryNotice() {
   const { data: user } = useCurrentUser()
 
   const [expired, setExpired] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
+
+  // Opens, closes, and returns focus to whatever it interrupted.
+  useModalDialog(dialog, expired, () => { setExpired(false); })
 
   // Read inside the subscription without re-subscribing on every profile
   // refetch, which would drop and re-add the listener on a timer.
@@ -52,19 +57,37 @@ export function SessionExpiryNotice() {
     [],
   )
 
-  if (! expired) return null
-
   const returnTo = `${location.pathname}${location.search}`
 
   return (
-    <div
+    /*
+     * A native `<dialog>`, opened with `showModal()`, rather than a div
+     * wearing `role="alertdialog"` and `aria-modal="true"`.
+     *
+     * The div version was a lie told to assistive technology. `aria-modal`
+     * announces "nothing outside this matters" and enforces nothing: focus
+     * stayed wherever it had been, Tab walked straight out into a page the
+     * customer could no longer use, Escape did nothing, and a screen-reader
+     * user was told a dialogue had appeared while their cursor sat behind it.
+     * The browser gives all of that for free from `showModal()` — the focus
+     * trap, the inertness of the page behind, Escape, the top layer, and
+     * returning focus where it came from — which is why every other dialogue
+     * in this portal is built on it.
+     *
+     * `alertdialog` stays as the role: this interrupts rather than waits, and
+     * it is the one dialogue the customer did not ask for.
+     */
+    <dialog
+      ref={dialog}
       role="alertdialog"
-      aria-modal="true"
       aria-labelledby="session-expired-title"
       aria-describedby="session-expired-body"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className={[
+        'w-full max-w-md rounded-xl border p-6 backdrop:bg-black/50',
+        'border-[var(--border-subtle)] bg-[var(--surface-raised)]',
+      ].join(' ')}
     >
-      <div className="w-full max-w-md rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-6">
+      <div>
         <h2 id="session-expired-title" className="text-lg font-semibold text-[var(--text-primary)]">
           {t('session.expiredTitle')}
         </h2>
@@ -93,6 +116,6 @@ export function SessionExpiryNotice() {
           </a>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }

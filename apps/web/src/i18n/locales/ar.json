@@ -24,7 +24,8 @@
     "remove": "إزالة",
     "dismiss": "إغلاق",
     "breadcrumbs": "أنت هنا",
-    "edit": "تعديل"
+    "edit": "تعديل",
+    "actions": "إجراءات"
   },
   "nav": {
     "apiKeys": "مفاتيح API",
@@ -644,7 +645,8 @@
     "viewSubscription": "عرض الاشتراكات",
     "print": "طباعة",
     "backToInvoice": "العودة إلى الفاتورة",
-    "taxId": "الرقم الضريبي"
+    "taxId": "الرقم الضريبي",
+    "viewNamed": "عرض الفاتورة {{number}}"
   },
   "subscriptions": {
     "subtitle": "ما يتجدّد، ومتى.",

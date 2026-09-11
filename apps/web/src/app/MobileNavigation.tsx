@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/Button'
@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn'
 
 import { NavGroups } from './NavGroups'
 import { CUSTOMER_NAV_GROUPS, OPERATOR_NAV_GROUPS } from './navigation'
+import { useModalDialog } from '@/lib/useModalDialog'
 
 interface MobileNavigationProps {
   open: boolean
@@ -37,16 +38,8 @@ export function MobileNavigation({ open, isOperator, signingOut, onClose, onSign
   const { t } = useTranslation()
   const dialog = useRef<HTMLDialogElement>(null)
 
-  useEffect(() => {
-    const element = dialog.current
-    if (element === null) return
-
-    if (open && !element.open) {
-      element.showModal()
-    } else if (!open && element.open) {
-      element.close()
-    }
-  }, [open])
+  // Opens, closes, and gives the hamburger focus back.
+  useModalDialog(dialog, open, onClose)
 
   return (
     <dialog

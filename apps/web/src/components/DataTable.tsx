@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export interface Column<Row> {
   key: string
@@ -23,6 +24,8 @@ interface DataTableProps<Row> {
  * on any layout, and a horizontally scrolling page is unusable in RTL.
  */
 export function DataTable<Row>({ columns, rows, rowKey, empty, caption }: DataTableProps<Row>) {
+  const { t } = useTranslation()
+
   if (rows.length === 0) {
     return <p className="py-8 text-center text-sm text-[var(--text-muted)]">{empty}</p>
   }
@@ -39,7 +42,19 @@ export function DataTable<Row>({ columns, rows, rowKey, empty, caption }: DataTa
                 scope="col"
                 className="px-4 py-2 text-start text-xs font-medium tracking-wide text-[var(--text-muted)] uppercase"
               >
-                {column.header}
+                {/*
+                  An action column has no visible heading, and an empty `<th>`
+                  is not the same as a column with nothing to say: it leaves
+                  the cells under it associated with nothing, which is what
+                  axe reports as an empty table header. The word is supplied
+                  for assistive technology and kept off the screen, where the
+                  buttons are self-evidently the actions.
+                */}
+                {column.header === '' ? (
+                  <span className="sr-only">{t('common.actions')}</span>
+                ) : (
+                  column.header
+                )}
               </th>
             ))}
           </tr>

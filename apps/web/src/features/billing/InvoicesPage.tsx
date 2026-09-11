@@ -86,8 +86,19 @@ export function InvoicesPage() {
     {
       key: 'view',
       header: '',
+      /*
+       * "View" is enough to read and not enough to hear. A screen-reader user
+       * listing the links on a page of ten invoices got "View, View, View…"
+       * with nothing to say which invoice each one opened; the column header
+       * that disambiguates them visually is not part of a link's accessible
+       * name. So the visible word stays short and the name carries the number.
+       */
       cell: (invoice) => (
-        <Link className="text-sm underline" to={`/invoices/${invoice.id}`}>
+        <Link
+          className="text-sm underline"
+          to={`/invoices/${invoice.id}`}
+          aria-label={t('invoices.viewNamed', { number: invoice.number })}
+        >
           {t('invoices.view')}
         </Link>
       ),

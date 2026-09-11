@@ -24,7 +24,8 @@
     "remove": "Remove",
     "dismiss": "Dismiss",
     "breadcrumbs": "You are here",
-    "edit": "Edit"
+    "edit": "Edit",
+    "actions": "Actions"
   },
   "nav": {
     "apiKeys": "API Keys",
@@ -640,7 +641,8 @@
     "viewSubscription": "View subscriptions",
     "print": "Print",
     "backToInvoice": "Back to the invoice",
-    "taxId": "Tax number"
+    "taxId": "Tax number",
+    "viewNamed": "View invoice {{number}}"
   },
   "subscriptions": {
     "subtitle": "What renews, and when.",

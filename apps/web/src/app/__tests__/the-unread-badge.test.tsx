@@ -60,10 +60,23 @@ describe('the unread badge', () => {
 
     /*
      * The whole point. A coloured circle beside a link announces as
-     * "Notifications" with no number in it; this announces as "Notifications, 3 unread" because the count is a child of the link.
+     * "Notifications" with no number in it; this announces with the count,
+     * because the count is a child of the link.
+     *
+     * Matched loosely on purpose, and the reason is worth knowing. jsdom and
+     * Chromium do not join adjacent text nodes the same way when computing an
+     * accessible name: Chromium inserts a space, jsdom does not. An exact
+     * string here can only be right in one of the two, and pinning it to
+     * jsdom's answer is how this badge ended up carrying a hard-coded comma —
+     * which made the unit test read well and made the real name
+     * "Notifications , 1 unread", with an audible "comma" in it.
+     *
+     * So the property is asserted here — the label and the count are both in
+     * the link's name, in that order — and the exact string is asserted in the
+     * browser suite, against the accessibility tree a screen reader reads.
      */
     expect(
-      await screen.findByRole('link', { name: 'Notifications, 3 unread' }),
+      await screen.findByRole('link', { name: /^Notifications\s*3 unread$/ }),
     ).toBeInTheDocument()
   })
 
@@ -72,7 +85,7 @@ describe('the unread badge', () => {
 
     mount()
 
-    await screen.findByRole('link', { name: 'Notifications, 1 unread' })
+    await screen.findByRole('link', { name: /^Notifications\s*1 unread$/ })
 
     // The badge is drawn on every page; fetching twenty-five notifications to
     // render a digit is what this endpoint exists to avoid.
@@ -92,7 +105,7 @@ describe('the unread badge', () => {
      * asking "how many" deserves the answer.
      */
     expect(await screen.findByText('99+')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Notifications, 142 unread' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Notifications\s*142 unread$/ })).toBeInTheDocument()
   })
 
   it('shows nothing at all when the inbox is clear', async () => {
