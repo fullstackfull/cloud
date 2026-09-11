@@ -85,8 +85,17 @@ test.describe('an Arabic customer', () => {
     await page.getByRole('button', { name: 'تشغيل', exact: true }).click()
     await expect(page.getByText('قيد التشغيل', { exact: true }).first()).toBeVisible()
 
-    // Force off asks, in Arabic, and cancel leaves the machine alone.
-    await page.getByRole('button', { name: 'فصل قسري' }).click()
+    /*
+     * Force off asks, in Arabic, and cancel leaves the machine alone.
+     *
+     * The word is the same one the confirmation's own button uses. It was
+     * not: in English both say "Force off", while the Arabic said one thing
+     * on the page ("فصل قسري") and another in the dialogue ("إيقاف قسري"),
+     * so the confirmation appeared to be about a different action from the
+     * one pressed. The pair now reads "إيقاف آمن" and "إيقاف قسري" — a safe
+     * stop and a forced one.
+     */
+    await page.getByRole('button', { name: 'إيقاف قسري', exact: true }).click()
     const dialog = page.getByRole('dialog')
     await expectArabicProse(dialog)
     await dialog.getByRole('button', { name: 'إلغاء' }).click()

@@ -181,6 +181,51 @@ export function forgetSessions(email: string = users.customer.email): void {
   )
 }
 
+/**
+ * Raises one unread notification on the seeded customer's account.
+ *
+ * The seeder writes exactly one unread notification, deliberately, and it is
+ * a single-use fixture: the Wave 4 spec marks everything read to prove the
+ * badge clears, so any later spec that counts unread messages is counting
+ * whatever ran before it. A spec that needs an unread message therefore makes
+ * one — which is also the only way to assert the badge's exact accessible
+ * name, since a name is only exact if the number in it is known.
+ *
+ * Written to the database rather than raised through the product, because
+ * nothing a customer can do from the portal reliably notifies their own
+ * account, and the subject under test is the badge rather than the notifier.
+ *
+ * @returns the number of unread notifications afterwards
+ */
+export function raiseNotification(): number {
+  const output = execFileSync(
+    'php',
+    [
+      'artisan',
+      'tinker',
+      '--execute',
+      '$c = Lynomia\\Modules\\Identity\\Infrastructure\\Models\\Customer::query()' +
+        '->whereHas("members.user", fn ($q) => $q->where("email", "customer@lynomia.local"))' +
+        '->firstOrFail();' +
+        'Lynomia\\Modules\\Notifications\\Infrastructure\\Models\\Notification::factory()' +
+        '->create(["customer_id" => $c->getKey(), "read_at" => null]);' +
+        'echo Lynomia\\Modules\\Notifications\\Infrastructure\\Models\\Notification::query()' +
+        '->where("customer_id", $c->getKey())->whereNull("read_at")->count();',
+    ],
+    {
+      cwd: path.resolve(import.meta.dirname, '../../../control-plane'),
+      encoding: 'utf8',
+      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e' },
+    },
+  )
+
+  const count = Number.parseInt(output.trim().split('\n').at(-1) ?? '', 10)
+
+  if (Number.isNaN(count)) throw new Error(`Could not read the unread count back: "${output}"`)
+
+  return count
+}
+
 export async function signIn(
   page: Page,
   who: { email: string; password: string } = users.customer,

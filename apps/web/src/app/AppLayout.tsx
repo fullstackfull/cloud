@@ -8,6 +8,7 @@ import { LocaleSwitcher } from '@/components/LocaleSwitcher'
 import { useCurrentUser, useLogout } from '@/features/auth/useAuth'
 import { useIsOperator } from '@/features/admin/useIsOperator'
 import { applyTimeZone } from '@/lib/format'
+import { useRouteFocus } from '@/lib/useRouteFocus'
 
 import { ConnectionNotice } from './ConnectionNotice'
 import { MobileNavigation } from './MobileNavigation'
@@ -33,6 +34,10 @@ export function AppLayout() {
   const logout = useLogout()
   const isOperator = useIsOperator()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Where focus goes when a page is replaced; the strategy and the three
+  // cases it deliberately stays out of are in the hook.
+  useRouteFocus()
 
   /*
    * AS-17. Every date below this point is rendered in the customer's own time

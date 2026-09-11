@@ -18,8 +18,16 @@ test.describe('an invoice on a phone', () => {
     await openMenu(page)
     await page.getByRole('link', { name: /^invoices$/i }).click()
 
-    const row = page.getByRole('row', { name: new RegExp(fixtures.openInvoice) })
-    await row.getByRole('link', { name: /^view$/i }).click()
+    /*
+     * By the name a screen reader hears. W5.6 renamed the row link from
+     * "View" — ten identical links on a page of ten invoices — to carry
+     * the number it opens, so addressing it this way also means this
+     * journey cannot open the wrong invoice and pass.
+     */
+    await page
+      .getByRole('row', { name: new RegExp(fixtures.openInvoice) })
+      .getByRole('link', { name: new RegExp(`view invoice ${fixtures.openInvoice}`, 'i') })
+      .click()
 
     await expect(
       page.getByRole('heading', { level: 1, name: new RegExp(fixtures.openInvoice) }),
@@ -50,8 +58,16 @@ test.describe('an invoice on a phone', () => {
 
     await page.goto('/invoices')
 
-    const row = page.getByRole('row', { name: new RegExp(fixtures.phonePaymentInvoice) })
-    await row.getByRole('link', { name: /^view$/i }).click()
+    /*
+     * By the name a screen reader hears. W5.6 renamed the row link from
+     * "View" — ten identical links on a page of ten invoices — to carry
+     * the number it opens, so addressing it this way also means this
+     * journey cannot open the wrong invoice and pass.
+     */
+    await page
+      .getByRole('row', { name: new RegExp(fixtures.phonePaymentInvoice) })
+      .getByRole('link', { name: new RegExp(`view invoice ${fixtures.phonePaymentInvoice}`, 'i') })
+      .click()
 
     await expect(
       page.getByRole('heading', { level: 1, name: new RegExp(fixtures.phonePaymentInvoice) }),

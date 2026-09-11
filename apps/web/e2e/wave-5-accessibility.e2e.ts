@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { expectAccessible } from './support/axe'
-import { fixtures, signIn, users } from './support/helpers'
+import { fixtures, raiseNotification, signIn, users } from './support/helpers'
 
 /*
  * Wave 5, W5.6. The automated floor under the manual accessibility work.
@@ -119,13 +119,21 @@ test.describe('the automated accessibility floor', () => {
      * without the space Chromium inserts — and pinning the unit test to jsdom's
      * answer is exactly how this badge came to carry a hard-coded comma that
      * made the real name "Notifications , 1 unread".
+     *
+     * The unread message is this spec's own. The seeder writes exactly one,
+     * and the Wave 4 spec marks everything read to prove the badge clears —
+     * so borrowing it made this assertion depend on which specs had run, and
+     * in a full suite the count was zero and the name had no number in it at
+     * all. An exact name needs a known number.
      */
+    const unread = raiseNotification()
+
     await page.goto('/')
 
     await expect(
       page
         .getByRole('navigation', { name: /main navigation/i })
-        .getByRole('link', { name: 'Notifications 1 unread' }),
+        .getByRole('link', { name: `Notifications ${String(unread)} unread` }),
     ).toBeVisible()
   })
 

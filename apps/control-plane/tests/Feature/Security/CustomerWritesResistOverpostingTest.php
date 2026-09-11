@@ -256,4 +256,52 @@ final class CustomerWritesResistOverpostingTest extends TestCase
         // The one restriction that is enforced was honoured.
         self::assertSame(100, $token->rate_limit_per_minute);
     }
+
+    #[Test]
+    public function the_account_itself_is_not_a_field_on_the_profile_form(): void
+    {
+        /*
+         * The profile endpoint writes to the *person*. The account's identity
+         * — what it is called legally, which country it belongs to, what it is
+         * billed in, whether it may buy at all — is either an operator's to
+         * change or the country/currency workflow's, and the portal offers no
+         * control for any of it.
+         *
+         * Posting them here is the cheapest attempt there is, so it is the one
+         * worth refusing out loud. The currency case is the one with money
+         * behind it: an account that could rewrite its own currency would be
+         * repricing a live catalogue, which is why the change is a request an
+         * operator decides and not a field.
+         */
+        [$customer, $user] = $this->account();
+
+        $this->actingAs($user)->withHeaders(['X-Lynomia-Customer' => (string) $customer->getKey()])
+            ->patchJson('/api/v1/me', [
+                'name' => 'Renamed Properly',
+
+                // SUPPORT_ONLY: the names on an invoice.
+                'display_name' => 'Somebody Else Ltd',
+                'legal_name' => 'Somebody Else Ltd',
+
+                // WORKFLOW_CONTROLLED: the country/currency change request.
+                'country' => 'GB',
+                'currency' => 'USD',
+
+                // Never customer-writable at all.
+                'status' => 'active',
+                'type' => 'organization',
+                'can_purchase' => true,
+                'customer_id' => '01hzzzzzzzzzzzzzzzzzzzzzzz',
+            ])->assertOk();
+
+        $fresh = $customer->fresh();
+        self::assertNotNull($fresh);
+
+        // The person's own field was applied; the account did not move.
+        self::assertSame('Renamed Properly', $user->fresh()?->name);
+        self::assertNotSame('Somebody Else Ltd', $fresh->display_name);
+        self::assertNull($fresh->legal_name);
+        self::assertSame('KW', $fresh->country);
+        self::assertSame('KWD', $fresh->currency);
+    }
 }

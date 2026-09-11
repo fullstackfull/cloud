@@ -49,7 +49,18 @@ export function Breadcrumbs({ crumbs }: { crumbs: readonly Crumb[] }) {
                     {crumb.label}
                   </span>
                 ) : (
-                  <Link to={crumb.to} className="hover:text-[var(--text-primary)] hover:underline">
+                  /*
+                   * `py-1` is not spacing. Measured on the phone descriptor,
+                   * the crumb links were 16px tall — the height of their own
+                   * text — which is under the 24px minimum SC 2.5.8 names and
+                   * is a real miss on a trail somebody taps to go back up.
+                   * `inline-block` is what makes the padding count: vertical
+                   * padding on an inline box does not grow the hit area.
+                   */
+                  <Link
+                    to={crumb.to}
+                    className="inline-block py-1 hover:text-[var(--text-primary)] hover:underline"
+                  >
                     {crumb.label}
                   </Link>
                 )}

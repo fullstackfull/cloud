@@ -83,6 +83,38 @@ describe('the design tokens', () => {
   })
 })
 
+describe('motion', () => {
+  it('is turned off for anybody who asked for less of it', () => {
+    /*
+     * W5.6. One block, at the root, rather than a `motion-reduce:` variant
+     * remembered on each animated element — and it is asserted because the
+     * failure is invisible to everybody who is not affected by it. The
+     * spinner, the switch thumb and the skip link's slide are all animation
+     * or transition, and somebody whose vestibular system objects to movement
+     * has said so in their operating system already.
+     *
+     * `animation-iteration-count: 1` matters as much as the duration: a
+     * spinner with a near-zero duration and an infinite count is still
+     * animating, forever.
+     */
+    const block = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/.exec(CSS)
+
+    expect(block, 'a reduced-motion block exists').not.toBeNull()
+
+    const body = block?.[1] ?? ''
+
+    expect(body).toMatch(/animation-duration:\s*0\.01ms\s*!important/)
+    expect(body).toMatch(/animation-iteration-count:\s*1\s*!important/)
+    expect(body).toMatch(/transition-duration:\s*0\.01ms\s*!important/)
+
+    // Applied to everything, including generated content: a `::before` that
+    // spins is still spinning.
+    expect(body).toContain('*::before')
+    expect(body).toContain('*::after')
+  })
+})
+
+
 /**
  * The token names declared directly in the block whose header matches.
  *

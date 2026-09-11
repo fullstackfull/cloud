@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { fixtures, signIn, users } from './support/helpers'
 import { linkFromMailTo } from './support/outbox'
@@ -11,6 +11,21 @@ import { linkFromMailTo } from './support/outbox'
  * browser's own arithmetic or from a URL: every amount is the server's, and a
  * payment is settled by the provider telling the platform.
  */
+
+/**
+ * Opens an invoice from the list, by the name a screen reader hears.
+ *
+ * The link used to be called "View", which reads perfectly on a screen with a
+ * column header above it and announces as ten identical links to somebody
+ * listing them. W5.6 gave each one the number it acts on, so this is how they
+ * are addressed now — and asserting the number here also means these journeys
+ * can no longer open the wrong invoice and pass.
+ */
+async function openInvoice(page: Page, number: string): Promise<void> {
+  const row = page.getByRole('row', { name: new RegExp(number) })
+
+  await row.getByRole('link', { name: new RegExp(`view invoice ${number}`, 'i') }).click()
+}
 
 /** A fresh address per run, so re-running the suite is not a duplicate. */
 function newAddress(): string {
@@ -206,8 +221,7 @@ test.describe('journey E — one invoice paid from credit and a card', () => {
     await signIn(page, users.moneyCustomer)
     await page.goto('/invoices')
 
-    const row = page.getByRole('row', { name: new RegExp(fixtures.creditThenCardInvoice) })
-    await row.getByRole('link', { name: /^view$/i }).click()
+    await openInvoice(page, fixtures.creditThenCardInvoice)
 
     // Waited for the document, not merely for the URL: the list is still
     // mounted for an instant after the address changes, and a click resolved
@@ -250,8 +264,7 @@ test.describe('journey F — a payment the bank refuses', () => {
     await signIn(page, users.moneyCustomer)
     await page.goto('/invoices')
 
-    const row = page.getByRole('row', { name: new RegExp(fixtures.declineInvoice) })
-    await row.getByRole('link', { name: /^view$/i }).click()
+    await openInvoice(page, fixtures.declineInvoice)
 
     // Waited for the document, not merely for the URL: the list is still
     // mounted for an instant after the address changes.
@@ -306,8 +319,7 @@ test.describe('journey H — printing an invoice', () => {
     await signIn(page)
     await page.goto('/invoices')
 
-    const row = page.getByRole('row', { name: new RegExp(fixtures.paidInvoice) })
-    await row.getByRole('link', { name: /^view$/i }).click()
+    await openInvoice(page, fixtures.paidInvoice)
 
     await expect(
       page.getByRole('heading', { level: 1, name: new RegExp(fixtures.paidInvoice) }),

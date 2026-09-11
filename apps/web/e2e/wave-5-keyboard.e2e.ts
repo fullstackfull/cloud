@@ -17,11 +17,13 @@ import { fixtures, signIn, users } from './support/helpers'
  */
 
 /** The accessible name and role of whatever currently has focus. */
-async function focused(page: Page): Promise<{ role: string; name: string; tag: string }> {
+async function focused(
+  page: Page,
+): Promise<{ role: string; name: string; tag: string; inNavigation: boolean }> {
   return page.evaluate(() => {
     const element = document.activeElement
 
-    if (element === null) return { role: 'none', name: '', tag: 'none' }
+    if (element === null) return { role: 'none', name: '', tag: 'none', inNavigation: false }
 
     /*
      * `textContent` is a stand-in for the accessible name and not the same
@@ -40,20 +42,47 @@ async function focused(page: Page): Promise<{ role: string; name: string; tag: s
         ? element.textContent
         : (document.getElementById(describedBy)?.textContent ?? ''))
 
+    /*
+     * Whether focus is inside the main navigation landmark, which is how the
+     * walk below tells a destination from a control that happens to share its
+     * word. The portal has several navigation landmarks — the sidebar, a
+     * resource's sections, the breadcrumb trail — and only one of them is
+     * named "Main navigation".
+     */
+    const nav = element.closest('nav')
+    const landmark = (nav?.getAttribute('aria-label') ?? '').toLowerCase()
+
     return {
       role: element.getAttribute('role') ?? element.tagName.toLowerCase(),
       name: label.trim().slice(0, 80),
       tag: element.tagName.toLowerCase(),
+      inNavigation: landmark.includes('main navigation'),
     }
   })
 }
 
-/** Tabs until the accessible name matches, and says so if it never does. */
-async function tabTo(page: Page, pattern: RegExp, limit = 140): Promise<void> {
+/**
+ * Tabs until the accessible name matches, and says so if it never does.
+ *
+ * `inNavigation` narrows the match to the sidebar, and it is not a
+ * convenience: the activity feed carries filters named after the same things
+ * the destinations are — "Support" is both a place and a category — so an
+ * unqualified walk found the filter first, applied it, and stayed on the page
+ * it was already on. The failure looked like a navigation that did nothing.
+ */
+async function tabTo(
+  page: Page,
+  pattern: RegExp,
+  options: { inNavigation?: boolean; limit?: number } = {},
+): Promise<void> {
+  const limit = options.limit ?? 140
+
   for (let step = 0; step < limit; step += 1) {
     await page.keyboard.press('Tab')
 
     const where = await focused(page)
+
+    if (options.inNavigation === true && ! where.inNavigation) continue
 
     if (pattern.test(where.name)) return
   }
@@ -76,7 +105,29 @@ test.describe('the whole portal, with no mouse', () => {
     await signIn(page, users.customer)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
-    // --- the skip link is the first stop, and it goes somewhere -------------
+    /*
+     * --- arriving somewhere puts focus on the page ------------------------
+     *
+     * Signing in is a navigation, and `useRouteFocus` moves focus to the new
+     * page's heading on every one of them. That is what makes the page
+     * announce itself to a screen reader — nothing else does, because the
+     * document never reloaded — and it is why the next Tab continues from the
+     * content instead of from the eleventh destination in the sidebar.
+     */
+    const arrived = await focused(page)
+    expect(arrived.tag, 'a navigation leaves focus on the new page heading').toBe('h1')
+
+    /*
+     * --- the skip link is the first stop of a fresh load ------------------
+     *
+     * Reloaded on purpose. A full load is the one arrival where focus is
+     * deliberately left alone — the document has just been handed over at the
+     * top — so it is the case where the skip link has to be the first stop,
+     * and it is the walk a customer takes when they open the portal.
+     */
+    await page.reload()
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+
     await page.keyboard.press('Tab')
 
     const first = await focused(page)
@@ -88,7 +139,7 @@ test.describe('the whole portal, with no mouse', () => {
     expect(landed, 'the skip link moves focus to <main>').toBe('main-content')
 
     // --- the sidebar, by keyboard ------------------------------------------
-    await tabTo(page, /^Cloud VPS$/i)
+    await tabTo(page, /^Cloud VPS$/i, { inNavigation: true })
     await page.keyboard.press('Enter')
 
     await expect(page.getByRole('heading', { level: 1, name: /cloud vps/i })).toBeVisible()
@@ -148,13 +199,18 @@ test.describe('the whole portal, with no mouse', () => {
       ['Support', /support|help/i],
       ['Profile', /profile|account/i],
     ] as const) {
-      await tabTo(page, new RegExp(`^${destination}$`, 'i'))
+      await tabTo(page, new RegExp(`^${destination}$`, 'i'), { inNavigation: true })
       await page.keyboard.press('Enter')
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(heading)
     }
 
     // --- sign out ---------------------------------------------------------
+    /*
+     * Unqualified: the sign-out button sits in the sidebar's footer, below the
+     * navigation landmark rather than inside it — it is a control, not a
+     * destination, and the landmark lists places to go.
+     */
     await tabTo(page, /^Sign out$/i)
     await page.keyboard.press('Enter')
 
@@ -226,36 +282,49 @@ test.describe('focus after a route change', () => {
   test('does not leave the customer on an element that has gone', async ({ page }) => {
     /*
      * The defect this looks for is specific: activate a link in the sidebar,
-     * the route changes, and focus stays on a DOM node the new page has
+     * the route changes, and focus is left on a DOM node the new page has
      * replaced — so the next Tab starts from the document root and the
      * customer has silently lost their place.
      *
-     * What is asserted is that focus is still on something real and named
-     * after navigating. A deliberate strategy, not a reset on every render:
-     * moving focus to the heading on every route change announces the page
-     * title every time anybody clicks anything, which is its own defect.
+     * The strategy that answers it is `useRouteFocus`: on a change of
+     * *pathname*, focus moves to the new page's heading. An earlier draft of
+     * this test asserted the opposite — that the sidebar link keeps focus —
+     * on the reasoning that moving focus "announces the page title every time
+     * anybody clicks anything". That conflated a navigation with a render. A
+     * render is not a navigation, the hook does not fire on one, and a query
+     * string changing is not one either; what is left is exactly the event a
+     * customer needs told about, because the document did not reload and
+     * nothing else tells them.
+     *
+     * Leaving focus on the link has the cost the sidebar was built to avoid:
+     * the next Tab continues through the remaining destinations rather than
+     * entering the page just opened.
      */
     await signIn(page, users.customer)
 
-    await tabTo(page, /^Activity$/i)
-    const before = await focused(page)
+    await tabTo(page, /^Activity$/i, { inNavigation: true })
 
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { level: 1, name: /activity/i })).toBeVisible()
 
     const after = await focused(page)
 
-    // Still a real element, still named, and still in the document.
-    expect(after.tag).not.toBe('none')
-    expect(after.tag).not.toBe('body')
-    expect(after.name).not.toBe('')
-
-    // The sidebar link survives the navigation and keeps focus, which is the
-    // predictable outcome: the customer's next Tab continues from where they
-    // were rather than from the top of the document.
-    expect(after.name).toBe(before.name)
+    // On the new page's heading: named, real, and the thing a screen reader
+    // reads out as the page it has arrived at.
+    expect(after.tag).toBe('h1')
+    expect(after.name).toMatch(/activity/i)
+    expect(after.inNavigation, 'focus left the navigation column').toBe(false)
 
     const connected = await page.evaluate(() => document.activeElement?.isConnected ?? false)
     expect(connected, 'the focused element is still in the document').toBe(true)
+
+    /*
+     * And not a tab stop of its own: focus can be *sent* to the heading
+     * without everybody having to walk past it on the way into the page.
+     */
+    expect(
+      await page.getByRole('heading', { level: 1 }).getAttribute('tabindex'),
+      'the heading is focusable but not in the tab order',
+    ).toBe('-1')
   })
 })
