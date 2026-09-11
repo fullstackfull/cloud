@@ -12,6 +12,7 @@ import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
+import { safeLabel } from '@/lib/safeLabel'
 import { usePayments } from '@/lib/queries'
 import type { Payment } from '@/lib/types'
 
@@ -43,12 +44,18 @@ export function PaymentsPage() {
     {
       key: 'kind',
       header: t('payments.kind'),
-      cell: (payment) => t(`paymentKind.${payment.kind}`, { defaultValue: payment.kind }),
+      cell: (payment) => safeLabel('paymentKind', payment.kind),
     },
     {
       key: 'method',
       header: t('payments.method'),
-      cell: (payment) => t(`paymentProvider.${payment.provider}`, { defaultValue: payment.provider }),
+      /*
+       * Where the money came from, which is what a customer reconciling their
+       * own records is asking. The column used to print the gateway's
+       * registered driver name — and its fallback printed the raw slug.
+       */
+      cell: (payment) =>
+        payment.from_account_credit ? t('payments.fromCredit') : t('payments.fromOutside'),
     },
     { key: 'amount', header: t('payments.amount'), cell: (payment) => <MoneyText value={payment.amount} /> },
     { key: 'status', header: t('payments.status'), cell: (payment) => <StatusBadge status={payment.status} /> },

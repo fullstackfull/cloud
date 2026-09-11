@@ -14069,6 +14069,64 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/team/roles":
+    get:
+      operationId: "api_v1_team_roles"
+      tags:
+        - "Team"
+      summary: "What each role may do"
+      description: "The five roles and the capability matrix behind them, derived from the same permission list the API refuses with - so a screen that explains a role and an endpoint that refuses it cannot disagree. Readable by any member: deciding whether to accept an invitation is exactly when this is asked. Each capability publishes the permission string as well as its own id, so the claim can be checked against a 403 rather than taken on trust. Static for the whole platform and costs no query."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TeamRole"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/team/transfer-ownership":
     post:
       operationId: "api_v1_team_transfer_ownership"
@@ -14088,7 +14146,7 @@ paths:
               properties:
                 member_id:
                   description: "See the endpoint description; validated server-side."
-                confirm_account_id:
+                confirm_account_name:
                   description: "See the endpoint description; validated server-side."
       security:
         - sessionCookie: []
@@ -17942,11 +18000,6 @@ components:
           type:
             - "string"
             - "null"
-        hardware_profile:
-          type:
-            - "object"
-            - "null"
-          additionalProperties: true
         status:
           type:
             - "string"
@@ -18509,11 +18562,6 @@ components:
         needs_attention:
           type: "boolean"
           description: "True when a person has to decide. An operation in this state must not be retried by the client: the money may already have moved."
-        failure_message:
-          type:
-            - "string"
-            - "null"
-          description: "The registrar's own words, with anything credential-shaped removed before it was stored."
         completed_at:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
@@ -19135,10 +19183,9 @@ components:
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
-        provider:
-          type:
-            - "string"
-            - "null"
+        from_account_credit:
+          type: "boolean"
+          description: "True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it."
         kind:
           type:
             - "string"
@@ -19939,17 +19986,12 @@ components:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
-        provider:
-          type:
-            - "string"
-            - "null"
+        from_account_credit:
+          type: "boolean"
+          description: "True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it."
         is_settled:
           type: "boolean"
         failure_code:
-          type:
-            - "string"
-            - "null"
-        failure_message:
           type:
             - "string"
             - "null"
@@ -21114,10 +21156,6 @@ components:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
-        order_item_id:
-          oneOf:
-            - "$ref": "#/components/schemas/Ulid"
-            - type: "null"
         subscription_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
@@ -21286,10 +21324,6 @@ components:
         is_awaiting_provider:
           type: "boolean"
         failure_code:
-          type:
-            - "string"
-            - "null"
-        failure_message:
           type:
             - "string"
             - "null"
@@ -21462,6 +21496,34 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/TeamMember"
+    TeamRole:
+      type: "object"
+      additionalProperties: false
+      description: "One team role and what the server will actually let it do. The capability list is computed from the role's own permission list - the one `AuthorisesWithinAccount` reads before every write - and an architecture test asserts that the published set and the enforced set are equal in both directions. Two permissions the role model declares are deliberately absent because nothing enforces them: closing the account, which is a support conversation at launch, and managing payment methods, of which the platform stores none."
+      properties:
+        id:
+          type: "string"
+          description: "owner, administrator, billing, technical or member."
+        is_owner:
+          type: "boolean"
+        assignable:
+          type: "boolean"
+          description: "Whether a member may be given this role. False for owner: an account has one owner and ownership moves by transfer, which names both sides in one act."
+        capabilities:
+          type: "array"
+          description: "The whole matrix, not only what this role holds: \"can this role see billing?\" has two useful answers, and a list of only the yeses makes the reader compare five lists to find the no."
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              id:
+                type: "string"
+                description: "The customer-facing capability id the portal translates."
+              permission:
+                type: "string"
+                description: "The canonical permission the API checks, published so the claim is verifiable."
+              granted:
+                type: "boolean"
     Ticket:
       type: "object"
       additionalProperties: false
@@ -21489,11 +21551,6 @@ components:
           type:
             - "string"
             - "null"
-        assigned_to:
-          type:
-            - "string"
-            - "null"
-          description: "A name, not a user id."
         opened_by:
           type:
             - "string"
@@ -21759,10 +21816,6 @@ components:
       type: "object"
       additionalProperties: false
       properties:
-        wallet_id:
-          oneOf:
-            - "$ref": "#/components/schemas/Ulid"
-            - type: "null"
         currency:
           type:
             - "string"
@@ -21798,10 +21851,6 @@ components:
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
-        wallet_id:
-          oneOf:
-            - "$ref": "#/components/schemas/Ulid"
-            - type: "null"
         kind:
           type:
             - "string"

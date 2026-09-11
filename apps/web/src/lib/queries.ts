@@ -50,6 +50,7 @@ import type {
   ZoneImportPlan,
   ZoneImportResult,
   TeamRole,
+  TeamRoleCapabilities,
   Ticket,
   TicketPriority,
   VirtualMachine,
@@ -1164,6 +1165,21 @@ export function useTeamMembers() {
   })
 }
 
+/**
+ * What each role may do, from the authorization the server enforces.
+ *
+ * The same five roles for every account on the platform, computed from an
+ * enum, costing no query — so it is cached for the session rather than
+ * refetched with the member list it sits beside.
+ */
+export function useTeamRoles() {
+  return useQuery({
+    queryKey: ['team', 'roles'],
+    queryFn: () => api.get<{ data: TeamRoleCapabilities[]; meta: { assignable_roles: TeamRole[] } }>('/team/roles'),
+    staleTime: Infinity,
+  })
+}
+
 export function useTeamInvitations(enabled = true) {
   return useQuery({
     queryKey: ['team', 'invitations'],
@@ -1214,7 +1230,7 @@ export function useRemoveMember() {
 }
 
 export function useTransferOwnership() {
-  return useTeamMutation((payload: { member_id: string; confirm_account_id: string }) =>
+  return useTeamMutation((payload: { member_id: string; confirm_account_name: string }) =>
     api.post<Envelope<TeamMember>>('/team/transfer-ownership', payload),
   )
 }

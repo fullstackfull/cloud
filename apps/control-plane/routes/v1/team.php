@@ -19,6 +19,8 @@ use Lynomia\Modules\Identity\Http\Controllers\TeamController;
  * account and the middleware that resolves one would refuse them.
  */
 
+Route::get('team/roles', [TeamController::class, 'roles'])->name('team.roles');
+
 Route::get('team/members', [TeamController::class, 'members'])->name('team.members');
 
 Route::patch('team/members/{member}', [TeamController::class, 'changeRole'])

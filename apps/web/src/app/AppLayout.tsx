@@ -9,7 +9,11 @@ import { useCurrentUser, useLogout } from '@/features/auth/useAuth'
 import { useIsOperator } from '@/features/admin/useIsOperator'
 import { applyTimeZone } from '@/lib/format'
 
+import { ConnectionNotice } from './ConnectionNotice'
 import { MobileNavigation } from './MobileNavigation'
+import { RouteErrorBoundary } from './RouteErrorBoundary'
+import { SessionExpiryNotice } from './SessionExpiryNotice'
+import { MAIN_CONTENT_ID, SkipLink } from './SkipLink'
 import { Sidebar } from './Sidebar'
 
 /**
@@ -52,7 +56,14 @@ export function AppLayout() {
   }
 
   return (
-    <div className="min-h-dvh bg-[var(--surface)] lg:flex">
+    <div className="relative min-h-dvh bg-[var(--surface)] lg:flex">
+      {/*
+        First in the DOM so it is first in the tab order: a portal with
+        twenty-one destinations in its sidebar puts twenty-one stops between
+        the top of the page and the page.
+      */}
+      <SkipLink />
+
       <Sidebar
         isOperator={isOperator}
         signingOut={logout.isPending}
@@ -110,7 +121,16 @@ export function AppLayout() {
           gutter, because a line of prose 1900px long is not a line anyone
           reads.
         */}
-        <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        <ConnectionNotice />
+
+        <main
+          id={MAIN_CONTENT_ID}
+          // Focusable only as a skip-link target: -1 keeps it out of the tab
+          // order while letting focus land here, so the next Tab continues
+          // from the content rather than from the top of the document.
+          tabIndex={-1}
+          className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 focus:outline-none"
+        >
           {user?.email_verified === false ? (
             <div className="mb-6">
               <Alert tone="warning" title={t('account.verifyEmailTitle')}>
@@ -132,9 +152,18 @@ export function AppLayout() {
             </div>
           ) : null}
 
-          <Outlet />
+          {/*
+            Inside `<main>` so that a screen which throws takes the page with
+            it and leaves the shell — the sidebar, the language switch and the
+            way to sign out — standing.
+          */}
+          <RouteErrorBoundary>
+            <Outlet />
+          </RouteErrorBoundary>
         </main>
       </div>
+
+      <SessionExpiryNotice />
     </div>
   )
 }

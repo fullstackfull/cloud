@@ -40,7 +40,6 @@ final class TicketResource extends JsonResource
             'priority' => $ticket->priority->value,
             'service_id' => $ticket->service_id,
             'invoice_id' => $ticket->invoice_id,
-            'assigned_to' => $ticket->assignee?->name,
             'opened_by' => $ticket->openedBy?->name,
             'last_reply_at' => $ticket->last_reply_at?->toIso8601String(),
             'last_reply_by' => $ticket->last_reply_by?->value,

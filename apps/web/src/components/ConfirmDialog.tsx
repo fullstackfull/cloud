@@ -25,6 +25,16 @@ interface ConfirmDialogProps {
   evidenceHint?: string
   confirmLabel: string
   /**
+   * How the confirm button is drawn.
+   *
+   * Defaults to danger, because most confirmations in this portal guard
+   * something a customer cannot undo. Changing a colleague's role is not one
+   * of those: it takes effect on their next request and is reversed by
+   * changing it back, and painting it the same red as "destroy this machine"
+   * teaches a customer that the red means nothing.
+   */
+  tone?: 'danger' | 'primary'
+  /**
    * What the way out is called. Defaults to "Cancel", which is wrong on
    * exactly one kind of dialog — the one that confirms a cancellation, where
    * two buttons reading "Cancel" are a coin toss. Those pass "Keep order".
@@ -73,6 +83,7 @@ export function ConfirmDialog({
   evidenceLabel,
   evidenceHint,
   confirmLabel,
+  tone = 'danger',
   cancelLabel,
   loading = false,
   ready = true,
@@ -178,7 +189,7 @@ export function ConfirmDialog({
         )}
 
         {error === undefined || error === null ? null : (
-          <p role="alert" className="text-sm text-red-500">
+          <p role="alert" className="text-sm text-[var(--danger-text)]">
             {error}
           </p>
         )}
@@ -198,7 +209,7 @@ export function ConfirmDialog({
             */}
           <Button
             type="button"
-            variant="danger"
+            variant={tone}
             disabled={! satisfied}
             loading={loading}
             onClick={() => { if (satisfied && ! loading) onConfirm(typed, evidence.trim()); }}

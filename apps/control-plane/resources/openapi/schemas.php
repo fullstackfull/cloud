@@ -224,7 +224,6 @@ return [
             'invoice_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'is_in_flight' => ['type' => 'boolean'],
             'needs_attention' => ['type' => 'boolean', 'description' => 'True when a person has to decide. An operation in this state must not be retried by the client: the money may already have moved.'],
-            'failure_message' => ['type' => ['string', 'null'], 'description' => 'The registrar\'s own words, with anything credential-shaped removed before it was stored.'],
             'completed_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
@@ -520,7 +519,7 @@ return [
         'additionalProperties' => false,
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'provider' => ['type' => ['string', 'null']],
+            'from_account_credit' => ['type' => 'boolean', 'description' => 'True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it.'],
             'kind' => ['type' => ['string', 'null']],
             'status' => ['type' => ['string', 'null']],
             'is_settled' => ['type' => 'boolean'],
@@ -624,7 +623,6 @@ return [
             'serial' => ['type' => ['string', 'null']],
             'manufacturer' => ['type' => ['string', 'null']],
             'model' => ['type' => ['string', 'null']],
-            'hardware_profile' => ['type' => ['object', 'null'], 'additionalProperties' => true],
             'status' => ['type' => ['string', 'null']],
             'power_state' => ['type' => ['string', 'null']],
             'is_powered_on' => ['type' => 'boolean'],
@@ -1420,10 +1418,9 @@ return [
             'status' => ['type' => ['string', 'null']],
             'amount' => ['$ref' => '#/components/schemas/Money'],
             'invoice_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
-            'provider' => ['type' => ['string', 'null']],
+            'from_account_credit' => ['type' => 'boolean', 'description' => 'True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it.'],
             'is_settled' => ['type' => 'boolean'],
             'failure_code' => ['type' => ['string', 'null']],
-            'failure_message' => ['type' => ['string', 'null']],
             'processed_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
@@ -1447,7 +1444,6 @@ return [
              */
             'is_awaiting_provider' => ['type' => 'boolean'],
             'failure_code' => ['type' => ['string', 'null']],
-            'failure_message' => ['type' => ['string', 'null']],
         ],
     ],
 
@@ -1623,7 +1619,6 @@ return [
             'resources' => ['type' => ['object', 'null'], 'additionalProperties' => true],
             'plan_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'order_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
-            'order_item_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'subscription_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'activated_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'suspended_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -1821,7 +1816,6 @@ return [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
-            'wallet_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'currency' => ['type' => ['string', 'null']],
             'balance' => ['$ref' => '#/components/schemas/Money'],
             'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -1832,7 +1826,6 @@ return [
         'additionalProperties' => false,
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'wallet_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'kind' => ['type' => ['string', 'null']],
             'amount' => ['$ref' => '#/components/schemas/Money'],
             'direction' => ['type' => ['string', 'null']],
@@ -2052,7 +2045,6 @@ return [
             'priority' => ['type' => 'string'],
             'service_id' => ['type' => ['string', 'null']],
             'invoice_id' => ['type' => ['string', 'null']],
-            'assigned_to' => ['type' => ['string', 'null'], 'description' => 'A name, not a user id.'],
             'opened_by' => ['type' => ['string', 'null']],
             'last_reply_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'last_reply_by' => ['type' => ['string', 'null']],
@@ -2128,6 +2120,29 @@ return [
             'invited_by' => ['type' => ['string', 'null'], 'description' => 'A name rather than a user id: the question is who let them in, not which row.'],
             'invited_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'joined_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'TeamRole' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One team role and what the server will actually let it do. The capability list is computed from the role\'s own permission list - the one `AuthorisesWithinAccount` reads before every write - and an architecture test asserts that the published set and the enforced set are equal in both directions. Two permissions the role model declares are deliberately absent because nothing enforces them: closing the account, which is a support conversation at launch, and managing payment methods, of which the platform stores none.',
+        'properties' => [
+            'id' => ['type' => 'string', 'description' => 'owner, administrator, billing, technical or member.'],
+            'is_owner' => ['type' => 'boolean'],
+            'assignable' => ['type' => 'boolean', 'description' => 'Whether a member may be given this role. False for owner: an account has one owner and ownership moves by transfer, which names both sides in one act.'],
+            'capabilities' => [
+                'type' => 'array',
+                'description' => 'The whole matrix, not only what this role holds: "can this role see billing?" has two useful answers, and a list of only the yeses makes the reader compare five lists to find the no.',
+                'items' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'id' => ['type' => 'string', 'description' => 'The customer-facing capability id the portal translates.'],
+                        'permission' => ['type' => 'string', 'description' => 'The canonical permission the API checks, published so the claim is verifiable.'],
+                        'granted' => ['type' => 'boolean'],
+                    ],
+                ],
+            ],
         ],
     ],
     'TeamInvitation' => [

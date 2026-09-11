@@ -27,6 +27,8 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerCapability;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentKind;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentState;
@@ -212,6 +214,17 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
          * whose result nobody knows.
          */
         'operations.retryAdvice' => [RetryAdvice::class],
+
+        /*
+         * Who on a team may do what. Both halves reach the customer: the role
+         * names label the rows of the permission matrix and the dropdown that
+         * assigns one, and the capability names label its columns. A missing
+         * string here is a permission table with a blank heading, which is
+         * worse than no table — the reader fills the blank in themselves.
+         */
+        'team.roles' => [CustomerRole::class],
+        'team.capabilities' => [CustomerCapability::class],
+        'team.capabilityHints' => [CustomerCapability::class],
         'admin.provisioning.kinds' => [ProvisioningJobKind::class],
         'admin.provisioning.failureClass' => [FailureClass::class],
     ];

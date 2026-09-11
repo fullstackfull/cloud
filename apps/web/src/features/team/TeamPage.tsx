@@ -10,7 +10,9 @@ import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { SelectField } from '@/components/SelectField'
 import { Loading } from '@/components/Loading'
+import { useToasts } from '@/components/toastChannel'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
@@ -22,10 +24,14 @@ import {
   useRevokeInvitation,
   useTeamInvitations,
   useTeamMembers,
+  useTeamRoles,
   useTransferOwnership,
 } from '@/lib/queries'
 import type { InvitationStatus, TeamInvitation, TeamMember, TeamRole } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+
+import { RoleChangeDialog } from './RoleChangeDialog'
+import { RolePermissionMatrix } from './RolePermissionMatrix'
 
 /**
  * An offer nobody has answered is not a problem; one that was withdrawn or ran
@@ -75,6 +81,7 @@ export function TeamPage() {
 
   const { data: members, isPending, error: membersError } = useTeamMembers()
   const { data: invitations, error: invitationsError } = useTeamInvitations(canManage)
+  const { data: roleMatrix } = useTeamRoles()
 
   const invite = useInviteMember()
   const resend = useResendInvitation()
@@ -86,9 +93,14 @@ export function TeamPage() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<TeamRole>('member')
   const [removing, setRemoving] = useState<TeamMember | null>(null)
+  // The role a colleague is about to be given, held until it is confirmed.
+  // Picking from the dropdown used to send the change on the change event.
+  const [changing, setChanging] = useState<{ member: TeamMember; to: TeamRole } | null>(null)
   const [handingOver, setHandingOver] = useState<TeamMember | null>(null)
   // The open offer about to be taken back. Named in the dialogue by address.
   const [withdrawing, setWithdrawing] = useState<TeamInvitation | null>(null)
+
+  const { announce } = useToasts()
 
   const displayed = describeError(
     invite.error ?? resend.error ?? revoke.error ?? changeRole.error ?? remove.error,
@@ -115,21 +127,27 @@ export function TeamPage() {
       header: t('team.role'),
       cell: (member) =>
         canManage && member.role !== 'owner' ? (
-          <select
-            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm"
-            aria-label={t('team.role')}
+          /*
+           * Choosing a role opens the confirmation; it does not send it. The
+           * select's own value stays on the member's current role until the
+           * server has agreed, so a dropdown that reads "Administrator" always
+           * means the person is one.
+           */
+          <SelectField
+            label={t('team.role')}
+            labelHidden
             value={member.role}
             disabled={changeRole.isPending}
             onChange={(event) => {
-              changeRole.mutate({ id: member.id, role: event.target.value as TeamRole })
+              const picked = event.target.value as TeamRole
+
+              if (picked !== member.role) setChanging({ member, to: picked })
             }}
-          >
-            {assignable.map((option) => (
-              <option key={option} value={option}>
-                {t(`team.roles.${option}`)}
-              </option>
-            ))}
-          </select>
+            options={assignable.map((option) => ({
+              value: option,
+              label: t(`team.roles.${option}`),
+            }))}
+          />
         ) : (
           <Badge tone={member.role === 'owner' ? 'info' : 'neutral'}>{t(`team.roles.${member.role}`)}</Badge>
         ),
@@ -207,7 +225,19 @@ export function TeamPage() {
               size="sm"
               variant="ghost"
               loading={resend.isPending && resend.variables === invitation.id}
-              onClick={() => { resend.mutate(invitation.id); }}
+              onClick={() => {
+                // A second silent success is indistinguishable from a button
+                // that does nothing, which is what this one looked like.
+                resend.mutate(invitation.id, {
+                  onSuccess: () => {
+                    announce({
+                      id: `invitation:${invitation.id}`,
+                      tone: 'success',
+                      title: t('team.invitationResent', { email: invitation.email }),
+                    })
+                  },
+                })
+              }}
             >
               {t('team.resend')}
             </Button>
@@ -237,6 +267,12 @@ export function TeamPage() {
       ) : null}
 
       <div className="flex flex-col gap-4">
+        {/*
+          Before the list, because the question it answers — what does this
+          role mean — is asked before a role is picked, not after.
+        */}
+        <RolePermissionMatrix />
+
         <Card title={t('team.membersTitle')} description={t('team.membersSubtitle')}>
           {/*
             * Loading, failed and empty are three different facts. A refused
@@ -340,7 +376,21 @@ export function TeamPage() {
       <ConfirmDialog
         open={removing !== null}
         title={t('team.removeTitle')}
-        body={t('team.removeBody', { name: removing?.name ?? removing?.email ?? '' })}
+        body={
+          <div className="flex flex-col gap-2">
+            <p>{t('team.removeBody', { name: removing?.name ?? removing?.email ?? '' })}</p>
+
+            {/*
+              What actually ends, and what does not. Said because the two are
+              different and a customer removing a departing colleague needs to
+              know which: their access to this account goes immediately, and
+              any API token they minted keeps working until somebody revokes
+              it — which is the account's own list, not theirs.
+            */}
+            <p>{t('team.removeAccessEnds')}</p>
+            <p className="text-[var(--warning-text)]">{t('team.removeTokensRemain')}</p>
+          </div>
+        }
         confirmLabel={t('team.remove')}
         loading={remove.isPending}
         onCancel={() => { setRemoving(null); }}
@@ -352,16 +402,28 @@ export function TeamPage() {
       />
 
       {/*
-        Handing the account over takes the account's own id typed back, the
-        same device the irreversible cancellation and the reinstall use. There
-        is no undo that does not depend on the goodwill of whoever now owns it.
+        Handing the account over takes the account's own name typed back — the
+        same device the irreversible cancellation and the reinstall use, and
+        there is no undo that does not depend on the goodwill of whoever now
+        owns it.
+
+        It used to be the account's ULID. Both values are on this screen, so
+        neither was ever a secret and nothing is weakened by the change; what
+        is different is that somebody typing their own company's name is
+        recognising what they are giving away, and somebody copying
+        twenty-six characters of base32 is not.
       */}
       <ConfirmDialog
         open={handingOver !== null}
         title={t('team.transferTitle')}
-        body={t('team.transferBody', { name: handingOver?.name ?? handingOver?.email ?? '' })}
-        requiredPhrase={account?.id ?? ''}
-        requiredPhraseLabel={t('team.transferConfirmLabel')}
+        body={
+          <div className="flex flex-col gap-2">
+            <p>{t('team.transferBody', { name: handingOver?.name ?? handingOver?.email ?? '' })}</p>
+            <p>{t('team.transferWhatChanges')}</p>
+          </div>
+        }
+        requiredPhrase={account?.display_name ?? ''}
+        requiredPhraseLabel={t('team.transferConfirmLabel', { account: account?.display_name ?? '' })}
         confirmLabel={t('team.makeOwner')}
         loading={transfer.isPending}
         error={transferError?.message}
@@ -369,10 +431,50 @@ export function TeamPage() {
         onConfirm={(phrase) => {
           if (handingOver !== null) {
             transfer.mutate(
-              { member_id: handingOver.id, confirm_account_id: phrase },
-              { onSuccess: () => { setHandingOver(null); } },
+              { member_id: handingOver.id, confirm_account_name: phrase },
+              {
+                onSuccess: () => {
+                  setHandingOver(null)
+                  announce({
+                    id: 'team:ownership',
+                    tone: 'success',
+                    title: t('team.transferDone', {
+                      name: handingOver.name ?? handingOver.email ?? '',
+                    }),
+                  })
+                },
+              },
             )
           }
+        }}
+      />
+
+      <RoleChangeDialog
+        member={changing?.member ?? null}
+        to={changing?.to ?? null}
+        roles={roleMatrix?.data ?? []}
+        loading={changeRole.isPending}
+        error={describeError(changeRole.error)?.message}
+        onCancel={() => { setChanging(null); }}
+        onConfirm={() => {
+          if (changing === null) return
+
+          changeRole.mutate(
+            { id: changing.member.id, role: changing.to },
+            {
+              onSuccess: () => {
+                announce({
+                  id: `team:role:${changing.member.id}`,
+                  tone: 'success',
+                  title: t('team.roleChange.done', {
+                    name: changing.member.name ?? changing.member.email ?? '',
+                    role: t(`team.roles.${changing.to}`),
+                  }),
+                })
+                setChanging(null)
+              },
+            },
+          )
         }}
       />
     </>

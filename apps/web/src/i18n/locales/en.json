@@ -60,7 +60,8 @@
       "account": "Account"
     },
     "buy": "Buy",
-    "activity": "Activity"
+    "activity": "Activity",
+    "skipToContent": "Skip to main content"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -1769,7 +1770,7 @@
     "makeOwner": "Make owner",
     "transferTitle": "Hand this account over?",
     "transferBody": "{{name}} becomes the owner and you become an administrator. Only the new owner can hand it back.",
-    "transferConfirmLabel": "Type the account id to confirm",
+    "transferConfirmLabel": "Type the account name — {{account}} — to confirm",
     "inviteTitle": "Invite somebody",
     "inviteSubtitle": "They receive a link that works once, only for the address you enter, and only for two weeks.",
     "sendInvitation": "Send invitation",
@@ -1803,6 +1804,48 @@
       "title": "Withdraw the invitation to {{email}}?",
       "body": "The link they were sent stops working immediately. Nothing else changes; you can invite them again later.",
       "confirmLabel": "Withdraw invitation"
+    },
+    "capabilities": {
+      "view_services": "See services",
+      "manage_services": "Manage services",
+      "end_services": "End services",
+      "view_billing": "See billing",
+      "pay_invoices": "Pay invoices",
+      "manage_members": "Invite and manage people",
+      "manage_account": "Change account settings",
+      "manage_api_tokens": "Manage API tokens",
+      "ask_support": "Contact support"
+    },
+    "capabilityHints": {
+      "view_services": "See every server, site, domain and zone on the account, and their state.",
+      "manage_services": "Reboot and rebuild machines, edit DNS records, manage sites and take backups.",
+      "end_services": "Terminate a service the account is paying for.",
+      "view_billing": "Read invoices, payments, the wallet and what the account owes.",
+      "pay_invoices": "Pay an invoice, by card or from account credit.",
+      "manage_members": "Invite people to the account, change their role and remove them.",
+      "manage_account": "Change the account's own details, including the country and currency request.",
+      "manage_api_tokens": "Create and revoke API tokens that act for this account.",
+      "ask_support": "Open a support request and reply to it."
+    },
+    "permissionsTitle": "What each role can do",
+    "permissionsSubtitle": "The same list the platform checks before it allows anything. Read across a row to compare the five roles.",
+    "permissionsNote": "Every role can see the account and ask for help. Nothing on this table is a promise made by this page: it is computed from the permissions the API enforces.",
+    "capability": "What it can do",
+    "invitationResent": "The invitation to {{email}} was sent again.",
+    "removeAccessEnds": "Their access to this account ends immediately. They keep their own Lynomia login and anything in their other accounts.",
+    "removeTokensRemain": "Any API token they created for this account keeps working until it is revoked. Check the API tokens page.",
+    "transferWhatChanges": "They become the owner and you become an administrator. Only an owner can transfer ownership, so you cannot undo this yourself.",
+    "transferDone": "{{name}} now owns this account.",
+    "roleChange": {
+      "title": "Change {{name}}'s role",
+      "summary": "{{name}} moves from {{from}} to {{to}}.",
+      "gains": "They will be able to:",
+      "loses": "They will no longer be able to:",
+      "noChange": "This changes nothing about what they can do.",
+      "membershipWarning": "This role can invite and remove people, including you.",
+      "whenItApplies": "It takes effect on their next request. You can change it back at any time.",
+      "confirm": "Change the role",
+      "done": "{{name}} is now {{role}}."
     }
   },
   "invitation": {
@@ -2205,7 +2248,9 @@
     "returnTitle": "Your payment",
     "returnRecorded": "What we have recorded for this payment:",
     "returnUnknown": "We cannot find that payment on this account.",
-    "returnIsNotProof": "Coming back from the payment page does not settle an invoice on its own. The invoice is marked paid when the provider confirms the payment to us."
+    "returnIsNotProof": "Coming back from the payment page does not settle an invoice on its own. The invoice is marked paid when the provider confirms the payment to us.",
+    "fromCredit": "From account credit",
+    "fromOutside": "Paid in"
   },
   "paymentKind": {
     "charge": "Payment",
@@ -2280,5 +2325,40 @@
     "billingBody": "What this costs, what renews it, and the order and invoice behind it.",
     "noBillingRelation": "This is not linked to a service, so there is nothing to bill against.",
     "noSubscription": "Nothing renews this: the platform has no subscription recorded against it."
+  },
+  "crash": {
+    "title": "Something went wrong while showing this page",
+    "body": "The page could not be drawn. This is a fault in the portal, not in your account.",
+    "unchanged": "Nothing was changed by this error. Anything you asked for before it either happened or did not, and your activity feed says which.",
+    "retry": "Try again",
+    "dashboard": "Go to dashboard",
+    "support": "Contact support"
+  },
+  "connection": {
+    "offlineTitle": "You are offline",
+    "offlineBody": "This device has no network. Nothing on this page has failed — it just cannot be updated until you are back online."
+  },
+  "session": {
+    "expiredTitle": "Your session has ended",
+    "expiredBody": "You have been signed out, so this page can no longer be updated. Sign in again to carry on from here.",
+    "expiredNotRepeated": "Nothing you had started has been repeated. If you were part-way through an action, please ask for it again after signing in.",
+    "expiredSignIn": "Sign in",
+    "expiredDismiss": "Keep reading"
+  },
+  "vocabulary": {
+    "unknownValue": "Not recognised",
+    "unknownState": "An unrecognised state",
+    "unknownPeriod": "An unrecognised billing period",
+    "unknownPaymentKind": "An unrecognised kind of payment",
+    "unknownEvent": "Something happened on this account",
+    "unknownChange": "An unrecognised change",
+    "unknownEntry": "An unrecognised entry",
+    "unknownRefusal": "This change cannot be made right now",
+    "unknownWarning": "There is something to be aware of",
+    "unknownOutcome": "An unrecognised outcome",
+    "unknownCategory": "Other",
+    "unknownChannel": "Another channel",
+    "unknownAttribute": "Another detail",
+    "unknownBlocker": "This action is not available right now"
   }
 }

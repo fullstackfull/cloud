@@ -28,13 +28,27 @@ use Tests\TestCase;
 final class CustomerErrorCatalogueTest extends TestCase
 {
     /**
-     * Modules with routes under /api/v1, plus the ones whose exceptions can
-     * escape through those routes without having routes of their own.
+     * Modules whose exceptions can escape through a customer route, and which
+     * must therefore have a sentence for every code they can raise.
+     *
+     * **The list is a floor, not the list.** It was a hand-maintained constant
+     * and it had already drifted: Wave 4 added the Activity module with routes
+     * under /api/v1 and nobody added it here, so for one whole wave a new
+     * customer module was outside the gate that exists to stop exactly that.
+     * It happened to raise no exceptions, which is luck rather than design.
+     *
+     * So the set is now derived from `routes/v1` and this constant only adds
+     * the modules whose exceptions escape through *somebody else's* routes —
+     * a domain refusal raised while placing an order, a readiness answer
+     * raised from the catalogue. Those cannot be found by reading route files
+     * and are the only thing worth maintaining by hand.
+     *
+     * @see modulesServingCustomerRoutes()
      */
-    private const array CUSTOMER_MODULES = [
-        'ApiKeys', 'Backups', 'Billing', 'Catalog', 'Compute', 'Dedicated', 'Dns', 'Domains',
-        'Identity', 'Ipam', 'Notifications', 'Orders', 'Payments', 'ProductReadiness', 'Shared',
-        'SharedHosting', 'Subscriptions', 'Support', 'Vps', 'Wallet',
+    private const array MODULES_WITHOUT_ROUTES_OF_THEIR_OWN = [
+        // Raised while placing an order or reading a plan, never from a route
+        // of its own.
+        'Compute', 'ProductReadiness', 'Shared', 'Subscriptions', 'Catalog',
     ];
 
     /**
@@ -42,6 +56,29 @@ final class CustomerErrorCatalogueTest extends TestCase
      * are named for staff, in English, and are not customer fields.
      */
     private const array MODULES_WITHOUT_CUSTOMER_REQUESTS = ['Compute', 'ProductReadiness', 'Shared'];
+
+    /**
+     * Modules serving /api/v1 that raise nothing and validate nothing, so
+     * neither derivation finds anything in them. Named so the floor assertion
+     * below cannot be satisfied by a module quietly disappearing.
+     */
+    private const array MODULES_WITH_NO_CODES = ['Activity'];
+
+    /**
+     * Modules that serve a customer route but whose exceptions cannot escape
+     * through it, with the reason.
+     *
+     * Provisioning's one customer route is a read — the events on a service —
+     * and its exceptions belong to the engine: capacity, timeouts, adoption,
+     * retry refusals, drift review. They are raised by jobs and by operator
+     * endpoints, they are answered to staff in English with the engineer's
+     * message, and translating them would be translating a log.
+     *
+     * Kept as a named list rather than folded into the derivation, so that a
+     * second module claiming the same exemption is a decision somebody makes
+     * here.
+     */
+    private const array OPERATOR_ONLY_EXCEPTIONS = ['Provisioning'];
 
     /** Codes minted by the renderer in bootstrap/app.php rather than by an exception. */
     private const array RENDERER_CODES = [
@@ -133,6 +170,59 @@ final class CustomerErrorCatalogueTest extends TestCase
         }
     }
 
+    #[Test]
+    public function the_module_list_is_read_from_the_routes_rather_than_maintained_by_hand(): void
+    {
+        $derived = self::customerModules();
+
+        /*
+         * Every module that serves a customer route is in the set, which is
+         * the property the hand-maintained constant did not have. Activity is
+         * the specific one it was missing.
+         */
+        foreach (['Activity', 'ApiKeys', 'Backups', 'Billing', 'Dedicated', 'Dns', 'Domains',
+            'Identity', 'Ipam', 'Notifications', 'Orders', 'Payments', 'SharedHosting',
+            'Support', 'Vps', 'Wallet'] as $module) {
+            $this->assertContains($module, $derived, "{$module} serves customer routes and the gate does not read it");
+        }
+
+        // And the modules that raise nothing still exist, so the floor above
+        // cannot be met by one of them being deleted.
+        foreach (self::MODULES_WITH_NO_CODES as $module) {
+            $this->assertDirectoryExists(base_path("src/Modules/{$module}"));
+        }
+    }
+
+    /**
+     * Every module a customer request can reach, read from the route files.
+     *
+     * @return list<string>
+     */
+    private static function customerModules(): array
+    {
+        $modules = self::MODULES_WITHOUT_ROUTES_OF_THEIR_OWN;
+
+        $files = [
+            ...File::glob(base_path('routes/v1/*.php')),
+            base_path('routes/api_v1.php'),
+        ];
+
+        foreach ($files as $file) {
+            preg_match_all(
+                '/Lynomia\\\\Modules\\\\([A-Za-z]+)\\\\/',
+                (string) file_get_contents($file),
+                $matches,
+            );
+
+            array_push($modules, ...$matches[1]);
+        }
+
+        $modules = array_values(array_unique($modules));
+        sort($modules);
+
+        return $modules;
+    }
+
     /**
      * @return list<string>
      */
@@ -140,7 +230,7 @@ final class CustomerErrorCatalogueTest extends TestCase
     {
         $codes = self::RENDERER_CODES;
 
-        foreach (self::CUSTOMER_MODULES as $module) {
+        foreach (array_diff(self::customerModules(), self::OPERATOR_ONLY_EXCEPTIONS) as $module) {
             $files = [
                 ...File::glob(base_path("src/Modules/{$module}/Domain/Exceptions/*.php")),
                 ...File::glob(base_path("src/Modules/{$module}/Domain/Enums/*Refusal*.php")),
@@ -165,7 +255,7 @@ final class CustomerErrorCatalogueTest extends TestCase
             ...File::glob(base_path('src/Http/**/*.php')),
             base_path('bootstrap/app.php'),
         ];
-        foreach (self::CUSTOMER_MODULES as $module) {
+        foreach (self::customerModules() as $module) {
             array_push($sources, ...File::glob(base_path("src/Modules/{$module}/Http/Controllers/*.php")));
         }
         foreach ($sources as $file) {
@@ -188,14 +278,21 @@ final class CustomerErrorCatalogueTest extends TestCase
     private function customerFields(): array
     {
         $fields = [];
-        foreach (array_diff(self::CUSTOMER_MODULES, self::MODULES_WITHOUT_CUSTOMER_REQUESTS) as $module) {
+        foreach (array_diff(self::customerModules(), self::MODULES_WITHOUT_CUSTOMER_REQUESTS) as $module) {
             $files = [
                 ...File::glob(base_path("src/Modules/{$module}/Http/Requests/*.php")),
                 ...File::glob(base_path("src/Modules/{$module}/Http/Controllers/*.php")),
             ];
             foreach ($files as $file) {
                 foreach (file($file) ?: [] as $line) {
-                    if (preg_match("/^\\s*'([a-z_]+(?:\\.\\*)?(?:\\.[a-z_]+)*)' => (?:\\[|'(?:required|nullable|sometimes|string|integer|boolean|array|email|accepted|bail|present|prohibited)\\b)/", $line, $m) === 1) {
+                    /*
+                     * A rule list, not any array. `'billing' => [` in a
+                     * controller building a response used to match this, which
+                     * is how three response keys turned up as fields with no
+                     * name in either catalogue the first time the module list
+                     * was derived from the routes rather than hand-written.
+                     */
+                    if (preg_match("/^\\s*'([a-z_]+(?:\\.\\*)?(?:\\.[a-z_]+)*)' => (?:\\[\\s*'(?:required|nullable|sometimes|string|integer|boolean|array|email|accepted|bail|present|prohibited|date|ulid|uuid|numeric|in|max|min|regex|confirmed|exists|image|file|timezone|url|ip|json)|'(?:required|nullable|sometimes|string|integer|boolean|array|email|accepted|bail|present|prohibited)\\b)/", $line, $m) === 1) {
                         $fields[] = $m[1];
                     }
                 }

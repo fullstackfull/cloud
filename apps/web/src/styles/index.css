@@ -61,6 +61,15 @@
    */
   --danger-border: oklch(0.82 0.09 25);
 
+  /*
+   * A destructive control's own surface. The token system had a danger text
+   * colour and a danger border and no danger *fill*, so every solid red
+   * button reached for `bg-red-600` — a fourth red, from outside the system,
+   * that no other danger surface matched.
+   */
+  --danger-surface: oklch(0.55 0.20 25);
+  --danger-surface-strong: oklch(0.48 0.20 25);
+
   /* Interactive emphasis outside a button: an unread dot, an inline link. */
   --accent: var(--color-brand-600);
 
@@ -87,6 +96,8 @@
     --danger-text: oklch(0.75 0.16 25);
     --warning-text: oklch(0.80 0.14 75);
     --danger-border: oklch(0.40 0.12 25);
+    --danger-surface: oklch(0.52 0.19 25);
+    --danger-surface-strong: oklch(0.46 0.19 25);
     --accent: var(--color-brand-400);
 
     --status-running: oklch(0.72 0.15 150);

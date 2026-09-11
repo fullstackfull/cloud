@@ -90,7 +90,20 @@ final class StartedPaymentResource extends JsonResource
             ],
 
             'failure_code' => $intent->failureCode,
-            'failure_message' => $intent->failureMessage,
+            /*
+             * The provider's own sentence is deliberately not here.
+             *
+             * It used to be, with a comment arguing a refused payment that
+             * cannot say why is a support ticket — and the argument was right
+             * about the need and wrong about the field. What was published was
+             * the gateway's or the registrar's English prose, falling back to
+             * an SDK exception message, which reached an Arabic customer in
+             * English and was never rendered by any screen. `failure_code` is
+             * the bounded, normalised reason, it is what the portal branches
+             * on, and it is the half that can be said in the reader's own
+             * language.
+             */
+
         ];
     }
 

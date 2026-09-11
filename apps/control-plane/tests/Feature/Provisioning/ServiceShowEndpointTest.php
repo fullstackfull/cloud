@@ -184,7 +184,7 @@ final class ServiceShowEndpointTest extends ServiceApiTestCase
             // machine's and a client building a link from it would point at
             // nothing. A handle and not a path — routes belong to the portal.
             'id', 'kind', 'label', 'identity', 'resource', 'state', 'is_usable', 'resources',
-            'plan_id', 'order_id', 'order_item_id', 'subscription_id',
+            'plan_id', 'order_id', 'subscription_id',
             'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
             'terminated_at', 'created_at',
         ], array_keys($document));

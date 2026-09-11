@@ -53,10 +53,6 @@ final class WalletTransactionResource extends JsonResource
         return [
             'id' => $this->id,
 
-            // The customer's own wallet, so a multi-currency account can group
-            // its statement by the balance each line moved.
-            'wallet_id' => $this->wallet_id,
-
             'kind' => $this->kind->value,
 
             // Signed, exactly as stored: positive credited the customer,

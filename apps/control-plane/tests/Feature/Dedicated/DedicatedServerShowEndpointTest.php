@@ -38,7 +38,6 @@ final class DedicatedServerShowEndpointTest extends DedicatedApiTestCase
             ->assertJsonPath('data.serial', 'SNSHOW00001')
             ->assertJsonPath('data.manufacturer', 'HPE')
             ->assertJsonPath('data.model', 'ProLiant DL360 Gen10')
-            ->assertJsonPath('data.hardware_profile', 'ded-epyc-64')
             ->assertJsonPath('data.status', DedicatedServerStatus::Active->value)
             ->assertJsonPath('data.service_id', $server->service_id);
     }

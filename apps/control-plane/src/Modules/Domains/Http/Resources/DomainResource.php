@@ -96,7 +96,6 @@ final class DomainResource extends JsonResource
                 'state' => $attempt->state->value,
                 'invoice_id' => $attempt->invoice_id,
                 'needs_attention' => $attempt->state->needsAttention(),
-                'failure_message' => $attempt->failure_message,
                 'completed_at' => $attempt->completed_at?->toIso8601String(),
             ],
         ];

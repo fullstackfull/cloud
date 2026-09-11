@@ -88,7 +88,8 @@ export function InvoiceDetailPage() {
     {
       key: 'method',
       header: t('payments.method'),
-      cell: (payment) => t(`paymentProvider.${payment.provider}`, { defaultValue: payment.provider }),
+      cell: (payment) =>
+        payment.from_account_credit ? t('payments.fromCredit') : t('payments.fromOutside'),
     },
     { key: 'status', header: t('payments.status'), cell: (payment) => <StatusBadge status={payment.status} /> },
     { key: 'amount', header: t('payments.amount'), cell: (payment) => <MoneyText value={payment.amount} /> },

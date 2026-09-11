@@ -177,6 +177,8 @@ return [
      * match every index the validator reports.
      */
     'attributes' => [
+        'confirm_account_name' => 'اسم الحساب',
+        'cursor' => 'موضع الصفحة',
         'client_secret' => 'بيانات تأكيد الدفع',
         'accepts_terms' => 'شروط الخدمة',
         'account_type' => 'نوع الحساب',
@@ -343,6 +345,9 @@ return [
             'two_factor_not_enabled' => 'التحقق بخطوتين غير مفعّل على هذا الحساب.',
             'too_many_password_attempts' => 'محاولات فاشلة كثيرة جدًا. حاول مرة أخرى لاحقًا.',
             'password_incorrect' => 'كلمة المرور هذه غير صحيحة.',
+        ],
+        'team' => [
+            'confirm_account_name_required' => 'اسم الحساب، مكتوبًا كما يظهر أعلاه، هو ما يؤكّد نقل الملكية.',
         ],
         'notifications' => [
             'unknown_category_or_channel' => 'فئة الإشعار أو قناته غير معروفة.',

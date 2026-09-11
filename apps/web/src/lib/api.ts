@@ -9,6 +9,7 @@
  */
 
 import i18n, { isSupportedLocale } from '@/i18n'
+import { reportSessionExpired } from '@/lib/sessionExpiry'
 
 export interface ApiErrorBody {
   code: string
@@ -217,6 +218,21 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (!response.ok) {
     const error = extractError(payload)
+
+    /*
+     * A refusal for want of a session is announced, once, so the shell can
+     * offer a deliberate way back in rather than leaving the customer on a
+     * page of failed reads.
+     *
+     * Announced and not acted on. Nothing here retries, redirects or
+     * remembers the request: a mutation that came back 401 must never be
+     * replayed after signing in, because the portal cannot know whether the
+     * server accepted it before the session went.
+     */
+    if (response.status === 401) {
+      reportSessionExpired()
+    }
+
     throw new ApiError(
       response.status,
       error ?? { code: `http.${response.status}`, message: response.statusText },

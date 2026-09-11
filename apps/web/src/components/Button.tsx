@@ -1,29 +1,12 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-import { cn } from '@/lib/cn'
-
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
-type Size = 'sm' | 'md' | 'lg'
+import { buttonClasses, type ButtonSize, type ButtonVariant } from '@/components/buttonStyles'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: Variant
-  size?: Size
+  variant?: ButtonVariant
+  size?: ButtonSize
   loading?: boolean
   children: ReactNode
-}
-
-const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800',
-  secondary:
-    'border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]',
-  ghost: 'text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)] hover:text-[var(--text-primary)]',
-  danger: 'bg-red-600 text-white hover:bg-red-700 active:bg-red-800',
-}
-
-const SIZES: Record<Size, string> = {
-  sm: 'h-8 px-3 text-sm',
-  md: 'h-10 px-4 text-sm',
-  lg: 'h-12 px-6 text-base',
 }
 
 export function Button({
@@ -41,13 +24,7 @@ export function Button({
       // submitted twice by an impatient click.
       disabled={disabled === true || loading}
       aria-busy={loading}
-      className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium',
-        'transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-        VARIANTS[variant],
-        SIZES[size],
-        className,
-      )}
+      className={buttonClasses(variant, size, className)}
       {...props}
     >
       {loading ? <Spinner /> : null}

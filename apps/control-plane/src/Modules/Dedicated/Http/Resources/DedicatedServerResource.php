@@ -97,7 +97,6 @@ final class DedicatedServerResource extends JsonResource
             'serial' => $this->serial,
             'manufacturer' => $this->manufacturer,
             'model' => $this->model,
-            'hardware_profile' => $this->hardware_profile,
 
             'status' => $this->status->value,
             // What the controller last reported the chassis was doing.

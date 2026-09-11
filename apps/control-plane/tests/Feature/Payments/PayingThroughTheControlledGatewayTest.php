@@ -320,17 +320,25 @@ final class PayingThroughTheControlledGatewayTest extends PaymentsApiTestCase
 
         /*
          * Two payment rows, because two different things happened: the wallet
-         * is a payment method of its own — recorded against the provider
-         * `wallet`, which is the platform itself — and the card is the other.
-         * An invoice that showed one line reading "paid" would leave the
-         * customer unable to see where nine dinars went.
+         * is a payment method of its own — the platform paying itself — and
+         * the card is the other. An invoice that showed one line reading
+         * "paid" would leave the customer unable to see where nine dinars
+         * went.
+         *
+         * Grouped by `kind`, which is the customer's vocabulary for how money
+         * moved. It used to be grouped by `provider` — the gateway's own
+         * registered name — and that field is no longer on the customer
+         * surface: it named a driver rather than anything the payer did.
          */
         $payments = collect((array) $document->json('data.payments'))
-            ->keyBy('provider')
+            ->keyBy(fn (array $row): string => $row['from_account_credit'] === true ? 'credit' : 'outside')
             ->map(fn (array $row): int => (int) $row['amount']['minor_units'])
             ->all();
 
-        $this->assertSame(['wallet' => 4000, 'fake' => 5000], $payments);
+        $this->assertSame(['credit' => 4000, 'outside' => 5000], $payments);
+
+        // And nothing in the document names the gateway that took the card.
+        $this->assertStringNotContainsString('"provider"', $document->getContent() ?: '');
 
         // And the ledger says the same thing from the wallet's side.
         $this->assertSame(-4000, $document->json('data.wallet_credits.0.amount.minor_units'));

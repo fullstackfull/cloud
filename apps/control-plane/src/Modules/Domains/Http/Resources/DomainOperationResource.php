@@ -45,11 +45,17 @@ final class DomainOperationResource extends JsonResource
             'needs_attention' => $this->state->needsAttention(),
 
             /*
-             * The registrar's refusal, already redacted where it was stored.
-             * A customer whose registration was refused needs to see why —
-             * most refusals are about the name itself, and they can act on it.
+             * The registrar's own refusal sentence is not published.
+             *
+             * It was, with a comment saying a customer whose registration was
+             * refused needs to see why — which is true, and which this field
+             * never delivered: no screen rendered it, and what it held was the
+             * registrar's English prose. `state` and `needs_attention` say
+             * that something stopped and that a person has to look at it, and
+             * the contextual support link carries the operation. A bounded
+             * registrar-reason vocabulary, translated like every other reason
+             * the portal shows, is the way to answer "why" properly.
              */
-            'failure_message' => $this->failure_message,
 
             'completed_at' => $this->completed_at?->toIso8601String(),
             'created_at' => $this->created_at->toIso8601String(),

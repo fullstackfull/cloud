@@ -1107,6 +1107,12 @@ return [
      | account - the person accepting their first invitation belongs to none.
      */
 
+    'api.v1.team.roles' => [
+        'tag' => 'Team',
+        'summary' => 'What each role may do',
+        'description' => 'The five roles and the capability matrix behind them, derived from the same permission list the API refuses with - so a screen that explains a role and an endpoint that refuses it cannot disagree. Readable by any member: deciding whether to accept an invitation is exactly when this is asked. Each capability publishes the permission string as well as its own id, so the claim can be checked against a 403 rather than taken on trust. Static for the whole platform and costs no query.',
+        'response' => ['envelope' => 'list', 'schema' => 'TeamRole'],
+    ],
     'api.v1.team.members' => [
         'tag' => 'Team',
         'summary' => 'List the people in this account',
@@ -1155,7 +1161,7 @@ return [
         'tag' => 'Team',
         'summary' => 'Hand this account to another member',
         'description' => "One act, both sides: the outgoing owner becomes an administrator and the incoming one becomes owner, in one transaction, so the account is never ownerless and never owned twice. Only the current owner may ask, the successor must already be an accepted member, and the account's own id must be typed back.",
-        'body' => ['member_id', 'confirm_account_id'],
+        'body' => ['member_id', 'confirm_account_name'],
         'response' => $one('TeamMember'),
     ],
     'api.v1.invitations.show' => [

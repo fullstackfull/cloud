@@ -302,7 +302,6 @@ final class WalletTransactionsEndpointTest extends WalletApiTestCase
 
         $this->assertSame([
             'id',
-            'wallet_id',
             'kind',
             'amount',
             'direction',

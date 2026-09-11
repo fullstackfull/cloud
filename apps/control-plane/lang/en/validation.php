@@ -196,6 +196,10 @@ return [
     */
 
     'attributes' => [
+
+        'confirm_account_name' => 'account name',
+
+        'cursor' => 'page position',
         'client_secret' => 'payment credential',
         'accepts_terms' => 'terms of service',
         'account_type' => 'account type',
@@ -369,6 +373,9 @@ return [
             'two_factor_not_enabled' => 'Two-factor authentication is not enabled on this account.',
             'too_many_password_attempts' => 'Too many failed attempts. Try again later.',
             'password_incorrect' => 'That password is incorrect.',
+        ],
+        'team' => [
+            'confirm_account_name_required' => "The account's name, typed exactly as it appears above, confirms the transfer.",
         ],
         'notifications' => [
             'unknown_category_or_channel' => 'Unknown notification category or channel.',

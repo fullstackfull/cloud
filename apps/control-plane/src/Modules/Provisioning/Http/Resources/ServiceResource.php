@@ -95,7 +95,6 @@ final class ServiceResource extends JsonResource
             // catalogue; none is another tenant's.
             'plan_id' => $this->plan_id,
             'order_id' => $this->order_id,
-            'order_item_id' => $this->order_item_id,
             'subscription_id' => $this->subscription_id,
 
             'activated_at' => $this->activated_at?->toIso8601String(),

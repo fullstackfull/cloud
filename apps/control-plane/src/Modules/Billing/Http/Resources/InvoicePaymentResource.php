@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
+use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 
 /**
@@ -37,8 +38,14 @@ final class InvoicePaymentResource extends JsonResource
         return [
             'id' => $this->id,
 
-            // How it was paid: the platform's own wallet, or a provider.
-            'provider' => $this->provider,
+            /*
+             * Whether the money came off the account's own credit or in from
+             * outside. The gateway's registered driver name used to be here
+             * and is not a customer fact: it named a driver, and the portal
+             * rendered the slug whenever the namespace did not cover it.
+             */
+            'from_account_credit' => $this->provider === IssueRefund::WALLET_PROVIDER,
+
             'kind' => $this->kind->value,
             'status' => $this->status->value,
             'is_settled' => $this->status === TransactionStatus::Succeeded,

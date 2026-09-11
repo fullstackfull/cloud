@@ -201,7 +201,8 @@ export interface BillingSnapshot {
  */
 export interface InvoicePaymentRow {
   id: string
-  provider: string
+  /** True when the account paid itself out of its own credit. */
+  from_account_credit: boolean
   kind: string
   status: string
   is_settled: boolean
@@ -226,7 +227,6 @@ export interface InvoiceWalletCreditRow {
 /** One entry in the wallet ledger, which is the only source of a balance. */
 export interface WalletTransaction {
   id: string
-  wallet_id: string
   kind: string
   /** Signed: negative when the balance went down. */
   amount: Money
@@ -323,10 +323,15 @@ export interface Payment {
   status: string
   amount: Money
   invoice_id: string | null
-  provider: string
+  /**
+   * True when the account paid itself out of its own credit. It replaced the
+   * gateway's registered driver name, which named a driver rather than
+   * anything the payer did — and which this portal rendered as a raw slug
+   * whenever its translation namespace did not cover it.
+   */
+  from_account_credit: boolean
   is_settled: boolean
   failure_code: string | null
-  failure_message: string | null
   processed_at: string | null
 }
 
@@ -367,7 +372,6 @@ export interface Service {
    */
   plan_id: string | null
   order_id: string | null
-  order_item_id: string | null
   subscription_id: string | null
   activated_at: string | null
   suspended_at: string | null
@@ -571,7 +575,6 @@ export interface DedicatedServer {
   serial: string
   manufacturer: string
   model: string
-  hardware_profile: string
   status: string
   power_state: string
   is_powered_on: boolean
@@ -697,7 +700,6 @@ export interface WalletBalance {
   // Null until the customer has actually transacted in this currency: the API
   // reports the account currency whether or not a wallets row was ever opened,
   // so a zero balance here is a real answer, not a missing one.
-  wallet_id: string | null
   currency: string
   balance: Money
   updated_at: string | null
@@ -762,7 +764,6 @@ export interface Ticket {
   priority: TicketPriority
   service_id: string | null
   invoice_id: string | null
-  assigned_to: string | null
   opened_by: string | null
   last_reply_at: string | null
   last_reply_by: 'customer' | 'operator' | 'system' | null
@@ -808,6 +809,35 @@ export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'revoked' |
  * An outstanding offer. There is no token field here and there must never be
  * one: the server stores a hash and the only copy of a token is in the mail.
  */
+/**
+ * One capability a role either has or does not, as the server publishes it.
+ *
+ * `permission` is the canonical machine value — the string the API refuses
+ * with — and `id` is what the portal translates. Both travel so that the
+ * explanation on the screen can be checked against a real 403 rather than
+ * taken on trust.
+ */
+export interface TeamCapability {
+  id: string
+  permission: string
+  granted: boolean
+}
+
+/**
+ * A team role and the whole capability matrix for it.
+ *
+ * Computed on the server from the same permission list `AuthorisesWithinAccount`
+ * reads before every write, so the table a customer reads and the endpoint that
+ * refuses them cannot disagree. An architecture test asserts the published set
+ * and the enforced set are equal in both directions.
+ */
+export interface TeamRoleCapabilities {
+  id: TeamRole
+  is_owner: boolean
+  assignable: boolean
+  capabilities: TeamCapability[]
+}
+
 export interface TeamInvitation {
   id: string
   email: string
@@ -920,7 +950,6 @@ export interface DomainRedemption {
     state: string
     invoice_id: string | null
     needs_attention: boolean
-    failure_message: string | null
     completed_at: string | null
   } | null
 }
@@ -937,7 +966,6 @@ export interface DomainOperation {
   invoice_id: string | null
   is_in_flight: boolean
   needs_attention: boolean
-  failure_message: string | null
   completed_at: string | null
   created_at: string
 }

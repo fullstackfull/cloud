@@ -75,10 +75,15 @@ export function DedicatedDetailPage() {
         }
         facts={
           <>
+            {/*
+              The machine as it would be described on a delivery note. The
+              hardware profile used to sit beside it and was the inventory
+              join key: what a customer read here was `ded-standard-1`, in
+              English, on an Arabic page, styled as a fact about their server.
+            */}
             <span dir="ltr">
               {server.manufacturer} {server.model}
             </span>
-            <span>{t(`dedicated.profile.${server.hardware_profile}`, { defaultValue: server.hardware_profile })}</span>
           </>
         }
         actions={<DedicatedPowerActions server={server} />}
@@ -100,12 +105,6 @@ export function DedicatedOverviewSection() {
     { label: t('dedicated.serial'), value: server.serial, ltr: true },
     { label: t('dedicated.manufacturer'), value: server.manufacturer, ltr: true },
     { label: t('dedicated.model'), value: server.model, ltr: true },
-    {
-      label: t('dedicated.hardwareProfile'),
-      value: t(`dedicated.profile.${server.hardware_profile}`, {
-        defaultValue: server.hardware_profile,
-      }),
-    },
     { label: t('dedicated.status'), value: <StatusBadge status={server.status} /> },
     { label: t('dedicated.power'), value: <StatusBadge status={server.power_state} /> },
     {
