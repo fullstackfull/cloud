@@ -100,7 +100,14 @@ test.describe('the verification page in Arabic', () => {
   test('it explains what to do and offers the link again', async ({ page }) => {
     await page.goto('/verify-email')
 
-    await expect(page.getByRole('heading', { level: 2, name: /تأكيد بريدك/ })).toBeVisible()
+    /*
+     * Level one, since W5.8. This page's title used to be the card's own `h2`,
+     * which made it the only public screen whose document began at level two —
+     * sign-in, registration, the forgotten-password form and the reset form all
+     * render an `h1`. This assertion held the defect in place: it was written
+     * against what the page did rather than against what a page's title is.
+     */
+    await expect(page.getByRole('heading', { level: 1, name: /تأكيد بريدك/ })).toBeVisible()
     await expectArabicProse(page.getByText(/افتح الرابط/))
 
     // Signed out, the page points at signing in rather than at a resend the
