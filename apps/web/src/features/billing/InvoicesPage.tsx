@@ -99,7 +99,7 @@ export function InvoicesPage() {
        */
       cell: (invoice) => (
         <Link
-          className="text-sm underline"
+          className="tap-link text-sm underline"
           to={`/invoices/${invoice.id}`}
           aria-label={t('invoices.viewNamed', { number: invoice.number })}
         >

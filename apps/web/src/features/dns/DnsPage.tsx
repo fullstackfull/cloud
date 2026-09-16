@@ -46,7 +46,7 @@ export function DnsPage() {
       cell: (zone) => (
         <Link
           to={`/dns/${encodeURIComponent(zone.name)}`}
-          className="technical font-medium text-[var(--text-primary)] hover:underline"
+          className="tap-link technical font-medium text-[var(--text-primary)] hover:underline"
         >
           {zone.name}
         </Link>
@@ -72,7 +72,7 @@ export function DnsPage() {
       header: '',
       cell: (zone) => (
         <div className="flex justify-end">
-          <Link to={`/dns/${encodeURIComponent(zone.name)}`} className="text-sm underline">
+          <Link to={`/dns/${encodeURIComponent(zone.name)}`} className="tap-link text-sm underline">
             {t('resource.open')}
           </Link>
         </div>

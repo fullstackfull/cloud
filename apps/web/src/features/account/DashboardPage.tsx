@@ -130,7 +130,7 @@ function NewAccount() {
 
       <Link
         to="/catalogue"
-        className="mt-3 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+        className="tap-link mt-3 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
       >
         {t('dashboard.servicesBrowse')}
       </Link>
@@ -201,7 +201,7 @@ function Attention({ items }: { items: AttentionItem[] }) {
                   {destination === null ? null : (
                     <Link
                       to={destination}
-                      className="text-sm font-medium text-[var(--accent)] hover:underline"
+                      className="tap-link text-sm font-medium text-[var(--accent)] hover:underline"
                     >
                       {t('resource.open')}
                     </Link>
@@ -213,7 +213,7 @@ function Attention({ items }: { items: AttentionItem[] }) {
                       ...(item.resource === null ? {} : { resource: item.resource }),
                       ...(item.reference === null ? {} : { reference: item.reference }),
                     })}
-                    className="text-xs text-[var(--text-muted)] hover:underline"
+                    className="tap-link text-xs text-[var(--text-muted)] hover:underline"
                   >
                     {t('activity.feed.askSupport')}
                   </Link>
@@ -240,7 +240,7 @@ function Services({ services }: { services: AccountOverview['services'] }) {
           <EmptyState>{t('dashboard.servicesEmpty')}</EmptyState>
           <Link
             to="/catalogue"
-            className="text-sm font-medium text-[var(--accent)] hover:underline"
+            className="tap-link text-sm font-medium text-[var(--accent)] hover:underline"
           >
             {t('dashboard.servicesBrowse')}
           </Link>
@@ -264,7 +264,7 @@ function Services({ services }: { services: AccountOverview['services'] }) {
 
           <Link
             to="/services"
-            className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+            className="tap-link mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
           >
             {t('nav.allServices')}
           </Link>
@@ -302,7 +302,7 @@ function Owed({ due }: { due: AccountOverview['billing']['due'] }) {
 
       <Link
         to="/invoices"
-        className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+        className="tap-link mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
       >
         {t('dashboard.billingOpen')}
       </Link>
@@ -336,7 +336,7 @@ function Renewals({ renewals }: { renewals: AccountOverview['renewals'] }) {
                   ) : (
                     <Link
                       to={destination}
-                      className="text-[var(--accent)] hover:underline"
+                      className="tap-link text-[var(--accent)] hover:underline"
                     >
                       <span className="technical" dir="ltr">
                         {renewal.resource.identity ?? t('resource.open')}
@@ -370,7 +370,7 @@ function Renewals({ renewals }: { renewals: AccountOverview['renewals'] }) {
 
       <Link
         to="/subscriptions"
-        className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+        className="tap-link mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
       >
         {t('nav.subscriptions')}
       </Link>
@@ -402,7 +402,7 @@ function RecentServices({ services }: { services: AccountOverview['recent']['ser
                 ) : (
                   <Link
                     to={destination}
-                    className="truncate text-sm text-[var(--accent)] hover:underline"
+                    className="tap-link truncate text-sm text-[var(--accent)] hover:underline"
                   >
                     <span className="technical" dir="ltr">
                       {service.identity ?? service.id}
@@ -454,7 +454,7 @@ function RecentActivity({ items }: { items: ActivityItem[] }) {
       */}
       <Link
         to="/activity"
-        className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+        className="tap-link mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
       >
         {t('dashboard.activityAll')}
       </Link>

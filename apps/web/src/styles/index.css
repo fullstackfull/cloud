@@ -264,6 +264,37 @@ body {
   font-feature-settings: 'tnum';
 }
 
+/*
+ * A text link that is also something a finger has to hit.
+ *
+ * W5.6 set a 24px floor for touch targets and swept every screen for it. The
+ * sweep measured each screen as soon as its heading appeared, which on the
+ * dashboard is before its data arrives — so it measured a loading screen and
+ * found nothing, on the screen with the most of these. Measured once settled,
+ * the dashboard had twenty-two targets under the floor, the invoice list three
+ * and the DNS screen two: all inline text links inside rows and cards, where
+ * `text-sm` gives a 20px line box and `text-xs` a 16px one, and a bare link is
+ * exactly as tall as its text.
+ *
+ * Padding out and margin back, rather than a min-height.
+ *
+ * A min-height needs a block-ish display to apply at all, and several of these
+ * links are `truncate` (which needs a block box to put an ellipsis in) or
+ * `inline-block` inside a flow of text. Changing their display to make a
+ * min-height work would rearrange layouts W5.8 measured at five widths.
+ *
+ * Vertical padding grows the border box — which is what a finger hits and what
+ * getBoundingClientRect reports — without touching the line box, so the text
+ * does not move. The negative margin cancels the growth for any of these that
+ * is inline-block, and is simply ignored on the inline ones, where vertical
+ * margins do nothing. Either way nothing around the link shifts.
+ */
+.tap-link {
+  padding-block: 4px;
+  margin-block: -4px;
+}
+
+
 /* Technical identifiers — IP addresses, hostnames, ULIDs — are always LTR even
    inside Arabic prose, or the octets render in the wrong order. */
 .technical {

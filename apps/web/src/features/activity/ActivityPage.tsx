@@ -216,7 +216,7 @@ function ActivityRow({ item, locale }: { item: ActivityItem; locale: 'en' | 'ar'
               {item.resource.identity}
             </span>
           ) : (
-            <Link to={destination} className="text-[var(--accent)] hover:underline">
+            <Link to={destination} className="tap-link text-[var(--accent)] hover:underline">
               <span className="technical" dir="ltr">
                 {item.resource.identity ?? item.resource.id}
               </span>
@@ -262,7 +262,7 @@ function ActivityRow({ item, locale }: { item: ActivityItem; locale: 'en' | 'ar'
               ...(item.resource === null ? {} : { resource: item.resource }),
               ...(item.reference === null ? {} : { reference: item.reference }),
             })}
-            className="text-xs font-medium text-[var(--accent)] hover:underline"
+            className="tap-link text-xs font-medium text-[var(--accent)] hover:underline"
           >
             {t('activity.feed.askSupport')}
           </Link>
