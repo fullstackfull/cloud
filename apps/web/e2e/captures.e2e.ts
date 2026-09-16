@@ -186,9 +186,26 @@ test.describe('the visual record', () => {
         }
 
         await page.goto('/vps')
-        await page.locator('main').getByRole('link', { name: fixtures.operableHostname, exact: true }).click()
+        await page
+          .locator('main')
+          .getByRole('link', { name: fixtures.operableHostname, exact: true })
+          .click()
+        /*
+         * Waited for, not assumed. Without this the next line read the address
+         * before the click had navigated, so it asked for `/vps/danger` — a
+         * machine whose identifier is the word "danger" — found no reinstall
+         * control on the refusal that came back, and waited out the timeout
+         * rather than failing. Thirty-six of forty images, and fifteen minutes
+         * to say so.
+         */
+        await page.waitForURL((url) => url.pathname !== '/vps')
         await page.goto(`${new URL(page.url()).pathname}/danger`)
-        await page.getByRole('button').filter({ hasText: /reinstall|إعادة/i }).first().click()
+
+        await page
+          .getByRole('button')
+          .filter({ hasText: /reinstall|إعادة/i })
+          .first()
+          .click({ timeout: 15_000 })
         await expect(page.getByRole('dialog')).toBeVisible()
         await shoot('confirmation-dialog')
         await page.keyboard.press('Escape')
@@ -220,7 +237,7 @@ test.describe('the visual record', () => {
           await route.continue()
         })
         await page.goto('/invoices')
-        await expect(page.getByRole('status')).toBeVisible()
+        await expect(page.getByRole('status')).toBeVisible({ timeout: 15_000 })
         await page.screenshot({
           path: path.join(OUTPUT, `${language}-${label}-loading-state.png`),
           fullPage: true,
