@@ -180,16 +180,18 @@ export default defineConfig({
   },
 
   /*
-   * Four surfaces, three projects.
+   * Five surfaces, four projects.
    *
    * `chromium` is the desktop suite as it has always been: every spec, one
-   * project, English unless a describe block asks for Arabic. Two customer
+   * project, English unless a describe block asks for Arabic. Three customer
    * projects sit beside it rather than multiplying it: the phone project runs
    * only `e2e/mobile/`, on a real phone descriptor (viewport, touch, mobile
    * user agent — not a desktop window made narrow), and the Arabic project
    * runs only `e2e/arabic/`, with the browser's own language set to Arabic
-   * so the portal picks it the way a customer's browser would. Each drives
-   * real journeys; neither reruns the Control Center.
+   * so the portal picks it the way a customer's browser would. The narrow
+   * project runs only `e2e/narrow/` at 360px — the specs the phone project
+   * also runs, so that both widths are measured rather than one inferred from
+   * the other. Each drives real journeys; none reruns the Control Center.
    *
    * The projects share one database and run one after another (one worker),
    * so a spec that changes fixtures names its own — a zone the phone claims
@@ -198,7 +200,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: ['**/mobile/**', '**/arabic/**'],
+      testIgnore: ['**/mobile/**', '**/arabic/**', '**/narrow/**'],
       use: {
         ...devices['Desktop Chrome'],
         ...chromiumExecutable(),
@@ -206,11 +208,33 @@ export default defineConfig({
     },
     {
       name: 'customer-mobile',
-      testMatch: '**/mobile/*.e2e.ts',
+      // `narrow/` runs here as well as in the project below, so that every
+      // assertion in it is made at 393 *and* at 360 rather than at one width
+      // with the other inferred.
+      testMatch: ['**/mobile/*.e2e.ts', '**/narrow/*.e2e.ts'],
       use: {
         // 393 × 851, touch, mobile user agent: the closest descriptor Playwright
         // ships to the 390 × 844 phone the audit measured against.
         ...devices['Pixel 5'],
+        ...chromiumExecutable(),
+      },
+    },
+    {
+      /*
+       * 360px, and it is a separate project rather than a viewport option on
+       * the one above.
+       *
+       * 360 is the narrowest width the portal claims to work at, and it is not
+       * 393 minus a bit: a row that fits at 393 with four pixels to spare
+       * fails at 360, and the failure has to name which width it was. Galaxy
+       * S8 is the descriptor Playwright ships at exactly 360 × 740, with touch
+       * and a mobile user agent, so this is a real phone rather than a desktop
+       * window made narrow.
+       */
+      name: 'customer-narrow',
+      testMatch: '**/narrow/*.e2e.ts',
+      use: {
+        ...devices['Galaxy S8'],
         ...chromiumExecutable(),
       },
     },

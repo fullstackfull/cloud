@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
+import { buttonClasses } from '@/components/buttonStyles'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
@@ -93,7 +94,7 @@ export function SubscriptionsPage() {
             */}
           <Link
             to={`/subscriptions/${s.id}/plan`}
-            className="inline-flex items-center rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]"
+            className={buttonClasses('secondary', 'sm')}
           >
             {t('subscriptions.changePlan')}
           </Link>

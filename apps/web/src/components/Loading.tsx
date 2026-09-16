@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
+import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/cn'
 
 interface LoadingProps {
@@ -26,6 +27,21 @@ interface LoadingProps {
  * Deliberately not used for a button that is submitting — that is the
  * button's own `loading` state, which sets `aria-busy` on the control the
  * person pressed rather than announcing a second thing.
+ *
+ * ## Why there is a turning mark and not only a sentence
+ *
+ * Until W5.8 this component and `EmptyState` rendered the same box with the
+ * same four classes, differing only in their words. So "your servers are on
+ * their way" and "you have no servers" were the same picture, and the moment
+ * the answer arrived was invisible: a customer who glanced away could not tell
+ * whether the screen had finished. A read that failed was already distinct — a
+ * red-toned alert — but two of the three states were not, and §25 asks for
+ * three.
+ *
+ * The mark is the smallest change that separates them. It is not a skeleton
+ * layout: guessing the shape of the table that is coming would be a redesign,
+ * and W5.8 is not one. Reduced motion stops it turning and leaves it drawn,
+ * which is still a different picture from an empty state's bare sentence.
  */
 export function Loading({ size = 'region', className }: LoadingProps) {
   const { t } = useTranslation()
@@ -34,11 +50,12 @@ export function Loading({ size = 'region', className }: LoadingProps) {
     <p
       role="status"
       className={cn(
-        'text-center text-sm text-[var(--text-muted)]',
-        size === 'screen' ? 'flex min-h-dvh items-center justify-center' : 'py-8',
+        'flex items-center justify-center gap-2 text-sm text-[var(--text-muted)]',
+        size === 'screen' ? 'min-h-dvh' : 'py-8',
         className,
       )}
     >
+      <Spinner />
       {t('common.loading')}
     </p>
   )

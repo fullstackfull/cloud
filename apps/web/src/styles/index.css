@@ -110,7 +110,15 @@
   --tone-danger-text: oklch(0.42 0.16 25);
 
   --tone-warning-surface: oklch(0.75 0.15 75 / 0.12);
-  --tone-warning-border: oklch(0.75 0.15 75 / 0.35);
+  /*
+   * 0.30, matching danger, info and success. It was 0.35 — the light theme's
+   * only tone border that did not match the other three, which made a warning
+   * alert's edge stronger than an error's on the same screen. Found by
+   * comparing the two themes token by token: every other theme-dependent
+   * token changes between light and dark, and this one did not, because its
+   * light value had been written at the dark value.
+   */
+  --tone-warning-border: oklch(0.75 0.15 75 / 0.30);
   --tone-warning-text: oklch(0.45 0.12 70);
 
   --tone-info-surface: oklch(0.62 0.16 250 / 0.10);
@@ -262,6 +270,32 @@ body {
   direction: ltr;
   unicode-bidi: isolate;
   font-family: var(--font-mono);
+
+  /*
+   * And they wrap rather than push.
+   *
+   * A technical value is one unbreakable word as far as the layout is
+   * concerned: a 48-character API token, an IPv6 address, a ULID, a long
+   * domain, an email address. There is no space in any of them, so the
+   * default `normal` leaves the box no legal place to break and the value
+   * simply extends past whatever holds it. The class is used at 155 places
+   * and 143 of them said nothing about wrapping, which made this one line the
+   * difference between a value that folds and a value that breaks the page
+   * shell.
+   *
+   * `anywhere` rather than `break-word`, and the difference is the whole
+   * point: both break a long word that would otherwise overflow, but only
+   * `anywhere` also lowers the box's min-content width, which is what lets a
+   * flex item, a grid track or a table cell actually shrink around it.
+   * `break-word` would leave the flex item refusing to go below the width of
+   * the token and the page scrolling exactly as before.
+   *
+   * Where a value should break mid-word greedily rather than only on
+   * overflow — a filesystem path in the backup browser, a DNS record's
+   * content — the call site still says `break-all`, which is a stronger rule
+   * than this one and stays deliberate.
+   */
+  overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {

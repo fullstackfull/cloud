@@ -22,6 +22,18 @@ interface DataTableProps<Row> {
  * A table that scrolls inside its own box rather than making the page scroll
  * sideways — a session list with a full user-agent string is wider than a phone
  * on any layout, and a horizontally scrolling page is unusable in RTL.
+ *
+ * `relative` on the scroller is not decoration and not spacing: it is what
+ * makes the clipping work. An absolutely positioned box is clipped only by an
+ * ancestor that is also its *containing block*, and a `position: static`
+ * scroller is nobody's containing block — so the `sr-only` headings below,
+ * which are `position: absolute`, escaped this scroller entirely and landed in
+ * the page's scrollable overflow. Measured at 360px on /services, the document
+ * scrolled to exactly 541px: the right edge of the off-screen "Actions" span
+ * sitting in the last column of a 578px-wide table. Nine screens scrolled
+ * sideways that way, in both languages, and none of it was visible in a
+ * screenshot, because `sr-only` also sets `clip: rect(0,0,0,0)` — nothing is
+ * painted out there, the page simply drags.
  */
 export function DataTable<Row>({ columns, rows, rowKey, empty, caption }: DataTableProps<Row>) {
   const { t } = useTranslation()
@@ -31,7 +43,7 @@ export function DataTable<Row>({ columns, rows, rowKey, empty, caption }: DataTa
   }
 
   return (
-    <div className="-mx-4 overflow-x-auto sm:mx-0">
+    <div className="relative -mx-4 overflow-x-auto sm:mx-0">
       <table className="w-full min-w-[36rem] border-collapse text-sm">
         {caption !== undefined ? <caption className="sr-only">{caption}</caption> : null}
         <thead>

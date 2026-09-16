@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
+import { buttonClasses } from '@/components/buttonStyles'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
@@ -135,7 +136,7 @@ export function VpsPage() {
         <div className="flex flex-wrap justify-end gap-2">
           <Link
             to={`/vps/${vm.id}`}
-            className="inline-flex items-center rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]"
+            className={buttonClasses('secondary', 'sm')}
           >
             {t('resource.open')}
           </Link>

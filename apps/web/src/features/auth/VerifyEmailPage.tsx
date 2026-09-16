@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
+import { buttonClasses } from '@/components/buttonStyles'
 import { Card } from '@/components/Card'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { useResendVerificationEmail } from '@/lib/queries'
@@ -51,84 +52,104 @@ export function VerifyEmailPage() {
   const verified = user?.email_verified === true
 
   return (
-    <Card title={t('verifyEmail.title')}>
-      <div className="flex flex-col gap-4">
-        {status === 'verified' ? (
-          <Alert tone="success">{t('verifyEmail.confirmed')}</Alert>
-        ) : status === 'already_verified' ? (
-          <Alert tone="info">{t('verifyEmail.alreadyConfirmed')}</Alert>
-        ) : status === 'expired' ? (
-          <Alert tone="warning">{t('verifyEmail.expired')}</Alert>
-        ) : status === 'invalid' ? (
-          <Alert tone="error">{t('verifyEmail.invalid')}</Alert>
-        ) : (
-          <p className="text-sm text-[var(--text-secondary)]">{t('verifyEmail.waiting')}</p>
-        )}
+    <div className="flex flex-col gap-6">
+      {/*
+        An `h1`, like the four public pages beside it.
 
-        {/*
-          The address the link went to, so a customer who mistyped it can see
-          the typo. It is their own address and they are signed in; nothing is
-          disclosed by showing it back to them.
-        */}
-        {user !== null ? (
-          <p className="text-sm">
-            {t('verifyEmail.sentTo')}{' '}
-            <span className="technical" dir="ltr">
-              {user.email}
-            </span>
-          </p>
-        ) : null}
+        This page's only heading was the card's own `h2`, so the document
+        began at level two: the heading order was wrong, a screen reader had
+        no page title to announce on arrival, and the route-focus strategy in
+        useRouteFocus had no heading to land on and fell back to the `main`
+        landmark. Sign-in, registration, the forgotten-password form and the
+        reset form all render exactly this heading. This was the one that did
+        not.
+      */}
+      <header>
+        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
+          {t('verifyEmail.title')}
+        </h1>
+      </header>
 
-        {resendError !== null ? (
-          <Alert tone="error" requestId={resendError.requestId}>
-            {resendError.message}
-          </Alert>
-        ) : null}
+      {/* Untitled, so the page's title is said once rather than twice. */}
+      <Card>
+        <div className="flex flex-col gap-4">
+          {status === 'verified' ? (
+            <Alert tone="success">{t('verifyEmail.confirmed')}</Alert>
+          ) : status === 'already_verified' ? (
+            <Alert tone="info">{t('verifyEmail.alreadyConfirmed')}</Alert>
+          ) : status === 'expired' ? (
+            <Alert tone="warning">{t('verifyEmail.expired')}</Alert>
+          ) : status === 'invalid' ? (
+            <Alert tone="error">{t('verifyEmail.invalid')}</Alert>
+          ) : (
+            <p className="text-sm text-[var(--text-secondary)]">{t('verifyEmail.waiting')}</p>
+          )}
 
-        {/*
-          Success is stated separately from the cooldown: "sent" answers what
-          happened, and the countdown answers why the button is not available.
-        */}
-        {resend.isSuccess && cooldown > 0 ? (
-          <Alert tone="success">{t('verifyEmail.resent')}</Alert>
-        ) : null}
+          {/*
+            The address the link went to, so a customer who mistyped it can see
+            the typo. It is their own address and they are signed in; nothing is
+            disclosed by showing it back to them.
+          */}
+          {user !== null ? (
+            <p className="text-sm">
+              {t('verifyEmail.sentTo')}{' '}
+              <span className="technical" dir="ltr">
+                {user.email}
+              </span>
+            </p>
+          ) : null}
 
-        {verified ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to="/"
-              className="inline-flex h-10 items-center rounded-lg bg-brand-600 px-4 text-sm text-white"
-            >
-              {t('verifyEmail.continue')}
-            </Link>
-          </div>
-        ) : user === null ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to="/sign-in"
-              className="inline-flex h-10 items-center rounded-lg bg-brand-600 px-4 text-sm text-white"
-            >
-              {t('verifyEmail.signIn')}
-            </Link>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <Button
-              loading={resend.isPending}
-              disabled={cooldown > 0}
-              onClick={() => {
-                resend.mutate(undefined, { onSuccess: () => { setCooldown(COOLDOWN_SECONDS); } })
-              }}
-            >
-              {cooldown > 0
-                ? t('verifyEmail.resendIn', { seconds: cooldown })
-                : t('verifyEmail.resend')}
-            </Button>
+          {resendError !== null ? (
+            <Alert tone="error" requestId={resendError.requestId}>
+              {resendError.message}
+            </Alert>
+          ) : null}
 
-            <p className="text-xs text-[var(--text-muted)]">{t('verifyEmail.checkSpam')}</p>
-          </div>
-        )}
-      </div>
-    </Card>
+          {/*
+            Success is stated separately from the cooldown: "sent" answers what
+            happened, and the countdown answers why the button is not available.
+          */}
+          {resend.isSuccess && cooldown > 0 ? (
+            <Alert tone="success">{t('verifyEmail.resent')}</Alert>
+          ) : null}
+
+          {verified ? (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/"
+                className={buttonClasses('primary')}
+              >
+                {t('verifyEmail.continue')}
+              </Link>
+            </div>
+          ) : user === null ? (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                to="/sign-in"
+                className={buttonClasses('primary')}
+              >
+                {t('verifyEmail.signIn')}
+              </Link>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Button
+                loading={resend.isPending}
+                disabled={cooldown > 0}
+                onClick={() => {
+                  resend.mutate(undefined, { onSuccess: () => { setCooldown(COOLDOWN_SECONDS); } })
+                }}
+              >
+                {cooldown > 0
+                  ? t('verifyEmail.resendIn', { seconds: cooldown })
+                  : t('verifyEmail.resend')}
+              </Button>
+
+              <p className="text-xs text-[var(--text-muted)]">{t('verifyEmail.checkSpam')}</p>
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
   )
 }

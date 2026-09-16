@@ -203,7 +203,7 @@ export function ApiTokensPage() {
                 },
                 {
                   onSuccess: (result) => {
-                    setIssued(result.plain_text_token)
+                    setIssued(result.token)
                     setName('')
                     setPassword('')
                     setExpiresIn('90')

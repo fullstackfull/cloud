@@ -31,6 +31,7 @@ import type {
   InvitationOffer,
   Invoice,
   IpAssignment,
+  IssuedApiToken,
   NotificationPreference,
   Order,
   OrderQuote,
@@ -1293,11 +1294,23 @@ export function useCreateApiToken() {
       expires_at?: string
       allowed_ip_ranges?: string[]
       rate_limit_per_minute?: number
-    }): Promise<{ token: ApiToken; plain_text_token: string }> => {
-      const response = await api.post<Envelope<{ token: ApiToken; plain_text_token: string }>>(
-        '/me/api-tokens',
-        payload,
-      )
+      /*
+       * The response is the token's own fields with one extra: `token`, the
+       * `id|plaintext` value that goes in the Authorization header. It is the
+       * only time the platform will ever send it.
+       *
+       * This was typed as `{ token: ApiToken; plain_text_token: string }`,
+       * which was wrong twice — there is no `plain_text_token` key, and
+       * `token` is the secret string rather than an object. The screen read
+       * the key that does not exist, so `undefined` was handed to a paragraph
+       * that renders it, and a customer who created a token was shown an
+       * empty box under the words "this is the only time it is shown".
+       * Nothing threw and nothing warned, because a hand-written response
+       * type that does not match the server typechecks perfectly.
+       */
+    }): Promise<IssuedApiToken> => {
+      const response = await api.post<Envelope<IssuedApiToken>>('/me/api-tokens', payload)
+
       return response.data
     },
     onSuccess: () => {

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useParams } from 'react-router'
 
+import { buttonClasses } from '@/components/buttonStyles'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { FactList, type Fact } from '@/components/FactList'
@@ -86,7 +87,7 @@ export function WordPressDetailPage() {
               target="_blank"
               rel="noreferrer noopener"
               dir="ltr"
-              className="inline-flex items-center rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]"
+              className={buttonClasses('secondary', 'sm')}
             >
               {t('wordpress.openAdmin')}
             </a>

@@ -26,7 +26,7 @@ export function ResourceTabs({ base, tabs }: { base: string; tabs: readonly Reso
   const { t } = useTranslation()
 
   return (
-    <nav aria-label={t('resource.sections')} className="mb-6 -mx-1 overflow-x-auto">
+    <nav aria-label={t('resource.sections')} className="relative mb-6 -mx-1 overflow-x-auto">
       <ul className="flex min-w-max items-center gap-1 border-b border-[var(--border-subtle)] px-1">
         {tabs.map((tab) => (
           <li key={tab.to}>

@@ -32,6 +32,18 @@ export interface Envelope<T> {
   data: T
 }
 
+/**
+ * A token as it comes back from the one request that creates it.
+ *
+ * The same fields the list endpoint returns, plus `token` — the whole
+ * `id|plaintext` value a client puts in the Authorization header. Split it and
+ * it stops authenticating. There is no endpoint that returns it again and no
+ * column it could be read back from: the table holds a SHA-256 digest.
+ */
+export interface IssuedApiToken extends ApiToken {
+  token: string
+}
+
 export interface PlanPrice {
   billing_period: 'hourly' | 'daily' | 'monthly' | 'quarterly' | 'yearly'
   currency: string

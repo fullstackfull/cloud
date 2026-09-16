@@ -46,8 +46,12 @@ export function RolePermissionMatrix() {
         <Loading />
       ) : (
         // Its own scroll container, so a five-column table on a 360px phone
-        // scrolls itself instead of scrolling the page sideways.
-        <div className="overflow-x-auto">
+        // scrolls itself instead of scrolling the page sideways. `relative`
+        // for the same reason DataTable carries it: the `sr-only` caption
+        // below is `position: absolute`, and a static scroller is not its
+        // containing block, so without this the caption escapes the scroller
+        // and the page scrolls after all.
+        <div className="relative overflow-x-auto">
           <table className="w-full min-w-[36rem] border-collapse text-sm">
             <caption className="sr-only">{t('team.permissionsTitle')}</caption>
 

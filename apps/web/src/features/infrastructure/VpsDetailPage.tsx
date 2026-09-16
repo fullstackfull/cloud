@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link, Outlet, useParams } from 'react-router'
 
+import { buttonClasses } from '@/components/buttonStyles'
 import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { DangerAction, DangerZone } from '@/components/DangerZone'
@@ -101,7 +102,7 @@ export function VpsDetailPage() {
             <VpsPowerActions vm={vm} />
             <Link
               to={`/vps/${vm.id}/console`}
-              className="inline-flex items-center rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-sunken)]"
+              className={buttonClasses('secondary', 'sm')}
             >
               {t('vps.actions.console')}
             </Link>
