@@ -146,11 +146,21 @@ test.describe('the visual record', () => {
           await page.goto(screen.index)
 
           if (screen.identity !== undefined) {
-            await page
+            /*
+             * By name where the row is titled by its identity, and by address
+             * where it is not. The invoice list is the second kind: its row
+             * link carries the number *and* the amount, so an exact-name
+             * locator matches nothing and then waits out the whole timeout
+             * rather than failing — which is how a capture run spent fifteen
+             * minutes on one screen. The fallback addresses the first row of
+             * the list on screen, which is the same row.
+             */
+            const named = page
               .locator('main')
               .getByRole('link', { name: screen.identity, exact: true })
-              .first()
-              .click()
+            const row = page.locator(`main a[href^="${screen.index}/"]`)
+
+            await ((await named.count()) > 0 ? named.first() : row.first()).click()
             await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
             if (screen.section !== undefined) {
