@@ -8,6 +8,24 @@ database is lost with the volume and cannot be reviewed.
 **Promtail is not used anywhere in this platform.** It is end-of-life. Log
 shipping is Grafana Alloy.
 
+## Names in this directory
+
+Every hostname in this directory is a **reference** name: the hosts of the
+example inventory in `infrastructure/ansible/inventories/production/hosts.yml`,
+under `.example`, which IANA reserves for documents. None of them exists.
+
+That is a deliberate choice rather than placeholder laziness. The target lists
+are `file_sd` files precisely so that the real ones arrive at deploy time from
+the private inventory, and a committed list of plausible internal hostnames is
+one copy-paste from being configured as real. It also used to disagree with the
+application: the control plane's own endpoint policy refuses `.internal` names
+outright, so the zone this directory named was one the platform it watches
+would never talk to.
+
+The values an operator must supply — the external URLs, the environment and
+the region stamped on every sample — are variables, and the compose file fails
+loudly when they are missing. See `docs/infrastructure-naming-standard.md`.
+
 ## What runs where
 
 Run this stack on a dedicated monitoring host — never on a hypervisor and never
@@ -71,7 +89,7 @@ export GRAFANA_ADMIN_PASSWORD=...
 export POSTGRES_EXPORTER_DSN='postgresql://monitoring:...@cp-db-01:5432/lynomia?sslmode=require'
 export REDIS_EXPORTER_ADDR='redis://cp-redis-01:6379'
 export LYNOMIA_ENV=production
-export LYNOMIA_REGION=kw-central
+export LYNOMIA_REGION=...               # stamped on every sample; no default
 
 # 3. Validate before starting. Always — see "Validating the configuration".
 docker compose -f docker-compose.monitoring.yml up -d
@@ -205,7 +223,7 @@ dashboard.
 
 ### Runbooks
 
-Every alert's `runbook_url` points at `https://docs.lynomia.internal/runbooks/<slug>`,
+Every alert's `runbook_url` points at `https://docs.prod.example/runbooks/<slug>`,
 which is served from `docs/runbooks/` in this repository.
 
 Already written: `ip-exhaustion`, `payment-reconciliation`, `provisioning-stuck`.
@@ -388,7 +406,7 @@ a log readable during an incident is gone.
 **5. The metrics endpoint refuses an unauthenticated scrape.**
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://cp-app-01.kw.lynomia.internal/metrics
+curl -s -o /dev/null -w '%{http_code}\n' https://cp-1.prod.example/metrics
 # expect 404 — not 401. The endpoint does not confirm its own existence.
 ```
 
@@ -397,7 +415,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://cp-app-01.kw.lynomia.internal/m
 ```bash
 curl -s -o /dev/null -w 'total: %{time_total}s\n' \
   -H "Authorization: Bearer $PROMETHEUS_METRICS_TOKEN" \
-  https://cp-app-01.kw.lynomia.internal/metrics
+  https://cp-1.prod.example/metrics
 ```
 
 Well under a second. A metrics endpoint that takes ten seconds gets scraped

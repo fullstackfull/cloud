@@ -42,8 +42,8 @@ groups:
             travels to every dashboard and notification built on this metric. Look the id
             up in the control plane, which is allowed to know it.
           runbook: docs/runbooks/backup-failure.md
-          runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+          runbook_url: https://docs.prod.example/runbooks/backup-failed
+          dashboard_url: https://grafana.prod.example/d/lynomia-platform/platform-overview
 
       - alert: BackupTooOld
         # A job that never runs never fails, so a status-only alert cannot see
@@ -62,7 +62,7 @@ groups:
             daily schedule. Thirty-six hours rather than twenty-four so that one late or
             skipped nightly run does not page, but two consecutive misses do.
           runbook: docs/runbooks/backup-failure.md
-          runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
+          runbook_url: https://docs.prod.example/runbooks/backup-failed
 
       - alert: BackupCollectorStale
         # The metric that watches the metrics. Without this, a dead collector
@@ -83,7 +83,7 @@ groups:
             output is no longer being scraped. Until it is fixed, every other backup
             alert in this file is blind and their silence means nothing.
           runbook: docs/runbooks/backup-failure.md
-          runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
+          runbook_url: https://docs.prod.example/runbooks/backup-failed
 
   - name: backups.verification
     rules:
@@ -106,8 +106,8 @@ groups:
             snapshot: take a fresh backup immediately, then find out whether the datastore
             itself is damaged before trusting anything else on it.
           runbook: docs/runbooks/backup-failure.md
-          runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+          runbook_url: https://docs.prod.example/runbooks/backup-verification-failed
+          dashboard_url: https://grafana.prod.example/d/lynomia-platform/platform-overview
 
       - alert: BackupVerificationStale
         # An unverified backup is an unproven backup. This fires when
@@ -126,7 +126,7 @@ groups:
             ago, against a weekly schedule. Nothing is known to be wrong — and nothing is
             known to be right either, which is the entire point of the alert.
           runbook: docs/runbooks/backup-failure.md
-          runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
+          runbook_url: https://docs.prod.example/runbooks/backup-verification-failed
 
       - alert: UnverifiedSnapshotsAccumulating
         expr: lynomia_backup_unverified_snapshots > 25
@@ -142,4 +142,4 @@ groups:
             nothing reports an error while the proportion of the datastore that has
             actually been proven restorable quietly shrinks.
           runbook: docs/runbooks/backup-failure.md
-          runbook_url: https://docs.lynomia.internal/runbooks/backup-verification-failed
+          runbook_url: https://docs.prod.example/runbooks/backup-verification-failed

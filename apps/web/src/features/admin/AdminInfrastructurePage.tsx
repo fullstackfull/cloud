@@ -43,7 +43,7 @@ export function AdminInfrastructurePage() {
       ltr: true,
       cell: (node) => (
         <div>
-          <p className="technical font-medium text-[var(--text-primary)]">{node.name}</p>
+          <p className="technical font-medium text-[var(--text-primary)]">{node.provider_name}</p>
           <p className="technical text-xs text-[var(--text-muted)]">
             {node.datacenter ?? '—'} / {node.cluster ?? '—'}
           </p>

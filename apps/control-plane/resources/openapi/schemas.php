@@ -2018,7 +2018,13 @@ return [
         'additionalProperties' => false,
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'name' => ['type' => ['string', 'null']],
+            // The hypervisor's own name for the node, not the platform's
+            // identity for it — that is `id`. It was published as `name`,
+            // which implied the opposite and made a rename look possible.
+            'provider_name' => [
+                'description' => "The hypervisor's own name for this node. The platform's identity for it is `id`.",
+                'type' => ['string', 'null'],
+            ],
             'cluster' => ['type' => ['string', 'null']],
             'cluster_id' => ['type' => ['string', 'null']],
             'datacenter' => ['type' => ['string', 'null']],

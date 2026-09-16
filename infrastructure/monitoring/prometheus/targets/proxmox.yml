@@ -1,9 +1,23 @@
+# -----------------------------------------------------------------------------
+# REFERENCE TARGET LIST — describes no machine that exists.
+#
+# Every name here is a host from the example inventory in
+# infrastructure/ansible/inventories/production/hosts.yml, under `.example`,
+# which IANA reserves for documents. The real target list is operator-supplied
+# and lives with the private inventory: Prometheus re-reads a file_sd file
+# within seconds, so replacing this file is the whole deployment step.
+#
+# It is written in the reference namespace on purpose. A committed list of
+# plausible-looking internal hostnames is one copy-paste from being configured
+# as real, and this platform's own endpoint policy refuses `.internal` names
+# outright — so a list under that zone disagreed with the application that
+# reads it.
+# -----------------------------------------------------------------------------
 # PVE API endpoints, passed to prometheus-pve-exporter as ?target=.
 # The credential is not here: it lives in the exporter's own pve.yml.
 - targets:
-    - pve-01.kw.lynomia.internal
-    - pve-02.kw.lynomia.internal
-    - pve-03.kw.lynomia.internal
+    - pve-1.prod.example
+    - pve-2.prod.example
   labels:
-    cluster_name: kw-central-1
+    cluster_name: ref-cluster-alpha-1
     service: compute

@@ -35,8 +35,8 @@ groups:
             still showing unpaid. Reconcile against the provider dashboard rather than
             waiting for their retries, and expect the tickets before the retries finish.
           runbook: docs/runbooks/payment-webhook-outage.md
-          runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
+          runbook_url: https://docs.prod.example/runbooks/payment-reconciliation
+          dashboard_url: https://grafana.prod.example/d/lynomia-business/business
 
       - alert: PaymentWebhooksStopped
         # Silence from a payment provider is ambiguous and always worth a look:
@@ -62,7 +62,7 @@ groups:
             timeouts there means the platform is losing payment events silently, and the
             provider will eventually stop retrying them.
           runbook: docs/runbooks/payment-webhook-outage.md
-          runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
+          runbook_url: https://docs.prod.example/runbooks/payment-reconciliation
 
       - alert: FailedPaymentsElevated
         expr: increase(lynomia_failed_payments_total[1h]) > 10
@@ -77,7 +77,7 @@ groups:
             genuine customer declines before acting — a spike concentrated in one method
             (KNET, one card network) is ours; a spread across all of them is usually not.
           runbook: docs/runbooks/payment-reconciliation.md
-          runbook_url: https://docs.lynomia.internal/runbooks/payment-reconciliation
+          runbook_url: https://docs.prod.example/runbooks/payment-reconciliation
 
       - alert: RevenueRecognitionStalled
         # MRR that does not move at all across a full day, on a platform with
@@ -98,7 +98,7 @@ groups:
             Recurring revenue has been perfectly static for a day while subscriptions
             exist. On a platform with any churn or growth at all this means the
             subscription renewal run has stopped rather than that the number is stable.
-          runbook_url: https://docs.lynomia.internal/runbooks/billing-run
+          runbook_url: https://docs.prod.example/runbooks/billing-run
 
   - name: business.capacity
     rules:
@@ -122,8 +122,8 @@ groups:
             audit assignments to terminated services, and open the RIR request in
             parallel rather than in sequence.
           runbook: docs/runbooks/ip-exhaustion.md
-          runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+          runbook_url: https://docs.prod.example/runbooks/ip-exhaustion
+          dashboard_url: https://grafana.prod.example/d/lynomia-platform/platform-overview
 
       - alert: IpPoolRunwayCritical
         expr: lynomia_ip_pool_runway_days < 7
@@ -139,7 +139,7 @@ groups:
             not at checkout. Stop selling into the affected region if reclamation cannot
             close the gap today.
           runbook: docs/runbooks/ip-exhaustion.md
-          runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
+          runbook_url: https://docs.prod.example/runbooks/ip-exhaustion
 
       - alert: IpPoolNearlyEmpty
         # The absolute floor, as a companion to runway rather than a substitute
@@ -156,7 +156,7 @@ groups:
             Fewer than sixteen usable addresses remain in {{ $labels.pool }}, regardless
             of what the consumption rate suggests. A single batch of orders exhausts this.
           runbook: docs/runbooks/ip-exhaustion.md
-          runbook_url: https://docs.lynomia.internal/runbooks/ip-exhaustion
+          runbook_url: https://docs.prod.example/runbooks/ip-exhaustion
 
       - alert: ComputeNodeCapacityExhausted
         # Allocated versus installed, from the control plane's own placement
@@ -175,8 +175,8 @@ groups:
             scheduler will start refusing placements here, and if every node in the
             cluster looks like this, orders fail with no capacity available. Add hardware
             or rebalance before that happens.
-          runbook_url: https://docs.lynomia.internal/runbooks/capacity-planning
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+          runbook_url: https://docs.prod.example/runbooks/capacity-planning
+          dashboard_url: https://grafana.prod.example/d/lynomia-proxmox/proxmox
 
       - alert: HostingNodeDiskRatioHigh
         # The control plane's own view of hosting disk, which exists separately
@@ -196,8 +196,8 @@ groups:
             sync into the control plane has stalled and placement is deciding on stale
             data.
           runbook: docs/runbooks/hosting-panel-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
+          runbook_url: https://docs.prod.example/runbooks/disk-pressure
+          dashboard_url: https://grafana.prod.example/d/lynomia-hosting/shared-hosting
 
   - name: business.orders
     rules:
@@ -217,8 +217,8 @@ groups:
             the worker pool first — an order stuck here with a healthy queue means the
             dispatch step failed, which is a different fault from a failing provider.
           runbook: docs/runbooks/provisioning-stuck.md
-          runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
+          runbook_url: https://docs.prod.example/runbooks/provisioning-stuck
+          dashboard_url: https://grafana.prod.example/d/lynomia-business/business
 
       - alert: OrdersInManualReview
         expr: sum(lynomia_orders_total{status="manual_review"}) > 0
@@ -233,7 +233,7 @@ groups:
             enough that nobody is coming on their own — this alert exists because the
             review queue is otherwise a page nobody opens.
           runbook: docs/runbooks/provider-indeterminate.md
-          runbook_url: https://docs.lynomia.internal/runbooks/provisioning-stuck
+          runbook_url: https://docs.prod.example/runbooks/provisioning-stuck
 
   - name: business.backups
     rules:
@@ -257,7 +257,7 @@ groups:
             platform stopped tracking them and will not retry; the customer
             has been told not to start another.
           runbook: docs/runbooks/file-restore-indeterminate.md
-          runbook_url: https://docs.lynomia.internal/runbooks/file-restore-indeterminate
+          runbook_url: https://docs.prod.example/runbooks/file-restore-indeterminate
 
   - name: business.accounts
     rules:
@@ -279,7 +279,7 @@ groups:
             {{ $value }} account change(s) are in needs_review: approved,
             then held at the last check. Nothing was applied.
           runbook: docs/runbooks/currency-change-needs-review.md
-          runbook_url: https://docs.lynomia.internal/runbooks/currency-change-needs-review
+          runbook_url: https://docs.prod.example/runbooks/currency-change-needs-review
 
   - name: business.wordpress
     rules:
@@ -302,7 +302,7 @@ groups:
             indeterminate. The live site is marked needs_review and the
             customer has been told not to push again.
           runbook: docs/runbooks/wordpress-push-indeterminate.md
-          runbook_url: https://docs.lynomia.internal/runbooks/wordpress-push-indeterminate
+          runbook_url: https://docs.prod.example/runbooks/wordpress-push-indeterminate
 
   - name: business.domains
     rules:
@@ -327,5 +327,5 @@ groups:
             or check the registry by hand, and resolve the operation before the
             redemption window closes.
           runbook: docs/runbooks/domain-redemption-indeterminate.md
-          runbook_url: https://docs.lynomia.internal/runbooks/domain-redemption-indeterminate
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-business/business
+          runbook_url: https://docs.prod.example/runbooks/domain-redemption-indeterminate
+          dashboard_url: https://grafana.prod.example/d/lynomia-business/business

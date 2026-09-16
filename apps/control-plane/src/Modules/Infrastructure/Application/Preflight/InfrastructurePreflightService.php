@@ -7,13 +7,17 @@ namespace Lynomia\Modules\Infrastructure\Application\Preflight;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
+use Lynomia\Modules\Infrastructure\Application\Naming\AuditInfrastructureNaming;
 use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\DependencyChain;
 use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\MappingChain;
 use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\ProviderChain;
 use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
+use Lynomia\Modules\Infrastructure\Domain\Naming\NamingFinding;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckCategory;
+use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckStatus;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\EvidenceClass;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
+use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightMode;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightReport;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightRequest;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightScope;
@@ -112,6 +116,7 @@ final readonly class InfrastructurePreflightService
         private AssessProduct $readiness,
         private ProductRequirements $requirements,
         private SafetyGate $gate,
+        private AuditInfrastructureNaming $naming,
         private ReferenceValues $reference = new ReferenceValues,
     ) {}
 
@@ -216,6 +221,8 @@ final readonly class InfrastructurePreflightService
         }
 
         $findings = [...$findings, ...$this->guarded('dependencies', CheckCategory::Backup, fn (): array => $this->dependencies->inspect())];
+
+        $findings = [...$findings, ...$this->guarded('naming', CheckCategory::Configuration, fn (): array => $this->namingFindings($request))];
 
         foreach ($this->familiesInService() as $product) {
             $findings = [...$findings, ...$this->guarded(
@@ -576,6 +583,58 @@ final readonly class InfrastructurePreflightService
             BlockerReason::Dependency => 'register a provider in that category, or bring the existing one up to production readiness',
             BlockerReason::NotImplemented => 'this platform has no adapter for that category yet',
         };
+    }
+
+    /**
+     * What the naming standard says about this estate, in the report's own
+     * vocabulary.
+     *
+     * The checks are not reimplemented here. Gap 5 put them in one service
+     * because the CLI, the preflight and the tests all have to agree about
+     * what a noncanonical identifier is, and three copies of that judgement
+     * would eventually be three answers. This maps its findings into the
+     * report's terms and nothing more.
+     *
+     * A naming problem is a CONFIGURATION finding. It is not a new blocker
+     * category: an operator reading "blocked: configuration — two racks in
+     * this datacenter are one identity" knows what to do, and a
+     * `BLOCKED_NAMING` would mean teaching every consumer of this report a
+     * word that adds nothing.
+     *
+     * @return list<PreflightFinding>
+     */
+    private function namingFindings(PreflightRequest $request): array
+    {
+        $production = $request->mode === PreflightMode::ReadOnlyReal
+            && app()->environment('production');
+
+        return array_map(
+            static fn (NamingFinding $finding): PreflightFinding => match ($finding->status) {
+                CheckStatus::Fail, CheckStatus::Blocked => PreflightFinding::blocked(
+                    $finding->id,
+                    CheckCategory::Configuration,
+                    $finding->target,
+                    $finding->summary,
+                    BlockerReason::Configuration,
+                    $finding->nextAction ?? 'Resolve the naming conflict this names.',
+                ),
+                CheckStatus::Warning => PreflightFinding::warning(
+                    $finding->id,
+                    CheckCategory::Configuration,
+                    $finding->target,
+                    $finding->summary,
+                    $finding->nextAction,
+                ),
+                default => PreflightFinding::pass(
+                    $finding->id,
+                    CheckCategory::Configuration,
+                    $finding->target,
+                    $finding->summary,
+                    EvidenceClass::Configuration,
+                ),
+            },
+            $this->naming->execute($production),
+        );
     }
 
     /**

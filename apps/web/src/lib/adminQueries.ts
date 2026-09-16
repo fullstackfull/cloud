@@ -250,7 +250,8 @@ export function useReconcileCluster() {
 
 export interface AdminNode {
   id: string
-  name: string
+  /* What the hypervisor calls this node; `id` is what Lynomia calls it. */
+  provider_name: string
   cluster: string | null
   cluster_id: string | null
   datacenter: string | null

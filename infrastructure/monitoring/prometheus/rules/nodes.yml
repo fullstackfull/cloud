@@ -34,8 +34,8 @@ groups:
             on it are affected right now; if it is a hosting node, every account on it
             is offline.
           runbook: docs/runbooks/node-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/node-down
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+          runbook_url: https://docs.prod.example/runbooks/node-down
+          dashboard_url: https://grafana.prod.example/d/lynomia-platform/platform-overview
 
       - alert: HypervisorNodeOffline
         # The cluster's own opinion, which can disagree with ours: a node whose
@@ -54,8 +54,8 @@ groups:
             Check quorum before touching anything — restarting a node in a cluster
             that has lost quorum can fence the survivors.
           runbook: docs/runbooks/node-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/node-down
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+          runbook_url: https://docs.prod.example/runbooks/node-down
+          dashboard_url: https://grafana.prod.example/d/lynomia-proxmox/proxmox
 
       - alert: HostingNodeUnavailable
         # Deliberately separate from NodeDown even though the expression is
@@ -75,8 +75,8 @@ groups:
             starting recovery, so provisioning does not place fresh accounts onto a
             machine that is being rebuilt.
           runbook: docs/runbooks/hosting-panel-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/hosting-node-down
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
+          runbook_url: https://docs.prod.example/runbooks/hosting-node-down
+          dashboard_url: https://grafana.prod.example/d/lynomia-hosting/shared-hosting
 
       - alert: DedicatedServerUnreachable
         # ICMP is all the platform has: the customer owns the OS and there is
@@ -94,7 +94,7 @@ groups:
             system, so this is only actionable once network and power are ruled out:
             check the switch port and the BMC before contacting the customer.
           runbook: docs/runbooks/dedicated-reinstall-stuck.md
-          runbook_url: https://docs.lynomia.internal/runbooks/dedicated-unreachable
+          runbook_url: https://docs.prod.example/runbooks/dedicated-unreachable
 
   - name: nodes.saturation
     rules:
@@ -114,8 +114,8 @@ groups:
             {{ $labels.instance }} is at {{ printf "%.0f" $value }}% CPU averaged across
             all cores. On a hypervisor this shows up to customers as steal time.
             Stop placing new guests here before investigating which guest is responsible.
-          runbook_url: https://docs.lynomia.internal/runbooks/node-saturation
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+          runbook_url: https://docs.prod.example/runbooks/node-saturation
+          dashboard_url: https://grafana.prod.example/d/lynomia-proxmox/proxmox
 
       - alert: NodeMemoryHigh
         # MemAvailable, not MemFree. Free memory on a busy Linux box is close to
@@ -133,7 +133,7 @@ groups:
             Available memory on {{ $labels.instance }} has been below 10% for 15 minutes.
             On a hypervisor the next thing that happens is the OOM killer choosing a
             guest, which looks to that customer like an unexplained hard reset.
-          runbook_url: https://docs.lynomia.internal/runbooks/node-saturation
+          runbook_url: https://docs.prod.example/runbooks/node-saturation
 
       - alert: NodeMemoryCritical
         expr: >-
@@ -148,7 +148,7 @@ groups:
             {{ $labels.instance }} has under 4% available memory. Guests are about to be
             killed. Migrate or stop the largest guest rather than waiting for the kernel
             to pick one at random.
-          runbook_url: https://docs.lynomia.internal/runbooks/node-saturation
+          runbook_url: https://docs.prod.example/runbooks/node-saturation
 
   - name: nodes.disk
     rules:
@@ -172,8 +172,8 @@ groups:
             guests stop when a thin volume cannot grow, and snapshots and backups fail
             first. Free space or migrate guests now; do not delete a backup to make room.
           runbook: docs/runbooks/node-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+          runbook_url: https://docs.prod.example/runbooks/disk-pressure
+          dashboard_url: https://grafana.prod.example/d/lynomia-proxmox/proxmox
 
       - alert: HostingNodeDiskAlmostFull
         # 20%, higher than a hypervisor's, because a shared node fills from the
@@ -195,8 +195,8 @@ groups:
             new accounts here, then find the account responsible — it is almost always
             one mailbox or one unrotated log, not gradual growth.
           runbook: docs/runbooks/hosting-panel-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-hosting/shared-hosting
+          runbook_url: https://docs.prod.example/runbooks/disk-pressure
+          dashboard_url: https://grafana.prod.example/d/lynomia-hosting/shared-hosting
 
       - alert: NodeDiskAlmostFull
         expr: >-
@@ -212,7 +212,7 @@ groups:
           description: >-
             {{ $labels.mountpoint }} on {{ $labels.instance }} ({{ $labels.role }}) is
             below 10% free.
-          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+          runbook_url: https://docs.prod.example/runbooks/disk-pressure
 
       - alert: NodeDiskWillFillIn4Hours
         # The rate-of-change alert that the threshold alerts cannot replace. A
@@ -235,7 +235,7 @@ groups:
             {{ $labels.instance }} runs out of space within four hours. The second half of
             the expression suppresses this on volumes that are still mostly empty, where
             a short burst of writes projects alarmingly and means nothing.
-          runbook_url: https://docs.lynomia.internal/runbooks/disk-pressure
+          runbook_url: https://docs.prod.example/runbooks/disk-pressure
 
   - name: nodes.storage
     rules:
@@ -254,7 +254,7 @@ groups:
             The kernel remounted {{ $labels.mountpoint }} read-only, which it does after
             an I/O error it cannot recover from. Treat the underlying device as failing.
             Do not remount read-write to "test" it — take the workload off first.
-          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
+          runbook_url: https://docs.prod.example/runbooks/storage-failure
 
       - alert: RaidArrayDegraded
         expr: node_md_disks{state="failed"} > 0
@@ -268,7 +268,7 @@ groups:
             {{ $labels.device }} is running degraded. The array is one more failure from
             data loss, and rebuild is itself the most likely moment for the second
             failure — verify backups are current before replacing the disk.
-          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
+          runbook_url: https://docs.prod.example/runbooks/storage-failure
 
       - alert: ProxmoxStorageUnavailable
         # The PVE view of storage, which covers the cases node_exporter cannot
@@ -286,8 +286,8 @@ groups:
             next write, backups to it will fail, and provisioning onto it will fail after
             the customer has already paid.
           runbook: docs/runbooks/proxmox-unavailable.md
-          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-proxmox/proxmox
+          runbook_url: https://docs.prod.example/runbooks/storage-failure
+          dashboard_url: https://grafana.prod.example/d/lynomia-proxmox/proxmox
 
       - alert: SmartHealthFailing
         # Written by the smartmon textfile collector. Predictive rather than
@@ -304,4 +304,4 @@ groups:
             {{ $labels.disk }} has failed its SMART health assessment. Schedule a
             replacement during a maintenance window rather than waiting for it to fail
             into a degraded array at 3am.
-          runbook_url: https://docs.lynomia.internal/runbooks/storage-failure
+          runbook_url: https://docs.prod.example/runbooks/storage-failure

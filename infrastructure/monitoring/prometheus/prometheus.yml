@@ -25,8 +25,12 @@ global:
     # federation). Without them an alert forwarded from a second region is
     # indistinguishable from a local one.
     cluster: lynomia
-    environment: production
-    region: kw-central
+    # Expanded from the process environment (see the compose file's
+    # --enable-feature=expand-external-labels). The environment and the region
+    # are facts about the estate this server watches, and writing them here
+    # would make this file the naming authority for somebody else's estate.
+    environment: ${LYNOMIA_ENV}
+    region: ${LYNOMIA_REGION}
 
 rule_files:
   - /etc/prometheus/rules/*.yml

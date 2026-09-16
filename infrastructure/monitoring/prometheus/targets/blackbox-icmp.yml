@@ -1,3 +1,18 @@
+# -----------------------------------------------------------------------------
+# REFERENCE TARGET LIST — describes no machine that exists.
+#
+# Every name here is a host from the example inventory in
+# infrastructure/ansible/inventories/production/hosts.yml, under `.example`,
+# which IANA reserves for documents. The real target list is operator-supplied
+# and lives with the private inventory: Prometheus re-reads a file_sd file
+# within seconds, so replacing this file is the whole deployment step.
+#
+# It is written in the reference namespace on purpose. A committed list of
+# plausible-looking internal hostnames is one copy-paste from being configured
+# as real, and this platform's own endpoint policy refuses `.internal` names
+# outright — so a list under that zone disagreed with the application that
+# reads it.
+# -----------------------------------------------------------------------------
 # Dedicated servers: reachability is the only signal the platform has for a
 # machine it does not run an agent on, and the customer owns the OS.
 - targets:

@@ -1596,15 +1596,18 @@
       "row": "Row {{row}}",
       "units": "{{units}}U · {{machines}} machines",
       "region": "Region",
-      "slug": "Slug",
-      "name": "Name",
+      "slug": "Logical ID",
+      "name": "Display name",
       "facility": "Facility",
       "datacenter": "Datacenter",
-      "rackName": "Rack name",
+      "rackName": "Rack code",
       "rowLabel": "Row",
       "unitsLabel": "Units",
       "powerNotes": "Power notes",
-      "networkNotes": "Network notes"
+      "networkNotes": "Network notes",
+      "slugHint": "Stable identifier. Orders, audit history and monitoring reference it; renaming the display name does not change it. Lower case, digits and dashes — for example ref-dc-alpha-1.",
+      "nameHint": "What people read on screens, in any language. Rename it freely: nothing references it.",
+      "rackCodeHint": "The code on the cabinet. Unique within this datacenter, and A1 and a1 are the same rack."
     },
     "accountChanges": {
       "title": "Account changes",

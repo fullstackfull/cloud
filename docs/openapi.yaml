@@ -16823,7 +16823,8 @@ components:
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
-        name:
+        provider_name:
+          description: "The hypervisor's own name for this node. The platform's identity for it is `id`."
           type:
             - "string"
             - "null"
