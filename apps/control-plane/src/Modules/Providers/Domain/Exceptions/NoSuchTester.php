@@ -27,6 +27,28 @@ final class NoSuchTester extends RuntimeException
         ));
     }
 
+    /**
+     * A controlled driver asked to answer for a production row.
+     *
+     * Reported as "no tester", because for a production row that is the true
+     * statement: the fake is registered for rehearsal in this deployment and
+     * there is nothing here that can establish anything about a row the
+     * readiness engine consults before a product goes on sale.
+     *
+     * A refusal rather than a result. A result would be recorded as a
+     * connection test against a provider that does not exist, and an operator
+     * reading "authentication failed" would go looking for a credential.
+     */
+    public static function forAProductionRow(string $driver): self
+    {
+        return new self(sprintf(
+            'Driver [%s] is a controlled driver for rehearsing the onboarding path, and this provider row is a '
+            .'production row. Nothing here can establish whether a production provider is reachable, and a '
+            .'production row is what the readiness engine consults before a product is offered for sale.',
+            $driver,
+        ));
+    }
+
     public static function mismatched(string $requested, string $actual): self
     {
         return new self(sprintf(

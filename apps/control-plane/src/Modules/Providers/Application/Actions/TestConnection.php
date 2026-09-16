@@ -13,12 +13,14 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
 use Lynomia\Modules\Infrastructure\Domain\Services\SafetyGate;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Providers\Domain\Contracts\ConnectionTester;
 use Lynomia\Modules\Providers\Domain\Contracts\SecretResolver;
 use Lynomia\Modules\Providers\Domain\DTOs\ConnectionResult;
 use Lynomia\Modules\Providers\Domain\DTOs\ServerDiscovery;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
 use Lynomia\Modules\Providers\Domain\Exceptions\NoBmcProvider;
+use Lynomia\Modules\Providers\Domain\Exceptions\NoSuchTester;
 use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest as ConnectionTestRecord;
@@ -97,7 +99,7 @@ final readonly class TestConnection
         $this->gate->assert($server->name, $server->safety_class, $server->allow_reimage, InfrastructureAction::Read);
 
         $target = $this->targetFor($server);
-        $tester = $this->testers->for($target->driver);
+        $tester = $this->testerFor($target->driver, $target->environment);
         $result = $tester->test($target);
 
         $test = $this->recordServerTest($server, $target->driver, $result);
@@ -242,7 +244,39 @@ final readonly class TestConnection
 
     private function run(string $driver, TestTarget $target): ConnectionResult
     {
-        return $this->testers->for($driver)->test($target);
+        return $this->testerFor($driver, $target->environment)->test($target);
+    }
+
+    /**
+     * The tester for a driver, if it may answer for this environment at all.
+     *
+     * The one seam every test and every discovery goes through, which is why
+     * the environment check lives here rather than in the factory: the factory
+     * is handed a driver name and has no way to know what it is being asked
+     * about.
+     *
+     * What it refuses is a controlled driver answering for a **production
+     * row**. The deployment-level controls cannot see that case — the fake is
+     * legitimately registered in a staging deployment, and legitimately
+     * refuses to be constructed in a production one — and it is the case that
+     * matters most, because a production row is what the readiness engine
+     * consults before a product is offered for sale.
+     *
+     * Raised as NoSuchTester so that the refusal reaches an operator as the
+     * 422 the controller already renders for a driver nothing can test. The
+     * fake tester keeps its own guard on the same condition: it is now
+     * unreachable through this path, which is what a backstop is.
+     *
+     * @throws NoSuchTester
+     */
+    private function testerFor(string $driver, DeploymentEnvironment $environment): ConnectionTester
+    {
+        if ($environment === DeploymentEnvironment::Production
+            && in_array($driver, $this->catalogue->controlledDrivers(), strict: true)) {
+            throw NoSuchTester::forAProductionRow($driver);
+        }
+
+        return $this->testers->for($driver);
     }
 
     /**

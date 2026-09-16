@@ -277,7 +277,37 @@ move to the other side of the same asymmetry (a staging machine with a productio
 credential rather than the reverse); `DeploymentEnvironment::satisfies()` is an exact
 match, so either direction proves the property that test is about.
 
-### 8.7 A catalogue claim that had become false
+### 8.7 The production guard, as first written, answered an operator with a 500
+
+Found by the full suite rather than by the targeted one, which is the argument for
+running it. The fake tester's new target guard threw a `RuntimeException` from inside
+`test()`, and that reaches the HTTP layer as an unhandled 500 — the wrong answer for
+somebody pressing a button on a screen, and one that says nothing about what is wrong.
+
+The refusal was moved up to `TestConnection`, into the single seam every test and every
+discovery resolves a tester through, and raised as `NoSuchTester` — which the connection
+test controller already renders as a 422 with `error.code` of `unknown_driver`. For a
+production row that is the true statement: the fake is registered for rehearsal in this
+deployment, and there is nothing here that can establish anything about a row the
+readiness engine consults before a product goes on sale. The tester keeps its own guard
+on the same condition; it is now unreachable through the HTTP path, which is what a
+backstop is.
+
+### 8.8 A security test whose passing assertion was the wrong answer
+
+`a_staging_credential_is_never_tried_against_production` asserted `assertOk()`: the test
+ran with no secret — the staging reference was correctly never resolved for a production
+target — and the fake answered `AuthFailed`, as a real endpoint would to an empty
+credential. That satisfied the property the test is about, and it was the wrong answer to
+give an operator twice over. It recorded a connection test against a provider that does
+not exist, and it said "authentication failed", which sends somebody to the credential
+centre to fix a credential that is not the problem.
+
+It now asserts the 422 and that the provider's `connection_state` is still `not_tested`:
+nothing was dialled, so nothing was recorded. The cross-environment property the test
+exists for is unchanged and still asserted.
+
+### 8.9 A catalogue claim that had become false
 
 `TheProviderRegistryRefusesToGoLiveOnHopeTest` asserted that `proxmox` and `cloudflare`
 were **not** testable, with a comment reading "the honest state of this build: adapters
@@ -337,11 +367,13 @@ Run locally at the commit this document is part of.
 | check | command | result |
 |---|---|---|
 | New gates | `--filter='EveryRealDriverHasAnIdentityTester\|AConnectionIsNotHealthyBecauseASocketOpened\|EachProviderIsIdentifiedByWhatOnlyItSays\|AConnectionTestKeepsNeitherTheSecretNorTheAnswer'` | 148 tests, 505 assertions, passed |
-| Providers, endpoint policy, infrastructure | `--filter='Providers\|EndpointPolicy\|AnEndpointIsNotAWayIntoTheNetwork'` | 269 tests, 1,012 assertions, passed |
+| Providers, endpoint policy, security, infrastructure | `--filter='Providers\|EndpointPolicy\|AnEndpointIsNotAWayIntoTheNetwork\|TheControlCenterRefusesTheDangerousInputs\|OnboardingAServer\|AMachineIsReached'` | 276 tests, 1,068 assertions, passed |
+| **Whole backend suite** | `php artisan test` | **3,190 tests, 139,473 assertions, passed** |
 | Code style | `vendor/bin/pint --test` | passed |
 | Static analysis | `tools/phpstan/vendor/bin/phpstan analyse -c tools/phpstan/phpstan.neon` | 0 errors |
 | Frontend types | `npx tsc -b` | clean |
 | Frontend unit | `npx vitest run` | 81 files, 443 tests, passed |
+| Frontend lint | `npx eslint . --max-warnings 0` | clean |
 
 The negative matrix is 98 cases: eight HTTPS drivers against thirteen impostor
 responses, minus the cases where an impostor is the driver's own product. It is driven by
@@ -425,7 +457,10 @@ longer make this platform believe in an estate that is not there.
 
 - `src/Modules/Providers/Domain/Enums/ConnectionState.php` — two cases
 - `src/Modules/Providers/Infrastructure/ProvidersServiceProvider.php` — the registry
-- `src/Modules/Providers/Infrastructure/Testers/FakeConnectionTester.php` — third guard
+- `src/Modules/Providers/Infrastructure/Testers/FakeConnectionTester.php` — backstop guard
+- `src/Modules/Providers/Application/Actions/TestConnection.php` — one tester seam, production refusal
+- `src/Modules/Providers/Domain/Exceptions/NoSuchTester.php` — `forAProductionRow()`
+- `tests/Feature/Security/TheControlCenterRefusesTheDangerousInputsTest.php` — corrected assertion
 - `src/Modules/Shared/Domain/Services/EndpointPolicy.php` — port-bypass fix
 - `tests/Unit/Shared/AnEndpointIsNotAWayIntoTheNetworkTest.php` — bypass regressions
 - `tests/Feature/Providers/TheProviderRegistryRefusesToGoLiveOnHopeTest.php` — corrected claim
