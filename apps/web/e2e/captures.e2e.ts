@@ -122,13 +122,27 @@ test.describe('the visual record', () => {
           await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
         }
 
-        const shoot = async (name: string): Promise<void> => {
+        /*
+         * `fullPage` everywhere except over an open dialogue.
+         *
+         * A full-page capture has to scroll the document to stitch the image,
+         * and a native modal `<dialog>` scroll-locks the document — so the
+         * capture never completes and the test sits there until its timeout.
+         * That cost two runs: thirty-six of forty images each time, with the
+         * remaining four never attempted and nothing in the log to say why.
+         *
+         * A viewport capture is also the truer picture of a dialogue: it is
+         * positioned against the viewport, so what a customer sees of it is
+         * exactly a viewport, and a stitched page behind it shows a state no
+         * screen is ever in.
+         */
+        const shoot = async (name: string, modal = false): Promise<void> => {
           // Settled rather than raced: a capture taken mid-request records a
           // loading state and proves nothing about the layout.
           await page.waitForTimeout(1200)
           await page.screenshot({
             path: path.join(OUTPUT, `${language}-${label}-${name}.png`),
-            fullPage: true,
+            fullPage: ! modal,
           })
         }
 
@@ -171,17 +185,63 @@ test.describe('the visual record', () => {
           await shoot(screen.name)
         }
 
-        /*
-         * The four states §3 asks for beyond the screens themselves. Each is
-         * reached by driving the product rather than by mocking: the drawer is
-         * opened, the dialogue is opened on a real machine, and the empty
-         * state is a genuinely empty list.
-         */
+      })
+    }
+  }
+})
+
+/*
+ * The four states §3 asks for beyond the screens themselves, as their own
+ * test rather than as a tail on each matrix test.
+ *
+ * Separated because a stall in one of them held the other thirty-six captures
+ * hostage: the matrix test wrote its screens, reached this block, and sat
+ * there until the timeout, so a run produced thirty-six of forty images and
+ * nothing to say which step had not returned. Four pictures and a matrix are
+ * two concerns, and a test that does one thing fails where the fault is.
+ *
+ * Two widths rather than five, because a dialogue, an empty list, a refusal
+ * and a waiting screen do not change between 1440 and 1024 in ways a picture
+ * shows; what matters is one wide and one narrow.
+ */
+test.describe('the states between the screens', () => {
+  test.skip(process.env.CAPTURES !== '1', 'captures are taken on request, not on every run')
+
+  test.describe.configure({ timeout: 240_000 })
+
+  for (const language of ['en', 'ar'] as const) {
+    for (const [label, width, height] of [
+      ['1440', 1440, 900],
+      ['360', 360, 740],
+    ] as Array<[string, number, number]>) {
+      test(`records the drawer, a dialogue, an empty list and a refusal in ${language} at ${label}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height })
+
+        if (language === 'ar') {
+          await page.goto('/sign-in')
+          await page.getByRole('button', { name: 'العربية' }).first().click()
+          await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
+        }
+
+        await signIn(page, users.customer, {
+          headingPattern: language === 'ar' ? /مرحب|أهل/ : /welcome/i,
+        })
+
+        const shoot = async (name: string, modal = false): Promise<void> => {
+          await page.waitForTimeout(800)
+          await page.screenshot({
+            path: path.join(OUTPUT, `${language}-${label}-${name}.png`),
+            fullPage: ! modal,
+          })
+        }
+
         if (width < 1024) {
           await page.goto('/')
-          await page.getByRole('button', { name: /^menu$|^القائمة$/i }).click()
-          await expect(page.getByRole('dialog')).toBeVisible()
-          await shoot('drawer')
+          await page.getByRole('button', { name: /^menu$|^القائمة$/i }).click({ timeout: 15_000 })
+          await expect(page.getByRole('dialog')).toBeVisible({ timeout: 15_000 })
+          await shoot('drawer', true)
           await page.keyboard.press('Escape')
         }
 
@@ -189,16 +249,9 @@ test.describe('the visual record', () => {
         await page
           .locator('main')
           .getByRole('link', { name: fixtures.operableHostname, exact: true })
-          .click()
-        /*
-         * Waited for, not assumed. Without this the next line read the address
-         * before the click had navigated, so it asked for `/vps/danger` — a
-         * machine whose identifier is the word "danger" — found no reinstall
-         * control on the refusal that came back, and waited out the timeout
-         * rather than failing. Thirty-six of forty images, and fifteen minutes
-         * to say so.
-         */
-        await page.waitForURL((url) => url.pathname !== '/vps')
+          .first()
+          .click({ timeout: 15_000 })
+        await page.waitForURL((url) => url.pathname !== '/vps', { timeout: 15_000 })
         await page.goto(`${new URL(page.url()).pathname}/danger`)
 
         await page
@@ -206,12 +259,11 @@ test.describe('the visual record', () => {
           .filter({ hasText: /reinstall|إعادة/i })
           .first()
           .click({ timeout: 15_000 })
-        await expect(page.getByRole('dialog')).toBeVisible()
-        await shoot('confirmation-dialog')
+        await expect(page.getByRole('dialog')).toBeVisible({ timeout: 15_000 })
+        await shoot('confirmation-dialog', true)
         await page.keyboard.press('Escape')
 
-        // An empty list: this account holds no dedicated-server backups, so
-        // the backups screen filtered to them has nothing to show.
+        // A genuinely empty list: a page number past the end of the orders.
         await page.goto('/orders?page=9999')
         await shoot('empty-state')
 
@@ -222,15 +274,12 @@ test.describe('the visual record', () => {
         await shoot('failure-state')
 
         /*
-         * The loading state, which is the one state that cannot be captured by
-         * arriving somewhere and waiting: by the time a screenshot is taken it
-         * is gone. So the response is held for a few seconds — the request is
-         * still made and still answered, nothing is stubbed — and the picture
-         * is taken while the screen is genuinely waiting.
-         *
-         * Worth a capture of its own since W5.8: until this wave the waiting
-         * state and the empty state were the same picture, and the only way to
-         * see that they now differ is to look at them side by side.
+         * The loading state, which cannot be captured by arriving somewhere
+         * and waiting: by the time a screenshot is taken it is gone. The
+         * response is held for a few seconds — the request is still made and
+         * still answered, nothing is stubbed — and the picture is taken while
+         * the screen is genuinely waiting. Worth its own capture since W5.8,
+         * because until this wave waiting and empty were the same picture.
          */
         await page.route('**/api/v1/invoices*', async (route) => {
           await new Promise((resolve) => setTimeout(resolve, 4000))
@@ -240,7 +289,7 @@ test.describe('the visual record', () => {
         await expect(page.getByRole('status')).toBeVisible({ timeout: 15_000 })
         await page.screenshot({
           path: path.join(OUTPUT, `${language}-${label}-loading-state.png`),
-          fullPage: true,
+          fullPage: false,
         })
         await page.unroute('**/api/v1/invoices*')
       })
