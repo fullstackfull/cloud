@@ -171,6 +171,19 @@ final class InfrastructurePreflightCommand extends Command
             $report->scope->label(),
             $report->target === null ? '' : ': '.$report->target,
         ));
+
+        /*
+         * Two words, not one. The mode says how the checks ran; this says what
+         * they ran against. Without it, a green simulation over the reference
+         * estate reads as a green estate, which is the confusion Gap 4 exists
+         * to remove.
+         */
+        $this->line(sprintf('  <options=bold>%s</>%s',
+            $report->topologyLabel(),
+            $report->referenceTopology
+                ? ' — a model of an estate. Nothing in it exists and nothing in it is reachable.'
+                : '',
+        ));
         $this->newLine();
 
         foreach ($report->findings as $finding) {
@@ -179,6 +192,7 @@ final class InfrastructurePreflightCommand extends Command
 
         $this->newLine();
         $this->line(sprintf('  Mode:     %s', $report->mode->label()));
+        $this->line(sprintf('  Topology: %s', $report->topologyLabel()));
         $this->line(sprintf('  Checks:   %d', count($report->findings)));
         $this->line(sprintf('  Passed:   %d', $report->countOf(CheckStatus::Pass)));
         $this->line(sprintf('  Failed:   %d', $report->countOf(CheckStatus::Fail)));
@@ -196,6 +210,16 @@ final class InfrastructurePreflightCommand extends Command
         $this->line($claims === []
             ? '  Real infrastructure verified: NONE'
             : sprintf('  Real infrastructure verified, for these reads only: %s', implode(', ', array_unique($claims))));
+
+        /*
+         * Printed unconditionally and always NONE, because this command cannot
+         * establish it. Sellability is a decision an operator records against a
+         * product once its real requirements are met, and a preflight — in
+         * either mode, over either estate — is not that decision. Saying so on
+         * every run is cheaper than somebody inferring the opposite from a
+         * screen full of passes.
+         */
+        $this->line('  Ready to sell: NONE — a preflight observes; it does not declare a product sellable.');
 
         $actions = $report->nextActions();
 

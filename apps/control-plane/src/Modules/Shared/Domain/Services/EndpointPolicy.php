@@ -29,6 +29,12 @@ use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
  *     socket is ever opened for.
  *   - No userinfo in a URL: a credential lives in the credential centre, not
  *     in an endpoint string that is logged and shown.
+ *   - In production, and only in production, a value out of the reference
+ *     estate: an address from a range an RFC set aside for documents, a name
+ *     under a domain that is never delegated, or a reference logical id. Those
+ *     values are correct in the reference topology, in the example inventories
+ *     and in every fixture; a production installation dialling one is a
+ *     production installation pointed at a model of an estate.
  *
  * Checked at registration and again at use, so a row that arrived by a road
  * this did not guard is still refused before a socket opens.
@@ -40,6 +46,10 @@ final readonly class EndpointPolicy
     private const array FORBIDDEN_SUFFIXES = ['.localhost', '.local', '.internal', '.localdomain'];
 
     private const array METADATA_LITERALS = ['169.254.169.254', '100.100.100.200', 'fd00:ec2::254'];
+
+    public function __construct(
+        private ReferenceValues $reference = new ReferenceValues,
+    ) {}
 
     public function assertProviderEndpoint(string $endpoint, bool $controlledDriver, bool $onOurHardware, bool $production): void
     {
@@ -65,7 +75,7 @@ final readonly class EndpointPolicy
             throw EndpointRefused::because($endpoint, 'a credential in an endpoint is a credential in a log line. Record it in the credential centre and attach it.');
         }
 
-        $this->assertHost($endpoint, $parts['host'], allowPrivate: $onOurHardware);
+        $this->assertHost($endpoint, $parts['host'], allowPrivate: $onOurHardware, production: $production);
     }
 
     public function assertMachineAddress(string $address, bool $production): void
@@ -83,7 +93,7 @@ final readonly class EndpointPolicy
         }
 
         // Machines are on the management network: private is expected.
-        $this->assertHost($address, $this->hostWithoutPort($address), allowPrivate: true);
+        $this->assertHost($address, $this->hostWithoutPort($address), allowPrivate: true, production: $production);
     }
 
     /**
@@ -139,7 +149,7 @@ final readonly class EndpointPolicy
         }
     }
 
-    private function assertHost(string $original, string $host, bool $allowPrivate): void
+    private function assertHost(string $original, string $host, bool $allowPrivate, bool $production): void
     {
         $host = strtolower(trim($host, '[]'));
 
@@ -153,25 +163,58 @@ final readonly class EndpointPolicy
             }
         }
 
+        /*
+         * Production only, and the restriction is the point: `.example` and
+         * `.test` are how the Ansible inventories and the development seeder
+         * name hosts that do not exist, and `.invalid` is how Gap 2's negative
+         * matrix names one. All three are correct there and disqualifying here.
+         *
+         * Below the suffix loop rather than above it, so that `x.localhost`
+         * keeps the more specific refusal. Both would reject it; only one tells
+         * the operator that the name is this machine.
+         */
+        if ($production && $this->reference->isDocumentationHostname($host)) {
+            throw EndpointRefused::because($original, 'that name is under a domain reserved for examples and is never delegated, so nothing will ever answer it in production.');
+        }
+
         $literal = filter_var($host, FILTER_VALIDATE_IP) !== false;
 
         $addresses = $literal ? [$host] : $this->resolve($host);
 
         foreach ($addresses as $ip) {
-            $this->assertAddress($original, $ip, $allowPrivate, $literal);
+            $this->assertAddress($original, $ip, $allowPrivate, $literal, $production);
         }
     }
 
-    private function assertAddress(string $original, string $ip, bool $allowPrivate, bool $literal): void
+    private function assertAddress(string $original, string $ip, bool $allowPrivate, bool $literal, bool $production): void
     {
         if (in_array($ip, self::METADATA_LITERALS, strict: true)) {
             throw EndpointRefused::because($original, 'that is a cloud metadata service.');
         }
 
-        // Reserved ranges — loopback, link-local, unspecified, multicast,
-        // documentation — are refused for everything. FILTER_FLAG_NO_RES_RANGE
-        // covers them; NO_PRIV_RANGE is added only when the caller is not on
-        // our own hardware.
+        /*
+         * Applied to a resolved address as well as to a literal, so that a name
+         * pointed at 203.0.113.10 is refused for the same reason the literal
+         * is. This check is here rather than in the flags below because PHP's
+         * reserved set does not contain the documentation ranges: measured on
+         * 8.4, FILTER_FLAG_NO_RES_RANGE accepts 192.0.2.10, 198.51.100.10,
+         * 203.0.113.10 and 2001:db8::1, with and without NO_PRIV_RANGE. The
+         * comment below this one used to claim otherwise and was wrong, which
+         * meant every documentation address in this repository's own examples
+         * was an acceptable production provider endpoint.
+         */
+        if ($production && $this->reference->isDocumentationAddress($ip)) {
+            throw EndpointRefused::because($original, sprintf(
+                '%s in a range reserved for documentation, so it belongs to nobody and routes nowhere. A production endpoint needs a real address.',
+                $literal ? 'the address is' : 'it resolves to an address',
+            ));
+        }
+
+        // Reserved ranges — loopback, link-local, unspecified and multicast —
+        // are refused for everything. FILTER_FLAG_NO_RES_RANGE covers them;
+        // NO_PRIV_RANGE is added only when the caller is not on our own
+        // hardware. The documentation ranges are NOT in that set and are
+        // handled above.
         $flags = FILTER_FLAG_NO_RES_RANGE | ($allowPrivate ? 0 : FILTER_FLAG_NO_PRIV_RANGE);
 
         if (filter_var($ip, FILTER_VALIDATE_IP, $flags) === false) {

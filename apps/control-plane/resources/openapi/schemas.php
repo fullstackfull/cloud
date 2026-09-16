@@ -1183,6 +1183,8 @@ return [
         'properties' => [
             'mode' => ['type' => 'string', 'enum' => ['simulation', 'read_only_real']],
             'mode_label' => ['type' => 'string', 'description' => 'SIMULATION or READ_ONLY_REAL, for display. A simulation result that does not say so is one somebody quotes as proof.'],
+            'reference_topology' => ['type' => 'boolean', 'description' => 'True when the run looked at rows out of the reference topology, which is a model of an estate rather than an estate. Carried separately from the mode: the mode says how the checks ran, this says what they ran against.'],
+            'topology_label' => ['type' => 'string', 'description' => 'REFERENCE TOPOLOGY or CONFIGURED INFRASTRUCTURE, for display beside the mode.'],
             'scope' => ['type' => 'string', 'enum' => ['estate', 'site', 'provider', 'product', 'machine']],
             'target' => ['type' => ['string', 'null']],
             'started_at' => ['type' => 'string', 'format' => 'date-time'],

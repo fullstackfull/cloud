@@ -1373,6 +1373,7 @@
       },
       "counts": "{{pass}} passed, {{blocked}} blocking, {{warning}} warnings, {{unknown}} not established",
       "noRealVerification": "Real infrastructure verified: none. Nothing in this run reached a real provider in a way that could establish it.",
+      "referenceTopology": "These checks ran against the REFERENCE TOPOLOGY, which is a model of an estate rather than an estate. Nothing in it exists and nothing in it is reachable, so nothing here is evidence about real infrastructure.",
       "realVerification": "Real infrastructure verified, for these reads only: {{checks}}. A read that succeeded has earned exactly that read — nothing about whether a machine will build.",
       "nextHeading": "What to do next",
       "next": "Next: {{action}}"

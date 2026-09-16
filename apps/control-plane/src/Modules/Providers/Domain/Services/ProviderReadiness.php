@@ -8,7 +8,9 @@ use Lynomia\Modules\Providers\Domain\DTOs\CatalogueEntry;
 use Lynomia\Modules\Providers\Domain\DTOs\ReadinessVerdict;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
+use Lynomia\Modules\Shared\Domain\Services\ReferenceValues;
 
 /**
  * Why a provider is not usable yet, in the order the answers can be acted on.
@@ -39,6 +41,10 @@ use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
  */
 final readonly class ProviderReadiness
 {
+    public function __construct(
+        private ReferenceValues $reference = new ReferenceValues,
+    ) {}
+
     /**
      * @param  bool  $testerAvailable  Whether a connection tester exists for this driver.
      *                                 Passed in rather than looked up so this stays a pure
@@ -126,6 +132,36 @@ final readonly class ProviderReadiness
 
         if ($entry->needsEndpoint && ($provider->endpoint === null || trim($provider->endpoint) === '')) {
             return $blocked(BlockerReason::Configuration, 'No endpoint address is configured.');
+        }
+
+        /*
+         * A provider row DECLARED for production, carrying a value out of the
+         * reference estate.
+         *
+         * Checked against the row's own environment rather than the
+         * installation's, and that is the opposite choice from
+         * RegisterProvider on purpose. Registration asks "may this
+         * installation hold such a row at all", where the installation is the
+         * fact and the row is data somebody typed. Readiness asks "may this row
+         * be given real work", and there the row's declared environment is
+         * exactly the claim being tested: an operator who wrote `production` on
+         * a row pointed at 203.0.113.11 has stated an intention, and the
+         * endpoint contradicts it.
+         *
+         * Placed here rather than in EnableProvider so that one check covers
+         * four surfaces: enabling refuses because readiness is not ready, the
+         * readiness screen says why, the preflight provider chain reports it as
+         * a configuration blocker, and the stored readiness column records it.
+         */
+        if ($provider->environment === DeploymentEnvironment::Production && $provider->endpoint !== null) {
+            $refusal = $this->reference->refuseForProduction($provider->endpoint);
+
+            if ($refusal !== null) {
+                return $blocked(BlockerReason::Configuration, sprintf(
+                    'This row is declared for production and its endpoint is not: %s',
+                    $refusal,
+                ));
+            }
         }
 
         if (! $testerAvailable) {

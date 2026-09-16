@@ -20,6 +20,7 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
+use Lynomia\Modules\Shared\Domain\Services\ReferenceValues;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use PHPUnit\Framework\Attributes\Test;
@@ -104,14 +105,31 @@ final class DevelopmentFixturesTest extends TestCase
     {
         $this->seedDevelopmentFixtures();
 
-        // A development database that names a real hypervisor or a real panel is
-        // one misconfigured APP_ENV away from acting on somebody's production
-        // estate. Both drivers must be the fake, and no credential reference may
-        // be recorded for either.
+        /*
+         * A development database that names a real hypervisor or a real panel is
+         * one misconfigured APP_ENV away from acting on somebody's production
+         * estate. Both drivers must be the fake, and no credential reference may
+         * be recorded for either.
+         *
+         * The endpoint assertion changed in Gap 4 from "must be null" to "must
+         * be null or a fake:// marker", and the second is not weaker. `fake://`
+         * is this platform's own word for a controlled endpoint: it is the only
+         * shape EndpointPolicy accepts for a controlled driver, no socket is
+         * ever opened for one, and it says what it is — where a null endpoint
+         * says nothing and reads as "not configured yet". Anything else,
+         * including any URL, still fails.
+         */
         foreach (ComputeCluster::query()->get() as $cluster) {
             $this->assertSame(ComputeDriver::Fake, $cluster->driver);
-            $this->assertNull($cluster->api_endpoint);
             $this->assertNull($cluster->credentials_reference);
+
+            if ($cluster->api_endpoint !== null) {
+                $this->assertMatchesRegularExpression(
+                    '/^fake:\/\/[a-z0-9-]{1,60}$/',
+                    $cluster->api_endpoint,
+                    sprintf('Cluster "%s" has an endpoint that is not a controlled marker.', $cluster->slug),
+                );
+            }
         }
 
         foreach (HostingNode::query()->get() as $node) {
@@ -119,10 +137,30 @@ final class DevelopmentFixturesTest extends TestCase
             $this->assertNull($node->credentials_reference);
         }
 
-        // No out-of-band management endpoint is seeded at all: a BMC row carries
-        // an address on a management network and a credential reference, and a
-        // development database has no business holding either.
-        $this->assertSame(0, BmcEndpoint::query()->count());
+        /*
+         * Out-of-band management.
+         *
+         * This used to assert that no BMC row is seeded at all, because the old
+         * seeder deliberately created none — the objection being that a BMC row
+         * carries an address on a management network and a credential
+         * reference, and a development database has no business holding either.
+         *
+         * Gap 4 models the BMC relationship, because a reference estate that
+         * cannot express "this chassis has a BMC" cannot show an engineer what
+         * Lynomia will ask them for. So the assertion now refuses the two things
+         * that were actually objectionable, rather than the row that carried
+         * them: no credential, not even half of one, and no address that could
+         * be reached. That is a stronger statement than a count of zero, which
+         * said nothing about a row somebody might add later.
+         */
+        foreach (BmcEndpoint::query()->get() as $bmc) {
+            $this->assertNull($bmc->credentials_reference, 'A seeded BMC names a credential reference.');
+            $this->assertNull($bmc->username, 'A seeded BMC names a username, which is half a credential.');
+            $this->assertTrue(
+                (new ReferenceValues)->isDocumentationAddress($bmc->address),
+                sprintf('Seeded BMC address "%s" is not in a range reserved for documentation.', $bmc->address),
+            );
+        }
     }
 
     #[Test]

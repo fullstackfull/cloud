@@ -415,6 +415,17 @@ function PreflightPanel() {
             })}
           </Alert>
 
+          {/*
+            Two words, not one. The mode says how the checks ran; this says what
+            they ran against. A complete green over the reference estate is a
+            fact about this codebase and about nothing else, and a screen that
+            showed only the first word would let somebody read it as a fact
+            about an estate.
+          */}
+          {report.reference_topology ? (
+            <Alert tone="warning">{t('admin.preflight.referenceTopology')}</Alert>
+          ) : null}
+
           <p className="flex flex-wrap items-center gap-2 text-sm">
             <StatusBadge status={report.overall_status} />
             <span className="text-[var(--text-muted)]">

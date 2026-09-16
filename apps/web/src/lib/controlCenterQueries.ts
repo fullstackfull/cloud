@@ -706,6 +706,10 @@ export type PreflightCheck = {
 export type PreflightReport = {
   mode: PreflightMode
   mode_label: string
+  // What the checks ran against, beside how they ran. A complete green over a
+  // model of an estate says nothing about an estate.
+  reference_topology: boolean
+  topology_label: string
   scope: string
   target: string | null
   started_at: string

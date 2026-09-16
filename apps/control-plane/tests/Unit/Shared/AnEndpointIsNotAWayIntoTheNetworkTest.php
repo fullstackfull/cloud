@@ -67,9 +67,19 @@ final class AnEndpointIsNotAWayIntoTheNetworkTest extends TestCase
     #[Test]
     public function a_provider_on_our_hardware_may_be_private_and_a_cloud_provider_may_be_public(): void
     {
+        /*
+         * The sample hostnames are not under `.example` or `.test`, and that
+         * matters because these three lines assert acceptance in PRODUCTION.
+         * Gap 4 made the endpoint policy refuse a name under a reserved domain
+         * when production is true — nothing will ever answer one — so a sample
+         * that used a reserved domain would now be asserting that a reserved
+         * domain is acceptable in production, which is the opposite of what
+         * this file wants to say. The subject here is private-versus-public
+         * addressing, and it is unchanged.
+         */
         $this->policy->assertProviderEndpoint('https://10.66.0.5:8006/', controlledDriver: false, onOurHardware: true, production: true);
-        $this->policy->assertProviderEndpoint('https://panel.example.test:2087/', controlledDriver: false, onOurHardware: true, production: true);
-        $this->policy->assertProviderEndpoint('https://api.cloudflare.example/client/v4', controlledDriver: false, onOurHardware: false, production: true);
+        $this->policy->assertProviderEndpoint('https://panel.lynomia-hosting.net:2087/', controlledDriver: false, onOurHardware: true, production: true);
+        $this->policy->assertProviderEndpoint('https://api.some-dns-provider.net/client/v4', controlledDriver: false, onOurHardware: false, production: true);
 
         $this->expectNotToPerformAssertions();
     }
@@ -96,7 +106,9 @@ final class AnEndpointIsNotAWayIntoTheNetworkTest extends TestCase
     public function a_machine_address_is_a_host_and_may_be_private_but_never_this_host(): void
     {
         $this->policy->assertMachineAddress('10.66.0.2', production: true);
-        $this->policy->assertMachineAddress('bmc-01.mgmt.example.test', production: true);
+        // Not a reserved domain, for the reason given in the provider test
+        // above: this line asserts acceptance in production.
+        $this->policy->assertMachineAddress('bmc-01.mgmt.lynomia-fleet.net', production: true);
         $this->policy->assertMachineAddress('fake://connected', production: false);
 
         foreach (['127.0.0.1', '::1', 'localhost', '169.254.169.254', 'https://10.66.0.2', 'user@10.66.0.2', '10.66.0.2/admin', 'fake://connected'] as $address) {
@@ -181,7 +193,7 @@ final class AnEndpointIsNotAWayIntoTheNetworkTest extends TestCase
          */
         $this->policy->assertMachineAddress('10.66.0.2:8006', production: true);
         $this->policy->assertMachineAddress('10.66.0.2:623', production: true);
-        $this->policy->assertMachineAddress('bmc-01.mgmt.example.test:8443', production: true);
+        $this->policy->assertMachineAddress('bmc-01.mgmt.lynomia-fleet.net:8443', production: true);
 
         // A bare IPv6 literal, whose colons are part of the address rather
         // than a port separator. Splitting on the last one would turn a

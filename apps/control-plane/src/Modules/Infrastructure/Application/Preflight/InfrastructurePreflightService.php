@@ -29,6 +29,7 @@ use Lynomia\Modules\ProductReadiness\Domain\Services\ProductRequirements;
 use Lynomia\Modules\Providers\Application\Services\ProbeProvider;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
+use Lynomia\Modules\Shared\Domain\Services\ReferenceValues;
 use Throwable;
 
 /**
@@ -111,6 +112,7 @@ final readonly class InfrastructurePreflightService
         private AssessProduct $readiness,
         private ProductRequirements $requirements,
         private SafetyGate $gate,
+        private ReferenceValues $reference = new ReferenceValues,
     ) {}
 
     public function run(PreflightRequest $request): PreflightReport
@@ -148,7 +150,35 @@ final readonly class InfrastructurePreflightService
             startedAt: $startedAt,
             finishedAt: CarbonImmutable::now(),
             findings: $findings,
+            referenceTopology: $this->sawTheReferenceTopology($providers),
         );
+    }
+
+    /**
+     * Did this run look at rows out of the reference topology?
+     *
+     * Computed from the rows the run actually loaded rather than by asking
+     * whether a reference topology exists on disk — the question the report has
+     * to answer is what these checks were run against, not what the repository
+     * happens to contain. Provider names, provider endpoints and the machines
+     * behind them are the identifiers the loader writes, and they all carry the
+     * `ref-` scheme, which is exactly why the scheme is a scheme.
+     *
+     * @param  Collection<int, ProviderInstance>  $providers
+     */
+    private function sawTheReferenceTopology(Collection $providers): bool
+    {
+        foreach ($providers as $provider) {
+            $candidates = array_filter([$provider->name, $provider->endpoint, $provider->server?->name]);
+
+            foreach ($candidates as $candidate) {
+                if ($this->reference->refuseForProduction($candidate) !== null) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**

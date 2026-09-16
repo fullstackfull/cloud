@@ -35,6 +35,18 @@ use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
  * field on this report that says the estate is verified, because no such fact
  * exists. A cluster answering an authenticated read has earned exactly that
  * much, and the report says exactly that much.
+ *
+ * ===========================================================================
+ * WHICH TOPOLOGY WAS LOOKED AT
+ * ===========================================================================
+ *
+ * {@see $referenceTopology} is true when the run saw rows out of the reference
+ * topology, and it is carried separately from the mode because the two say
+ * different things. SIMULATION says how the checks were run; REFERENCE
+ * TOPOLOGY says what they were run against. A complete green against a model
+ * of an estate is a fact about this codebase and about nothing else, and a
+ * report that showed only the first word would let somebody read it as a fact
+ * about an estate.
  */
 final readonly class PreflightReport
 {
@@ -48,7 +60,20 @@ final readonly class PreflightReport
         public CarbonImmutable $startedAt,
         public CarbonImmutable $finishedAt,
         public array $findings,
+        public bool $referenceTopology = false,
     ) {}
+
+    /**
+     * What the run looked at, in the words that go beside the mode.
+     *
+     * A sentence rather than a flag at the call sites, so that neither the
+     * command nor the screen has to decide how to phrase it and they cannot
+     * phrase it differently.
+     */
+    public function topologyLabel(): string
+    {
+        return $this->referenceTopology ? 'REFERENCE TOPOLOGY' : 'CONFIGURED INFRASTRUCTURE';
+    }
 
     /**
      * Blocking, or not. Nothing in between.
@@ -252,6 +277,8 @@ final readonly class PreflightReport
     {
         return [
             'mode' => $this->mode->value,
+            'reference_topology' => $this->referenceTopology,
+            'topology_label' => $this->topologyLabel(),
             'mode_label' => $this->mode->label(),
             'scope' => $this->scope->value,
             'target' => $this->target,

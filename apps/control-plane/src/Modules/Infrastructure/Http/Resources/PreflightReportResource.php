@@ -56,6 +56,13 @@ final class PreflightReportResource extends JsonResource
             // The word that goes at the top of every screen. A simulation
             // result that does not say SIMULATION is one somebody quotes.
             'mode_label' => $report->mode->label(),
+            /*
+             * What the checks ran against, beside how they ran. A complete
+             * green against a model of an estate says nothing about an estate,
+             * and the screen needs both words to say so.
+             */
+            'reference_topology' => $report->referenceTopology,
+            'topology_label' => $report->topologyLabel(),
             'scope' => $report->scope->value,
             'target' => $report->target,
             'started_at' => $report->startedAt->toIso8601String(),
