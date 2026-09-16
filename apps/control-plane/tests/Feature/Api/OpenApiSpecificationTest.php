@@ -116,7 +116,8 @@ final class OpenApiSpecificationTest extends TestCase
      */
     private static function resourceFields(): array
     {
-        $fields = [];
+        $literal = [];
+        $composes = [];
 
         foreach (glob(base_path('src/Modules/*/Http/Resources/*.php')) ?: [] as $file) {
             $source = (string) file_get_contents($file);
@@ -125,11 +126,47 @@ final class OpenApiSpecificationTest extends TestCase
                 continue;
             }
 
-            preg_match_all("/^\s*'([a-z0-9_]+)' =>/m", $match[1], $keys);
+            $body = $match[1];
+
+            preg_match_all("/^\s*'([a-z0-9_]+)' =>/m", $body, $keys);
 
             $name = str_replace('Resource', '', basename($file, '.php'));
 
-            $fields[$name] = array_values(array_unique($keys[1]));
+            $literal[$name] = array_values(array_unique($keys[1]));
+
+            /*
+             * A resource that publishes another resource's fields as well as
+             * its own.
+             *
+             * Only a merge counts, and the pattern says so by requiring
+             * `toArray` to be called on it: a resource used as a *value* —
+             * `'messages' => TicketMessageResource::collection(...)` — is a
+             * nested object under a key of its own and its fields are not this
+             * resource's fields.
+             *
+             * Without this, IssuedApiTokenResource read as publishing `token`
+             * alone, because that is the only literal key in its body; the
+             * eleven fields it merges from ApiTokenResource were invisible.
+             * The schema was then written to match what this reader could see
+             * rather than what the endpoint returns, which is how the one
+             * response a customer can never ask for again came to be
+             * documented as a single field with `additionalProperties: false`.
+             */
+            if (preg_match_all('/new ([A-Za-z]+)Resource\([^)]*\)\)?->toArray\(/', $body, $merged) === 1
+                || ($merged[1] ?? []) !== []) {
+                $composes[$name] = $merged[1];
+            }
+        }
+
+        $fields = $literal;
+
+        foreach ($composes as $name => $parents) {
+            foreach ($parents as $parent) {
+                $fields[$name] = array_values(array_unique([
+                    ...$fields[$name] ?? [],
+                    ...$literal[$parent] ?? [],
+                ]));
+            }
         }
 
         return $fields;
