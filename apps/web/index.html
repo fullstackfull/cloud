@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <title>Lynomia Cloud</title>
+
+    <!--
+      The tab mark, inline.
+
+      Every page load asked the browser for /favicon.ico, there was none, and
+      the console answered 404 on each one — which is what W5.9 §24's walk
+      through the portal found. A file in public/ would have fixed the 404 and
+      needed a build step and an asset nobody had; a data URI fixes it here.
+
+      The two colours are the design system's own: #006fd7 is the sRGB
+      rendering of --color-brand-600, which --accent resolves to, and #ebf7ff
+      is --color-brand-50. Nothing new was chosen. The mark is the wordmark's
+      initial, drawn as a stroke so it stays legible at 16px.
+    -->
+    <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%23006fd7"/><path d="M11 8v13h10" fill="none" stroke="%23ebf7ff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' />
   </head>
   <body>
     <div id="root"></div>
