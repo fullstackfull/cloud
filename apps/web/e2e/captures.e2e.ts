@@ -254,9 +254,17 @@ test.describe('the states between the screens', () => {
         await page.waitForURL((url) => url.pathname !== '/vps', { timeout: 15_000 })
         await page.goto(`${new URL(page.url()).pathname}/danger`)
 
+        /*
+         * Named exactly, in both languages. `إعادة` on its own means "re-",
+         * and it prefixes the reboot action ("إعادة تشغيل") as well as this
+         * one ("إعادة التثبيت") — so a substring filter clicked reboot, which
+         * takes no dialogue, and the capture then waited for a dialogue that
+         * was never going to appear. Both Arabic state captures were lost
+         * that way while the English ones passed, because "reinstall" happens
+         * to be unambiguous.
+         */
         await page
-          .getByRole('button')
-          .filter({ hasText: /reinstall|إعادة/i })
+          .getByRole('button', { name: /^reinstall$|^إعادة التثبيت$/ })
           .first()
           .click({ timeout: 15_000 })
         await expect(page.getByRole('dialog')).toBeVisible({ timeout: 15_000 })
