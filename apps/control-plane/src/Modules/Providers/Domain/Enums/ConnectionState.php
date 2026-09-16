@@ -32,6 +32,32 @@ enum ConnectionState: string
     /** The endpoint answered and rejected the credential. */
     case AuthFailed = 'auth_failed';
 
+    /**
+     * Something answered over HTTPS and it is not the product this driver speaks to.
+     *
+     * Deliberately not AuthFailed, and the distinction is the whole reason
+     * this case exists. AuthFailed says the right product refused the
+     * credential, which sends an operator to rotate a key. This says the
+     * credential was never judged, because whatever is at that address is a
+     * load balancer error page, a captive portal, a different vendor's panel,
+     * or — as Phase 30B.0 found in this project's own sandbox — an egress
+     * gateway that answers a trusted TLS handshake for every hostname on
+     * earth, including ones that do not exist. Rotating a key fixes none of
+     * those. The endpoint is wrong.
+     */
+    case IdentityMismatch = 'identity_mismatch';
+
+    /**
+     * The stored credential is not in the shape this driver's API requires,
+     * so nothing was dialled at all.
+     *
+     * Also deliberately not AuthFailed: reporting that an endpoint rejected a
+     * credential it was never sent is inventing an answer, and it sends the
+     * operator to the wrong screen — the credential is not wrong at the
+     * provider, it is wrong in the credential centre.
+     */
+    case CredentialMalformed = 'credential_malformed';
+
     /** Nothing answered: no route, no listener, a firewall. */
     case NetworkFailed = 'network_failed';
 
@@ -54,7 +80,7 @@ enum ConnectionState: string
     public function reached(): bool
     {
         return match ($this) {
-            self::NotTested, self::Testing, self::NetworkFailed, self::TlsFailed => false,
+            self::NotTested, self::Testing, self::NetworkFailed, self::TlsFailed, self::CredentialMalformed => false,
             default => true,
         };
     }
@@ -75,7 +101,8 @@ enum ConnectionState: string
     {
         return match ($this) {
             self::NotTested, self::Testing, self::Connected, self::ConnectedReadOnly => null,
-            self::AuthFailed => BlockerReason::Credentials,
+            self::AuthFailed, self::CredentialMalformed => BlockerReason::Credentials,
+            self::IdentityMismatch => BlockerReason::Configuration,
             self::NetworkFailed, self::TlsFailed => BlockerReason::Network,
             self::LicenceMissing => BlockerReason::Licence,
             self::PermissionInsufficient => BlockerReason::Configuration,

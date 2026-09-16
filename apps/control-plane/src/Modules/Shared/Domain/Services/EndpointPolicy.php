@@ -83,7 +83,60 @@ final readonly class EndpointPolicy
         }
 
         // Machines are on the management network: private is expected.
-        $this->assertHost($address, trim($address, '[]'), allowPrivate: true);
+        $this->assertHost($address, $this->hostWithoutPort($address), allowPrivate: true);
+    }
+
+    /**
+     * The host half of a machine address, with a port removed and checked.
+     *
+     * Separated out because leaving the port attached defeated every check
+     * below it, and silently. `assertHost` asks whether the string is an IP
+     * literal; `169.254.169.254:80` is not one, so it fell through to name
+     * resolution, which cannot resolve a string with a port in it either, and
+     * returned no addresses at all — so the loop that refuses loopback,
+     * link-local and the cloud metadata services ran zero times and the
+     * address was accepted.
+     *
+     * A BMC on a non-standard port is an ordinary thing to have, so the answer
+     * is to parse the port rather than to forbid one. The port is then
+     * validated in its own right: a machine address is dialled, and a port
+     * outside 1-65535 is not a thing that can be dialled.
+     */
+    private function hostWithoutPort(string $address): string
+    {
+        // A bracketed IPv6 literal, with or without a port: [::1] or [::1]:443.
+        if (preg_match('/^\[([0-9A-Fa-f:.]+)\](?::(\d{1,5}))?$/', $address, $match) === 1) {
+            $this->assertPort($address, $match[2] ?? null);
+
+            return $match[1];
+        }
+
+        /*
+         * An unbracketed address with more than one colon is a bare IPv6
+         * literal — `fe80::1` — and the last colon is part of the address, not
+         * a port separator. Splitting on it would turn a loopback literal into
+         * an unrecognised name, which is the bug this method exists for.
+         */
+        if (substr_count($address, ':') === 1) {
+            [$host, $port] = explode(':', $address, 2);
+
+            $this->assertPort($address, $port);
+
+            return $host;
+        }
+
+        return $address;
+    }
+
+    private function assertPort(string $original, ?string $port): void
+    {
+        if ($port === null) {
+            return;
+        }
+
+        if (preg_match('/^\d{1,5}$/', $port) !== 1 || (int) $port < 1 || (int) $port > 65535) {
+            throw EndpointRefused::because($original, 'the port is not a port number.');
+        }
     }
 
     private function assertHost(string $original, string $host, bool $allowPrivate): void

@@ -139,6 +139,8 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   invalid: 'danger',
   blocked: 'danger',
   auth_failed: 'danger',
+  identity_mismatch: 'danger',
+  credential_malformed: 'danger',
   network_failed: 'danger',
   tls_failed: 'danger',
   licence_missing: 'danger',

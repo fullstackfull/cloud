@@ -123,6 +123,8 @@
     "applied": "مُطبَّق",
     "applying": "قيد التطبيق",
     "auth_failed": "فشلت المصادقة",
+    "credential_malformed": "بيانات الاعتماد غير قابلة للاستخدام",
+    "identity_mismatch": "نقطة الوصول خاطئة",
     "available": "متاح",
     "awaiting_approval": "بانتظار الموافقة",
     "awaiting_registry": "بانتظار السجلّ",

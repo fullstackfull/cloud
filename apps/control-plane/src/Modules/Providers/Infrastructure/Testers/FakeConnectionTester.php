@@ -10,6 +10,7 @@ use Lynomia\Modules\Providers\Domain\DTOs\ConnectionStep;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\CapabilityState;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use RuntimeException;
 
 /**
@@ -49,6 +50,15 @@ use RuntimeException;
  * production is not a bug to be caught in review — the application refuses to
  * build one, so a misconfigured deployment fails to boot rather than quietly
  * telling an operator that a machine nobody has bought is connected.
+ *
+ * And a second guard, on the target rather than on the deployment, because the
+ * first cannot see the case that matters most. A staging deployment is allowed
+ * to build this class; a *production provider row* tested from that staging
+ * deployment would still get an imaginary Connected, and that row is the one
+ * the readiness engine consults before a product goes on sale. So the
+ * environment of the thing being tested is checked too, and the two controls
+ * together mean a production row cannot be told it is connected by a fake from
+ * anywhere.
  */
 final class FakeConnectionTester implements ConnectionTester
 {
@@ -86,6 +96,8 @@ final class FakeConnectionTester implements ConnectionTester
      */
     public function discover(TestTarget $target): array
     {
+        $this->refuseProductionTargets($target);
+
         $marker = $this->markerIn($target->endpoint);
 
         if (in_array($marker, ['network-failed', 'tls-failed', 'timeout', 'unavailable', 'auth-failed'], true) || ! $target->hasSecret()) {
@@ -108,6 +120,8 @@ final class FakeConnectionTester implements ConnectionTester
 
     public function test(TestTarget $target): ConnectionResult
     {
+        $this->refuseProductionTargets($target);
+
         $marker = $this->markerIn($target->endpoint);
 
         // Reachability comes first, because nothing below it can be known
@@ -216,6 +230,28 @@ final class FakeConnectionTester implements ConnectionTester
             $steps,
             $this->allOf($target, CapabilityState::Supported),
         );
+    }
+
+    /**
+     * A production row is never answered by a fake, wherever this is running.
+     *
+     * An exception rather than a failed result, and the contract allows
+     * exactly this: {@see ConnectionTester}
+     * reserves them for a caller having asked for something impossible, as
+     * opposed to for an ordinary failure like an unreachable host. Answering
+     * NetworkFailed here would be worse than throwing — it would look like a
+     * real test of a real provider that happened to fail, and somebody would
+     * spend a morning on the network.
+     */
+    private function refuseProductionTargets(TestTarget $target): void
+    {
+        if ($target->environment === DeploymentEnvironment::Production) {
+            throw new RuntimeException(
+                'The fake connection tester must never answer for a production provider row. '
+                .'A production row is what the readiness engine consults before a product is offered for sale, '
+                .'and an imaginary Connected on one is how a customer buys something that does not exist.'
+            );
+        }
     }
 
     private function markerIn(?string $endpoint): string

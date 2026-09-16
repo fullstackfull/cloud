@@ -7,7 +7,16 @@ namespace Lynomia\Modules\Providers\Infrastructure;
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Providers\Domain\Contracts\ConnectionTester;
 use Lynomia\Modules\Providers\Domain\Contracts\SecretResolver;
+use Lynomia\Modules\Providers\Infrastructure\Testers\CloudflareConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\CpanelConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\DirectAdminConnectionTester;
 use Lynomia\Modules\Providers\Infrastructure\Testers\FakeConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\IpmiConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\ProxmoxBackupConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\ProxmoxConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\RedfishConnectionTester;
+use Lynomia\Modules\Providers\Infrastructure\Testers\StripeConnectionTester;
+use Tests\Architecture\EveryRealDriverHasAnIdentityTesterTest;
 
 /**
  * Wires the control centre.
@@ -20,9 +29,19 @@ use Lynomia\Modules\Providers\Infrastructure\Testers\FakeConnectionTester;
  * boot hands every later caller the bindings that existed at boot.
  *
  * The fake tester is registered only outside production. It also refuses to be
- * constructed there — belt and braces, because these two controls fail in
- * different ways: this one depends on the environment being read correctly at
- * boot, and the constructor guard depends on nothing.
+ * constructed there, and refuses a provider row whose own environment is
+ * production wherever it is built — three controls, because they fail in
+ * different ways: the first depends on the deployment environment being read
+ * correctly at boot, the second depends on nothing, and the third catches the
+ * case neither of the others can see, a production provider row being tested
+ * from a staging deployment.
+ *
+ * Every other driver in the catalogue with a real adapter now has a real
+ * tester, and each one identifies its product from something only that product
+ * says before it concludes anything at all. Two drivers deliberately have
+ * none, and the reasons are recorded in
+ * {@see EveryRealDriverHasAnIdentityTesterTest} rather
+ * than left to be rediscovered.
  */
 final class ProvidersServiceProvider extends ServiceProvider
 {
@@ -44,7 +63,30 @@ final class ProvidersServiceProvider extends ServiceProvider
      */
     private function testers(): array
     {
-        $testers = [];
+        /*
+         * One entry per driver, and a closure wherever a tester answers for
+         * more than one driver name or must not be built by the container.
+         *
+         * The Stripe tester is built here rather than resolved, deliberately:
+         * its constructor takes an optional client so that a test can inject
+         * one, and the container would otherwise hand it the application's own
+         * configured StripeClient — which carries the key from configuration
+         * instead of the key on the credential reference being tested. A
+         * tester that tested a different credential from the one asked about
+         * would pass and mean nothing.
+         */
+        $testers = [
+            'proxmox' => ProxmoxConnectionTester::class,
+            'proxmox_backup' => ProxmoxBackupConnectionTester::class,
+            'cpanel' => CpanelConnectionTester::class,
+            'directadmin' => DirectAdminConnectionTester::class,
+            'cloudflare' => fn (): ConnectionTester => new CloudflareConnectionTester('cloudflare'),
+            'cloudflare_rdns' => fn (): ConnectionTester => new CloudflareConnectionTester('cloudflare_rdns'),
+            'stripe' => fn (): ConnectionTester => new StripeConnectionTester,
+            'redfish' => fn (): ConnectionTester => new RedfishConnectionTester('redfish'),
+            'ilo' => fn (): ConnectionTester => new RedfishConnectionTester('ilo'),
+            'ipmi' => IpmiConnectionTester::class,
+        ];
 
         if (! $this->app->environment('production')) {
             $environment = (string) $this->app->environment();

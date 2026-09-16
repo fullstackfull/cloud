@@ -123,6 +123,8 @@
     "applied": "Applied",
     "applying": "Applying",
     "auth_failed": "Authentication failed",
+    "credential_malformed": "Credential unusable",
+    "identity_mismatch": "Wrong endpoint",
     "available": "Available",
     "awaiting_approval": "Awaiting approval",
     "awaiting_registry": "Waiting on the registry",
