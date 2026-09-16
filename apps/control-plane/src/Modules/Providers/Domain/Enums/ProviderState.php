@@ -32,4 +32,24 @@ enum ProviderState: string
     {
         return $this === self::Enabled;
     }
+
+    /**
+     * How far along onboarding this state is, from switched off to serving.
+     *
+     * The cases are ordered rather than derived from whether a blocker was
+     * recorded, because an instance nobody has assessed has no blocker, and
+     * reading that absence as "nothing is wrong" ranks a declared draft above
+     * one that was assessed and needs a single named thing. Whoever is asked
+     * to choose between them wants the second.
+     */
+    public function onboardingPosition(): int
+    {
+        return match ($this) {
+            self::Disabled => 0,
+            self::Draft => 1,
+            self::Blocked => 2,
+            self::Ready => 3,
+            self::Enabled => 4,
+        };
+    }
 }

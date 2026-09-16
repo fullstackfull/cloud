@@ -218,6 +218,41 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
         $this->assertStringContainsString('dns-live is not_ready (blocked)', $verdict->detail);
     }
 
+    /**
+     * The estate that found this had two instances in one category: one the
+     * reference topology declares and nobody has configured, and one assessed
+     * and waiting for a credential. Ranking on "has a blocker been recorded"
+     * put the untouched draft first, so the screen asked an operator to
+     * finish configuring a provider nobody had started instead of naming the
+     * credential that was missing.
+     */
+    #[Test]
+    public function a_draft_nobody_assessed_does_not_outrank_an_instance_blocked_on_one_named_thing(): void
+    {
+        $untouched = $this->provider(
+            ProviderCategory::Dns,
+            state: ProviderState::Draft,
+            readiness: ReadinessState::NotReady,
+            name: 'dns-declared',
+        );
+
+        $assessed = $this->provider(
+            ProviderCategory::Dns,
+            state: ProviderState::Blocked,
+            readiness: ReadinessState::NotReady,
+            blocker: BlockerReason::Credentials,
+            name: 'dns-live',
+        );
+
+        // Declared first, which is the order a seeded estate produces: the
+        // reference topology loads before anything is assessed.
+        $verdict = $this->evaluate(Product::Dns, [...$this->sharedMet(), $untouched, $assessed]);
+
+        $this->assertSame(BlockerReason::Credentials, $verdict->blocker);
+        $this->assertStringContainsString('dns-live', $verdict->detail);
+        $this->assertStringNotContainsString('dns-declared', $verdict->detail);
+    }
+
     #[Test]
     public function a_disabled_provider_is_not_proven_whatever_it_proved_before(): void
     {

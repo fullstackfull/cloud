@@ -85,8 +85,13 @@ export const fixtures = {
   providerTestable: 'e2e-bmc-node-01',
   providerBlocked: 'e2e-dns',
   machineConfigurable: 'e2e-node-03',
+  /*
+   * The rack this suite registers. Its datacenter is deliberately absent: the
+   * seeder puts the rack in whichever datacenter the seeded estate declares
+   * first, and that estate names its own places. The sites specs read the name
+   * off the row holding the rack instead.
+   */
   rack: 'E2E-R1',
-  datacenter: 'Kuwait Central 1',
 } as const
 
 /**
