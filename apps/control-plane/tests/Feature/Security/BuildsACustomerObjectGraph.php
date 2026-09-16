@@ -315,7 +315,19 @@ trait BuildsACustomerObjectGraph
             'to_currency' => 'AED',
             'state' => 'requested',
             'reason' => 'Relocating the business.',
-            'impact' => json_encode(['open_invoices' => 0, 'active_subscriptions' => 0]),
+            /*
+             * The shape CountryCurrencyImpact::toArray() writes, because that
+             * is the only thing that ever writes this column and the resource
+             * reads `$impact['facts']` without a fallback. A fixture inventing
+             * its own shape 500s the endpoint — which is a fixture fault, not a
+             * product one, and worth writing down so the next reader does not
+             * re-diagnose it as a defect.
+             */
+            'impact' => json_encode([
+                'facts' => ['open_invoices' => 0, 'active_subscriptions' => 1, 'wallet_balance_minor' => 50000],
+                'blockers' => [],
+                'warnings' => [],
+            ]),
             'analysed_at' => now(),
             'created_at' => now(),
             'updated_at' => now(),
