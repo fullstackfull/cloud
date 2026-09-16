@@ -34,10 +34,13 @@ groups:
           summary: 'Backup failed for {{ $labels.guest_type }}/{{ $labels.guest_id }} on datastore {{ $labels.datastore }}'
           description: >-
             The most recent backup task for {{ $labels.guest_type }}/{{ $labels.guest_id }}
-            ({{ $labels.guest_name }}) failed. Recoverability for this guest is now as old
-            as its last successful snapshot — check that age before deciding how urgent
-            this is, because a failed run on top of a week of successes is very different
-            from a failed run on top of nothing.
+            failed. Recoverability for this guest is now as old as its last successful
+            snapshot — check that age before deciding how urgent this is, because a failed
+            run on top of a week of successes is very different from a failed run on top
+            of nothing. The guest is named by id rather than by hostname deliberately: a
+            guest's name is a customer's hostname, and it is not put into a series that
+            travels to every dashboard and notification built on this metric. Look the id
+            up in the control plane, which is allowed to know it.
           runbook: docs/runbooks/backup-failure.md
           runbook_url: https://docs.lynomia.internal/runbooks/backup-failed
           dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview

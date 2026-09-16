@@ -274,26 +274,44 @@ counters: those rows are appended and never re-classified.
 
 ### 2. Proxmox Backup Server — `lynomia_backup_*`
 
-PBS has no Prometheus endpoint. These are written by a textfile collector on the
-backup host, read by its node_exporter from
-`/var/lib/node_exporter/textfile_collector/`. The collector belongs to
-`infrastructure/pbs`.
+PBS has no Prometheus endpoint of its own, so these series are the platform's
+decision rather than something it inherits.
 
-**NOT IMPLEMENTED.** `infrastructure/pbs` does not exist and nothing writes these
-series, so every alert in `backups.yml` is currently incapable of firing —
-including `BackupVerificationFailed` and `UnverifiedSnapshotsAccumulating`,
-which exist to catch the failure that looks exactly like success until somebody
-tries to restore. Blocker: `BLOCKED_HARDWARE` — the collector reads
-`proxmox-backup-manager` output, and writing it against output nobody has seen
-is guesswork with a green tick on it. `scripts/validate-monitoring.py` prints
-this gap on every run and fails the build if this paragraph is deleted while the
-directory is still missing.
+**IMPLEMENTED — by the control plane, not by a textfile collector.**
+`Monitoring\Application\Collectors\BackupCollector` produces all six from the
+`backups` table, and they are served from the control plane's own `/metrics`
+alongside every other family.
+
+That is a change of producer from what this section originally planned, and the
+reason is worth keeping. A textfile collector on the backup host can only report
+what PBS did; it cannot report a backup the control plane asked for and never
+heard about, which is the failure that matters most. It also cannot run at all
+until a PBS host exists — which, as of
+`docs/phase-30b-0-real-infrastructure-preflight.md`, it does not. The control
+plane already records every backup it requested, every task it polled and every
+verification result it was told about, so it can answer today.
+
+When a real PBS exists, a textfile collector may be added *beside* this one to
+cross-check it. The two disagreeing would itself be worth an alert.
+
+Two guarantees are enforced rather than intended:
+
+  - `tests/Architecture/EveryBackupAlertMetricHasAProducerTest` asserts the set
+    of `lynomia_backup_*` metrics the alerts read and the set the collectors
+    emit are equal in both directions, so an alert can never again read a series
+    nobody writes.
+  - `tests/Feature/Monitoring/BackupsAreVisibleToAlertingTest` asserts the
+    values, not just the names: a never-verified snapshot counts as unverified
+    rather than as a pass, and a datastore nobody has verified reports zero so
+    that `BackupVerificationStale` fires instead of staying silent.
 
 This is the contract the alerts in `backups.yml` expect:
 
 ```
-# 0 = last run succeeded, 1 = last run failed
-lynomia_backup_task_last_status{datastore,guest_type,guest_id,guest_name}
+# 0 = last run succeeded, 1 = failed, 2 = needs review (indeterminate, not failed).
+# No guest_name label: a guest's name is a customer's hostname, and it is not put
+# into a series that travels to every dashboard and notification built on it.
+lynomia_backup_task_last_status{datastore,guest_type,guest_id}
 lynomia_backup_last_success_timestamp_seconds{datastore,guest_type,guest_id}
 
 # 0 = verification passed, 1 = verification failed
@@ -305,9 +323,10 @@ lynomia_backup_unverified_snapshots{datastore}
 lynomia_backup_collector_last_run_timestamp_seconds
 ```
 
-Write the file atomically — `.prom.tmp` then `rename(2)`. node_exporter reads
-the directory on every scrape, and a half-written file is a parse error that
-drops *every* textfile metric on that host, not just the one being written.
+If a textfile collector is ever added beside the control plane's producer,
+write its file atomically — `.prom.tmp` then `rename(2)`. node_exporter reads the
+directory on every scrape, and a half-written file is a parse error that drops
+*every* textfile metric on that host, not just the one being written.
 
 ## What to verify by hand
 
