@@ -18,11 +18,13 @@ declare(strict_types=1);
  * down.
  */
 
-return [
-    'ApiToken' => [
-        'type' => 'object',
-        'additionalProperties' => false,
-        'properties' => [
+/**
+ * The properties of a token as it is normally read.
+ *
+ * Named once because two schemas publish them: `ApiToken`, and
+ * `IssuedApiToken`, which is the same object with the secret added. See below.
+ */
+$apiTokenProperties = [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'name' => ['type' => ['string', 'null']],
             'status' => ['type' => ['string', 'null']],
@@ -35,13 +37,33 @@ return [
             'revoked_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'revoked_reason' => ['type' => ['string', 'null']],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
-        ],
+];
+
+return [
+    'ApiToken' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => $apiTokenProperties,
     ],
+    /*
+     * The whole token, not only the secret.
+     *
+     * IssuedApiTokenResource merges ApiTokenResource's output and adds
+     * `token`, so the response carries the id, the name, the abilities and the
+     * rest alongside the value. This schema used to declare `token` alone,
+     * with `additionalProperties: false` — which is not an omission but an
+     * active claim that nothing else is there, on the one endpoint whose
+     * response a customer can never ask for again.
+     *
+     * Found by the client-and-description gate: the portal's IssuedApiToken
+     * extends ApiToken and so reads eleven fields this schema denied.
+     */
     'IssuedApiToken' => [
         'type' => 'object',
         'additionalProperties' => false,
         'description' => 'The only response that ever carries a token value. The platform stores a hash and cannot show it again.',
         'properties' => [
+            ...$apiTokenProperties,
             'token' => ['type' => 'string'],
         ],
     ],

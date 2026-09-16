@@ -46,7 +46,6 @@ const PAYMENT = {
   provider: 'fake',
   is_settled: false,
   failure_code: null,
-  failure_message: null,
   processed_at: null,
 }
 
@@ -78,7 +77,6 @@ function stubFetch(nextAction: NextAction, failureCode: string | null = null) {
             ...nextAction,
           },
           failure_code: failureCode,
-          failure_message: null,
         },
       }
     } else if (path.endsWith('/invoices')) {

@@ -31,7 +31,7 @@ const ORDER = {
     {
       id: '01JITEM',
       kind: 'plan',
-      description: 'Cloud VPS — Starter',
+      name: 'Cloud VPS — Starter',
       quantity: 1,
       total: { minor_units: 9000, currency: 'KWD', amount: '9.000' },
     },
@@ -84,6 +84,24 @@ function renderPage() {
 describe('the order chain', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  /*
+   * The gap that let a defect through.
+   *
+   * The fixture named each line `description`, the page rendered
+   * `item.description`, and both were wrong: the order endpoint publishes
+   * `name`. Nothing here asserted the line was identified on screen, so the
+   * test agreed with the page about a field the API has never returned, and a
+   * customer opening an order saw quantities and prices with nothing naming
+   * them.
+   */
+  it('names what the order bought, and not only what it cost', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+
+    renderPage()
+
+    expect(await screen.findByText('Cloud VPS — Starter')).toBeInTheDocument()
   })
 
   it('links the invoice the order produced, by id rather than by amount', async () => {

@@ -32,8 +32,8 @@ export type PaymentLaunchState =
     }
   /** The provider has taken it. The platform is still confirming. */
   | { type: 'completed'; payment: Payment }
-  /** Refused, with the provider's reason. */
-  | { type: 'failed'; payment: Payment; failureCode: string | null; failureMessage: string | null }
+  /** Refused, with the bounded reason the portal can say in either language. */
+  | { type: 'failed'; payment: Payment; failureCode: string | null }
   /** Nobody knows yet. Do not start another payment. */
   | { type: 'pending'; payment: Payment }
 
@@ -86,7 +86,6 @@ export function usePaymentLaunch(): PaymentLaunch {
         type: 'failed',
         payment: started.payment,
         failureCode: started.failure_code,
-        failureMessage: started.failure_message,
       })
       return
     }

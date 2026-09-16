@@ -61,7 +61,7 @@ export function OrderDetailPage() {
             {(order.items ?? []).map((item) => (
               <li key={item.id} className="flex items-center justify-between gap-4 py-3">
                 <div className="min-w-0">
-                  <p className="truncate text-[var(--text-primary)]">{item.description}</p>
+                  <p className="truncate text-[var(--text-primary)]">{item.name}</p>
                   <p className="text-xs text-[var(--text-muted)]" dir="ltr">
                     × {item.quantity}
                   </p>

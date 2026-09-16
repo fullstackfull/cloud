@@ -75,7 +75,14 @@ export interface Product {
 
 export interface OrderItem {
   id: string
-  description: string
+  /*
+   * `name`, not `description`. The order endpoint has always published `name`;
+   * this said `description` — which is the invoice line's field — so every row
+   * on the order detail page rendered an empty paragraph where the thing the
+   * customer bought should have been. Nothing failed: the value arrived
+   * undefined and React drew nothing.
+   */
+  name: string
   quantity: number
   total: Money
 }
@@ -1434,6 +1441,13 @@ export interface StartedPayment {
     client_secret: string | null
     is_awaiting_provider: boolean
   }
+  /*
+   * The code and not a message. A prior wave removed `failure_message` from
+   * this response on purpose: what it carried was the gateway's English prose,
+   * which reached an Arabic customer in English and was rendered by no screen.
+   * This type kept declaring it, so the field was read into the failed state
+   * and was permanently undefined — a contract that outlived the thing it
+   * described.
+   */
   failure_code: string | null
-  failure_message: string | null
 }
