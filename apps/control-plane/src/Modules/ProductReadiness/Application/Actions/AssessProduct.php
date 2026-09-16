@@ -80,6 +80,34 @@ final readonly class AssessProduct
     }
 
     /**
+     * The verdict, without recording it.
+     *
+     * Public so that the unified infrastructure preflight can consult the one
+     * readiness engine this platform has instead of growing a second one.
+     * A preflight observes: it must not persist a readiness row, because
+     * changing the state of the thing it was asked to diagnose would change
+     * the answer.
+     *
+     * Everything except {@see self::persist()} is reachable from here, which
+     * is the whole difference between the two callers.
+     *
+     * @param  Collection<int, ProviderInstance>|null  $providers  Already-loaded providers with their
+     *                                                             capabilities, so a caller inspecting
+     *                                                             several products loads them once.
+     */
+    public function verdictFor(Product $product, ?Collection $providers = null): ProductVerdict
+    {
+        $memo = [];
+
+        return $this->evaluate(
+            $product,
+            $this->facts($providers ?? $this->providers()),
+            $this->capacity(),
+            $memo,
+        );
+    }
+
+    /**
      * @param  list<ProviderFacts>  $facts
      * @param  array<string, ProductReadinessState>  $memo
      */

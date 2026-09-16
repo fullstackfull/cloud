@@ -54,6 +54,18 @@ return [
         'provisioning' => ['attempts' => 20, 'decay_minutes' => 1],
 
         /*
+         * Preflight, split by how expensive the answer is to produce.
+         *
+         * A simulation run reads this platform's own records and rehearses
+         * against controlled providers, so an operator iterating on a
+         * configuration should not be fought. A read-only-real run sends a
+         * request to somebody else's API for every provider in scope, and the
+         * tighter bound is there to protect those providers from an operator
+         * clicking a button twenty times.
+         */
+        'preflight' => ['simulation_attempts' => 60, 'real_attempts' => 6],
+
+        /*
          * Status reads a customer makes while waiting on their own operation:
          * operation status, the account overview, the activity feed. Roomier
          * than a mutation because observing is not acting, and still bounded

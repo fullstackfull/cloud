@@ -259,6 +259,12 @@ enum AuditAction: string
     case DeploymentResolved = 'infrastructure.deployment.resolved';
     case DeploymentCancelled = 'infrastructure.deployment.cancelled';
 
+    /**
+     * A preflight was run. It changed nothing, and that is why it is worth
+     * recording: the run is the only trace it leaves.
+     */
+    case InfrastructurePreflightRun = 'infrastructure.preflight.run';
+
     case ConnectionTested = 'providers.connection.tested';
     case ProviderRegistered = 'providers.provider.registered';
     case ProviderEnabled = 'providers.provider.enabled';

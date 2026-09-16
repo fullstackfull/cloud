@@ -1467,6 +1467,18 @@ return [
         'permission' => 'infrastructure.view',
         'response' => $one('InfrastructureOverview'),
     ],
+    'api.admin.infrastructure.preflight' => [
+        'tag' => 'Operator',
+        'summary' => 'What exactly prevents this from being used',
+        'description' => 'Runs the one preflight service the CLI also calls, in one of two modes and against one '
+            .'scope. SIMULATION reads the platform\'s own records and rehearses against controlled providers; '
+            .'READ_ONLY_REAL sends real credentials to real endpoints and reads. Neither mode writes anything, '
+            .'anywhere: no provisioning, no configuration change, no readiness update, and no state moved on the '
+            .'thing being diagnosed. READ_ONLY_REAL additionally requires provider.manage, because dialling a real '
+            .'provider is the same act as a connection test. Every run is fresh; there is no cached result.',
+        'permission' => 'infrastructure.view',
+        'response' => $one('PreflightReport'),
+    ],
     'api.admin.infrastructure.regions.index' => [
         'tag' => 'Operator',
         'summary' => 'Regions a datacenter can be registered in',

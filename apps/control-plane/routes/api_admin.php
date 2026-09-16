@@ -18,6 +18,7 @@ use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\PreflightController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SiteController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SoftwareProfileController;
@@ -289,6 +290,26 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('infrastructure/overview', [OverviewController::class, 'index'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.overview');
+
+    /*
+     | The unified preflight: what exactly prevents this from being used.
+     |
+     | The route requires the operator view, which is what a simulation run
+     | needs — it reads this platform's own records and rehearses against
+     | controlled providers. A read-only-real run sends real credentials to
+     | real endpoints, which is the same act as pressing "test connection", so
+     | the controller requires provider.manage for that mode as well. The
+     | second half cannot be middleware: the permission depends on the mode,
+     | and middleware does not see the body.
+     |
+     | Throttled because an operator clicking a button repeatedly must not
+     | become a burst of outbound requests at somebody else's API. Nothing here
+     | writes, in either mode, so the throttle is protecting providers rather
+     | than this platform.
+     */
+    Route::post('infrastructure/preflight', [PreflightController::class, 'run'])
+        ->middleware(['permission:'.Permission::InfrastructureView->value, 'throttle:preflight'])
+        ->name('infrastructure.preflight');
 
     Route::get('infrastructure/regions', [SiteController::class, 'regions'])
         ->middleware('permission:'.Permission::InfrastructureView->value)

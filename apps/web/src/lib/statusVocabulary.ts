@@ -24,6 +24,7 @@ export type StatusTone = 'success' | 'warning' | 'danger' | 'info' | 'neutral'
 export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   // Services, machines and accounts: alive, or working towards it.
   active: 'success',
+  pass: 'success',
   running: 'success',
   on: 'success',
   enabled: 'success',
@@ -91,6 +92,7 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
 
   // Somebody should look, and the customer can still act.
   suspended: 'warning',
+  warning: 'warning',
   past_due: 'warning',
   grace: 'warning',
   paused: 'warning',
@@ -139,6 +141,7 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   invalid: 'danger',
   blocked: 'danger',
   auth_failed: 'danger',
+  fail: 'danger',
   identity_mismatch: 'danger',
   credential_malformed: 'danger',
   network_failed: 'danger',
@@ -154,6 +157,7 @@ export const STATUS_TONES: Readonly<Record<string, StatusTone>> = {
   closed: 'neutral',
   refunded: 'neutral',
   not_required: 'neutral',
+  not_applicable: 'neutral',
   not_tested: 'neutral',
   not_ready: 'neutral',
 }

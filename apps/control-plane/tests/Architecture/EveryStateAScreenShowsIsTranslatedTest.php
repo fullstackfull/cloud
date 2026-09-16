@@ -42,6 +42,7 @@ use Lynomia\Modules\Infrastructure\Domain\Enums\GpuPassthroughMode;
 use Lynomia\Modules\Infrastructure\Domain\Enums\PlanRisk;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
+use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckStatus;
 use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
@@ -118,6 +119,11 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
      */
     private const array RENDERED = [
         'status' => [
+            // Every preflight finding renders its status through StatusBadge,
+            // which is one flat namespace — so a status with no label would
+            // render `not_applicable` in snake case on an Arabic screen and
+            // look enough like a label that nobody reports it.
+            CheckStatus::class,
             // StatusBadge, on the customer's screens.
             BackupState::class,
             FileRestoreState::class,

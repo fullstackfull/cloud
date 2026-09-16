@@ -20,10 +20,12 @@ import {
   useDeclareSellable,
   useProductDependencies,
   useProductReadiness,
+  useRunPreflight,
   useWithdrawSellability,
   type ProductReadiness,
   type ProductReadinessState,
   type ReadinessAnswer,
+  type PreflightMode,
   type RequirementRow,
 } from '@/lib/controlCenterQueries'
 import { formatDateTime } from '@/lib/format'
@@ -80,6 +82,8 @@ export function ReadinessPage() {
           ))}
         </ul>
       )}
+
+      <PreflightPanel />
 
       <Card>
         <h2 className="mb-3 text-base font-semibold">{t('admin.readiness.dependenciesHeading')}</h2>
@@ -340,5 +344,128 @@ function DeclareDialog({ product, onClose }: { product: ProductReadiness; onClos
         declare.mutate({ product: product.product, reason, validation_reference: reference.trim() }, { onSuccess: onClose })
       }}
     />
+  )
+}
+
+/**
+ * Run the unified preflight, and show what it found.
+ *
+ * On the readiness page on purpose, not on a page of its own. Readiness is
+ * where an operator already comes to ask "why can I not sell this", and the
+ * preflight is the detailed answer to that question — a second screen would
+ * mean two places to look and two things to keep in agreement.
+ *
+ * Nothing here decides anything. Whether a finding blocks, what to go and do
+ * about it, and whether any of it may be called real verification are the
+ * backend's answers, rendered. The same service answers `infra:preflight`, so
+ * the screen and the command cannot tell an operator two different things.
+ */
+function PreflightPanel() {
+  const { t } = useTranslation()
+  const describe = useApiErrorMessage()
+  const locale = useActiveLocale()
+  const preflight = useRunPreflight()
+  const [mode, setMode] = useState<PreflightMode>('simulation')
+  const report = preflight.data?.data
+
+  return (
+    <Card>
+      <h2 className="mb-3 text-base font-semibold">{t('admin.preflight.heading')}</h2>
+      <p className="mb-3 text-sm text-[var(--text-muted)]">{t('admin.preflight.note')}</p>
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <div className="max-w-xs">
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">{t('admin.preflight.mode')}</span>
+            <select
+              value={mode}
+              onChange={(event) => { setMode(event.target.value as PreflightMode) }}
+              className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
+            >
+              <option value="simulation">{t('admin.preflight.modes.simulation')}</option>
+              <option value="read_only_real">{t('admin.preflight.modes.read_only_real')}</option>
+            </select>
+          </label>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">{t(`admin.preflight.modeHint.${mode}`)}</p>
+        </div>
+
+        <Button
+          loading={preflight.isPending}
+          onClick={() => { preflight.mutate({ mode, scope: 'estate' }) }}
+        >
+          {t('admin.preflight.run')}
+        </Button>
+      </div>
+
+      {describe(preflight.error) === null ? null : <Alert tone="error">{describe(preflight.error)?.message}</Alert>}
+
+      {preflight.isPending ? <Loading /> : null}
+
+      {report === undefined || preflight.isPending ? null : (
+        <div className="flex flex-col gap-3">
+          {/*
+            The mode first, and prominent. A simulation result read as proof of
+            a working estate is the single most expensive misunderstanding this
+            screen could cause.
+          */}
+          <Alert tone={report.mode === 'read_only_real' ? 'info' : 'warning'}>
+            {t(`admin.preflight.ran.${report.mode}`, {
+              checks: report.counts.total ?? 0,
+              at: formatDateTime(report.finished_at, locale),
+            })}
+          </Alert>
+
+          <p className="flex flex-wrap items-center gap-2 text-sm">
+            <StatusBadge status={report.overall_status} />
+            <span className="text-[var(--text-muted)]">
+              {t('admin.preflight.counts', {
+                pass: report.counts.pass ?? 0,
+                blocked: (report.counts.blocked ?? 0) + (report.counts.fail ?? 0),
+                warning: report.counts.warning ?? 0,
+                unknown: report.counts.not_tested ?? 0,
+              })}
+            </span>
+          </p>
+
+          <p className="text-xs text-[var(--text-muted)]">
+            {report.real_verification_claims.length === 0
+              ? t('admin.preflight.noRealVerification')
+              : t('admin.preflight.realVerification', { checks: report.real_verification_claims.join(', ') })}
+          </p>
+
+          {report.next_actions.length === 0 ? null : (
+            <div>
+              <h3 className="mb-1 text-sm font-semibold">{t('admin.preflight.nextHeading')}</h3>
+              <ul className="list-disc ps-5 text-sm">
+                {report.next_actions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <ul className="flex flex-col gap-2" aria-label={t('admin.preflight.heading')}>
+            {report.checks.map((check, index) => (
+              <li
+                key={`${check.id}-${check.target}-${index}`}
+                className="rounded-lg border border-[var(--border-subtle)] p-3 text-sm"
+              >
+                <p className="flex flex-wrap items-center gap-2">
+                  <StatusBadge status={check.status} />
+                  <span className="technical">{check.id}</span>
+                  <span className="text-[var(--text-muted)]">{check.target}</span>
+                </p>
+                <p className="mt-1">{check.summary}</p>
+                {check.next_action === null ? null : (
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">
+                    {t('admin.preflight.next', { action: check.next_action })}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Card>
   )
 }

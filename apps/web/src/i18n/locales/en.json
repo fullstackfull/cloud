@@ -129,6 +129,10 @@
     "awaiting_approval": "Awaiting approval",
     "awaiting_registry": "Waiting on the registry",
     "blocked": "Blocked",
+    "pass": "Passed",
+    "fail": "Failed",
+    "warning": "Warning",
+    "not_applicable": "Not applicable",
     "bmc_configuring": "Configuring the BMC",
     "cancelled": "Cancelled",
     "closed": "Closed",
@@ -1349,6 +1353,29 @@
         "blocked_configuration": "Blocked by configuration",
         "blocked_network": "Blocked by network"
       }
+    },
+    "preflight": {
+      "heading": "Infrastructure preflight",
+      "note": "What exactly prevents a provider, a product or the estate from being used. Runs fresh every time — nothing here is a stored result — and changes nothing anywhere.",
+      "mode": "Mode",
+      "run": "Run preflight",
+      "modes": {
+        "simulation": "Simulation",
+        "read_only_real": "Read real providers"
+      },
+      "modeHint": {
+        "simulation": "Reads this platform's own records and rehearses against controlled providers. Dials nothing real, and can never evidence real infrastructure.",
+        "read_only_real": "Sends real credentials to real endpoints and reads. Creates, changes and deletes nothing."
+      },
+      "ran": {
+        "simulation": "SIMULATION — {{checks}} checks at {{at}}. A controlled provider answering correctly is evidence about this software, and no evidence about any machine.",
+        "read_only_real": "READ_ONLY_REAL — {{checks}} checks at {{at}}. Reads only: nothing was created, changed or deleted."
+      },
+      "counts": "{{pass}} passed, {{blocked}} blocking, {{warning}} warnings, {{unknown}} not established",
+      "noRealVerification": "Real infrastructure verified: none. Nothing in this run reached a real provider in a way that could establish it.",
+      "realVerification": "Real infrastructure verified, for these reads only: {{checks}}. A read that succeeded has earned exactly that read — nothing about whether a machine will build.",
+      "nextHeading": "What to do next",
+      "next": "Next: {{action}}"
     },
     "discovery": {
       "title": "Discovery",

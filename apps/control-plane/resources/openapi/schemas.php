@@ -1174,6 +1174,68 @@ return [
             'superseded_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'PreflightReport' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'What a preflight run established, and what prevents the thing it was asked about from '
+            .'being used. Carries no secret, no credential reference variable, no raw provider response and no '
+            .'stack trace: every summary is a sentence written by the check that produced it.',
+        'properties' => [
+            'mode' => ['type' => 'string', 'enum' => ['simulation', 'read_only_real']],
+            'mode_label' => ['type' => 'string', 'description' => 'SIMULATION or READ_ONLY_REAL, for display. A simulation result that does not say so is one somebody quotes as proof.'],
+            'scope' => ['type' => 'string', 'enum' => ['estate', 'site', 'provider', 'product', 'machine']],
+            'target' => ['type' => ['string', 'null']],
+            'started_at' => ['type' => 'string', 'format' => 'date-time'],
+            'finished_at' => ['type' => 'string', 'format' => 'date-time'],
+            'duration_ms' => ['type' => 'integer'],
+            'overall_status' => ['type' => 'string', 'enum' => ['pass', 'fail', 'blocked', 'warning', 'not_applicable', 'not_tested']],
+            'passed' => ['type' => 'boolean', 'description' => 'False if any check is failing or blocked. One blocker makes the whole report blocking; there is no average.'],
+            'counts' => [
+                'type' => 'object',
+                'additionalProperties' => ['type' => 'integer'],
+                'description' => 'total, pass, fail, blocked, warning, not_applicable and not_tested.',
+            ],
+            'checks' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/PreflightCheck']],
+            'blockers' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/PreflightCheck']],
+            'warnings' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/PreflightCheck']],
+            'blocker_reasons' => [
+                'type' => 'array',
+                'items' => ['type' => 'string', 'enum' => ['blocked_credentials', 'blocked_hardware', 'blocked_network', 'blocked_licence', 'blocked_configuration', 'blocked_dependency', 'not_implemented']],
+            ],
+            'verification_levels' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'real_verification_claims' => [
+                'type' => 'array',
+                'items' => ['type' => 'string'],
+                'description' => 'The individual check ids a real provider answered, by id. Always empty in simulation '
+                    .'mode. There is no field saying the estate is verified, because no such fact exists: a read that '
+                    .'succeeded has earned exactly that read.',
+            ],
+            'next_actions' => ['type' => 'array', 'items' => ['type' => 'string']],
+        ],
+    ],
+
+    'PreflightCheck' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One thing a preflight asked, and what it found.',
+        'properties' => [
+            'id' => ['type' => 'string', 'description' => 'Stable and machine-readable, so automation can match on it across wording changes.'],
+            'category' => ['type' => 'string'],
+            'status' => ['type' => 'string', 'enum' => ['pass', 'fail', 'blocked', 'warning', 'not_applicable', 'not_tested']],
+            'target' => ['type' => 'string'],
+            'summary' => ['type' => 'string'],
+            'evidence_class' => [
+                'type' => 'string',
+                'enum' => ['configuration', 'simulation', 'real_read', 'none'],
+                'description' => 'Where the answer came from, which decides what it may be used to claim. Only real_read can support a real-infrastructure claim.',
+            ],
+            'blocker_reason' => ['type' => ['string', 'null']],
+            'next_action' => ['type' => ['string', 'null'], 'description' => 'The thing to go and do. Never "fix configuration".'],
+            'duration_ms' => ['type' => 'integer'],
+            'verified' => ['type' => ['string', 'null']],
+        ],
+    ],
+
     'InfrastructureOverview' => [
         'type' => 'object',
         'additionalProperties' => false,

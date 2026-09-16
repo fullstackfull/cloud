@@ -670,6 +670,66 @@ export function useProductDependencies() {
   })
 }
 
+/* -------------------------------------------------------------------------
+ | Unified infrastructure preflight
+ |
+ | One endpoint, one service, two modes. The screen renders what the backend
+ | decided and judges nothing itself: whether a finding blocks, what the next
+ | action is and whether anything may claim real verification are all the
+ | service's answers, so the Control Center and `infra:preflight` can never
+ | disagree about the same provider.
+ |
+ | It is a mutation rather than a query on purpose. A preflight is an act with
+ | a cost — in real mode it sends requests to somebody else's API — so it
+ | happens when an operator asks, never on render, and it is never served from
+ | a cache. A cached success shown as a fresh run is the one thing a diagnostic
+ | must not do.
+ */
+
+export type PreflightMode = 'simulation' | 'read_only_real'
+
+export type PreflightCheckStatus = 'pass' | 'fail' | 'blocked' | 'warning' | 'not_applicable' | 'not_tested'
+
+export type PreflightCheck = {
+  id: string
+  category: string
+  status: PreflightCheckStatus
+  target: string
+  summary: string
+  evidence_class: 'configuration' | 'simulation' | 'real_read' | 'none'
+  blocker_reason: string | null
+  next_action: string | null
+  duration_ms: number
+  verified: string | null
+}
+
+export type PreflightReport = {
+  mode: PreflightMode
+  mode_label: string
+  scope: string
+  target: string | null
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  overall_status: PreflightCheckStatus
+  passed: boolean
+  counts: Record<string, number>
+  checks: PreflightCheck[]
+  blockers: PreflightCheck[]
+  warnings: PreflightCheck[]
+  blocker_reasons: string[]
+  verification_levels: string[]
+  real_verification_claims: string[]
+  next_actions: string[]
+}
+
+export function useRunPreflight() {
+  return useMutation({
+    mutationFn: ({ mode, scope, target }: { mode: PreflightMode; scope: string; target?: string | null }) =>
+      admin.post<Envelope<PreflightReport>>('/infrastructure/preflight', { mode, scope, target: target ?? null }),
+  })
+}
+
 export function useAssessAllProducts() {
   const queryClient = useQueryClient()
 
