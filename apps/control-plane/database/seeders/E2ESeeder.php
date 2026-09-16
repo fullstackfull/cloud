@@ -378,17 +378,7 @@ class E2ESeeder extends Seeder
             'label' => 'Cloud VPS — '.self::OPERABLE_HOSTNAME,
         ]);
 
-        /*
-         * An image staged on the cluster, so a rebuild has something to
-         * install. Staging is an operator act on a real cluster (the seeded
-         * templates deliberately carry no provider reference); on the fake,
-         * a reference is a name the fake records and nothing more.
-         */
-        $template = VmTemplate::query()
-            ->where('cluster_id', $node->cluster_id)
-            ->where('slug', 'debian-13')
-            ->firstOrFail();
-        $template->forceFill(['provider_reference' => 'e2e-fake-debian-13'])->save();
+        $template = $this->installableTemplateOn($node);
 
         $machine = VirtualMachine::factory()
             ->onNode($node)
@@ -396,8 +386,12 @@ class E2ESeeder extends Seeder
             ->resources(1, 2048, 40)
             ->create([
                 'hostname' => self::OPERABLE_HOSTNAME,
-                'os_family' => 'debian',
-                'os_version' => '13',
+                // Taken from the template rather than stated beside it. A
+                // machine whose recorded OS disagrees with the image it was
+                // built from is a fixture that lies about itself, and the two
+                // drift the moment the topology changes either one.
+                'os_family' => $template->os_family->value,
+                'os_version' => $template->os_version,
                 'template_id' => $template->getKey(),
                 // A rebuild replaces the disk on the storage the platform
                 // recorded for it, and refuses rather than guesses when none
@@ -425,6 +419,66 @@ class E2ESeeder extends Seeder
             memoryMib: 2048,
             diskGib: 40,
             storageName: 'local-lvm',
+        ));
+    }
+
+    /**
+     * The image the browser suite rebuilds onto, resolved from the estate
+     * rather than named.
+     *
+     * ---------------------------------------------------------------------
+     * Why this is not a slug
+     * ---------------------------------------------------------------------
+     *
+     * It was one: `where('slug', 'debian-13')`, which was the slug the old
+     * development seeder happened to write. Gap 4 moved the estate into
+     * resources/reference-topology/topology.php, where a template's logical key
+     * is deliberately separated from the provider's own identifier — the whole
+     * point being that a real cluster keeps the logical key and changes only
+     * the provider reference. The reference estate publishes `debian-stable`,
+     * so the old lookup found nothing and the browser job died on a
+     * ModelNotFoundException naming a model, which tells whoever reads it
+     * nothing about what the estate owes this suite.
+     *
+     * So this asks for what the suite actually needs, in the properties the
+     * topology already represents: an image that is installable — active, with
+     * a provider reference, which is exactly {@see VmTemplate::scopeInstallable()} —
+     * on this node's cluster, for the architecture the node reports through
+     * {@see ComputeNode::architecture()}, which is the same answer placement
+     * uses. Any template satisfying that will do; the ordering is only so that
+     * two runs of the same estate build the same fixture.
+     *
+     * Nothing here is staged, forced or written back onto the template. The
+     * reference estate supplies its own provider references, so an image is
+     * installable because the canonical source says so.
+     */
+    private function installableTemplateOn(ComputeNode $node): VmTemplate
+    {
+        $architecture = $node->architecture();
+
+        $template = VmTemplate::query()
+            ->installable()
+            ->where('cluster_id', $node->cluster_id)
+            ->where('architecture', $architecture)
+            ->orderBy('slug')
+            ->first();
+
+        if ($template !== null) {
+            return $template;
+        }
+
+        /*
+         * Named as a contract between the estate and this suite, because that
+         * is what has broken. A reader of this sentence knows which file to
+         * open and what it has to provide; a reader of ModelNotFoundException
+         * knows only that a row was missing.
+         */
+        throw new RuntimeException(sprintf(
+            'The browser suite needs an installable %s image on cluster %s to rebuild onto, and the seeded estate has none. '
+            .'An installable template is active and carries a provider reference. The estate is declared in '
+            .'resources/reference-topology/topology.php; add or re-enable one there rather than naming a template here.',
+            $architecture->value,
+            $node->cluster_id,
         ));
     }
 
