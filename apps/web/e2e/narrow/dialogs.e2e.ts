@@ -70,7 +70,7 @@ test.describe('a dialogue on a narrow screen', () => {
      * actually types when they are naming the fourth token this quarter, and
      * it is longer than the column it lands in.
      */
-    const name = 'Build server — staging deploy pipeline (eu-west)'
+    const name = `Build server — staging deploy pipeline (eu-west) ${own(page)}`
 
     await page.goto('/api-tokens')
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
@@ -84,7 +84,7 @@ test.describe('a dialogue on a narrow screen', () => {
     // dialogue one.
     await expect(page.locator('code')).toBeVisible()
 
-    const row = page.getByRole('row').filter({ hasText: 'Build server' })
+    const row = page.getByRole('row').filter({ hasText: name })
     const revoke = row.getByRole('button', { name: /^revoke$/i })
     await revoke.scrollIntoViewIfNeeded()
     await revoke.click()
@@ -94,6 +94,7 @@ test.describe('a dialogue on a narrow screen', () => {
 
     // The name is quoted back in the title, so a long name is a long title.
     await expect(dialog).toContainText('Build server')
+
     await expectUsable(page, dialog, 'the token revocation')
 
     /*
@@ -161,6 +162,21 @@ test.describe('a dialogue on a narrow screen', () => {
     expect(await pageOverflow(page), 'the page behind the drawer').toBeLessThanOrEqual(1)
   })
 })
+
+/**
+ * A suffix that makes a fixture this spec creates belong to this run.
+ *
+ * `e2e/narrow/` runs in two projects against one database, so a token named
+ * the same thing in both leaves two rows and every locator that names it
+ * resolves to two elements. The answer is not `.first()` — that hides the
+ * duplicate rather than removing it, and the second row is a revoked
+ * credential from the other width, which is not what the assertion is about.
+ * The viewport width is what differs between the projects, so it is what
+ * names the fixture.
+ */
+function own(page: Page): string {
+  return String(page.viewportSize()?.width ?? 0)
+}
 
 /** No wider than the viewport, no sideways scrolling, and a way out. */
 async function expectUsable(page: Page, dialog: Locator, what: string): Promise<void> {

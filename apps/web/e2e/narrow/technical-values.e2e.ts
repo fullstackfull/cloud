@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { expectNoPageOverflow, pageOverflow } from '../support/layout'
 import { signIn, users } from '../support/helpers'
@@ -26,12 +26,25 @@ import { signIn, users } from '../support/helpers'
  * around a 48-character token instead of refusing to.
  */
 
+/**
+ * A suffix that makes a fixture this spec creates belong to this run.
+ *
+ * These specs run in two projects against one database, so a zone, a token or
+ * a ticket named the same thing in both leaves two of it. The answer is not
+ * `.first()`: that hides the duplicate instead of removing it. The viewport
+ * width is what differs between the projects, so it is what names the fixture.
+ */
+function own(page: Page): string {
+  return String(page.viewportSize()?.width ?? 0)
+}
+
 /*
  * A zone this spec claims and gives back. It shares a database with the phone
  * and Arabic projects, so a fixture it leaves behind is a fixture another
  * project did not expect to find.
  */
-const LONG_ZONE = 'staging-environment-eu-west-1.example-company-holdings.test'
+const LONG_ZONE = (page: Page): string =>
+  `staging-environment-eu-west-${own(page)}.example-company-holdings.test`
 
 /** A full IPv6 address, written out: no `::`, so it is as wide as it gets. */
 const FULL_IPV6 = '2001:0db8:85a3:0000:0000:8a2e:0370:7334'
@@ -44,20 +57,22 @@ test.describe('a long technical value on a narrow screen', () => {
   })
 
   test('folds a long domain and a full IPv6 address rather than breaking the page', async ({ page }) => {
+    const zone = LONG_ZONE(page)
+
     await page.goto('/dns')
-    await page.getByLabel(/^domain$/i).first().fill(LONG_ZONE)
+    await page.getByLabel(/^domain$/i).first().fill(zone)
     await page.getByRole('button', { name: /add domain/i }).click()
 
     /*
      * The index first: a 60-character name in a table row, and the row also
      * carries a status and an action.
      */
-    await expect(page.getByRole('link', { name: LONG_ZONE }).first()).toBeVisible()
-    await expectNoPageOverflow(page, `the zone list holding ${LONG_ZONE}`)
+    await expect(page.getByRole('link', { name: zone })).toBeVisible()
+    await expectNoPageOverflow(page, `the zone list holding ${zone}`)
 
     // Then the zone's own page, where the name is the h1.
-    await page.getByRole('link', { name: LONG_ZONE }).first().click()
-    await expect(page.getByRole('heading', { level: 1, name: LONG_ZONE })).toBeVisible()
+    await page.getByRole('link', { name: zone }).click()
+    await expect(page.getByRole('heading', { level: 1, name: zone })).toBeVisible()
     await expectNoPageOverflow(page, 'the zone page, titled by a long name')
 
     const base = new URL(page.url()).pathname
@@ -96,7 +111,7 @@ test.describe('a long technical value on a narrow screen', () => {
     await page.goto(`${base}/danger`)
     await page.getByRole('button', { name: /give up domain/i }).click()
     const dialog = page.getByRole('dialog')
-    await dialog.getByRole('textbox').fill(LONG_ZONE)
+    await dialog.getByRole('textbox').fill(zone)
     await dialog.getByRole('button', { name: /give up domain/i }).click()
     await expect(page).toHaveURL(/\/dns$/)
   })
@@ -130,7 +145,8 @@ test.describe('a long technical value on a narrow screen', () => {
      * measured the box would have passed against an empty one. It did.
      */
     await page.goto('/api-tokens')
-    await page.getByLabel(/^name$/i).fill('Deployment pipeline')
+    const token = `Deployment pipeline ${own(page)}`
+    await page.getByLabel(/^name$/i).fill(token)
     await page.getByLabel(/current password/i).fill(users.customer.password)
     await page.getByRole('button', { name: /^create token$/i }).click()
 
@@ -162,7 +178,7 @@ test.describe('a long technical value on a narrow screen', () => {
 
     await expectNoPageOverflow(page, 'the credential screen with a whole token on it')
 
-    const row = page.getByRole('row').filter({ hasText: 'Deployment pipeline' })
+    const row = page.getByRole('row').filter({ hasText: token })
     await row.getByRole('button', { name: /^revoke$/i }).click()
     await page.getByRole('dialog').getByRole('button', { name: /^revoke token$/i }).click()
     await expect(row).toContainText(/Revoked/)
@@ -176,14 +192,15 @@ test.describe('a long technical value on a narrow screen', () => {
      * list is `.technical` and sits in a table cell next to a status and an
      * action.
      */
-    await page.getByLabel(/^name$/i).fill('Continuous integration runners')
+    const runners = `Continuous integration runners ${own(page)}`
+    await page.getByLabel(/^name$/i).fill(runners)
     await page.getByLabel(/current password/i).fill(users.customer.password)
     await page
       .getByLabel(/only from these addresses/i)
       .fill(`198.51.100.0/24\n203.0.113.17/32\n${FULL_IPV6}/64`)
     await page.getByRole('button', { name: /^create token$/i }).click()
 
-    const row = page.getByRole('row').filter({ hasText: 'Continuous integration runners' })
+    const row = page.getByRole('row').filter({ hasText: runners })
     await expect(row).toHaveCount(1)
     await expectNoPageOverflow(page, 'the credential list with CIDR restrictions')
 
@@ -194,7 +211,8 @@ test.describe('a long technical value on a narrow screen', () => {
 
   test('folds a long support subject, in English and in Arabic', async ({ page }) => {
     const subject =
-      'Outbound mail from the staging relay is being rejected with 550 5.7.1 since the weekend'
+      'Outbound mail from the staging relay is being rejected with 550 5.7.1 since the ' +
+      `weekend (${own(page)})`
 
     await page.goto('/support')
     await page.getByLabel(/^subject$/i).fill(subject)
@@ -211,11 +229,16 @@ test.describe('a long technical value on a narrow screen', () => {
      * here rather than in a separate spec because this is the screen where a
      * customer actually types both.
      */
-    const ticket = page.getByRole('button', { name: new RegExp(subject.slice(0, 40)) })
-    await expect(ticket.first()).toBeVisible()
+    /*
+     * Named exactly, so it is this run's ticket. A ticket is not deletable, so
+     * the other narrow project's ticket is still in the list — matching on a
+     * prefix and taking the first would be picking one of two at random.
+     */
+    const ticket = page.getByRole('button', { name: subject })
+    await expect(ticket).toBeVisible()
     await expectNoPageOverflow(page, 'the ticket list with a long subject')
 
-    await ticket.first().click()
+    await ticket.click()
     await expect(page.getByText('550 5.7.1').first()).toBeVisible()
     expect(await pageOverflow(page), 'the ticket, with Arabic prose and a Latin code in it')
       .toBeLessThanOrEqual(1)
