@@ -812,7 +812,7 @@ At the ending code SHA, from a clean database:
 | Frontend unit | `npm run test --workspace=apps/web -- --run` | 81 files, 443 tests, pass |
 | Frontend build | `npm run build` | pass |
 | API description | `npm run openapi:lint` | pass (unchanged by this gap) |
-| Browser end-to-end | `npm run test:e2e` | <!-- E2E RESULT --> |
+| Browser end-to-end | `npm run test:e2e` | **364 pass, 14 skipped** (the capture specs), 33.7 min; the §27 race did not fire in this run |
 | Inventory safety | `validate-inventory.py`, `test_validate_inventory.py` | pass |
 | Safety gate | `test_safety_gate.sh` | pass |
 | Monitoring rules | `validate-monitoring.py` | pass |
@@ -827,7 +827,35 @@ was modified by this gap.
 
 ## 31. Exact-SHA CI
 
-<!-- CI RECORD -->
+Run **176**, `completed` / `success`, **first attempt**, head SHA
+`6d06d31ef979f42b202f631e542f301e89938aff` — the ending code SHA of this gap,
+not a later one.
+
+<https://github.com/fullstackfull/cloud/actions/runs/35234335307>
+
+| Job | Conclusion |
+|---|---|
+| Backend (PHP 8.4, PostgreSQL 18) | success |
+| Backend (PHP 8.4, PostgreSQL 16) | success |
+| Static analysis | success |
+| Frontend | success |
+| API description | success |
+| Browser end-to-end | success |
+| Security checks | success |
+| Infrastructure validation | success |
+| Production guards | success |
+
+Nine of nine, no re-run. Both backend jobs matter here rather than one: they
+run the same `php artisan test` that failed twenty-nine assertions before §30's
+fix, on two PostgreSQL majors, from a database CI builds empty each time.
+
+The browser job passed on its first attempt too, which is worth stating
+plainly and not over-claiming: the §27 race is a race, and a run in which it
+does not fire is not evidence that it is gone. It stays carried in §33.
+
+This section was written after the run finished, in a commit that changes no
+code. **The functional gate is the code SHA above**, and everything in §28,
+§29 and §30 was measured at it.
 
 ---
 
