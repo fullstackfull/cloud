@@ -1346,6 +1346,28 @@ was a place my change reached that I had not run. The backend suite found the
 first two and CI found the third, which is the order of expense, and the
 correction in each case is the same — run the gate that covers what the change
 touches, not the directory the change is in.
+### 41.12 Exact-SHA CI
+
+```
+run 186 · db0466c · completed · success · 9 of 9 jobs · first attempt
+```
+
+Both PostgreSQL majors, static analysis, frontend, the API description,
+the browser suite, security, infrastructure validation and the production
+guards. No job was re-run to get a better answer.
+
+The two runs before it are part of the record rather than omitted from it.
+Run 184 on `6a1cd28` **failed** — the missing error sentence and the
+hand-edited generated file of §41.11 — and runs 182 and 183 show cancelled
+because each was superseded by the next push, which is how a red backend job
+rode three commits without being looked at. Run 185 on `f44a19c` failed on
+the browser suite alone, for the third reason in §41.11.
+
+This section is the last thing written, and it is a documentation-only commit:
+by the same rule Gap 8 closed under, no further commit is made to record CI on
+this one. `db0466c` is the functional gate, and the nine green jobs above are
+on it.
+
 ---
 
 ## Appendix — final product matrix
