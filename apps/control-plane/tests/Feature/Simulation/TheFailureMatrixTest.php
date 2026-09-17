@@ -6,7 +6,9 @@ namespace Tests\Feature\Simulation;
 
 use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Providers\FakeBackupProvider;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Compute\Application\Actions\DetectVirtualMachineDrift;
 use Lynomia\Modules\Compute\Application\Actions\PollProviderTasks;
@@ -21,7 +23,10 @@ use Lynomia\Modules\Dns\Application\Jobs\PublishZone;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsRecord;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
+use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpReservation;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
@@ -108,7 +113,6 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         'payment.duplicate_webhook' => 'TheVpsGoldenPathTest::a_redelivered_webhook_produces_one_payment_one_service_and_one_machine',
         'provision.address_exhausted' => 'Tests\\Feature\\Ipam\\IpAllocationTest — an exhausted pool is a capacity failure, not a permanent one',
         'provision.duplicate_delivery' => 'Tests\\Feature\\Queue\\ARealWorkerConsumesTheQueueTest::a_second_delivery_of_the_same_message_builds_nothing_more',
-        'backup.verification_failed' => 'Tests\\Feature\\Simulation\\EveryFaultASimulatorAdvertisesIsOneThePlatformDistinguishesTest — the verification verdict on the archive',
         'lifecycle.cancellation' => 'Tests\\Feature\\Queue\\TheNewSweepsRunOutsideThisProcessTest::the_retention_sweep_ends_a_cancelled_service_and_a_worker_destroys_the_machine',
         'queue.retry' => 'Tests\\Feature\\Queue\\ARealWorkerConsumesTheQueueTest::a_provider_refusal_is_recorded_and_rescheduled_rather_than_lost',
         'production.controlled_driver_refused' => 'Tests\\Feature\\Simulation\\NoControlledDriverSurvivesProductionTest — four controls per driver',
@@ -127,6 +131,7 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         'provision.task_timeout',
         'dns.mutation_failed_after_create',
         'backup.failed_after_activation',
+        'backup.verification_failed',
         'reconciliation.drift',
         'provider.duplicate_terminal_result',
         'event.out_of_order',
@@ -151,7 +156,9 @@ final class TheFailureMatrixTest extends GoldenPathHarness
     #[Test]
     public function a_hypervisor_that_refuses_the_build_is_transient_and_the_job_waits_rather_than_dying(): void
     {
-        [$service, $job] = $this->committedBuild('provider-fail-one');
+        $estate = $this->committedVpsEstate();
+
+        [$service, $job] = $this->committedBuild('provider-fail-one', estate: $estate);
 
         $this->work(RunProvisioningJob::QUEUE);
 
@@ -176,6 +183,50 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         $this->assertSame(0, VirtualMachine::query()->where('service_id', $service->getKey())->count());
         $this->assertSame(0, IpAssignment::query()->where('service_id', $service->getKey())->count());
         $this->assertNotSame(ServiceStatus::Active, $service->fresh()?->status);
+
+        /*
+         * §85, and the invariant nothing was asserting: a retried build must
+         * not take a second address.
+         *
+         * No assignment is made on the way to the failure — the handler
+         * commits one only against a machine that exists — so counting
+         * assignments proves nothing about the pool. What can leak is the
+         * reservation. A transient refusal deliberately keeps it: the job is
+         * going to be retried and the retry must land on the same address, so
+         * compensation runs only where a job has stopped for good. That makes
+         * the allocator's own lookup of what this job already holds the only
+         * thing standing between a retry and a stranded address — and a
+         * stranded reservation is released by nothing, because the reaper
+         * only collects reservations whose job reached a terminal failure.
+         *
+         * So: one reservation after the refusal, and still one after the
+         * second attempt, with no address reserved that no reservation names.
+         */
+        $this->assertSame(1, $this->liveReservationCount($job), 'the refused build released the address it will need again');
+
+        RunProvisioningJob::dispatch((string) $job->getKey());
+
+        $this->work(RunProvisioningJob::QUEUE);
+
+        $this->assertSame(
+            1,
+            $this->liveReservationCount($job),
+            'the second attempt took a second address and stranded the first',
+        );
+
+        $this->assertSame(
+            1,
+            IpAddress::query()
+                ->whereHas(
+                    'subnet',
+                    static fn ($query) => $query->where('ip_pool_id', $estate['pool']->getKey()),
+                )
+                ->where('status', IpAddressStatus::Reserved->value)
+                ->count(),
+            'the pool holds an address reserved for nothing',
+        );
+
+        $this->assertSame(0, IpAssignment::query()->where('service_id', $service->getKey())->count());
     }
 
     #[Test]
@@ -527,6 +578,112 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         $this->assertNotSame(ServiceStatus::Active, $service->fresh()?->status);
     }
 
+    #[Test]
+    public function a_verification_that_failed_is_not_a_verified_archive(): void
+    {
+        /*
+         * §41, and the row this matrix was crediting to the wrong test. The
+         * entry used to point at the simulator-contract test, which proves
+         * that the controlled datastore can report a verification that failed
+         * — a fact about the simulator, not about the platform. What the
+         * platform does with that answer is this, and nothing asserted it.
+         *
+         * It matters because of what the three values mean: `verified` is
+         * null when nobody has checked, true when the archive was read back,
+         * and false-with-a-reason when it could not be. A platform that let a
+         * failed verification land as `Verified` would tell a customer their
+         * backup restores because the check ran, which is the one thing worse
+         * than not checking.
+         *
+         * A carried gap goes with it, in §33 of the report: nothing in the
+         * platform starts a verification. `startVerification` exists on the
+         * provider contract and on both drivers, `Verifying` is a state with
+         * transitions out of it, and no action, job or command ever puts a row
+         * into it. So the row below is put into `Verifying` here, and this
+         * test covers the half that exists — the verdict — while
+         * `EveryBackupAlertMetricHasAProducerTest` covers the consequence of
+         * the half that does not: a finished backup is never reported as a
+         * verified one.
+         */
+        [$backup] = $this->committedVerification(FakeBackupProvider::FAILING_MARKER);
+
+        $this->runArtisan('backups:reconcile');
+        $this->runArtisan('backups:reconcile');
+
+        $settled = $backup->fresh();
+
+        $this->assertSame(BackupState::Failed, $settled?->state);
+        $this->assertNotNull($settled->failure_reason, 'the archive could not be read back and nothing says so');
+
+        // Not verified, and not silently left as though it had been.
+        $this->assertNotTrue($settled->verified);
+        $this->assertNull($settled->verified_at);
+    }
+
+    #[Test]
+    public function a_verification_that_passed_is_a_verified_archive(): void
+    {
+        // §100. The same path with the marker taken out: the state machine
+        // and the poller are the same, and the verdict is the opposite one.
+        [$backup] = $this->committedVerification();
+
+        $this->runArtisan('backups:reconcile');
+        $this->runArtisan('backups:reconcile');
+
+        $settled = $backup->fresh();
+
+        $this->assertSame(BackupState::Verified, $settled?->state);
+        $this->assertTrue($settled->verified);
+        $this->assertNotNull($settled->verified_at);
+        $this->assertNull($settled->failure_reason);
+    }
+
+    #[Test]
+    public function a_backup_nobody_verified_is_never_reported_as_verified(): void
+    {
+        /*
+         * The other half of the three-valued answer, and the one nothing
+         * asserted: an ordinary backup that finished. It is `Succeeded`,
+         * which means the datastore wrote it; `verified` stays null, which
+         * means nobody has read it back. Folding those together is how a
+         * platform comes to tell a customer their backups are fine on the
+         * strength of never having checked — so the null is asserted here as
+         * a value, not treated as the absence of one.
+         */
+        $backup = $this->outsideTheTransaction(function (): Backup {
+            $customer = $this->committedCustomer();
+            $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+            $node = ComputeNode::factory()->withCapacity(32, 65_536, 2_000)->create([
+                'cluster_id' => $cluster->getKey(),
+            ]);
+
+            $service = Service::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'kind' => 'vps',
+                'status' => ServiceStatus::Active,
+            ]);
+
+            $machine = VirtualMachine::factory()
+                ->onNode($node)
+                ->forService($service)
+                ->resources(2, 2048, 20)
+                ->create();
+
+            config()->set('backups.datastores.'.$cluster->slug, 'pbs-test-01');
+
+            return app(RequestServiceBackup::class)->execute($machine, notes: 'the nightly one');
+        });
+
+        $this->runArtisan('backups:reconcile');
+        $this->runArtisan('backups:reconcile');
+
+        $settled = $backup->fresh();
+
+        $this->assertSame(BackupState::Succeeded, $settled?->state);
+        $this->assertNull($settled->verified, 'a backup nobody read back is reported as one that was');
+        $this->assertNull($settled->verified_at);
+    }
+
     /**
      * A committed service and a queued build for it, with the hostname the
      * caller wants — which is how a fault is chosen, because the controlled
@@ -569,4 +726,78 @@ final class TheFailureMatrixTest extends GoldenPathHarness
             return [$service, $job];
         });
     }
+
+    /**
+     * An archive at the controlled datastore with a verification in flight
+     * against it, and the platform row that is waiting on that verification.
+     *
+     * The marker goes in the archive id because that is what the controlled
+     * datastore reads a verification verdict from — it is the only thing the
+     * call carries that a caller chooses.
+     *
+     * @return array{0: Backup, 1: ComputeCluster}
+     */
+    private function committedVerification(string $marker = ''): array
+    {
+        return $this->outsideTheTransaction(function () use ($marker): array {
+            $customer = $this->committedCustomer();
+            $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+            $node = ComputeNode::factory()->withCapacity(32, 65_536, 2_000)->create([
+                'cluster_id' => $cluster->getKey(),
+            ]);
+
+            $service = Service::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'kind' => 'vps',
+                'status' => ServiceStatus::Active,
+            ]);
+
+            $datastore = 'pbs-test-01';
+
+            config()->set('backups.datastores.'.$cluster->slug, $datastore);
+
+            $archive = 'vzdump-qemu-9001-'.($marker === '' ? 'clean' : $marker).'.vma.zst';
+
+            /*
+             * Started here and polled in another process, which is the point:
+             * the task only exists for `backups:reconcile` because the
+             * controlled datastore keeps what it was told outside this
+             * process's memory.
+             */
+            $operation = app(BackupProviderFactory::class)
+                ->for($cluster)
+                ->startVerification($node->provider_name, $datastore, $archive);
+
+            $backup = Backup::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'service_id' => $service->getKey(),
+                'cluster_id' => $cluster->getKey(),
+                'node_name' => $node->provider_name,
+                'datastore' => $datastore,
+                'state' => BackupState::Verifying,
+                'archive_id' => $archive,
+                'provider' => 'fake',
+                'provider_task_id' => $operation->taskId,
+                'started_at' => now(),
+                'verified' => null,
+                'verified_at' => null,
+                'failure_reason' => null,
+            ]);
+
+            return [$backup, $cluster];
+        });
+    }
+
+
+    /**
+     * Addresses this job is still holding.
+     */
+    private function liveReservationCount(ProvisioningJob $job): int
+    {
+        return IpReservation::query()
+            ->where('provisioning_job_id', $job->getKey())
+            ->whereNull('released_at')
+            ->count();
+    }
+
 }
