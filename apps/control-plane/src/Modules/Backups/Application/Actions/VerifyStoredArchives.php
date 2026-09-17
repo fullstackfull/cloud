@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Backups\Application\DTOs\ReconciliationSweep;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\VerificationAttempt;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -64,6 +65,29 @@ use Throwable;
  * re-read of old archives is a real operational practice, but it is a policy
  * about how often and at what cost, and nothing in this repository states one.
  * Inventing a cadence would be inventing a product decision.
+ *
+ * ---------------------------------------------------------------------------
+ * A provider that cannot be asked is not a provider that failed
+ * ---------------------------------------------------------------------------
+ *
+ * Proxmox Backup Server verifies on its own schedule, and the hypervisor API
+ * exposes no endpoint that starts a verification. Its adapter says so —
+ * `supportsVerification()` answers false, `startVerification()` refuses — so
+ * this sweep asks before it calls.
+ *
+ * The version of this that did not ask was wrong in a way worth naming,
+ * because everything about it looked fine: the attempt limit bounded it, so
+ * each archive was refused three times rather than for ever. But those three
+ * refusals raised the attempt counter and wrote the refusal into
+ * `failure_reason`, which is the column a person reads as the verdict on the
+ * archive — so a perfectly good backup on a perfectly healthy datastore ended
+ * up carrying a sentence about verification failing. On the one adapter that
+ * can actually run in production, that was every backup the platform would
+ * ever take.
+ *
+ * So an archive on such a provider is left alone here, with nothing counted
+ * against it, and its verdict arrives the way that provider gives one:
+ * {@see ReconcileBackupInventory} reads it off the datastore listing.
  */
 final readonly class VerifyStoredArchives
 {
@@ -76,6 +100,7 @@ final readonly class VerifyStoredArchives
     {
         $started = 0;
         $failed = 0;
+        $unaskable = 0;
 
         $unverified = Backup::query()
             ->awaitingVerification($this->attemptLimit())
@@ -84,7 +109,11 @@ final readonly class VerifyStoredArchives
 
         foreach ($unverified as $backup) {
             try {
-                $this->start($backup) ? $started++ : $failed++;
+                match ($this->start($backup)) {
+                    VerificationAttempt::Started => $started++,
+                    VerificationAttempt::Refused => $failed++,
+                    VerificationAttempt::NotAskable => $unaskable++,
+                };
             } catch (Throwable $e) {
                 $failed++;
 
@@ -103,10 +132,18 @@ final readonly class VerifyStoredArchives
             considered: $unverified->count(),
             settled: $started,
             failed: $failed,
+            /*
+             * Its own number, and not folded into either of the others. These
+             * rows were not settled and nothing about them failed: the
+             * platform looked, found a provider it cannot ask, and left them
+             * for the inventory sweep. Counting them as failures would put a
+             * standing non-zero failure count on a healthy platform.
+             */
+            skipped: $unaskable,
         );
     }
 
-    private function start(Backup $backup): bool
+    private function start(Backup $backup): VerificationAttempt
     {
         $cluster = $backup->cluster()->first();
 
@@ -118,7 +155,18 @@ final readonly class VerifyStoredArchives
                 'failure_reason' => 'the cluster this backup was taken on no longer exists, so the archive cannot be read back',
             ]);
 
-            return false;
+            return VerificationAttempt::Refused;
+        }
+
+        $provider = $this->providers->for($cluster);
+
+        /*
+         * Asked before anything is written, so a provider that cannot start a
+         * verification costs this archive nothing: no attempt counted, no
+         * failure reason, no row touched at all.
+         */
+        if (! $provider->supportsVerification()) {
+            return VerificationAttempt::NotAskable;
         }
 
         /*
@@ -132,8 +180,6 @@ final readonly class VerifyStoredArchives
             'verification_requested_at' => now(),
             'verification_attempts' => $backup->verification_attempts + 1,
         ])->save();
-
-        $provider = $this->providers->for($cluster);
 
         try {
             $operation = $provider->startVerification(
@@ -157,7 +203,7 @@ final readonly class VerifyStoredArchives
                 'failure_reason' => $this->redactor->redactString($e->getMessage()),
             ])->save();
 
-            return false;
+            return VerificationAttempt::Refused;
         }
 
         $backup->transitionTo(BackupState::Verifying, [
@@ -180,7 +226,7 @@ final readonly class VerifyStoredArchives
             'failure_reason' => null,
         ]);
 
-        return true;
+        return VerificationAttempt::Started;
     }
 
     private function attemptLimit(): int

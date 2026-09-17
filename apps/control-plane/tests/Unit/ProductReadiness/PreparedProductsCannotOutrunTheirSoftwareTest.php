@@ -192,18 +192,49 @@ final class PreparedProductsCannotOutrunTheirSoftwareTest extends TestCase
     #[Test]
     public function an_optional_capability_the_provider_lacks_is_not_a_blocker(): void
     {
+        /*
+         * Shaped like the one adapter that can actually run in production.
+         *
+         * Proxmox Backup Server verifies on its own schedule and exposes no
+         * endpoint to start one, and it does not implement file-level access
+         * at all — so all three of these are Unsupported on the real thing.
+         * The product is still production-ready, because what it owes a
+         * customer is the verdict and not the button, and the verdict is a
+         * required capability this provider does answer.
+         */
         $backup = $this->live(ProviderCategory::Backup);
-        $noBrowse = new ProviderFacts(
+        $asProxmoxActuallyIs = new ProviderFacts(
             $backup->id, $backup->name, $backup->category, $backup->driver, false,
             DeploymentEnvironment::Production, ProviderState::Enabled, ReadinessState::ReadyForProduction, null,
-            [...$backup->capabilities, 'file_browse' => CapabilityState::Unsupported, 'file_restore' => CapabilityState::Unsupported],
+            [...$backup->capabilities, 'verify' => CapabilityState::Unsupported, 'file_browse' => CapabilityState::Unsupported, 'file_restore' => CapabilityState::Unsupported],
         );
         $others = array_values(array_filter($this->everythingLive(), static fn (ProviderFacts $p): bool => $p->category !== ProviderCategory::Backup));
 
-        $verdict = $this->evaluate(Product::Backups, [...$others, $noBrowse], ['vps' => ProductReadinessState::ReadyForProduction]);
+        $verdict = $this->evaluate(Product::Backups, [...$others, $asProxmoxActuallyIs], ['vps' => ProductReadinessState::ReadyForProduction]);
 
         $this->assertSame(ProductReadinessState::ReadyForProduction, $verdict->state);
-        $this->assertSame(['file_browse', 'file_restore'], $verdict->requirements[0]->requirement->optional);
+        $this->assertSame(['verify', 'file_browse', 'file_restore'], $verdict->requirements[0]->requirement->optional);
+    }
+
+    #[Test]
+    public function a_backup_provider_that_cannot_report_a_verdict_does_block_the_product(): void
+    {
+        // The twin of the test above, and the reason `verify` could move to
+        // optional without the guarantee moving with it: the verdict itself is
+        // required, so a provider that cannot say whether an archive was read
+        // back is not one this product can be sold on.
+        $backup = $this->live(ProviderCategory::Backup);
+        $silent = new ProviderFacts(
+            $backup->id, $backup->name, $backup->category, $backup->driver, false,
+            DeploymentEnvironment::Production, ProviderState::Enabled, ReadinessState::ReadyForProduction, null,
+            [...$backup->capabilities, 'verification_verdict' => CapabilityState::Unsupported],
+        );
+        $others = array_values(array_filter($this->everythingLive(), static fn (ProviderFacts $p): bool => $p->category !== ProviderCategory::Backup));
+
+        $verdict = $this->evaluate(Product::Backups, [...$others, $silent], ['vps' => ProductReadinessState::ReadyForProduction]);
+
+        $this->assertSame(ProductReadinessState::NotReady, $verdict->state);
+        $this->assertStringContainsString('verification_verdict', (string) $verdict->detail);
     }
 
     #[Test]

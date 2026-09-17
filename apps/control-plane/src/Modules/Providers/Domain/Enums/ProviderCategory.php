@@ -78,7 +78,26 @@ enum ProviderCategory: string
     {
         return match ($this) {
             self::Compute => ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'gpu_passthrough'],
-            self::Backup => ['create', 'restore', 'delete', 'verify', 'retention', 'file_browse', 'file_restore'],
+            /*
+             * `verify` and `verification_verdict` are two different questions
+             * and only the second one is the product's promise.
+             *
+             * `verify` is "can this platform ask the provider to read an
+             * archive back now?". Proxmox Backup Server cannot be asked: a
+             * verification runs on the backup server on its own schedule and
+             * the hypervisor API exposes no endpoint that starts one, so
+             * ProxmoxBackupProvider::supportsVerification() answers false and
+             * startVerification() refuses.
+             *
+             * `verification_verdict` is "can this platform find out whether an
+             * archive was read back, and what the answer was?". That it can:
+             * listBackups() carries a three-valued verdict per archive — read
+             * back cleanly, failed, not yet checked — and reconciliation
+             * adopts it. What a customer is owed is the verdict, not the
+             * button, and a provider that verifies on its own schedule and
+             * reports the result honours that in full.
+             */
+            self::Backup => ['create', 'restore', 'delete', 'verify', 'verification_verdict', 'retention', 'file_browse', 'file_restore'],
             self::Hosting => ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
             /*
              * Five, and `uninstall` and `ssl` are deliberately not among them.

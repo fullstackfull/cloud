@@ -104,7 +104,31 @@ final readonly class ProductRequirements
                 new Requirement(ProviderCategory::Dns, ['create_zone', 'delete_zone', 'records', 'reconcile']),
             ],
             Product::Backups => [
-                new Requirement(ProviderCategory::Backup, ['create', 'restore', 'delete', 'verify', 'retention'], optional: ['file_browse', 'file_restore']),
+                /*
+                 * `verify` moved from required to optional, and that is a
+                 * correction rather than a relaxation.
+                 *
+                 * Requiring it said the product needs a provider this platform
+                 * can ask to verify on demand. No production-capable adapter
+                 * can be: PBS verifies on its own schedule and exposes no
+                 * endpoint to start one, so the only driver that answered
+                 * `verify` was the simulator. A required capability that only
+                 * a controlled driver can satisfy is how a product comes to be
+                 * called complete on the strength of its own fake.
+                 *
+                 * What the product actually owes a customer is the verdict: an
+                 * archive is either known to have been read back, known to
+                 * have failed, or not yet checked, and the platform must be
+                 * able to say which. That is `verification_verdict`, it is
+                 * required, and the real adapter has it — listBackups() reads
+                 * the verdict PBS recorded and ReconcileBackupInventory adopts
+                 * it onto the row.
+                 *
+                 * So a provider that can be asked directly is a convenience
+                 * the platform uses where it exists, and the guarantee stands
+                 * without it.
+                 */
+                new Requirement(ProviderCategory::Backup, ['create', 'restore', 'delete', 'retention', 'verification_verdict'], optional: ['verify', 'file_browse', 'file_restore']),
             ],
 
             Product::Cdn => [

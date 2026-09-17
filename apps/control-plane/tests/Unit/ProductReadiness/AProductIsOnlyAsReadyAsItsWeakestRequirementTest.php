@@ -295,6 +295,21 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
     #[Test]
     public function a_dependency_that_was_declared_sellable_only_lends_production_not_the_declaration(): void
     {
+        $verdict = $this->evaluate(
+            Product::Backups,
+            [...$this->sharedMet(), $this->provider(ProviderCategory::Backup)],
+            ['vps' => ProductReadinessState::ReadyToSell],
+        );
+
+        // ready_to_sell is a person's declaration about one product. It lends
+        // the dependent everything the providers earned and not the sentence
+        // somebody signed: the dependent has to be declared on its own.
+        $this->assertSame(ProductReadinessState::ReadyForProduction, $verdict->state);
+    }
+
+    #[Test]
+    public function a_prepared_dependent_is_capped_by_its_own_software_however_ready_its_dependency_is(): void
+    {
         $installer = $this->provider(ProviderCategory::WordPressInstaller, 'cpanel');
 
         $verdict = $this->evaluate(
@@ -303,7 +318,15 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
             ['shared_hosting' => ProductReadinessState::ReadyToSell],
         );
 
-        $this->assertSame(ProductReadinessState::ReadyForProduction, $verdict->state);
+        /*
+         * This used to read ready_for_production, on the same providers and
+         * the same declared dependency. What changed is not the lending rule
+         * above but WordPress: there is no production-capable installer in the
+         * repository, so the product is prepared and prepared caps at
+         * ready_for_real_validation. A perfect dependency cannot lift a
+         * product past software that does not exist.
+         */
+        $this->assertSame(ProductReadinessState::ReadyForRealValidation, $verdict->state);
     }
 
     #[Test]
