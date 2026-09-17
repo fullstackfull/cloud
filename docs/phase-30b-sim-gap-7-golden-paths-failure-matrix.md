@@ -643,9 +643,9 @@ ending code SHA, three times in succession:
 
 | Run | Tests | Assertions | Result |
 |---|---|---|---|
-| 1 | 47 | 275 | pass |
-| 2 | 47 | 275 | pass |
-| 3 | 47 | 275 | pass |
+| 1 | 49 | 288 | pass |
+| 2 | 49 | 288 | pass |
+| 3 | 49 | 288 | pass |
 
 Same counts each time, which is itself part of the evidence: a suite whose
 assertion count moves between runs is doing something conditional.
@@ -654,8 +654,13 @@ assertion count moves between runs is doing something conditional.
 
 ## 29. Deliberate breakages, and their positive twins
 
-Ten breakages, each applied **alone**, measured, and restored with
+Eleven breakages, each applied **alone**, measured, and restored with
 `git checkout --`. The working tree at the ending SHA contains none of them.
+
+Ten were planned (A–J). The eleventh, K, is the one this phase caused: it is
+the harness defect of §30, and it is listed here because the same discipline
+applies to it — a gate was written for it, the defect was put back, and the
+gate failed.
 
 | | Breakage | Gate that must fail | Result |
 |---|---|---|---|
@@ -669,6 +674,7 @@ Ten breakages, each applied **alone**, measured, and restored with
 | H | remove the redaction in `CreateProvisioningJob` | `WhatAGoldenPathMustNotDoTest::no_secret_shaped_value_…` | **FAILS**: canary found in the queue payload |
 | I | retry a create whose outcome is unknown | `TheFailureMatrixTest::a_build_that_timed_out_…` | **FAILS**: `queued` instead of `needs_review` |
 | J | disable durable controlled-simulation state | `AControlledProviderRemembersAcrossProcessesTest` | **FAILS**: 0 of 5 |
+| K | restore the remember-and-delete harness teardown | `TheHarnessHandsBackAnEmptyDatabaseTest::and_the_next_test_finds_none_of_them` | **FAILS**: `provisioning_jobs still holds rows the previous test committed` |
 
 **A needed three attempts, and that is the interesting part of this section.**
 
@@ -706,7 +712,116 @@ deleted without the other becoming obviously unbalanced.
 
 ## 30. Regression
 
-<!-- REGRESSION TABLE -->
+### 30.1 A defect this phase caused, found by the regression and not by the gap
+
+The gap's own suites were green throughout, and the full suite was not. Run
+from a clean database, `php artisan test` failed **twenty-three assertions and
+six errors, all of them in `tests/Feature/Vps`** — a directory this gap does
+not touch:
+
+```
+Tests\Feature\Vps\NoCustomerPathBypassesSuspensionTest::power_is_refused_and_nothing_is_queued
+  Failed asserting that 1 is identical to 0.
+Tests\Feature\Vps\VpsPowerHandlerTest::shutdown_asks_the_guest_and_stop_pulls_the_plug
+  2 records were found.
+Tests\Feature\Vps\VpsReinstallEndpointTest::a_replayed_key_does_not_reinstall_twice
+  Failed asserting that 2 is identical to 1.
+```
+
+Every one of them passed when `tests/Feature/Vps` ran on its own (141/141).
+That shape — passes alone, fails in the run — is a test-isolation failure, and
+it took a directory bisection to attribute:
+
+| Selection (in the order given) | Result |
+|---|---|
+| `tests/Feature/Vps` | 141 pass |
+| `tests/Feature` | 23 failed, 6 errors |
+| `Activity` + 16 directories `Admin…Infrastructure` + `Vps` | 1297 pass |
+| `Activity` + 19 directories `Lifecycle…Termination` + `Vps` | 29 fail |
+| `Activity` + `Queue Rbac Security Seeders SharedHosting Simulation Subscriptions Support Team Termination` + `Vps` | 29 fail |
+| `Activity` + `Rbac Security Seeders` + `Vps`, and `Activity` + `SharedHosting Subscriptions Support Team Termination` + `Vps` | pass |
+| `Activity` + `Queue` + `Vps` | 193 pass |
+| **`Activity` + `Simulation` + `Vps`** | **29 fail** |
+
+`Activity` first is not decoration. `RefreshDatabase` runs `migrate:fresh`
+once, at the first test in the process that uses it — so a selection that puts
+the polluting directory *before* the first RefreshDatabase test has its
+pollution wiped by that very migration and passes. Three earlier bisections
+passed for exactly that reason and sent the search in the wrong direction.
+
+**Cause.** Nothing in `tests/Feature/Simulation` or `tests/Feature/Queue` can
+use `RefreshDatabase` — a transaction is invisible to the worker process that
+is the entire point of §13. Their rows are committed, and `WorkerHarness`
+removed them afterwards by remembering every model an `eloquent.created` event
+had announced **in this process**. A worker in the other process announces
+nothing there, and a parent cannot be deleted while a child still points at
+it, so the sweep stopped when a pass made no progress and left the rest.
+
+Measured per test, with the old teardown, on a freshly migrated database:
+
+| Test | Rows left behind |
+|---|---|
+| `WhatAGoldenPathMustNotDoTest::no_secret_shaped_value_…` | `provisioning_jobs=1` |
+| `WhatAGoldenPathMustNotDoTest::a_provider_message_that_quotes_its_own_credential_…` | `compute_clusters=1 compute_nodes=1` |
+| `TheFailureMatrixTest` (whole file) | `compute_clusters=4 compute_nodes=4` |
+| the four other golden-path files | none |
+
+That single `provisioning_jobs` row is what `assertSame(0,
+ProvisioningJob::query()->count())` saw, what `->sole()` counted as a second
+record, and what made an idempotency replay read two where one was expected.
+
+**Fix.** `WorkerHarness::tearDown()` no longer remembers. It owns the
+committed database for the length of one test and hands it back empty:
+`truncate <every table in the schema except migrations> cascade`, on the
+committed connection, not wrapped in a `try`/`catch` — a teardown that cannot
+empty the database has to say so where the cause is still on screen. The
+bookkeeping it replaces is gone: no recorded-model list, no `created`
+listener, no special case for the rows `insertOrIgnore` writes.
+
+**Gate.** `TheHarnessHandsBackAnEmptyDatabaseTest` asserts the property
+instead of trusting the bookkeeping: the first test drives a hosting build
+through a real worker, the second finds nineteen tables empty. PHPUnit runs
+them in declaration order, so the second reads what the first one's teardown
+left. It is breakage K in §29, and with the old teardown restored it fails.
+
+**A correction.** An earlier commit in this phase (`f65ba3b`) claimed the same
+symptom was caused by `SeedSubnetAddresses`'s `insertOrIgnore` leaking 64
+`ip_addresses`, 3 pools, 3 subnets and 4 networks. That claim was wrong, and
+wrong for an embarrassing reason: the census that produced those numbers was
+run with `php artisan tinker` under `APP_ENV=local`, which reads `.env` and
+therefore counted the **development** database (`lynomia`), not the test
+database (`phpunit.xml` sets `DB_DATABASE=lynomia_test`). The numbers it
+reported are exactly what `DevelopmentSeeder` puts in `lynomia`. Every census
+in this section was taken with `APP_ENV=testing`. The `insertOrIgnore`
+reasoning was sound in principle — a bulk insert fires no model event — but it
+was not the cause of these failures, and the code it added is now deleted
+along with the rest of the bookkeeping.
+
+### 30.2 The regression itself
+
+At the ending code SHA, from a clean database:
+
+| Gate | Command | Result |
+|---|---|---|
+| Backend suite | `php artisan test` | **3576 tests, 3576 pass**, 142 134 assertions |
+| Golden paths, ×3 | `php artisan test --group=golden-path` | 49 / 49, 288 assertions, three times (§28) |
+| Style | `vendor/bin/pint --test` | pass |
+| Static analysis | `tools/phpstan/vendor/bin/phpstan analyse -c tools/phpstan/phpstan.neon` | 0 errors |
+| Frontend types | `npm run typecheck` | pass |
+| Frontend lint | `npm run lint` | pass |
+| Frontend unit | `npm run test --workspace=apps/web -- --run` | 81 files, 443 tests, pass |
+| Frontend build | `npm run build` | pass |
+| API description | `npm run openapi:lint` | pass (unchanged by this gap) |
+| Browser end-to-end | `npm run test:e2e` | <!-- E2E RESULT --> |
+| Inventory safety | `validate-inventory.py`, `test_validate_inventory.py` | pass |
+| Safety gate | `test_safety_gate.sh` | pass |
+| Monitoring rules | `validate-monitoring.py` | pass |
+| Runbooks | `validate-runbooks.py` | pass |
+| No workflow applies | `check-ci-cannot-apply.py` | pass |
+| Production guards | the `production-guards` CI job | run by CI at the exact SHA (§31); this gap adds no environment template |
+
+Gaps 1–6 gates are inside the backend suite and run with it; nothing in them
+was modified by this gap.
 
 ---
 

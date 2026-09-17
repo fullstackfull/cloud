@@ -6,7 +6,6 @@ namespace Tests\Feature\Queue;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
@@ -15,7 +14,6 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
-use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
@@ -57,13 +55,6 @@ abstract class WorkerHarness extends TestCase
 
     /** Reserved for these suites, and emptied before every test in them. */
     protected const int REDIS_DATABASE = 15;
-
-    /**
-     * Rows written for real, newest last, deleted in reverse in the teardown.
-     *
-     * @var list<Model>
-     */
-    private array $committed = [];
 
     /** Where the fake hypervisor keeps its fleet for this test. */
     private string $fleetPath = '';
@@ -176,78 +167,61 @@ abstract class WorkerHarness extends TestCase
     }
 
     /**
-     * Rows that exist because of this test and that no model event announced.
+     * Leaves the committed database as empty as an untouched one.
      *
-     * `SeedSubnetAddresses` writes addresses with `insertOrIgnore` — which is
-     * the right call, because it is an idempotent bulk insert against a unique
-     * index — and an insert that goes round Eloquent fires no `created` event,
-     * so {@see outsideTheTransaction()} never hears about the rows.
+     * The first version of this teardown remembered every model the test
+     * created and deleted them in reverse. That can only ever clean up what
+     * *this process* wrote, and the entire point of the harness is that a
+     * second process does the work: a worker running
+     * `ProvisionOrderedService` writes a provisioning job, a virtual machine,
+     * an assignment, an operation and an audit trail that no `created` event
+     * in this process ever announced. Bulk inserts have the same problem —
+     * `SeedSubnetAddresses` writes addresses with `insertOrIgnore`, which goes
+     * round Eloquent entirely.
      *
-     * Left behind, they are not merely untidy: they hold a foreign key into
-     * the subnet, so the subnet, its network and its pool cannot be deleted
-     * either, and every later test in the run that counts pools or subnets
-     * globally then finds this test's estate. That is how a golden path comes
-     * to fail a VPS endpoint test in another directory.
+     * Those rows are not merely untidy. They are committed, so they outlive
+     * the test, and RefreshDatabase's transaction hides them from nobody: the
+     * next test in the run that asks a global question — `assertSame(0,
+     * ProvisioningJob::query()->count())`, or `->sole()` — sees this test's
+     * estate and fails for a reason that has nothing to do with what it is
+     * testing. That is how a golden path in this directory came to fail
+     * twenty-nine assertions in `tests/Feature/Vps`.
+     *
+     * So the harness does not try to remember. It owns the committed database
+     * for the length of one test and hands it back empty. `migrations` is the
+     * one table left alone, because emptying it would tell the next
+     * `migrate` that this schema does not exist.
      */
-    private function deleteRowsNothingRecorded(): void
+    private function emptyTheCommittedDatabase(): void
     {
-        $subnetIds = [];
+        $connection = DB::connection(self::CONNECTION);
 
-        foreach ($this->committed as $model) {
-            if ($model instanceof Subnet) {
-                $subnetIds[] = $model->getKey();
-            }
-        }
+        /** @var list<object{tablename: string}> $rows */
+        $rows = $connection->select(
+            "select tablename from pg_tables where schemaname = current_schema() and tablename <> 'migrations'",
+        );
 
-        if ($subnetIds === []) {
+        if ($rows === []) {
             return;
         }
 
-        try {
-            IpAddress::on(self::CONNECTION)->whereIn('subnet_id', $subnetIds)->forceDelete();
-        } catch (\Throwable) {
-            // Assignments may still hold some of them; the sweep below takes
-            // those with their own parents and this runs again next time.
-        }
+        /*
+         * Not wrapped in a try/catch. A teardown that cannot empty the
+         * database has to say so here, where the cause is still on screen —
+         * swallowing it would put the leak back and move the failure to
+         * whichever unrelated test asked the next global question.
+         */
+        $connection->statement(
+            'truncate '.implode(', ', array_map(
+                static fn (object $row): string => '"'.str_replace('"', '""', $row->tablename).'"',
+                $rows,
+            )).' cascade',
+        );
     }
 
     protected function tearDown(): void
     {
-        $this->deleteRowsNothingRecorded();
-
-        /*
-         * Reverse order, and then again for whatever would not go.
-         *
-         * A parent cannot be deleted while a child still points at it, and the
-         * order rows were created in is only approximately the order they can
-         * be deleted in — a worker in another process may have written a child
-         * after this process created the parent. So the list is swept until a
-         * pass stops making progress, rather than once.
-         */
-        $remaining = array_reverse($this->committed);
-
-        while ($remaining !== []) {
-            $stuck = [];
-
-            foreach ($remaining as $model) {
-                try {
-                    $model->newQueryWithoutScopes()->whereKey($model->getKey())->forceDelete();
-                } catch (\Throwable) {
-                    // A row a cascade already took with its parent, or one
-                    // whose own children have not gone yet. Either way it is
-                    // tried again on the next pass.
-                    $stuck[] = $model;
-                }
-            }
-
-            if (count($stuck) === count($remaining)) {
-                break;
-            }
-
-            $remaining = $stuck;
-        }
-
-        $this->committed = [];
+        $this->emptyTheCommittedDatabase();
 
         foreach ($this->simulationPaths as $path) {
             if (is_file($path)) {
@@ -283,8 +257,6 @@ abstract class WorkerHarness extends TestCase
     {
         $model->setConnection(self::CONNECTION)->save();
 
-        $this->committed[] = $model;
-
         return $model;
     }
 
@@ -310,19 +282,9 @@ abstract class WorkerHarness extends TestCase
 
         DB::setDefaultConnection(self::CONNECTION);
 
-        Event::listen('eloquent.created: *', function (string $event, array $payload): void {
-            foreach ($payload as $model) {
-                if ($model instanceof Model) {
-                    $this->committed[] = $model;
-                }
-            }
-        });
-
         try {
             return $build();
         } finally {
-            Event::forget('eloquent.created: *');
-
             DB::setDefaultConnection($previous);
         }
     }
