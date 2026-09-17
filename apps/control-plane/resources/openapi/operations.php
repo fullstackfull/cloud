@@ -40,10 +40,13 @@ return [
     'api.v1.register' => [
         'tag' => 'Authentication',
         'summary' => 'Create an account',
-        'description' => 'Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified.',
+        'description' => 'Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified. Answers 202 with a sentence and nothing identifying, whether or not an account was created: answering differently for an address that already has one would tell a caller which addresses are registered here. No session is issued — verification comes first. Refused with 503 `registration.unavailable` while the legal documents a customer would be accepting are not published, so no account is created against a policy nobody has written.',
         'auth' => false,
         'body' => ['name', 'email', 'password', 'password_confirmation'],
-        'response' => $one('User', 201),
+        'response' => $one('RegistrationAccepted', 202),
+        'errors' => [
+            503 => 'Registration is closed on this deployment. `registration.unavailable`, returned while the legal documents a customer would be accepting are not published. Nothing the caller sent is wrong, and the response names no document, configuration key or version.',
+        ],
     ],
     'api.v1.registration.options' => [
         'tag' => 'Authentication',

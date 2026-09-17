@@ -30,6 +30,15 @@ return [
         'account_locked' => 'This account is temporarily locked after repeated failed sign-in attempts.',
         'two_factor_required' => 'A two-factor code is required to complete sign-in.',
     ],
+    /*
+     * Registration closed on this deployment, which is not the visitor's
+     * mistake and names nothing about why: the documents they would be
+     * accepting are not published, and an unauthenticated endpoint that said
+     * so would report deployment state to anybody who asked.
+     */
+    'registration' => [
+        'unavailable' => 'Registration is not open at the moment. Please try again later.',
+    ],
     'resource' => [
         'not_found' => 'The requested resource does not exist.',
     ],

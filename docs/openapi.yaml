@@ -12979,7 +12979,7 @@ paths:
       tags:
         - "Authentication"
       summary: "Create an account"
-      description: "Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified."
+      description: "Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified. Answers 202 with a sentence and nothing identifying, whether or not an account was created: answering differently for an address that already has one would tell a caller which addresses are registered here. No session is issued — verification comes first. Refused with 503 `registration.unavailable` while the legal documents a customer would be accepting are not published, so no account is created against a policy nobody has written."
       requestBody:
         required: true
         content:
@@ -12998,24 +12998,11 @@ paths:
       security: []
       responses:
         202:
-          description: "Accepted. Whether an account was created is deliberately not stated: answering differently for an address that already has one would tell a caller which addresses are registered here. Nothing identifying is returned and no session is issued — verification comes first."
+          description: "The resource."
           content:
             "application/json":
               schema:
-                type: "object"
-                required:
-                  - "data"
-                properties:
-                  data:
-                    type: "object"
-                    properties:
-                      message:
-                        type: "string"
-                  meta:
-                    type: "object"
-                    properties:
-                      email_verification_required:
-                        type: "boolean"
+                "$ref": "#/components/schemas/RegistrationAcceptedResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -13023,12 +13010,6 @@ paths:
               "$ref": "#/components/headers/RateLimitRemaining"
         422:
           description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
-          content:
-            "application/json":
-              schema:
-                "$ref": "#/components/schemas/Error"
-        503:
-          description: "Registration is closed on this deployment. `registration.unavailable`, returned when the legal documents a customer would be accepting are not published — so no account is created against a policy nobody has written. Nothing the caller sent is wrong, and the response names no document, key or version."
           content:
             "application/json":
               schema:
@@ -13044,6 +13025,12 @@ paths:
           headers:
             Retry-After:
               "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        503:
+          description: "Registration is closed on this deployment. `registration.unavailable`, returned while the legal documents a customer would be accepting are not published. Nothing the caller sent is wrong, and the response names no document, configuration key or version."
           content:
             "application/json":
               schema:
@@ -21307,6 +21294,19 @@ components:
           type: "string"
         name:
           type: "string"
+    RegistrationAccepted:
+      type: "object"
+      additionalProperties: false
+      properties:
+        message:
+          type: "string"
+    RegistrationAcceptedResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/RegistrationAccepted"
     RegistrationOptions:
       type: "object"
       additionalProperties: false
@@ -21323,12 +21323,10 @@ components:
         fallback_currency:
           type: "string"
         legal:
-          description: "The documents a customer accepts. Only published documents appear: a URL without a revision and a revision without a URL are both unpublished, and the server omits them. Registration is refused entirely unless every document is published."
           type: "object"
           additionalProperties: false
           properties:
             registration_permitted:
-              description: "Whether a registration would be accepted at all. The form reads this to say so before collecting a password; the enforcement is server-side either way."
               type: "boolean"
             documents:
               type: "array"
@@ -21345,7 +21343,6 @@ components:
                     type: "string"
                     format: "uri"
                   version:
-                    description: "The revision the customer would be agreeing to, recorded with the acceptance. A stable identifier, never a title."
                     type: "string"
     RegistrationOptionsResponse:
       type: "object"

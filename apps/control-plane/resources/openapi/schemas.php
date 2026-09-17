@@ -1616,25 +1616,63 @@ return [
             'fallback_currency' => ['type' => 'string'],
 
             /*
-             * Where the documents the acceptance checkbox names are
-             * published. Null for a document that is not published yet, and
-             * that is a state a client renders rather than treats as an
-             * error: the terms of service and the acceptable use policy are
-             * written by people, and a URL to a page nobody has written would
-             * read as a prerequisite that has been met.
+             * The documents the acceptance checkbox names, and whether this
+             * deployment will accept a registration at all.
              *
-             * Here rather than built into a client, so publishing them is an
-             * operator setting a variable instead of somebody shipping a new
+             * Only published documents appear, so there is no null to render:
+             * a URL without a revision is a page whose acceptance nobody
+             * could pin to a revision, a revision without a URL is a revision
+             * nobody can read, and both are omitted. Registration is refused
+             * entirely until every document is published — an unwritten
+             * policy is not a lenient one.
+             *
+             * `registration_permitted` is the same answer the registration
+             * endpoint will give, so a form can say so before collecting a
+             * password. It is not the enforcement; that is server-side.
+             *
+             * Here rather than built into a client, so publishing is an
+             * operator setting variables instead of somebody shipping a new
              * portal build.
              */
             'legal' => [
                 'type' => 'object',
                 'additionalProperties' => false,
                 'properties' => [
-                    'terms_url' => ['type' => ['string', 'null'], 'format' => 'uri'],
-                    'aup_url' => ['type' => ['string', 'null'], 'format' => 'uri'],
+                    'registration_permitted' => ['type' => 'boolean'],
+                    'documents' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'properties' => [
+                                'type' => ['type' => 'string', 'enum' => ['terms', 'aup']],
+                                'url' => ['type' => 'string', 'format' => 'uri'],
+                                // A stable identifier, never a title: it is
+                                // stored with the acceptance so the platform
+                                // can say which text was agreed to.
+                                'version' => ['type' => 'string'],
+                            ],
+                        ],
+                    ],
                 ],
             ],
+        ],
+    ],
+
+    /*
+     * What registration answers, which is deliberately not the account.
+     *
+     * The endpoint used to be documented as returning a User at 201. It has
+     * long answered 202 with a sentence and nothing identifying: answering
+     * differently for an address that already has an account is a membership
+     * oracle, and returning the created account is the same disclosure by
+     * another route. The document said otherwise until this was noticed.
+     */
+    'RegistrationAccepted' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'message' => ['type' => 'string'],
         ],
     ],
 
