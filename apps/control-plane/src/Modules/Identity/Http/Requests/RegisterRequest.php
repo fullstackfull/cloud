@@ -65,7 +65,18 @@ final class RegisterRequest extends FormRequest
             'timezone' => ['sometimes', 'string', 'timezone'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:32', 'regex:/\A\+?[0-9 ()-]{6,32}\z/'],
 
-            // Explicit acceptance is recorded, not assumed.
+            /*
+             * Explicit acceptance, and now genuinely recorded: this rule used
+             * to be the only place in the repository the words appeared, and
+             * the value was discarded the moment it passed. RegisterCustomer
+             * writes one row per published document, in the same transaction
+             * as the account.
+             *
+             * What is not taken from here is which document or which revision
+             * was accepted. Those are read from configuration on the server
+             * every time — a client that could name the revision it agreed to
+             * could name one from two years ago.
+             */
             'accepts_terms' => ['accepted'],
         ];
     }

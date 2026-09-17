@@ -29,16 +29,26 @@ const OPTIONS = {
     ],
     currencies: ['KWD', 'USD', 'EUR', 'GBP', 'SAR', 'AED'],
     fallback_currency: 'USD',
-    // Unpublished, which is the state the platform is in until somebody
-    // writes the documents. The two tests at the bottom cover both answers.
-    legal: { terms_url: null, aup_url: null },
+    /*
+     * Published, because most of these tests are about the currency and need
+     * a form that submits: registration fails closed when the documents are
+     * not published, and the button is disabled with it. The tests at the
+     * bottom pass their own answer for the cases that matter.
+     */
+    legal: {
+      registration_permitted: true,
+      documents: [
+        { type: 'terms', url: 'https://legal.example/terms', version: '2026-04-01' },
+        { type: 'aup', url: 'https://legal.example/aup', version: '1.2' },
+      ],
+    },
   },
   meta: { countries_count: 3, currencies_count: 6 },
 }
 
 function stubFetch(
   onRegister?: (body: unknown) => void,
-  legal: { terms_url: string | null; aup_url: string | null } = OPTIONS.data.legal,
+  legal: { registration_permitted: boolean; documents: { type: string; url: string; version: string }[] } = OPTIONS.data.legal,
 ) {
   return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
@@ -187,20 +197,23 @@ describe('registration decides the currency out loud', () => {
   /*
    * The documents the checkbox names.
    *
-   * The sentence beside the box says a customer accepts a terms of service and
-   * an acceptable use policy, and for a long time offered no way to read
-   * either. The documents are a business and legal deliverable rather than
-   * something this repository writes, so the screen's job is to link them
-   * when they exist and to say nothing when they do not — and publishing them
-   * has to be configuration rather than a code change, which is why the URLs
-   * travel with the rest of the registration options.
+   * The sentence beside the box says a customer accepts a terms of service
+   * and an acceptable use policy, and for a long time offered no way to read
+   * either — and, worse, let the registration through regardless. The
+   * documents are a business and legal deliverable rather than something this
+   * repository writes, so publishing them is configuration; what the screen
+   * owes a customer is the link, the revision they are agreeing to, and an
+   * honest answer when there is nothing to agree to.
    */
-  it('links the documents the customer is accepting, once they are published', async () => {
+  it('links each document the customer is accepting, and names its revision', async () => {
     vi.stubGlobal(
       'fetch',
       stubFetch(undefined, {
-        terms_url: 'https://legal.example/terms',
-        aup_url: 'https://legal.example/aup',
+        registration_permitted: true,
+        documents: [
+          { type: 'terms', url: 'https://legal.example/terms', version: '2026-04-01' },
+          { type: 'aup', url: 'https://legal.example/aup', version: '1.2' },
+        ],
       }),
     )
 
@@ -212,20 +225,29 @@ describe('registration decides the currency out loud', () => {
     expect(terms).toHaveAttribute('href', 'https://legal.example/terms')
     expect(aup).toHaveAttribute('href', 'https://legal.example/aup')
 
+    // The revision is what the box commits them to, so it is beside the link
+    // rather than only in the acceptance the server records.
+    expect(terms).toHaveTextContent('2026-04-01')
+    expect(aup).toHaveTextContent('1.2')
+
     // A document on somebody else's origin, opened without a handle on this
     // tab — a half-filled registration form must not be navigable by it.
     expect(terms).toHaveAttribute('rel', expect.stringContaining('noopener'))
   })
 
-  it('offers no link at all while the documents are unpublished', async () => {
-    vi.stubGlobal('fetch', stubFetch())
+  it('says registration is not open and refuses to submit while nothing is published', async () => {
+    vi.stubGlobal('fetch', stubFetch(undefined, { registration_permitted: false, documents: [] }))
 
     renderPage()
 
-    // The checkbox is there and still required: acceptance is recorded either
-    // way, and that half is the platform's. What must not appear is a link
-    // that goes nowhere or an empty line pretending to be one.
-    expect(await screen.findByRole('checkbox')).toBeRequired()
+    /*
+     * The server refuses this registration either way — that is the
+     * enforcement and it does not depend on the screen. What the screen adds
+     * is telling the visitor before they type a password twice, and not
+     * offering a link that goes nowhere.
+     */
+    expect(await screen.findByText(/registration is not open yet/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create account/i })).toBeDisabled()
     expect(screen.queryByRole('link', { name: /terms of service/i })).toBeNull()
     expect(screen.queryByRole('link', { name: /acceptable use policy/i })).toBeNull()
   })
@@ -234,19 +256,26 @@ describe('registration decides the currency out loud', () => {
     /*
      * Two documents, published separately, and a screen that waits for both
      * would show neither. This is also the shape the server produces when it
-     * drops a URL it will not hand a browser — a script scheme in the
-     * configuration comes back as null, and null is a state this page already
-     * renders. `TheRegistrationOptionsNameTheLegalDocumentsTest` is where that
-     * refusal itself is asserted.
+     * drops something it will not hand a browser — a script scheme in a URL,
+     * or a revision that is a sentence rather than an identifier, and the
+     * document is simply absent from the list.
+     * `TheRegistrationOptionsNameTheLegalDocumentsTest` is where those
+     * refusals themselves are asserted.
+     *
+     * Registration is still closed, because both documents are required.
      */
     vi.stubGlobal(
       'fetch',
-      stubFetch(undefined, { terms_url: null, aup_url: 'https://legal.example/aup' }),
+      stubFetch(undefined, {
+        registration_permitted: false,
+        documents: [{ type: 'aup', url: 'https://legal.example/aup', version: '1.2' }],
+      }),
     )
 
     renderPage()
 
     expect(await screen.findByRole('link', { name: /acceptable use policy/i })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /terms of service/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /create account/i })).toBeDisabled()
   })
 })

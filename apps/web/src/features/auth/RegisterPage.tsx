@@ -34,17 +34,22 @@ import type { ReactNode } from 'react'
  * paragraph entirely, so an unpublished document leaves no gap under the
  * sentence and no link that goes nowhere. That state is a launch prerequisite
  * recorded as one, rather than a placeholder page pretending to be terms.
+ *
+ * Every document here is published — the server omits the rest, so there is
+ * no null to filter and no half-published case to render. Each link names the
+ * revision beside it, because that is what the checkbox commits the customer
+ * to and it is what the acceptance records.
  */
 function legalDocuments(
   legal: RegistrationLegalDocuments | undefined,
   t: TFunction,
 ): ReactNode {
-  const documents = [
-    { url: legal?.terms_url, label: t('auth.termsDocument') },
-    { url: legal?.aup_url, label: t('auth.aupDocument') },
-  ].filter((document): document is { url: string; label: string } =>
-    typeof document.url === 'string' && document.url !== '',
-  )
+  const labels: Record<string, string> = {
+    terms: t('auth.termsDocument'),
+    aup: t('auth.aupDocument'),
+  }
+
+  const documents = legal?.documents ?? []
 
   if (documents.length === 0) {
     return undefined
@@ -54,7 +59,7 @@ function legalDocuments(
     <span className="flex flex-wrap gap-x-3 gap-y-1">
       {documents.map((document) => (
         <a
-          key={document.label}
+          key={document.type}
           href={document.url}
           target="_blank"
           // noopener because the document is on somebody else's origin, and a
@@ -63,7 +68,10 @@ function legalDocuments(
           rel="noreferrer noopener"
           className="font-medium text-brand-600 hover:underline"
         >
-          {document.label}
+          {labels[document.type] ?? document.type}{' '}
+          <span className="font-normal text-[var(--text-secondary)]">
+            ({t('auth.documentVersion', { version: document.version })})
+          </span>
         </a>
       ))}
     </span>
@@ -121,6 +129,10 @@ export function RegisterPage() {
   const displayed = describeError(register.error)
   const fieldErrors = displayed?.fields ?? null
 
+  // Only once the answer is in hand: `undefined` is "not asked yet", which is
+  // not the same as "closed".
+  const registrationClosed = options.data?.legal.registration_permitted === false
+
   if (register.isSuccess) {
     /*
      * Registration deliberately does not sign the customer in: verification
@@ -173,6 +185,20 @@ export function RegisterPage() {
         <Alert tone="error" requestId={displayed.requestId}>
           {displayed.message}
         </Alert>
+      ) : null}
+
+      {/*
+        Said before the form is filled in, not after it is submitted.
+
+        The server refuses the registration either way — that is the
+        enforcement, and it does not depend on this — but a visitor who has
+        typed a name, an address and a password twice deserves to have been
+        told first. Rendered only once the options have actually loaded, so a
+        slow request does not flash "not open yet" at somebody who can
+        register perfectly well.
+      */}
+      {registrationClosed ? (
+        <Alert tone="warning">{t('auth.registrationUnavailable')}</Alert>
       ) : null}
 
       <Field
@@ -285,7 +311,12 @@ export function RegisterPage() {
         required
       />
 
-      <Button type="submit" loading={register.isPending} className="w-full">
+      <Button
+        type="submit"
+        loading={register.isPending}
+        disabled={registrationClosed}
+        className="w-full"
+      >
         {t('common.register')}
       </Button>
 

@@ -83,6 +83,8 @@
     "acceptTerms": "أوافق على شروط الخدمة وسياسة الاستخدام المقبول.",
     "termsDocument": "شروط الخدمة",
     "aupDocument": "سياسة الاستخدام المقبول",
+    "documentVersion": "الإصدار {{version}}",
+    "registrationUnavailable": "التسجيل غير متاح بعد. لم تُنشر المستندات التي ستوافق عليها.",
     "haveAccount": "لديك حساب بالفعل؟",
     "checkYourEmailTitle": "تحقّق من بريدك",
     "checkYourEmailBody": "أرسلنا رابط تفعيل إلى {{email}}. أُنشئ حسابك؛ فعّل العنوان لتتمكّن من الطلب.",

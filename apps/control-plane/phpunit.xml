@@ -82,5 +82,18 @@
         <env name="BACKUP_PROVIDER" value="fake"/>
 
         <env name="BILLING_DEFAULT_CURRENCY" value="KWD"/>
+
+        <!--
+            Registration fails closed when the legal documents are not
+            published, so the suite publishes two. The addresses use the
+            reserved .test TLD and the versions are obviously synthetic: these
+            stand in for documents that do not exist, and nothing here should
+            ever be mistaken for a real published policy. The tests that prove
+            the fail-closed behaviour unset these for themselves.
+        -->
+        <env name="LEGAL_TERMS_URL" value="https://legal.lynomia.test/terms"/>
+        <env name="LEGAL_TERMS_VERSION" value="test-terms-1"/>
+        <env name="LEGAL_AUP_URL" value="https://legal.lynomia.test/acceptable-use"/>
+        <env name="LEGAL_AUP_VERSION" value="test-aup-1"/>
     </php>
 </phpunit>

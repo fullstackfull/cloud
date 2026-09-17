@@ -6,6 +6,8 @@ namespace Lynomia\Modules\Identity\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
+use Lynomia\Modules\Identity\Domain\DTOs\PublishedLegalDocument;
+use Lynomia\Modules\Identity\Domain\Services\LegalDocuments;
 
 /**
  * What a registration form is allowed to offer.
@@ -27,7 +29,7 @@ use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
  */
 final class RegistrationOptionsController
 {
-    public function __invoke(BillingCurrencies $currencies): JsonResponse
+    public function __invoke(BillingCurrencies $currencies, LegalDocuments $legal): JsonResponse
     {
         $countries = $currencies->countries();
         $fallback = $currencies->recommendationFor(null);
@@ -58,25 +60,31 @@ final class RegistrationOptionsController
                 'fallback_currency' => $fallback['currency'],
 
                 /*
-                 * Where the documents the checkbox names are published, or
-                 * null for each one that is not.
+                 * What the screen needs to render the acceptance, and nothing
+                 * else. Each published document arrives with the revision the
+                 * customer would be agreeing to, so the screen can name it.
                  *
-                 * The screen asks a customer to accept a terms of service and
-                 * an acceptable use policy. Without these, it names two
-                 * documents and offers no way to read either — so the URLs
-                 * come from configuration and travel with the rest of what a
-                 * registration form is allowed to offer, rather than being
-                 * built into the portal where publishing them would be a code
-                 * change and a deployment.
+                 * `registration_permitted` is the same answer the registration
+                 * endpoint will give, from the same service, so the form can
+                 * say so up front instead of collecting a password and then
+                 * failing. It is not the enforcement — that is server-side in
+                 * RegisterCustomer — and a client that ignores it is refused
+                 * there.
                  *
-                 * Null is a truthful answer and the screen renders it as one:
-                 * the documents are a legal deliverable this repository does
-                 * not write, and a link to a page nobody has written would be
-                 * a worse answer than no link.
+                 * No configuration keys and no reason. Which of the platform's
+                 * own launch prerequisites are outstanding is not a visitor's
+                 * business, and this endpoint is unauthenticated.
                  */
                 'legal' => [
-                    'terms_url' => $this->publishedUrl('legal.terms_url'),
-                    'aup_url' => $this->publishedUrl('legal.aup_url'),
+                    'registration_permitted' => $legal->registrationPermitted(),
+                    'documents' => array_map(
+                        static fn (PublishedLegalDocument $document): array => [
+                            'type' => $document->type->value,
+                            'url' => $document->url,
+                            'version' => $document->version,
+                        ],
+                        $legal->published(),
+                    ),
                 ],
             ],
             'meta' => [
@@ -84,35 +92,5 @@ final class RegistrationOptionsController
                 'currencies_count' => count($currencies->enabled()),
             ],
         ]);
-    }
-
-    /**
-     * A configured document URL, or null.
-     *
-     * Only `http` and `https` are handed to a browser. The value is an
-     * operator's, so this is not a trust boundary in the usual sense — but a
-     * `javascript:` or `data:` URL reaching an anchor on an unauthenticated
-     * page would turn a configuration mistake into a script running in every
-     * visitor's browser, and refusing a scheme is cheaper than explaining
-     * that. A value this refuses reads as "not published", which is the same
-     * answer an unset key gives and the one the screen already handles.
-     */
-    private function publishedUrl(string $key): ?string
-    {
-        $configured = config($key);
-
-        if (! is_string($configured)) {
-            return null;
-        }
-
-        $url = trim($configured);
-
-        if ($url === '' || filter_var($url, FILTER_VALIDATE_URL) === false) {
-            return null;
-        }
-
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-
-        return in_array($scheme, ['http', 'https'], strict: true) ? $url : null;
     }
 }

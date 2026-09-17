@@ -1416,9 +1416,22 @@ export interface RegistrationCountry {
  * policy are written by people, not by this repository, and a link to a page
  * nobody has written would be a worse answer than no link.
  */
+export interface RegistrationLegalDocument {
+  type: string
+  url: string
+  version: string
+}
+
+/**
+ * Only published documents appear, so there is no null to handle here: a URL
+ * without a revision and a revision without a URL are both "not published"
+ * and the server omits them. `registration_permitted` is the server's own
+ * answer to whether it will accept a registration at all — the form reads it
+ * to say so up front instead of collecting a password and then failing.
+ */
 export interface RegistrationLegalDocuments {
-  terms_url: string | null
-  aup_url: string | null
+  registration_permitted: boolean
+  documents: RegistrationLegalDocument[]
 }
 
 export interface RegistrationOptions {

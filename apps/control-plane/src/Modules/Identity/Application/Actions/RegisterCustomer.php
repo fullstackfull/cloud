@@ -7,11 +7,15 @@ namespace Lynomia\Modules\Identity\Application\Actions;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Domain\Services\BillingCurrencies;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
+use Lynomia\Modules\Identity\Domain\Exceptions\RegistrationUnavailable;
+use Lynomia\Modules\Identity\Domain\Services\LegalDocuments;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\LegalAcceptance;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\RegistrationAttemptedOnExistingAccount;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
@@ -22,11 +26,30 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
  * A registration always produces both: a user with no customer cannot be
  * billed or own a service, and creating one lazily later would mean every
  * ordering path has to handle the "no account yet" case.
+ *
+ * ---------------------------------------------------------------------------
+ * And the acceptance, in the same transaction
+ * ---------------------------------------------------------------------------
+ *
+ * The documents a customer accepts are refused entry here if they are not
+ * published, before anything is created: {@see LegalDocuments} decides, and
+ * this action asks it rather than trusting its caller, so there is no route
+ * to an account that skips the check. The refusal happens before the
+ * duplicate-address branch too — a deployment that cannot enrol anyone must
+ * not send "someone tried to register with your address" mail either.
+ *
+ * The acceptances are then written inside the same transaction as the user.
+ * Not after it: a process that died in between would leave an account whose
+ * holder has agreed to nothing, which is precisely the state this work exists
+ * to make impossible. The versions come from the server every time and are
+ * never read from the request — a client that could name the revision it was
+ * agreeing to could name a revision from two years ago.
  */
 final readonly class RegisterCustomer
 {
     public function __construct(
         private BillingCurrencies $currencies,
+        private LegalDocuments $legal,
     ) {}
 
     /**
@@ -44,9 +67,34 @@ final readonly class RegisterCustomer
      * }  $attributes
      * @return array{user: User, customer: Customer}|null null when the address
      *                                                    already has an account
+     *
+     * @throws RegistrationUnavailable when the legal documents are not published
      */
     public function execute(array $attributes): ?array
     {
+        /*
+         * First, and before any side effect at all.
+         *
+         * Not in the FormRequest, where it would read as a field the visitor
+         * got wrong, and not in the controller, where a second caller could
+         * one day skip it. Here it guards every path into an account.
+         */
+        $documents = $this->legal->published();
+
+        if (! $this->legal->registrationPermitted()) {
+            /*
+             * Which documents are missing goes here and not into the
+             * exception: a domain exception's context is rendered to the
+             * client as `error.details`, and this endpoint is public. An
+             * operator reading the log is the audience for this.
+             */
+            Log::warning('A registration was refused because the legal documents are not published.', [
+                'unpublished_documents' => $this->legal->unpublished(),
+            ]);
+
+            throw RegistrationUnavailable::untilTheLegalDocumentsArePublished();
+        }
+
         $email = strtolower(trim($attributes['email']));
 
         /*
@@ -97,7 +145,7 @@ final readonly class RegisterCustomer
         // One transaction: a user without their customer account, or a customer
         // with no owner, are both unusable states.
         try {
-            [$user, $customer] = DB::transaction(function () use ($attributes, $type, $country, $currency): array {
+            [$user, $customer] = DB::transaction(function () use ($attributes, $type, $country, $currency, $documents): array {
                 $user = User::create([
                     'name' => $attributes['name'],
                     'email' => strtolower(trim($attributes['email'])),
@@ -129,6 +177,21 @@ final readonly class RegisterCustomer
                     'role' => CustomerRole::Owner,
                     'accepted_at' => now(),
                 ]);
+
+                /*
+                 * One row per document, each naming the revision and where it
+                 * was published. Inside the transaction, so there is no moment
+                 * at which this account exists without them.
+                 */
+                foreach ($documents as $document) {
+                    LegalAcceptance::create([
+                        'user_id' => $user->id,
+                        'document_type' => $document->type,
+                        'document_version' => $document->version,
+                        'document_url' => $document->url,
+                        'accepted_at' => now(),
+                    ]);
+                }
 
                 return [$user, $customer];
             });
