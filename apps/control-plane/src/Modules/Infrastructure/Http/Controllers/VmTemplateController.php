@@ -110,13 +110,30 @@ final class VmTemplateController
         );
     }
 
-    public function destroy(Request $request, VmTemplate $template, WithdrawVmTemplate $withdraw): JsonResponse
+    /**
+     * Withdraw an image.
+     *
+     * The id arrives as a string and is resolved here rather than by route
+     * model binding, and that is not a style preference. `SubstituteBindings`
+     * runs with the `api` group, before the permission middleware a route
+     * appends — so a bound parameter answers 404 for an id that does not
+     * exist *before* anybody checks whether the caller was allowed to ask.
+     * A customer could then tell an administrative endpoint that exists from
+     * one that does not, which is exactly what `AdminSurfaceTest` refuses:
+     * 403 on every administrative route, never 404 and never 200. Every other
+     * admin route in this application resolves its own id for the same
+     * reason.
+     */
+    public function destroy(Request $request, string $template, WithdrawVmTemplate $withdraw): JsonResponse
     {
+        /** @var VmTemplate $found */
+        $found = VmTemplate::query()->findOrFail($template);
+
         /** @var User $operator */
         $operator = $request->user();
 
         return response()->json([
-            'data' => (new VmTemplateResource($withdraw->execute($template, $operator)->load('cluster')))->toArray($request),
+            'data' => (new VmTemplateResource($withdraw->execute($found, $operator)->load('cluster')))->toArray($request),
         ]);
     }
 }
