@@ -256,6 +256,17 @@ final class LegacyNamesAreReportedAndNeverQuietlyRewrittenTest extends TestCase
         $this->assertCount(1, $warnings);
         $this->assertStringContainsString('web-01.some-other-zone.example', $warnings[0]->summary);
         $this->assertStringContainsString('Two live naming schemes', (string) $warnings[0]->nextAction);
+
+        /*
+         * And the finding says what it cannot tell apart. One configured
+         * suffix is all the platform holds, so an estate whose second site
+         * resolves under its own zone reports here with correct names. Gap 5
+         * left "per-site suffixes are not modelled" as an unresolved item and
+         * Gap 8 decided it: not modelled, and the audit that would otherwise
+         * look like an accusation names the possibility itself. A report is
+         * not where an operator reads their tooling's limits.
+         */
+        $this->assertStringContainsString('per-datacenter column', (string) $warnings[0]->nextAction);
     }
 
     #[Test]

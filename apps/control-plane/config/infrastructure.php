@@ -37,11 +37,18 @@ return [
      | which it reports, with a next action, rather than guessing.
      |
      | `internal` is for management names the platform reaches (hypervisors,
-     | hosting nodes, its own hosts). `public` is for names customers resolve.
-     | They are separate because they usually are: the first is often a private
-     | zone with a private certificate authority, the second is registered and
-     | publicly resolvable, and one value serving both would make every
-     | management host a public name or every customer-facing name unroutable.
+     | hosting nodes, its own hosts).
+     |
+     | There was a second key, `public_dns_suffix`, for names customers
+     | resolve. Nothing ever read it. No approved product composes a
+     | customer-facing hostname from a platform suffix — a VPS is named for its
+     | own service id, and a hosting account, a WordPress site and a DNS zone
+     | all carry the customer's own domain — so the key was a setting an
+     | operator could fill in and change nothing by. It is gone rather than
+     | documented as prepared: a control plane whose settings do not all do
+     | something teaches operators that some of them might not, and the day a
+     | product does compose such a name, the key comes back with the consumer
+     | that needs it.
      |
      | A reference suffix (.example, .test, .invalid, .localhost, or a reserved
      | example domain) is refused for production by
@@ -50,7 +57,6 @@ return [
      */
     'naming' => [
         'internal_dns_suffix' => env('INFRASTRUCTURE_INTERNAL_DNS_SUFFIX'),
-        'public_dns_suffix' => env('INFRASTRUCTURE_PUBLIC_DNS_SUFFIX'),
     ],
 
     // A job that has been applying or verifying longer than this without

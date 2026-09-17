@@ -333,6 +333,16 @@ final readonly class AuditInfrastructureNaming
      * zone is either a machine that has not been migrated or a second scheme
      * nobody retired, and either way somebody should know which.
      *
+     * There is a third reading, and the finding now says so rather than
+     * leaving it to a report: the platform holds *one* internal suffix, so an
+     * estate whose sites each resolve under their own zone has legitimate
+     * names that land here. Per-site suffixes are not modelled — that is a
+     * per-datacenter column and a migration, and nothing in the approved
+     * launch estate needs it — so the honest behaviour is a warning that
+     * names the possibility, never a refusal. A warning an operator can
+     * explain is a better answer than a model that quietly calls a correct
+     * name wrong.
+     *
      * @return list<NamingFinding>
      */
     private function auditMixedAuthorities(): array
@@ -380,7 +390,11 @@ final readonly class AuditInfrastructureNaming
                 $suffix->value(),
                 implode('; ', array_slice($outside, 0, 5)),
             ),
-            'Decide which zone is authoritative. Two live naming schemes means every name has to be checked against both before anybody trusts it.',
+            'Decide which zone is authoritative, or record that this estate needs more than one. '
+                .'Two live naming schemes means every name has to be checked against both before '
+                .'anybody trusts it — but one configured suffix is also all this platform can hold, '
+                .'so a second site legitimately under its own zone reports here too, and answering '
+                .'that would be a per-datacenter column rather than a decision about these rows.',
             NamingConcept::HostingNodeHostname,
         )];
     }

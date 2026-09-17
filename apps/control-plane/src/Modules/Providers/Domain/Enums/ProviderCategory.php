@@ -80,7 +80,22 @@ enum ProviderCategory: string
             self::Compute => ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'gpu_passthrough'],
             self::Backup => ['create', 'restore', 'delete', 'verify', 'retention', 'file_browse', 'file_restore'],
             self::Hosting => ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
-            self::WordPressInstaller => ['install', 'uninstall', 'version', 'ssl', 'staging', 'clone', 'push_to_production'],
+            /*
+             * Five, and `uninstall` and `ssl` are deliberately not among them.
+             *
+             * Both used to be declared here and required of the WordPress
+             * product, and no contract in this repository modelled either — so
+             * a product the readiness engine calls software-complete asked for
+             * capabilities nothing could ever answer. Gap 8 found the
+             * requirement was the wrong half: removal is
+             * `HostingProvider::terminate`, and an account's SSL state is
+             * observed by the platform's own site probe and reported through
+             * `AccountUsage`. Neither is the installer's to answer, so neither
+             * is asked of it — `EveryDeclaredCapabilityHasAConsumerTest`
+             * insists a capability with no consumer leaves the category rather
+             * than sitting here unanswered.
+             */
+            self::WordPressInstaller => ['install', 'version', 'staging', 'clone', 'push_to_production'],
             self::Dns => ['create_zone', 'delete_zone', 'records', 'reconcile'],
             self::ReverseDns => ['set_ptr', 'clear_ptr'],
             self::Registrar => ['search', 'availability', 'register', 'renew', 'transfer', 'nameservers', 'contacts', 'lock', 'auth_code', 'redemption', 'premium', 'held_names'],

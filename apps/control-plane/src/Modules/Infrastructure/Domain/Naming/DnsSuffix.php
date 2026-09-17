@@ -57,11 +57,18 @@ use Stringable;
  */
 final readonly class DnsSuffix implements Stringable
 {
-    /** Where the operator sets the internal zone. Unset by default, on purpose. */
+    /**
+     * Where the operator sets the internal zone. Unset by default, on purpose.
+     *
+     * One key, and there used to be two. `public_dns_suffix` was declared here
+     * and in the config, documented in the standard, and read by nothing: no
+     * approved product composes a customer-facing hostname out of a platform
+     * suffix. Gap 8 removed it rather than describing it as prepared, because
+     * a setting that changes nothing is worse than a missing one — an operator
+     * who fills it in has been told a lie about what the platform does with
+     * it.
+     */
     public const string INTERNAL_CONFIG_KEY = 'infrastructure.naming.internal_dns_suffix';
-
-    /** And the public zone, which is a different question — see §50 of the standard. */
-    public const string PUBLIC_CONFIG_KEY = 'infrastructure.naming.public_dns_suffix';
 
     private function __construct(
         private DnsName $zone,

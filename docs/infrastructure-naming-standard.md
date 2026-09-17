@@ -125,10 +125,9 @@ produces one class that is the weaker half of both.
 
 ```
 config('infrastructure.naming.internal_dns_suffix')   # INFRASTRUCTURE_INTERNAL_DNS_SUFFIX
-config('infrastructure.naming.public_dns_suffix')     # INFRASTRUCTURE_PUBLIC_DNS_SUFFIX
 ```
 
-Both start unset. That is the decision, not an omission: a real zone is a fact
+It starts unset. That is the decision, not an omission: a real zone is a fact
 about an operator's network, resolver and certificate authority, and a default
 shipped here would become the naming authority for every deployment that
 inherited it.
@@ -137,10 +136,26 @@ Unset is a reportable state, not an error. The platform stores the hostnames it
 is given and composes none — which is correct when a provider hands back a
 fully qualified name, or an operator's inventory already has one.
 
-Two keys because they are two questions. Management hosts usually live in a
-private zone with a private certificate authority; customer-facing names are
-registered and publicly resolvable. One value serving both would make every
-management host a public name or every customer-facing name unroutable.
+**One key, and there used to be two.** `public_dns_suffix` existed for
+customer-facing names and was read by nothing. Nothing in the approved product
+scope composes a customer-facing hostname from a platform suffix: a VPS is
+named for its own service id, and a hosting account, a WordPress site and a DNS
+zone all carry the customer's own domain. Gap 8 removed it rather than
+recording it as prepared — a setting an operator can fill in that changes
+nothing teaches them that some settings might not work — and the day a product
+does compose such a name, the key returns with the consumer that needs it.
+
+**The internal zone must be a zone the operator actually holds.** It is a real
+delegated subdomain, such as `dc1.operator-chosen-zone.net`, and deliberately
+not a `.internal` or `.local` name. `EndpointPolicy` refuses names under those
+suffixes everywhere, in every mode, and that stays: they are unqualified
+multicast or resolver-local namespaces, they cannot carry a certificate from a
+public authority, and the one thing a management endpoint must never be is
+ambiguous about which host it names. Private management targets are supported
+by *address* — `EndpointPolicy` accepts RFC1918 for a provider on our own
+hardware — and by a private zone the operator has delegated to themselves.
+Nothing in the approved scope needs `.internal`, and allowing it would widen
+SSRF surface to every resolver-local name for no product gain.
 
 **Composition is one place.** `DnsSuffix::compose()` joins a host label and a
 zone. A label that is already qualified is refused rather than concatenated,
