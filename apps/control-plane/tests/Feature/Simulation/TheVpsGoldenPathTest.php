@@ -11,6 +11,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
+use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -18,6 +19,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -222,6 +224,39 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
         $this->assertSame(1, Transaction::query()->where('provider_reference', 'pi_golden_vps_dup')->count());
         $this->assertSame(1, Subscription::query()->where('customer_id', $customer->getKey())->count());
         $this->assertSame(1, Service::query()->where('customer_id', $customer->getKey())->count());
+
+        /*
+         * §11 and §86: one financial effect, stated as money rather than as a
+         * row count. A second copy of a webhook can go wrong in three ways and
+         * only the first of them is a second transaction — the platform can
+         * also apply the same fils twice against the document, or decide the
+         * second copy is an overpayment and hand the customer stored value it
+         * was never given. So the invoice's own arithmetic is asserted exactly,
+         * and the wallet is asserted to have received nothing at all.
+         */
+        $settled = $invoice->fresh();
+
+        $this->assertNotNull($settled);
+        $this->assertSame(InvoiceStatus::Paid, $settled->status);
+        $this->assertSame(
+            (int) $settled->total_minor,
+            (int) $settled->amount_paid_minor,
+            'the redelivered webhook changed what this invoice has been paid',
+        );
+        $this->assertSame(0, (int) $settled->amount_refunded_minor);
+        $this->assertSame(
+            0,
+            (int) Transaction::query()
+                ->where('invoice_id', $settled->getKey())
+                ->where('status', TransactionStatus::Succeeded->value)
+                ->sum('amount_minor') - (int) $settled->total_minor,
+            'the captured money attached to this invoice is not the invoice total',
+        );
+        $this->assertSame(
+            0,
+            WalletTransaction::query()->where('invoice_id', $settled->getKey())->count(),
+            'a duplicate webhook turned into stored value the customer never paid for',
+        );
 
         $service = Service::query()->where('customer_id', $customer->getKey())->sole();
 
