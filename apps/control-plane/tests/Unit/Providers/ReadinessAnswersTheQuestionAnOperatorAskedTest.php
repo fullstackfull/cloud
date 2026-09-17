@@ -69,6 +69,10 @@ final class ReadinessAnswersTheQuestionAnOperatorAskedTest extends TestCase
             needsCredential: $needsCredential,
             needsLicence: $needsLicence,
             summary: 'A provider for this test.',
+            // Everything its category asks. These tests are about the rungs
+            // below capability — hardware, licence, credential, tester — and a
+            // capability gap here would blur which one they are measuring.
+            capabilities: $category->capabilities(),
         );
     }
 

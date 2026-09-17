@@ -103,9 +103,9 @@ enum Product: string
              * whose every operation throws — `BLOCKED_LICENCE` in its own
              * words. A non-controlled class that can do nothing is not a
              * production-capable adapter, and counting it as one is the exact
-             * false green a real-adapter gate has to refuse: a check that
-             * asked only whether a non-controlled driver existed would read
-             * this class and call Domains ready.
+             * false green {@see \Tests\Architecture\EveryCompleteProductHasARealAdapterTest}
+             * refuses: a check that asked only whether a non-controlled driver
+             * existed would read this class and call Domains ready.
              *
              * Both keep their software: models, contracts, orchestration,
              * simulators and tests. What changed is the claim, not the code.

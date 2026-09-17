@@ -55,6 +55,14 @@ final readonly class ProviderCatalogue
                 // demanding a licence row here would block a legitimate setup.
                 needsLicence: false,
                 summary: 'Proxmox VE cluster: virtual machines, snapshots and consoles.',
+                /*
+                 * Everything the compute category asks except GPU passthrough,
+                 * which ComputeProvider does not model at all: CreateVmRequest
+                 * carries no device, ResizeVmRequest cannot add one, and no
+                 * adapter reads one. Templates are here because the adapter
+                 * installs from one — `import-from=` on the disk it builds.
+                 */
+                capabilities: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling'],
             ),
             new CatalogueEntry(
                 driver: 'proxmox_backup',
@@ -63,6 +71,19 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Proxmox Backup Server: scheduled archives and restores.',
+                /*
+                 * `verify` is absent and that is a statement about Proxmox
+                 * rather than about this adapter: a PBS verification runs on
+                 * the backup server on its own schedule and the hypervisor API
+                 * has no endpoint that starts one, which is why
+                 * supportsVerification() answers false. The verdict is here,
+                 * because listBackups() reports it per archive and the
+                 * inventory sweep adopts it.
+                 *
+                 * `file_browse` and `file_restore` are absent because this
+                 * adapter does not implement FileLevelBackupProvider.
+                 */
+                capabilities: ['create', 'restore', 'delete', 'retention', 'verification_verdict'],
             ),
             new CatalogueEntry(
                 driver: 'cpanel',
@@ -73,6 +94,7 @@ final readonly class ProviderCatalogue
                 // is the case the licence centre exists for.
                 needsLicence: true,
                 summary: 'cPanel/WHM shared hosting node.',
+                capabilities: ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
             ),
             new CatalogueEntry(
                 driver: 'directadmin',
@@ -81,6 +103,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: true,
                 summary: 'DirectAdmin shared hosting node.',
+                capabilities: ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
             ),
             new CatalogueEntry(
                 driver: 'cloudflare',
@@ -90,6 +113,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Cloudflare authoritative DNS.',
+                capabilities: ['create_zone', 'delete_zone', 'records', 'reconcile'],
             ),
             new CatalogueEntry(
                 driver: 'cloudflare_rdns',
@@ -98,6 +122,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Reverse DNS through Cloudflare.',
+                capabilities: ['set_ptr', 'clear_ptr'],
             ),
             new CatalogueEntry(
                 driver: 'sy_registry',
@@ -106,6 +131,24 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'The .sy registry, reached directly rather than through a reseller.',
+                /*
+                 * Nothing, and the empty list is the entry's whole point.
+                 *
+                 * SyRegistryProvider is a real class implementing the whole
+                 * registrar contract. Its supports() answers false for every
+                 * capability, its supportedTlds() is empty, and every
+                 * operation throws RegistrarNotAvailableException — the .sy
+                 * registry publishes no reseller API and Lynomia holds no
+                 * accreditation, so there is nothing for the adapter to call.
+                 *
+                 * It stays catalogued because the platform genuinely has the
+                 * adapter and the day a contract exists it is where the work
+                 * goes. Declaring nothing is what stops it being counted as
+                 * the production-capable registrar the Domains product would
+                 * need, which is exactly the false green a driver-exists check
+                 * would have produced.
+                 */
+                capabilities: [],
             ),
             new CatalogueEntry(
                 driver: 'stripe',
@@ -114,6 +157,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Stripe card payments and refunds.',
+                capabilities: ['charge', 'refund', 'webhook', 'currencies'],
             ),
             new CatalogueEntry(
                 driver: 'smtp',
@@ -129,6 +173,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Transactional mail through the deployment\'s own mail transport. Untestable from here.',
+                capabilities: ['send'],
             ),
             new CatalogueEntry(
                 driver: 'ipmi',
@@ -137,6 +182,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'IPMI baseboard management: power and boot control.',
+                capabilities: ['inventory', 'power_state', 'power_control', 'boot_override', 'firmware'],
             ),
             new CatalogueEntry(
                 driver: 'redfish',
@@ -145,6 +191,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Redfish baseboard management: power, boot and inventory.',
+                capabilities: ['inventory', 'power_state', 'power_control', 'boot_override', 'firmware'],
             ),
             new CatalogueEntry(
                 driver: 'ilo',
@@ -153,6 +200,9 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'HPE iLO baseboard management.',
+                // Inherits every operation from the Redfish adapter, which it
+                // extends to paper over iLO's deviations from the spec.
+                capabilities: ['inventory', 'power_state', 'power_control', 'boot_override', 'firmware'],
             ),
             ...$this->controlled(),
         ];
