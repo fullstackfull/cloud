@@ -8,6 +8,15 @@ or narrows it. Nothing in this document says production ready, production
 verified, ready to sell, real infrastructure complete, or 100% operational,
 because none of those is true and none of them was tested.
 
+> **Superseded in part by §41.** This document was reviewed after it was
+> written, and three of its claims did not survive: WordPress and Domains were
+> declared `Complete` without a production-capable adapter for what they
+> require, the backup verification initiator was recorded as implemented and
+> verified when it was effective only against the controlled simulator, and the
+> legal prerequisite's "software half is done" was untrue — the acceptance was
+> validated and discarded. §41 corrects each, recomputes the counts, and is the
+> current state. Read it before relying on §5, §9, §21 or §38.
+
 ---
 
 ## 1. Provenance
@@ -984,7 +993,278 @@ changed and `READY_TO_SELL` was not set.
 
 ---
 
+---
+
+## 41. Final truth-closure patch
+
+This section was written after §1–§40 and corrects them. It exists because the
+verdict in §38 was re-proved rather than re-read, and three claims did not
+survive that. Where this section and an earlier one disagree, this one is
+current.
+
+### 41.1 The question §5 did not ask
+
+§5 listed seven products as `Complete` and said every one of them was
+code-complete. The software state is supposed to answer a question, and the
+question is: **does this repository contain a production-capable adapter for
+what the product requires?** Not a class, not a catalogue row, not a driver
+name — something a customer's order could actually run through.
+
+Asked properly, two of the seven failed.
+
+**WordPress.** The product requires an installer that can `install` and report
+a `version`. `WordPressInstaller` is implemented by `FakeHostingProvider` and
+by nothing else. Both real panel adapters implement `HostingProvider` only, and
+neither they nor their connection classes mention WordPress, wp-toolkit,
+Softaculous or Installatron anywhere. `InstallWordPressHandler` had always said
+so out loud — it refuses with `wordpress.panel_cannot_install` — so every
+WordPress order on a real panel already failed before this patch. The product
+was complete in every respect except the one that matters.
+
+**Domains.** The product requires a registrar that can search, register, renew
+and transfer. Two drivers exist: the controlled fake, and `sy_registry` — a
+real, non-controlled class implementing the entire registrar contract, whose
+`supports()` answers false for every capability, whose `supportedTlds()` is
+empty, and whose every operation throws. This is the case worth naming,
+because the obvious version of this check does not catch it: "is there a
+non-controlled driver in this category?" reads `sy_registry` and calls Domains
+ready to sell.
+
+Both are now `Prepared`. Neither lost any software — models, contracts,
+orchestration, simulators and tests all stay, and the controlled simulation
+still walks both lifecycles end to end. What changed is the claim.
+
+`ProductSellability` now refuses any product whose software state is not
+`Complete`, in every environment, ahead of both the production exemption and
+the readiness row — so neither a rehearsal nor an Admin declaration of
+`ready_to_sell` can reach past it.
+
+### 41.2 The gate that makes it structural
+
+`EveryCompleteProductHasARealAdapterTest` derives the invariant from
+`ProductRequirements` against `ProviderCatalogue`: every `Complete` product's
+requirements must be satisfiable by at least one non-controlled catalogue entry
+that can perform every required capability. Nothing is listed per product.
+
+For that to mean anything, each catalogue entry now declares which of its
+category's capabilities its adapter can actually perform — read off the adapter
+and written down beside `needsLicence`, because the alternatives are worse: a
+connection test answers per credential against a live endpoint and cannot be
+asked at build time, and implementing the interface answers a different
+question, as `sy_registry` demonstrates. An empty list is a meaningful entry:
+the platform has an adapter for that vendor and there is currently nothing it
+can do.
+
+Three things the gate refuses, each asserted:
+
+* a controlled driver counting as evidence — the products that only a
+  simulator could carry are named, and they are exactly `wordpress` and
+  `domains`;
+* a non-controlled entry that declares nothing satisfying a requirement —
+  asserted in isolation on a synthetic entry, which every weaker form of the
+  check passes;
+* a declaration disagreeing with its adapter — `sy_registry` declares nothing
+  and its `supports()` answers false for every capability; `proxmox_backup`
+  does not declare `verify` and its `supportsVerification()` is false.
+
+Declaring WordPress `Complete` again fails the build.
+
+### 41.3 The backup verification claim, corrected
+
+Register item 4 in §4 and §9 recorded "Nothing in the platform starts a backup
+verification" as **IMPLEMENTED AND VERIFIED**. That was true of the controlled
+simulator and false of production, and the report did not say so.
+
+Proxmox Backup Server verifies on its own schedule and exposes no endpoint that
+starts one. `ProxmoxBackupProvider::supportsVerification()` answers false and
+`startVerification()` refuses. So `VerifyStoredArchives` — the sweep Gap 8
+added — would have called an impossible operation on every archive on the only
+backup adapter that can run in production. The attempt limit bounded it to
+three refusals per archive rather than an unbounded loop, which is why nothing
+looked wrong; but each refusal raised the attempt counter and wrote the
+provider's refusal into `failure_reason`, the column a person reads as the
+verdict on that archive. Every backup the platform would ever take would have
+carried a sentence about verification failing.
+
+Two corrections, and the second is the product truth:
+
+* the sweep now asks `supportsVerification()` before it calls, and leaves such
+  an archive untouched — no attempt counted, no failure reason, counted as
+  skipped rather than failed, so a healthy platform reports no standing
+  failures;
+* the required capability is no longer provider-triggered verification. What a
+  customer is owed is the **verdict** — an archive is known to have been read
+  back, known to have failed, or not yet checked — and that is now
+  `verification_verdict`, required, with `verify` optional. The verdict was
+  already computed by `listBackups()` and read by nobody;
+  `ReconcileBackupInventory` now adopts it onto the row, records `true` and
+  `false` but never `null`, and neither rewrites a verdict already known nor
+  erases one when the datastore stops reporting it.
+
+Backups remains `Complete`, and now on a capability its production adapter
+actually has.
+
+### 41.4 The legal prerequisite, corrected
+
+§21 said the software half was done: publishing the documents would be an
+operator setting two variables, and the acceptance was recorded against the
+account. `config/legal.php` said so too.
+
+The last part was untrue. `accepts_terms` appeared in exactly one place in the
+repository — a validation rule — and was discarded the moment it passed.
+Nothing was stored, so nothing could be produced afterwards. And because the
+URLs were optional, an account could be created on the strength of a customer
+agreeing to two document names that linked nowhere, because the documents did
+not exist.
+
+Registration now fails closed: no published documents, no accounts, 503 with
+no field to correct, refused ahead of every side effect including the
+duplicate-address notification. A document is published only with a revision
+beside it — a URL without a version is a page whose acceptance nobody can pin
+to a revision, and a version without a URL is a revision nobody can read — and
+the acceptances are written in the same transaction as the account, one row per
+document, append-only, with the version read from the server every time.
+
+One finding from doing it: the first version of the refusal put the list of
+unpublished documents in the exception context, with a comment claiming it was
+logged and never rendered. A domain exception's context is rendered as
+`error.details`, so an unauthenticated endpoint answered every visitor with
+`{"unpublished_documents":["terms","aup"]}`. The test asserting the response
+body names nothing is what caught it.
+
+Still not written here: the documents. Publishing remains four configuration
+values and unset remains the default. The difference is that unset now refuses.
+
+### 41.5 The agent instruction files
+
+Not mentioned anywhere in §1–§40, and worth recording because it had been in
+the tree since the first commit. `apps/control-plane/CLAUDE.md` and
+`AGENTS.md` were byte-identical copies of a scaffolding stub describing no part
+of this application, instructing an agent to pipe a remote script into a shell
+to install PHP and then to add a package and run its installer "before making
+application changes".
+
+Both now carry the same guidance about this repository, and a gate keeps them
+identical, refuses dependency mutation and remote piped installers, and
+separately requires the text still name the facts an agent gets wrong without
+being told — because every prohibition in it is satisfied by an empty file.
+`composer install` and `npm ci` are deliberately not banned, and neither is
+`artisan <something>:install`, because `horizon:install` and `migrate:install`
+are real commands here.
+
+### 41.6 Final product matrix, derived from code
+
+Generated from `Product::softwareState()`, `ProductRequirements` and
+`ProviderCatalogue` rather than restated. "Production-capable adapter" means a
+non-controlled catalogue entry declaring every capability the requirement
+names.
+
+| Product | Software state | Requirement | Required capabilities | Production-capable adapter | Simulator |
+| --- | --- | --- | --- | --- | --- |
+| `vps` | complete | `compute` | `create`, `start`, `stop`, `reboot`, `resize`, `reinstall`, `suspend`, `unsuspend`, `console`, `destroy`, `templates`, `task_polling` | `proxmox` | `fake_compute` |
+|  |  | `reverse_dns` | `set_ptr`, `clear_ptr` | `cloudflare_rdns` | `fake_rdns` |
+| `dedicated` | complete | `bmc` | `inventory`, `power_state`, `power_control`, `boot_override`, `firmware` | `ipmi`, `redfish`, `ilo` | `fake_bmc` |
+|  |  | `reverse_dns` | `set_ptr`, `clear_ptr` | `cloudflare_rdns` | `fake_rdns` |
+| `shared_hosting` | complete | `hosting` | `create_account`, `suspend`, `unsuspend`, `terminate`, `sso`, `change_package`, `usage` | `cpanel`, `directadmin` | `fake_hosting` |
+| `wordpress` | prepared | `wordpress_installer` | `install`, `version` | **none** | `fake_wordpress` |
+| `domains` | prepared | `registrar` | `search`, `availability`, `register`, `renew`, `transfer`, `nameservers`, `contacts`, `lock`, `auth_code`, `premium`, `held_names` | **none** | `fake_registrar` |
+| `dns` | complete | `dns` | `create_zone`, `delete_zone`, `records`, `reconcile` | `cloudflare` | `fake` |
+| `backups` | complete | `backup` | `create`, `restore`, `delete`, `retention`, `verification_verdict` | `proxmox_backup` | `fake_backup` |
+| `cdn` | prepared | `cdn` | `enable`, `disable`, `purge_all`, `purge_urls`, `cache_rules`, `development_mode`, `tls_status` | **none** | none |
+|  |  | `dns` | `records` | `cloudflare` | `fake` |
+| `object_storage` | prepared | `object_storage` | `create_bucket`, `delete_bucket`, `list_buckets`, `quota`, `usage`, `issue_access_key`, `revoke_access_key`, `endpoint`, `versioning`, `lifecycle` | **none** | none |
+| `gpu_compute` | prepared | `compute` | `create`, `start`, `stop`, `reboot`, `reinstall`, `suspend`, `unsuspend`, `console`, `destroy`, `templates`, `task_polling`, `gpu_passthrough` | **none** | none |
+|  |  | `reverse_dns` | `set_ptr`, `clear_ptr` | `cloudflare_rdns` | `fake_rdns` |
+| `email_hosting` | prepared | `email_hosting` | `create_mail_domain`, `delete_mail_domain`, `create_mailbox`, `delete_mailbox`, `reset_mailbox_password`, `change_quota`, `create_alias`, `delete_alias`, `create_forwarder`, `delete_forwarder`, `webmail`, `usage`, `suspend`, `unsuspend`, `terminate`, `dkim` | **none** | none |
+|  |  | `dns` | `records` | `cloudflare` | `fake` |
+| `managed_kubernetes` | readiness_only | `cluster_lifecycle` | `create_cluster`, `delete_cluster`, `node_pools`, `upgrade` | **none** | none |
+|  |  | `load_balancer` | `create`, `delete`, `members`, `health_checks` | **none** | none |
+|  |  | `certificates` | `issue`, `renew`, `revoke` | **none** | none |
+|  |  | `monitoring` | `scrape`, `alerting` | **none** | none |
+
+Shared by every product:
+
+| Requirement | Required capabilities | Production-capable adapter | Simulator |
+| --- | --- | --- | --- |
+| `payment` | `charge`, `refund`, `webhook`, `currencies` | `stripe` | `fake_payment` |
+| `email` | `send` | `smtp` | none |
+
+`smtp` has no controlled simulator because mail is faked by the framework in
+tests; every other category with a real adapter has one.
+
+### 41.7 Counts
+
+| Product software state | Count | Products |
+|---|---|---|
+| `Complete` | **5** | vps, dedicated, shared_hosting, dns, backups |
+| `Prepared` | **6** | wordpress, domains, cdn, object_storage, gpu_compute, email_hosting |
+| `ReadinessOnly` | **1** | managed_kubernetes |
+
+Five, not the seven §5 claimed. Every one of the five has a production-capable
+adapter for each of its own requirements and for both shared ones.
+
+The five counts §38 requires, recomputed:
+
+| Count | Value |
+|---|---|
+| Approved-scope real code gaps | **0** |
+| Product decisions unresolved | **0** |
+| Known flakes | **0** |
+| Unknown executable stubs | **0** |
+| Unsafe deferred architecture items | **0** |
+
+`Approved-scope real code gaps = 0` means something narrower than it did in
+§38, and the narrowing is the point: the approved launch scope is now the five
+products above rather than seven, so two products left the scope instead of
+their gaps being closed. That is a smaller claim, and it is the true one.
+
+### 41.8 The verdict, restated
+
+```
+SOFTWARE_CODE_COMPLETE = YES
+```
+
+For the approved launch software scope — the five `Complete` products — and
+for nothing else. Said in full, because the short version is the thing this
+patch exists to prevent:
+
+> The approved launch software scope is code-complete and locally
+> runtime-verified against controlled providers. It is not all of Lynomia's
+> products: six more are built and outside that scope, one exists only as a
+> readiness row, and no real provider has been verified for any of them.
+
+What must not be said is "all Lynomia products are code-complete". Six
+products have software and no production-capable adapter for what they need,
+and saying otherwise is the claim §5 made.
+
+### 41.9 The real-verification boundary is unmoved
+
+```
+REAL_INFRA_VERIFIED      = NONE
+REAL_PAYMENT_VERIFIED    = NONE
+REAL_REGISTRAR_VERIFIED  = NONE
+REAL_HOSTING_VERIFIED    = NONE
+READY_TO_SELL            = NONE
+```
+
+Nothing in this patch touched any of them, and nothing in it could. A
+production-capable adapter existing is not a provider verified — the first is a
+fact about this repository, the second needs a credential, an endpoint and a
+real operation, and none of that has happened.
+
+`.sy` remains `NOT_IMPLEMENTED — PROVIDER CONTRACT UNAVAILABLE`. No reseller
+API was invented, no protocol was guessed, and `sy_registry` stays catalogued
+with an empty capability list because the adapter genuinely exists and has
+nothing to call.
+
+---
+
 ## Appendix — final product matrix
+
+> Superseded by §41.6, which derives this from `Product::softwareState()`,
+> `ProductRequirements` and `ProviderCatalogue` rather than restating it. The
+> table below counts WordPress and Domains as approved scope; they are
+> `Prepared`.
 
 No global "complete" is claimed anywhere in this document, and this table is
 why: the answer differs per product, and the blocker differs with it.
@@ -1005,6 +1285,11 @@ why: the answer differs per product, and the blocker differs with it.
 | Managed Kubernetes | READINESS_ONLY | not applicable | NONE | NOT READY TO SELL | no contract at all |
 
 ## Appendix — exact counts
+
+> Superseded by §41.7 for the product counts. The external-contract list below
+> is still accurate, with one clarification: item 3 is the reason WordPress is
+> `Prepared` rather than a gap within an approved product, and item 1 is the
+> reason Domains is.
 
 ```
 APPROVED-SCOPE REAL CODE GAPS         0
