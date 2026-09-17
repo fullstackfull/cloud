@@ -196,4 +196,52 @@ final class TheHarnessRefusesAnUnsafeDatabaseTest extends TestCase
             $this->app->detectEnvironment(static fn (): string => $original);
         }
     }
+
+    #[Test]
+    public function the_teardown_asks_the_guard_before_it_truncates_anything(): void
+    {
+        /*
+         * The assertion the four above cannot make.
+         *
+         * They prove the guard refuses. They say nothing about whether the
+         * teardown calls it — and Gap 8's own deliberate breakage proved the
+         * point: deleting the call site left all four of them passing, which
+         * means that as a gate they covered the method and not the danger.
+         *
+         * A runtime proof is not available and should not be invented. The
+         * only way to observe the teardown refusing is to point it at a
+         * database it must refuse, and if the call were missing that
+         * observation would be the truncation this guard exists to prevent. A
+         * test whose failure mode is destroying a database is not a test.
+         *
+         * So this reads the source, which is the technique this repository
+         * already uses where behaviour cannot be executed safely, and asserts
+         * the order: the guard is asked, and the truncate is after it. Order
+         * matters more than presence — a guard called after the statement is
+         * an audit, not a guard.
+         */
+        $source = (string) file_get_contents(__DIR__.'/WorkerHarness.php');
+
+        $teardown = strpos($source, 'private function emptyTheCommittedDatabase');
+        $this->assertNotFalse($teardown, 'WorkerHarness no longer has the teardown this guard belongs to.');
+
+        $body = substr($source, $teardown);
+
+        $guard = strpos($body, 'refuseToTruncateAnythingButATestDatabase(');
+        $truncate = strpos($body, "'truncate '");
+
+        $this->assertNotFalse(
+            $guard,
+            'The teardown that truncates the schema no longer asks the guard. Every other test in this file '
+            .'would still pass, because they call the guard directly — which is exactly why this assertion exists.',
+        );
+
+        $this->assertNotFalse($truncate, 'The teardown no longer issues the truncate this test is about; move this assertion with it.');
+
+        $this->assertLessThan(
+            $truncate,
+            $guard,
+            'The guard is asked after the truncate, which makes it a record of what was destroyed rather than a refusal.',
+        );
+    }
 }
