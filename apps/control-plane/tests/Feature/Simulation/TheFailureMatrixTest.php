@@ -26,8 +26,8 @@ use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
-use Lynomia\Modules\Ipam\Infrastructure\Models\IpReservation;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpReservation;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
@@ -788,7 +788,6 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         });
     }
 
-
     /**
      * Addresses this job is still holding.
      */
@@ -799,5 +798,4 @@ final class TheFailureMatrixTest extends GoldenPathHarness
             ->whereNull('released_at')
             ->count();
     }
-
 }

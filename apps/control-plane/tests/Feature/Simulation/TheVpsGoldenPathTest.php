@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace Tests\Feature\Simulation;
 
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
-use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;

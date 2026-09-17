@@ -15,6 +15,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
+use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
@@ -174,16 +175,76 @@ abstract class WorkerHarness extends TestCase
         $this->fleetPath = $this->simulationPaths['compute.fake.state_path'];
     }
 
+    /**
+     * Rows that exist because of this test and that no model event announced.
+     *
+     * `SeedSubnetAddresses` writes addresses with `insertOrIgnore` — which is
+     * the right call, because it is an idempotent bulk insert against a unique
+     * index — and an insert that goes round Eloquent fires no `created` event,
+     * so {@see outsideTheTransaction()} never hears about the rows.
+     *
+     * Left behind, they are not merely untidy: they hold a foreign key into
+     * the subnet, so the subnet, its network and its pool cannot be deleted
+     * either, and every later test in the run that counts pools or subnets
+     * globally then finds this test's estate. That is how a golden path comes
+     * to fail a VPS endpoint test in another directory.
+     */
+    private function deleteRowsNothingRecorded(): void
+    {
+        $subnetIds = [];
+
+        foreach ($this->committed as $model) {
+            if ($model instanceof Subnet) {
+                $subnetIds[] = $model->getKey();
+            }
+        }
+
+        if ($subnetIds === []) {
+            return;
+        }
+
+        try {
+            IpAddress::on(self::CONNECTION)->whereIn('subnet_id', $subnetIds)->forceDelete();
+        } catch (\Throwable) {
+            // Assignments may still hold some of them; the sweep below takes
+            // those with their own parents and this runs again next time.
+        }
+    }
+
     protected function tearDown(): void
     {
-        foreach (array_reverse($this->committed) as $model) {
-            try {
-                $model->newQueryWithoutScopes()->whereKey($model->getKey())->forceDelete();
-            } catch (\Throwable) {
-                // A row a cascade already took with its parent. The teardown's
-                // job is to leave the database clean, not to be right about
-                // the order it managed it in.
+        $this->deleteRowsNothingRecorded();
+
+        /*
+         * Reverse order, and then again for whatever would not go.
+         *
+         * A parent cannot be deleted while a child still points at it, and the
+         * order rows were created in is only approximately the order they can
+         * be deleted in — a worker in another process may have written a child
+         * after this process created the parent. So the list is swept until a
+         * pass stops making progress, rather than once.
+         */
+        $remaining = array_reverse($this->committed);
+
+        while ($remaining !== []) {
+            $stuck = [];
+
+            foreach ($remaining as $model) {
+                try {
+                    $model->newQueryWithoutScopes()->whereKey($model->getKey())->forceDelete();
+                } catch (\Throwable) {
+                    // A row a cascade already took with its parent, or one
+                    // whose own children have not gone yet. Either way it is
+                    // tried again on the next pass.
+                    $stuck[] = $model;
+                }
             }
+
+            if (count($stuck) === count($remaining)) {
+                break;
+            }
+
+            $remaining = $stuck;
         }
 
         $this->committed = [];

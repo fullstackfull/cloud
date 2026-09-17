@@ -7,6 +7,7 @@ namespace Tests\Feature\Simulation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
+use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
@@ -160,7 +161,7 @@ final class WhatAGoldenPathMustNotDoTest extends GoldenPathHarness
 
             config()->set('backups.datastores.'.$cluster->slug, 'pbs-test-01');
 
-            return app(\Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup::class)->execute(
+            return app(RequestServiceBackup::class)->execute(
                 $machine,
                 notes: 'backup-refused: a datastore that answers with its own token',
             );

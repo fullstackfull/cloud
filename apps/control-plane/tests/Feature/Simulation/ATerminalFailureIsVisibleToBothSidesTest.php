@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Simulation;
 
+use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
@@ -13,7 +15,6 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
-use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
@@ -55,7 +56,7 @@ final class ATerminalFailureIsVisibleToBothSidesTest extends TestCase
     {
         parent::setUp();
 
-        $this->seed(\Database\Seeders\RolePermissionSeeder::class);
+        $this->seed(RolePermissionSeeder::class);
     }
 
     #[Test]

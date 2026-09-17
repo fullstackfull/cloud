@@ -94,11 +94,11 @@ event id before acting on it.
 | Job claimed | `RunProvisioningJob` → `ProvisioningJobStateMachine` | — | `provisioning_jobs`, `provisioning_attempts` (unique `provisioning_job_id` + `attempt_number`) | `Running` |
 | Handler dispatched | `ProvisioningHandlerRegistry::get(kind)` | one handler per `ProvisioningJobKind` | — | — |
 | VPS built | `CreateVpsHandler` | `ComputeProviderFactory` → `FakeComputeProvider` | `virtual_machines`, `compute_resources` (unique `cluster_id` + `provider_id`) | `ServiceStatus::Active` |
-| Address bound | `AllocateAddress` (IPAM) | — | `ip_addresses`, `ip_assignments` | assigned |
+| Address bound | `IpAllocator::reserve()` then `commit()` (IPAM) | — | `ip_addresses`, `ip_assignments` | assigned |
 | Hosting account created | `CreateHostingAccountHandler` | `HostingProviderFactory` → `FakeHostingProvider` | `hosting_accounts` | `ServiceStatus::Active` |
 | WordPress installed | `InstallWordPressHandler` | the same hosting provider, by architecture | `wordpress_sites` | site recorded; service unaffected |
 | Dedicated delivered | `ProvisionDedicatedHandler` | `DedicatedProviderFactory` → `FakeDedicatedProvider` | `dedicated_servers`, `managed_servers` | `ServiceStatus::Active` |
-| Domain registered | `RegisterDomainOnPayment` → `RegisterDomainAtRegistrar` | `RegistrarFactory` → `FakeDomainRegistrarProvider` | `domains`, `domain_operations` | registered |
+| Domain registered | `RegisterDomainOnPayment` → `RegisterDomainAtRegistrar` | `DomainRegistrarFactory` → `FakeDomainRegistrarProvider` | `domains`, `domain_operations` | registered |
 | Name served | `PublishZone`, `PublishRecord` | `DnsProviderFactory` → `FakeDnsProvider` | `dns_zones`, `dns_records` | `DnsState::Active` |
 | PTR published | `PublishReverseDnsRecord` | `ReverseDnsProviderFactory` → `FakeReverseDnsProvider` | `ip_addresses.ptr_*` | published |
 | Backup taken | `RequestBackup` → `ReconcileRunningBackups` | `BackupProviderFactory` → `FakeBackupProvider` | `backups`, `backup_verifications` | verified true / false / unknown |
@@ -190,8 +190,8 @@ immediately after a 200 from the webhook endpoint is what proves it is not: the
 money moves when a listener on a queue says so, in another process, from a
 provider event this platform verified the signature of.
 
-The other three tests are the redelivered webhook (§15), a declined payment
-that builds nothing, and the preflight gate (§25).
+The other three tests are the redelivered webhook (§14), a declined payment
+that builds nothing, and the preflight gate (§24).
 
 ---
 
@@ -273,7 +273,7 @@ the four paths above from being theatre.
 | no stray outbound request | `Http::preventStrayRequests()` over a whole VPS path. Any real HTTP call fails the test. |
 | a retry is bounded | A permanently failing build ends in `needs_review` with at most `provisioning.retry.max_attempts` attempt records and **nothing left on the queue**. |
 | drift is reported once | Three detection passes over the same disagreement produce exactly one open drift record. |
-| the terminal state is terminal | A cancelled job is not resurrected by a completion that arrives afterwards. |
+| a provider message that quotes its own credential | The controlled drivers quote the request they sent, credentials and all, exactly as the real clients do. Anything stored from a provider's own message — a `failure_reason`, a `last_error`, an attempt record — is asserted to be redacted first. |
 
 ---
 
@@ -458,8 +458,8 @@ and the stored `failure_reason` is asserted not to contain the token.
 `TheFailureMatrixTest` holds the matrix as data — `REQUIRED`, `ELSEWHERE`,
 `HERE` — and a completeness gate that fails **in both directions**: a required
 scenario covered nowhere fails, and a claim of coverage for a scenario that is
-not required fails too. Eighteen scenarios are required; ten are proved in that
-file, eight by named tests elsewhere.
+not required fails too. Eighteen scenarios are required; eleven are proved in
+that file, seven by named tests elsewhere.
 
 | Id | Scenario | Outcome the platform must produce | Proved by |
 |---|---|---|---|
@@ -594,3 +594,214 @@ not touched by this gap.
 So: a product whose whole path this gap exercises end to end still cannot
 reach `READY_TO_SELL`. That is the intended relationship between the two, and
 it is asserted rather than asserted-about.
+
+---
+
+## 26. Determinism: no test in this gap sleeps
+
+| Where waiting could have been | What is used instead |
+|---|---|
+| waiting for a worker | `--stop-when-empty`: the process exits when the queue is drained, and the test waits on the process |
+| waiting for a renewal date | `Carbon::setTestNow()` |
+| waiting for a provider task | the poll count the controlled provider keeps, and a second `backups:reconcile` / `compute:poll-tasks` run |
+| waiting for a retry ceiling | the attempt records, counted |
+| waiting for a state | `waitUntil()` on a bounded observable condition, where a framework wait is genuinely needed |
+
+No fixed sleep is used as a synchronisation device anywhere in the
+golden-path group. The one `usleep` in the harness is the 50 ms poll interval
+inside `waitUntil()`, which the brief permits: its exit condition is observable
+state, and its 30-second deadline is a **failure**, never a pass. A test that
+slept and then asserted would be either flaky or slow; this one returns as soon
+as the condition holds.
+
+---
+
+## 27. Flake measurement
+
+The policy is measure, do not re-run until green.
+
+| Measured | Result |
+|---|---|
+| `--group=golden-path`, three consecutive runs from a clean state | §28 |
+| the one known browser race | carried, not hidden — see below |
+
+The browser reboot-acknowledgement race identified in Gap 6 is **still
+present** and is still carried as a known flake. Gap 6 §31 records its
+mechanism (an assertion whose window is a single HTTP round trip, proved
+non-deterministic by the same assertion passing repeatedly in one process,
+commit and database) and the three local measurements taken before the one
+permitted job re-run. Nothing in this gap changed that test, weakened it, or
+re-classified it. It is a browser-suite flake, it is measured, and it is
+listed in §33 as carried.
+
+---
+
+## 28. Three clean runs
+
+`php artisan test --group=golden-path`, from a clean working tree at the
+ending code SHA, three times in succession:
+
+| Run | Tests | Assertions | Result |
+|---|---|---|---|
+| 1 | 47 | 275 | pass |
+| 2 | 47 | 275 | pass |
+| 3 | 47 | 275 | pass |
+
+Same counts each time, which is itself part of the evidence: a suite whose
+assertion count moves between runs is doing something conditional.
+
+---
+
+## 29. Deliberate breakages, and their positive twins
+
+Ten breakages, each applied **alone**, measured, and restored with
+`git checkout --`. The working tree at the ending SHA contains none of them.
+
+| | Breakage | Gate that must fail | Result |
+|---|---|---|---|
+| A | let a duplicate payment event produce a second financial effect | `TheVpsGoldenPathTest::a_redelivered_webhook_…` | **FAILS** — see below |
+| B | let a duplicate provisioning delivery build a second machine | `ARealWorkerConsumesTheQueueTest::a_second_delivery_…` | **FAILS**: two machines |
+| C | drop the provider's creation-completion handling | `TheFailureMatrixTest::a_task_that_never_settles_…` | **FAILS**: a failed hypervisor task reported as `succeeded` |
+| D | hide a DNS failure after the machine exists | `TheFailureMatrixTest::a_name_that_cannot_be_published_…` | **FAILS**: record `active` with no reason |
+| E | mark a backup verified when verification never ran | `TheFailureMatrixTest::a_backup_nobody_verified_…` | **FAILS**: `verified = true` on a backup nobody read back |
+| F | leak the address a failed create was holding | `TheFailureMatrixTest::a_hypervisor_that_refuses_…` | **FAILS**: the second attempt takes a second address and strands the first |
+| G | remove the store's production guard | `ControlledSimulationStateIsOptInAndNeverProductionTest` | **FAILS**: 8 of 10 |
+| H | remove the redaction in `CreateProvisioningJob` | `WhatAGoldenPathMustNotDoTest::no_secret_shaped_value_…` | **FAILS**: canary found in the queue payload |
+| I | retry a create whose outcome is unknown | `TheFailureMatrixTest::a_build_that_timed_out_…` | **FAILS**: `queued` instead of `needs_review` |
+| J | disable durable controlled-simulation state | `AControlledProviderRemembersAcrossProcessesTest` | **FAILS**: 0 of 5 |
+
+**A needed three attempts, and that is the interesting part of this section.**
+
+| Layer removed | Gate |
+|---|---|
+| `IngestWebhookEvent`'s redelivery short-circuit | passed — no observable change |
+| `RecordPaymentCapture`'s already-captured short-circuit | passed — no observable change |
+| `SettleInvoice`'s exclusion of the capture in hand from the sum it is then added to | **FAILED** |
+
+The first two are absorbed by layers beneath them: the unique index on
+`(provider, provider_reference)` plus the update-existing branch, and a
+settlement that recomputes what an invoice has been paid rather than
+incrementing it. The third is the line the invariant actually rests on, and
+removing it leaves every row count at one, the invoice paid, and the customer
+holding the entire invoice total as wallet credit they never paid for — which
+is why §14's wallet assertion exists. Before it was added, all three variants
+passed.
+
+**B needed two lines** for the same reason: removing `isClaimable()` from the
+job claim is absorbed by the state machine's transition table, and a duplicate
+delivery only builds a second machine when success stops being terminal as
+well.
+
+Positive twins (§100 of the brief): every gate above has a passing scenario on
+the same path — a single webhook that settles once and builds once; a single
+delivery that builds one machine; a provider task that completes and confirms
+one build; a DNS record that publishes; a verification that passes and is
+recorded as passed; a refused build whose retry reuses its address; the store
+enabled, with five cross-process reads; a purchase whose secrets are present
+in the panel and absent from every store; a transient failure that is retried
+and succeeds. Each is in the same file as its negative, so neither can be
+deleted without the other becoming obviously unbalanced.
+
+---
+
+## 30. Regression
+
+<!-- REGRESSION TABLE -->
+
+---
+
+## 31. Exact-SHA CI
+
+<!-- CI RECORD -->
+
+---
+
+## 32. What this gap changed in production code
+
+Small, and listed in full.
+
+| File | Change |
+|---|---|
+| `Shared/Infrastructure/Simulation/ControlledSimulationStore.php` | new: the one durable controlled-simulation store |
+| `config/dedicated.php`, `config/hosting.php`, `config/backups.php`, `config/dns.php` | a `fake.state_path` block each (`dns` also `fake_reverse.state_path`), env-driven, unset by default |
+| `FakeDedicatedProvider`, `FakeHostingProvider`, `FakeBackupProvider`, `FakeDnsProvider`, `FakeReverseDnsProvider` | each gained an optional store and a `restore()`/`remember()` pair around the state it already kept in memory |
+| `FakeComputeProvider`, `FakeDomainRegistrarProvider` | their private hand-rolled state files replaced by the shared store |
+
+Nothing else. No business action, listener, job, state machine, controller,
+policy or migration was modified by this gap. The golden paths run against the
+same code a purchase runs against, which is the point of §5.
+
+Two things that are deliberately *not* here:
+
+- No change to `ProductReadinessEvaluator` (§25).
+- No new error class, no new provider capability, no fabricated contract (§34).
+
+---
+
+## 33. Carried gaps
+
+Five, each with the classification the brief asks for.
+
+| Finding | Classification | Evidence |
+|---|---|---|
+| **A purchased VPS is built with no OS image at all.** The create path never passes a template reference; the controlled hypervisor records no installed template and the job payload has no `template_reference` key. | **REAL CODE GAP — CARRIED TO GAP 8** | `TheFailureMatrixTest::a_purchased_machine_is_built_with_no_image_at_all_and_that_is_a_carried_gap`, which asserts the absence in both places |
+| **A dedicated power operation is sent twice.** Two `Cycle` requests through the ordinary application path reach the BMC twice. Two resets is a defect even where the final power state is identical. | **REAL CODE GAP — CARRIED TO GAP 8** | `TheDedicatedGoldenPathTest`, provider calls counted |
+| **A task-failed build leaves the service active.** The create was accepted, the machine row written and the service activated; the later task failure moves the job and not the service. | **PRODUCT DECISION — CARRIED TO GAP 8** | `TheFailureMatrixTest::a_task_that_never_settles_…`, asserted as `active` and annotated |
+| **Nothing in the platform starts a backup verification.** `startVerification` exists on the contract and both drivers, `Verifying` has transitions out of it, and no action, job or command puts a row into it — so `verified` is null for every backup the platform has ever taken. | **REAL CODE GAP — CARRIED TO GAP 8** | §19; the reconciliation half is now covered, the initiating half does not exist |
+| **The browser reboot-acknowledgement race.** Unchanged from Gap 6, measured there, not hidden here. | **KNOWN FLAKE — CARRIED** | Gap 6 report §31 |
+
+None of these was made to pass. None was deleted, skipped, or re-classified to
+look finished.
+
+---
+
+## 34. Contracts that stay unsupported
+
+| Contract | Status | What this gap did about it |
+|---|---|---|
+| `.sy` registrar | `NOT_IMPLEMENTED — PROVIDER CONTRACT UNAVAILABLE` | nothing. No `.sy` name is registered, renewed, transferred, priced or asserted anywhere in this gap. **`.sy` registration is not tested.** |
+| every capability a controlled driver declares it cannot do | unchanged | the declarations are asserted, not implemented around |
+
+Nothing was invented to make a path complete. Where a contract is unavailable,
+the path stops at the boundary and says so.
+
+---
+
+## 35. Status, and the boundary this gap does not cross
+
+**What is true.**
+
+| Claim | Status |
+|---|---|
+| The cross-domain workflows above exist in code | `CODE_COMPLETE` |
+| They are covered by tests that fail when the behaviour is removed | `TESTED` |
+| They were executed end to end, across real process boundaries, against controlled providers and the reference estate | `RUNTIME_VERIFIED (local controlled end-to-end simulation only)` |
+
+**What is not true, and is not claimed.**
+
+| Claim | Status |
+|---|---|
+| Real infrastructure | `REAL_INFRA_VERIFIED = NONE` |
+| Real payment | `REAL_PAYMENT_VERIFIED = NONE` |
+| Real registrar | `REAL_REGISTRAR_VERIFIED = NONE` |
+| Real hosting | `REAL_HOSTING_VERIFIED = NONE` |
+| Sellable | `READY_TO_SELL = NONE` |
+
+Every provider in this gap is a controlled simulator. No credential, socket,
+machine, domain, zone, invoice or fils in it is real. A simulator passing is
+evidence that this platform's own state machines, queues, ledgers and
+compensations agree with each other — nothing more, and it is worth having for
+exactly that. **Nothing here is production verification, and a simulator
+passing will never make it so.**
+
+Five findings are carried forward rather than closed (§33), including two real
+code gaps that a customer would notice: a VPS built with no operating system,
+and a power operation sent to a chassis twice.
+
+---
+
+## 36. Stop
+
+Gap 7 ends here. No real infrastructure was connected, no real credential
+used, no money charged, no domain registered, no DNS published, no VM created,
+no IaC applied, no production readiness declared, and no Gap 8 work started.
