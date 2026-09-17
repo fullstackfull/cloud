@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Http;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
 use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
+use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -229,7 +230,17 @@ final class AConnectionIsNotHealthyBecauseASocketOpenedTest extends TestCase
          */
         $registered = app(ConnectionTesterFactory::class)->drivers();
 
-        $httpDrivers = array_values(array_diff($registered, ['fake', 'fake_bmc', 'stripe', 'ipmi']));
+        /*
+         * Controlled drivers are excluded by asking the catalogue rather than
+         * by naming them. The list used to be `['fake', 'fake_bmc', 'stripe',
+         * 'ipmi']`, and the first two of those grew into nine the moment the
+         * catalogue learned about the simulators it already had — at which
+         * point a literal would have demanded every one of them serve an
+         * HTTPS impostor it never opens a socket to.
+         */
+        $notHttp = [...(new ProviderCatalogue)->controlledDrivers(), 'stripe', 'ipmi'];
+
+        $httpDrivers = array_values(array_diff($registered, $notHttp));
 
         $this->assertSame(
             [],

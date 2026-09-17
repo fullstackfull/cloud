@@ -81,7 +81,23 @@ final class FakeBackupProvider implements BackupProvider, FileLevelBackupProvide
     /** A credential-shaped string the refusal quotes back, so redaction is testable. */
     private const string CLUSTER_TOKEN = 'fake-pve-token-0123456789abcdef';
 
-    /** @var array<string, array{failing: bool, polls: int, request: BackupRequest}> */
+    /**
+     * What a task is doing.
+     *
+     * Carried on the task rather than inferred from its id prefix, because
+     * `taskState()` has to answer differently for each: a backup produces an
+     * archive, a verification writes a verdict onto one, and a restore
+     * produces neither.
+     */
+    private const string KIND_BACKUP = 'backup';
+
+    private const string KIND_VERIFY = 'verify';
+
+    private const string KIND_RESTORE = 'restore';
+
+    private const string KIND_FILE_RESTORE = 'file_restore';
+
+    /** @var array<string, array{failing: bool, polls: int, request: BackupRequest, kind: string, archive: ?string}> */
     private array $tasks = [];
 
     /** @var array<string, list<RemoteBackup>> datastore|vmid => backups */
@@ -125,6 +141,8 @@ final class FakeBackupProvider implements BackupProvider, FileLevelBackupProvide
             'failing' => str_contains($request->notes ?? '', self::FAILING_MARKER),
             'polls' => 0,
             'request' => $request,
+            'kind' => self::KIND_BACKUP,
+            'archive' => null,
         ];
 
         return new BackupOperation($taskId, $request->nodeName);
@@ -148,7 +166,30 @@ final class FakeBackupProvider implements BackupProvider, FileLevelBackupProvide
         }
 
         if ($task['failing']) {
+            /*
+             * A verification that ran and failed is recorded on the archive,
+             * because that is what the real datastore does: the verdict of the
+             * last verification is visible in a storage listing, and three
+             * answers are needed rather than two — never verified is not the
+             * same as verified and failed.
+             */
+            if ($task['kind'] === self::KIND_VERIFY) {
+                $this->recordVerification($task, verified: false);
+            }
+
             return new BackupTaskState($taskId, finished: true, successful: false, exitStatus: 'job failed: no space left on device');
+        }
+
+        if ($task['kind'] === self::KIND_VERIFY) {
+            $this->recordVerification($task, verified: true);
+
+            return new BackupTaskState($taskId, finished: true, successful: true, exitStatus: 'OK', archiveId: $task['archive']);
+        }
+
+        if ($task['kind'] !== self::KIND_BACKUP) {
+            // A restore produces no new archive; reporting one would invent a
+            // second copy of the thing being put back.
+            return new BackupTaskState($taskId, finished: true, successful: true, exitStatus: 'OK', archiveId: $task['archive']);
         }
 
         $request = $task['request'];
@@ -166,20 +207,55 @@ final class FakeBackupProvider implements BackupProvider, FileLevelBackupProvide
         return new BackupTaskState($taskId, finished: true, successful: true, exitStatus: 'OK', sizeBytes: 1_073_741_824, archiveId: $archiveId);
     }
 
+    /**
+     * Ask the datastore to prove an archive can be read back.
+     *
+     * The markers are read from the archive id, which is the only thing this
+     * call carries that a test can choose. It matters that verification can
+     * fail at all: "the backup completed" and "the backup can be restored" are
+     * different questions — a deduplicating datastore shares chunks, so one
+     * corrupt chunk can be shared by many archives — and a simulator whose
+     * verification always succeeded would leave the whole verification-failed
+     * path, and the alerts that read it, unexercised.
+     */
     public function startVerification(string $nodeName, string $datastore, string $archiveId): BackupOperation
     {
+        $this->refuseMarked($archiveId, 'start_verification');
+
         $taskId = 'UPID:fake-verify:'.$this->nextId++;
 
-        $this->tasks[$taskId] = ['failing' => false, 'polls' => 0, 'request' => new BackupRequest($nodeName, '0', $datastore)];
+        $this->tasks[$taskId] = [
+            'failing' => str_contains($archiveId, self::FAILING_MARKER),
+            'polls' => 0,
+            'request' => new BackupRequest($nodeName, '0', $datastore),
+            'kind' => self::KIND_VERIFY,
+            'archive' => $archiveId,
+        ];
 
         return new BackupOperation($taskId, $nodeName);
     }
 
+    /**
+     * Put an archive back, and be able to fail at it.
+     *
+     * A restore that cannot fail is the one simulator behaviour that would
+     * make a backup product look finished when it is not: everything the
+     * platform does about a failed restore — the operator alert, the refusal
+     * to mark a machine recovered, the ticket — would be unreachable.
+     */
     public function startRestore(string $nodeName, string $providerId, string $datastore, string $archiveId): BackupOperation
     {
+        $this->refuseMarked($archiveId, 'start_restore');
+
         $taskId = 'UPID:fake-restore:'.$this->nextId++;
 
-        $this->tasks[$taskId] = ['failing' => false, 'polls' => 0, 'request' => new BackupRequest($nodeName, $providerId, $datastore)];
+        $this->tasks[$taskId] = [
+            'failing' => str_contains($archiveId, self::FAILING_MARKER),
+            'polls' => 0,
+            'request' => new BackupRequest($nodeName, $providerId, $datastore),
+            'kind' => self::KIND_RESTORE,
+            'archive' => $archiveId,
+        ];
 
         return new BackupOperation($taskId, $nodeName);
     }
@@ -277,9 +353,40 @@ final class FakeBackupProvider implements BackupProvider, FileLevelBackupProvide
             'failing' => str_contains($joined, self::FAILING_MARKER),
             'polls' => 0,
             'request' => new BackupRequest($nodeName, $providerId, $datastore),
+            'kind' => self::KIND_FILE_RESTORE,
+            'archive' => $archiveId,
         ];
 
         return new BackupOperation($taskId, $nodeName);
+    }
+
+    /**
+     * Write a verification verdict onto the archive it was about.
+     *
+     * @param  array{failing: bool, polls: int, request: BackupRequest, kind: string, archive: ?string}  $task
+     */
+    private function recordVerification(array $task, bool $verified): void
+    {
+        if ($task['archive'] === null) {
+            return;
+        }
+
+        foreach ($this->stored as $key => $backups) {
+            foreach ($backups as $index => $backup) {
+                if ($backup->archiveId !== $task['archive']) {
+                    continue;
+                }
+
+                $this->stored[$key][$index] = new RemoteBackup(
+                    archiveId: $backup->archiveId,
+                    datastore: $backup->datastore,
+                    sizeBytes: $backup->sizeBytes,
+                    createdAt: $backup->createdAt,
+                    verified: $verified,
+                    notes: $backup->notes,
+                );
+            }
+        }
     }
 
     /**

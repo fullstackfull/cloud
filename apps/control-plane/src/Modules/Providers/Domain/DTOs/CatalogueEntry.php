@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Providers\Domain\DTOs;
 
+use Lynomia\Modules\Providers\Domain\Enums\ControlledDriver;
 use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
 
 /**
@@ -30,6 +31,7 @@ final readonly class CatalogueEntry
      * @param  bool  $needsEndpoint  Whether an address must be supplied to reach it.
      * @param  bool  $needsCredential  Whether it authenticates at all.
      * @param  bool  $needsLicence  Whether using it commercially requires a licence we must hold.
+     * @param  bool  $controlled  Whether this exists for rehearsal and must never be registered in production.
      */
     public function __construct(
         public string $driver,
@@ -38,7 +40,25 @@ final readonly class CatalogueEntry
         public bool $needsCredential,
         public bool $needsLicence,
         public string $summary,
+        public bool $controlled = false,
     ) {}
+
+    /**
+     * Built from a controlled driver, so the entry and the refusal cannot
+     * disagree about which drivers are for rehearsal.
+     */
+    public static function controlled(ControlledDriver $driver): self
+    {
+        return new self(
+            driver: $driver->value,
+            category: $driver->category(),
+            needsEndpoint: $driver->needsEndpoint(),
+            needsCredential: $driver->needsCredential(),
+            needsLicence: $driver->needsLicence(),
+            summary: $driver->summary(),
+            controlled: true,
+        );
+    }
 
     /**
      * Does an instance of this run on a machine Lynomia manages?

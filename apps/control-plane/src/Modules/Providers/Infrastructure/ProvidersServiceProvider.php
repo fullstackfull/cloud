@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Providers\Infrastructure;
 use Illuminate\Support\ServiceProvider;
 use Lynomia\Modules\Providers\Domain\Contracts\ConnectionTester;
 use Lynomia\Modules\Providers\Domain\Contracts\SecretResolver;
+use Lynomia\Modules\Providers\Domain\Enums\ControlledDriver;
 use Lynomia\Modules\Providers\Infrastructure\Testers\CloudflareConnectionTester;
 use Lynomia\Modules\Providers\Infrastructure\Testers\CpanelConnectionTester;
 use Lynomia\Modules\Providers\Infrastructure\Testers\DirectAdminConnectionTester;
@@ -28,13 +29,13 @@ use Tests\Architecture\EveryRealDriverHasAnIdentityTesterTest;
  * driver must not have to rebuild the world, and a factory resolved once at
  * boot hands every later caller the bindings that existed at boot.
  *
- * The fake tester is registered only outside production. It also refuses to be
- * constructed there, and refuses a provider row whose own environment is
- * production wherever it is built — three controls, because they fail in
- * different ways: the first depends on the deployment environment being read
- * correctly at boot, the second depends on nothing, and the third catches the
- * case neither of the others can see, a production provider row being tested
- * from a staging deployment.
+ * The fake tester is registered only outside production, once per controlled
+ * driver. It also refuses to be constructed there, and refuses a provider row
+ * whose own environment is production wherever it is built — three controls,
+ * because they fail in different ways: the first depends on the deployment
+ * environment being read correctly at boot, the second depends on nothing, and
+ * the third catches the case neither of the others can see, a production
+ * provider row being tested from a staging deployment.
  *
  * Every other driver in the catalogue with a real adapter now has a real
  * tester, and each one identifies its product from something only that product
@@ -91,10 +92,23 @@ final class ProvidersServiceProvider extends ServiceProvider
         if (! $this->app->environment('production')) {
             $environment = (string) $this->app->environment();
 
-            // One fake, two driver names: a remote account and a machine's
-            // BMC. Both refuse to be built in production.
-            $testers['fake'] = fn (): ConnectionTester => new FakeConnectionTester($environment, 'fake');
-            $testers['fake_bmc'] = fn (): ConnectionTester => new FakeConnectionTester($environment, 'fake_bmc');
+            /*
+             * One fake tester, one driver name per controlled driver.
+             *
+             * Iterated rather than listed: the two entries that used to be
+             * here were `fake` and `fake_bmc`, and a controlled driver added
+             * to the catalogue without a line here is a catalogued driver
+             * nothing can test — which the readiness engine reports as a
+             * configuration blocker and an operator reads as a platform fault.
+             *
+             * The tester is told which driver it answers for because it
+             * reports that driver's own capabilities: a controlled compute
+             * driver must not claim GPU passthrough because the category asks
+             * about it.
+             */
+            foreach (ControlledDriver::cases() as $driver) {
+                $testers[$driver->value] = fn (): ConnectionTester => new FakeConnectionTester($environment, $driver->value);
+            }
         }
 
         return $testers;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Providers\Domain\Services;
 
 use Lynomia\Modules\Providers\Domain\DTOs\CatalogueEntry;
+use Lynomia\Modules\Providers\Domain\Enums\ControlledDriver;
 use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 
@@ -153,42 +154,29 @@ final readonly class ProviderCatalogue
                 needsLicence: false,
                 summary: 'HPE iLO baseboard management.',
             ),
-            /*
-             * The fake is catalogued on purpose.
-             *
-             * It is the only driver with a connection tester, so leaving it out
-             * would mean no environment could exercise a complete provider
-             * lifecycle — and a lifecycle that only runs in tests is one whose
-             * screens nobody has ever seen work. RegisterProvider refuses it in
-             * production, and the tester refuses to be constructed there.
-             */
-            new CatalogueEntry(
-                driver: 'fake',
-                // Catalogued as DNS rather than compute, which decides one
-                // thing: a DNS provider is somebody else's servers, so
-                // rehearsing the lifecycle does not also require a classified
-                // machine of ours. The on-machine path has its own coverage
-                // through the readiness rules, and making every rehearsal need
-                // a rack would mean the rehearsal stopped being run.
-                category: ProviderCategory::Dns,
-                needsEndpoint: true,
-                needsCredential: true,
-                needsLicence: false,
-                summary: 'A controlled provider for rehearsing the onboarding path. Never available in production.',
-            ),
-            new CatalogueEntry(
-                driver: 'fake_bmc',
-                // The machine half of the rehearsal: a BMC that answers a
-                // connection test and a discovery for a machine that does not
-                // exist. Bound to a managed server like any BMC, gated by that
-                // server's classification like any BMC.
-                category: ProviderCategory::Bmc,
-                needsEndpoint: true,
-                needsCredential: true,
-                needsLicence: false,
-                summary: 'A controlled BMC for rehearsing machine onboarding and discovery. Never available in production.',
-            ),
+            ...$this->controlled(),
         ];
+    }
+
+    /**
+     * Every driver that exists for rehearsal, built from the enum that
+     * declares them.
+     *
+     * Written this way rather than as nine more literals because the list and
+     * the refusal have to be the same list. The fake is catalogued on purpose
+     * — without it no environment could exercise a complete provider
+     * lifecycle, and a lifecycle that only runs in tests is one whose screens
+     * nobody has ever seen work — and registration refuses every one of them in
+     * production, as does each simulator's own constructor.
+     *
+     * @return list<CatalogueEntry>
+     */
+    private function controlled(): array
+    {
+        return array_map(
+            static fn (ControlledDriver $driver): CatalogueEntry => CatalogueEntry::controlled($driver),
+            ControlledDriver::cases(),
+        );
     }
 
     public function find(string $driver): ?CatalogueEntry
@@ -205,14 +193,21 @@ final readonly class ProviderCatalogue
     /**
      * Drivers that must never be registered in production.
      *
-     * Named here rather than inferred from the word "fake" in a string, so that
-     * a second controlled driver added later is refused by having been thought
-     * about, not by having been named carefully.
+     * Derived from the entries rather than listed beside them. The earlier
+     * version returned a literal `['fake', 'fake_bmc']`, which could not
+     * disagree with the catalogue — a test caught that — but which also could
+     * not grow when a simulator did. It stayed at two while eight stateful
+     * simulators sat behind the per-family factories, unknown to the provider
+     * registry, and the reference estate could not rehearse three of the five
+     * dependencies it declares.
      *
      * @return list<string>
      */
     public function controlledDrivers(): array
     {
-        return ['fake', 'fake_bmc'];
+        return array_values(array_map(
+            static fn (CatalogueEntry $entry): string => $entry->driver,
+            array_filter($this->entries(), static fn (CatalogueEntry $entry): bool => $entry->controlled),
+        ));
     }
 }

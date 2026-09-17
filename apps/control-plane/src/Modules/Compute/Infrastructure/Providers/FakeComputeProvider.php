@@ -164,7 +164,19 @@ final class FakeComputeProvider implements ComputeProvider
             memoryMib: $request->memoryMib,
             diskGib: $request->diskGib,
             uptimeSeconds: $request->startAfterCreate ? 0 : null,
-            raw: ['fake' => true, 'storage' => $request->storageName],
+            /*
+             * The image is recorded under the same key the reinstall uses, so
+             * a test can assert the disk came from the template that was asked
+             * for rather than that a call was made. Without it, "this provider
+             * can install from a staged image" was a capability nothing could
+             * observe — the request carried a template reference and the
+             * machine that came back had forgotten it.
+             */
+            raw: [
+                'fake' => true,
+                'storage' => $request->storageName,
+                'installed_template' => $request->templateReference,
+            ],
         );
 
         unset($this->destroyed[$this->tombstoneKey($request->nodeName, $providerId)]);

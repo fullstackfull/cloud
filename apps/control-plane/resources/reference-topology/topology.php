@@ -676,6 +676,48 @@ return [
                 ],
             ],
 
+            /*
+             * The machine the backup target lives on.
+             *
+             * Added by Gap 6 and not before, for a reason worth keeping: a
+             * backup provider is one of the categories that runs on hardware
+             * we manage, so a provider row for one cannot be registered
+             * without a machine to bind it to. The estate declared a backup
+             * dependency it could not satisfy and a datastore with nowhere to
+             * sit, and that shape was not a modelling choice — it was the
+             * shape of a missing controlled driver.
+             *
+             * `configuration_allowed` rather than `discovery_only`, because
+             * modelling a backup host that may not even be configured would
+             * make the estate's own backup rehearsal refuse at the
+             * classification instead of at the credential.
+             */
+            'ref-machine-alpha-1-backup-1' => [
+                'facts' => [
+                    'name' => 'ref-machine-alpha-1-backup-1',
+                    'state' => 'managed',
+                    'rack_unit' => 21,
+                    'height_units' => 1,
+                    'vendor' => 'Reference Systems',
+                    'model' => 'RS-1U-B',
+                    'serial' => 'REF-BKP-0005',
+                    'asset_tag' => 'REF-AT-0005',
+                    'operating_system' => 'Reference Linux 10',
+                    'management_address' => '192.0.2.21',
+                    'management_port' => 22,
+                    'bmc_address' => '192.0.2.121',
+                    'bmc_port' => 443,
+                    'safety_class' => 'configuration_allowed',
+                    'allow_reimage' => false,
+                    'safety_reason' => 'Reference machine. Configuration is modelled; nothing is applied.',
+                    'reference_only' => true,
+                ],
+                'refs' => [
+                    'datacenter' => 'ref-dc-alpha-1',
+                    'rack' => 'ref-rack-alpha-1-a',
+                ],
+            ],
+
             // Classified do_not_touch on purpose. A provider bound to this
             // machine can never become ready, and the readiness engine says so
             // as a hardware blocker rather than sending somebody to a
@@ -948,6 +990,116 @@ return [
                 ],
                 'refs' => ['machine' => 'ref-machine-alpha-1-hv-a'],
             ],
+
+            /*
+             * -----------------------------------------------------------------
+             * The seven rows Gap 6 added
+             * -----------------------------------------------------------------
+             *
+             * Until Gap 6 this list had two entries, and the reason was not
+             * that the estate needed only two. It was that the provider
+             * catalogue had a controlled driver for two categories, so a
+             * reference provider row for any other family named a driver the
+             * validator refused. Eight stateful simulators existed behind the
+             * per-family factories the whole time; the provider registry had
+             * never been told.
+             *
+             * Each row below names a controlled driver whose simulator
+             * implements that family's own contract, and each is bound the way
+             * a real row of its category would be: the ones that run on
+             * hardware we manage name a machine, and the ones that are
+             * somebody else's servers do not.
+             *
+             * None of them carries a credential. The loader writes none, so
+             * every one of these is blocked on credentials until an operator
+             * supplies a reference — which is the honest state of a provider
+             * nobody has contacted, and one of the paths this estate exists to
+             * rehearse.
+             */
+            'ref-provider-alpha-compute' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-compute',
+                    'category' => 'compute',
+                    'driver' => 'fake_compute',
+                    'environment' => 'development',
+                    'endpoint' => 'fake://ref-cluster-alpha-1',
+                    'notes' => 'Reference hypervisor provider. Controlled driver; refuses to exist in production.',
+                ],
+                'refs' => ['machine' => 'ref-machine-alpha-1-hv-b'],
+            ],
+            'ref-provider-alpha-hosting' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-hosting',
+                    'category' => 'hosting',
+                    'driver' => 'fake_hosting',
+                    'environment' => 'development',
+                    'endpoint' => 'fake://ref-hosting-alpha-1',
+                    'notes' => 'Reference hosting panel provider. Controlled driver; refuses to exist in production.',
+                ],
+                'refs' => ['machine' => 'ref-machine-alpha-1-hosting-1'],
+            ],
+            'ref-provider-alpha-wordpress' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-wordpress',
+                    'category' => 'wordpress_installer',
+                    'driver' => 'fake_wordpress',
+                    'environment' => 'development',
+                    'endpoint' => 'fake://ref-hosting-alpha-1',
+                    // The same machine as the panel, because that is where a
+                    // toolkit runs: it is a feature of the panel, not a
+                    // separate service with its own host.
+                    'notes' => 'Reference WordPress toolkit, on the panel machine. Controlled driver; refuses to exist in production.',
+                ],
+                'refs' => ['machine' => 'ref-machine-alpha-1-hosting-1'],
+            ],
+            'ref-provider-alpha-backup' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-backup',
+                    'category' => 'backup',
+                    'driver' => 'fake_backup',
+                    'environment' => 'development',
+                    'endpoint' => 'fake://ref-datastore-alpha-1',
+                    'notes' => 'Reference backup provider, bound to the modelled backup host. Controlled driver; refuses to exist in production.',
+                ],
+                'refs' => ['machine' => 'ref-machine-alpha-1-backup-1'],
+            ],
+            'ref-provider-alpha-rdns' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-rdns',
+                    'category' => 'reverse_dns',
+                    'driver' => 'fake_rdns',
+                    'environment' => 'development',
+                    'endpoint' => 'fake://ref-rdns-alpha',
+                    'notes' => 'Reference reverse-DNS provider. Controlled driver; refuses to exist in production.',
+                ],
+                'refs' => [],
+            ],
+            'ref-provider-alpha-registrar' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-registrar',
+                    'category' => 'registrar',
+                    'driver' => 'fake_registrar',
+                    'environment' => 'development',
+                    // A controlled registrar stands in for the platform's own
+                    // generic registrar contract and for no particular
+                    // registry. Nothing here models .sy, whose technical
+                    // contract this project does not have.
+                    'endpoint' => 'fake://ref-registrar-alpha',
+                    'notes' => 'Reference registrar for the generic registrar contract. Controlled driver; refuses to exist in production.',
+                ],
+                'refs' => [],
+            ],
+            'ref-provider-alpha-payment' => [
+                'facts' => [
+                    'name' => 'ref-provider-alpha-payment',
+                    'category' => 'payment',
+                    'driver' => 'fake_payment',
+                    'environment' => 'development',
+                    'endpoint' => 'fake://ref-payment-alpha',
+                    'notes' => 'Reference payment gateway. Takes no money and reaches no network; refuses to exist in production.',
+                ],
+                'refs' => [],
+            ],
         ],
 
         /*
@@ -1075,21 +1227,28 @@ return [
                     'requires' => 'backup',
                     'why' => 'A VPS is sold with backups, and a backup provider that cannot restore is not a backup provider.',
                 ],
-                'refs' => ['datacenter' => 'ref-dc-alpha-1'],
+                'refs' => ['datacenter' => 'ref-dc-alpha-1', 'satisfied_by' => 'ref-provider-alpha-backup'],
             ],
             'ref-dep-alpha-registrar' => [
                 'facts' => [
                     'requires' => 'registrar',
                     'why' => 'A domain cannot be registered, renewed or transferred without one.',
                 ],
-                'refs' => ['datacenter' => 'ref-dc-alpha-1'],
+                'refs' => ['datacenter' => 'ref-dc-alpha-1', 'satisfied_by' => 'ref-provider-alpha-registrar'],
             ],
             'ref-dep-alpha-payment' => [
                 'facts' => [
                     'requires' => 'payment',
                     'why' => 'Nothing is sold until money can be taken and given back.',
                 ],
-                'refs' => ['datacenter' => 'ref-dc-alpha-1'],
+                'refs' => ['datacenter' => 'ref-dc-alpha-1', 'satisfied_by' => 'ref-provider-alpha-payment'],
+            ],
+            'ref-dep-alpha-rdns' => [
+                'facts' => [
+                    'requires' => 'reverse_dns',
+                    'why' => 'A VPS and a dedicated server are both sold with a name on their address, and a receiver that checks PTRs rejects mail from one without.',
+                ],
+                'refs' => ['datacenter' => 'ref-dc-alpha-1', 'satisfied_by' => 'ref-provider-alpha-rdns'],
             ],
         ],
     ],

@@ -10,6 +10,7 @@ use Lynomia\Modules\Providers\Domain\DTOs\ConnectionStep;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\CapabilityState;
 use Lynomia\Modules\Providers\Domain\Enums\ConnectionState;
+use Lynomia\Modules\Providers\Domain\Enums\ControlledDriver;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use RuntimeException;
 
@@ -37,10 +38,10 @@ use RuntimeException;
  *   fake://timeout              it accepts and never replies      (indeterminate)
  *   fake://licence-missing      authenticated, product unlicensed
  *   fake://read-only            authenticated, may look and not touch
- *   fake://unsupported          connected, and the capability is not offered
+ *   fake://unsupported          connected, and no capability is offered at all
  *   fake://unavailable          the provider is having an outage
  *   fake://slow                 succeeds, late enough to be worth noticing
- *   anything else               connected, with capabilities supported
+ *   anything else               connected, with the capabilities this driver offers
  *
  * ---------------------------------------------------------------------------
  * The production guard
@@ -63,11 +64,13 @@ use RuntimeException;
 final class FakeConnectionTester implements ConnectionTester
 {
     /**
-     * @param  string  $driver  Which catalogued driver this instance answers for. The
-     *                          same fake stands in for a remote account (`fake`) and
-     *                          for a machine's BMC (`fake_bmc`), so the whole
-     *                          onboarding path — machine and provider — can be
-     *                          rehearsed without either existing.
+     * @param  string  $driver  Which catalogued driver this instance answers for. One
+     *                          tester stands in for every controlled driver — a remote
+     *                          account, a machine's BMC, a hypervisor, a panel, a
+     *                          registrar, a gateway — so the whole onboarding path can
+     *                          be rehearsed without any of them existing. Which one it
+     *                          was told it is deciding what capabilities it reports:
+     *                          see {@see ControlledDriver}.
      */
     public function __construct(private readonly string $environment, private readonly string $driver = 'fake')
     {
@@ -228,7 +231,7 @@ final class FakeConnectionTester implements ConnectionTester
         return ConnectionResult::of(
             ConnectionState::Connected,
             $steps,
-            $this->allOf($target, CapabilityState::Supported),
+            $this->whatThisDriverOffers($target),
         );
     }
 
@@ -270,7 +273,9 @@ final class FakeConnectionTester implements ConnectionTester
      *
      * A read-only connection has genuinely learned that inspection works and
      * genuinely learned nothing about creation, and saying otherwise would be
-     * the fake teaching the platform a lie.
+     * the fake teaching the platform a lie. A capability this driver does not
+     * offer at all is reported as unsupported whether it is readable or not:
+     * a read-only credential does not make an absent operation appear.
      *
      * @return array<string, CapabilityState>
      */
@@ -278,12 +283,53 @@ final class FakeConnectionTester implements ConnectionTester
     {
         $readable = ['inventory', 'power_state', 'templates', 'search', 'availability', 'usage', 'version', 'currencies', 'held_names'];
 
+        $offered = $this->whatThisDriverOffers($target);
+
         $states = [];
 
         foreach ($target->probeCapabilities as $capability) {
+            if (($offered[$capability] ?? CapabilityState::Supported) === CapabilityState::Unsupported) {
+                $states[$capability] = CapabilityState::Unsupported;
+
+                continue;
+            }
+
             $states[$capability] = in_array($capability, $readable, strict: true)
                 ? CapabilityState::Supported
                 : CapabilityState::Unknown;
+        }
+
+        return $states;
+    }
+
+    /**
+     * What the simulator behind this driver can actually do.
+     *
+     * The earlier version of this method answered Supported for every
+     * capability the category asks about, and for the two drivers that existed
+     * then that was true. It stopped being true the moment a controlled driver
+     * was catalogued for a category whose questions outrun its contract — a
+     * controlled hypervisor asked about GPU passthrough, a controlled
+     * WordPress toolkit asked whether it can uninstall. Answering Supported
+     * there would be a fake teaching the readiness engine that the platform
+     * can do something no code path exists for, and the readiness engine is
+     * what a product is offered for sale on.
+     *
+     * {@see ControlledDriver::unsupported()} holds each answer with the
+     * missing contract as its reason.
+     *
+     * @return array<string, CapabilityState>
+     */
+    private function whatThisDriverOffers(TestTarget $target): array
+    {
+        $controlled = ControlledDriver::tryFrom($this->driver);
+
+        $states = [];
+
+        foreach ($target->probeCapabilities as $capability) {
+            $states[$capability] = $controlled === null
+                ? CapabilityState::Supported
+                : $controlled->stateOf($capability);
         }
 
         return $states;

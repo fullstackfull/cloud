@@ -304,7 +304,7 @@ final class TheReferenceTopologyIsAModelAndNotAnInventoryTest extends TestCase
             $seen++;
         }
 
-        self::assertSame(8, $seen, 'The number of address-carrying objects moved; check the new one states reference_only.');
+        self::assertSame(9, $seen, 'The number of address-carrying objects moved; check the new one states reference_only.');
     }
 
     #[Test]
@@ -409,11 +409,23 @@ final class TheReferenceTopologyIsAModelAndNotAnInventoryTest extends TestCase
             }
         }
 
-        // Backup, registrar and payment have no controlled driver in the
-        // catalogue, so the reference estate cannot rehearse them. Recorded
-        // here so that adding one is a deliberate change to this list rather
-        // than a silent improvement in what a green report means.
-        self::assertSame(['backup', 'registrar', 'payment'], $unsatisfiable);
+        /*
+         * Empty, and it was ['backup', 'registrar', 'payment'] until Gap 6.
+         *
+         * Those three were unsatisfiable for one reason: the catalogue had a
+         * controlled driver for two categories, so a reference provider row
+         * for a third named a driver the validator refused. The simulators
+         * behind all three existed the whole time. Gap 6 catalogued them, the
+         * rows now exist, and every dependency this estate declares names
+         * something that can stand in for it.
+         *
+         * The assertion is kept at [] rather than deleted, because the shape
+         * it guards still matters: a dependency nothing can satisfy has to
+         * say so out loud rather than leaving a green report to imply
+         * otherwise. A new dependency for a category with no controlled
+         * driver fails here, which is the deliberate conversation.
+         */
+        self::assertSame([], $unsatisfiable);
     }
 
     // ---------------------------------------------------------------------
@@ -468,14 +480,14 @@ final class TheReferenceTopologyIsAModelAndNotAnInventoryTest extends TestCase
         self::assertSame(5, ComputeStorage::count());
         self::assertSame(4, VmTemplate::count());
         self::assertSame(4, Network::count());
-        self::assertSame(4, ManagedServer::count());
+        self::assertSame(5, ManagedServer::count());
         self::assertSame(5, DedicatedServer::count());
         self::assertSame(1, BmcEndpoint::count());
         self::assertSame(1, HostingNode::count());
-        self::assertSame(2, ProviderInstance::count());
+        self::assertSame(9, ProviderInstance::count());
 
         self::assertSame(3, $written['node']);
-        self::assertSame(2, $written['provider']);
+        self::assertSame(9, $written['provider']);
 
         // A /26 is 64 addresses; the network, the gateway and the broadcast
         // address are not allocatable, and the v6 prefix is delegated rather
