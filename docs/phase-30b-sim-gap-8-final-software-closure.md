@@ -1257,6 +1257,73 @@ API was invented, no protocol was guessed, and `sy_registry` stays catalogued
 with an empty capability list because the adapter genuinely exists and has
 nothing to call.
 
+### 41.10 Deliberate breakages
+
+Thirteen, run in one pass, each restored before the next. The positive twin
+is the same five suites unmutated: 85 passed before the first mutation and 85
+after the last, with an empty `git diff` at the end.
+
+| | Breakage | Caught by | Result |
+|---|---|---|---|
+| A | WordPress declared `Complete` again | `EveryCompleteProductHasARealAdapterTest` — the invariant, and the simulator-only list | **observed** |
+| B | `sy_registry` declares the registrar capabilities it cannot perform | the same gate, plus the entry/adapter agreement | **observed** |
+| C | `proxmox_backup` claims it can be asked to `verify` | the backup entry/adapter agreement | **observed** |
+| D | a catalogue entry claims a capability its category never declares | the declaration-hygiene gate | **observed** |
+| E | the software-state guard removed from `ProductSellability` | three prepared-product assertions | **observed** |
+| F | the rehearsal's production check removed | the two production refusals | **observed** |
+| G | the rehearsal's prepared-only check removed | the readiness-only assertion | **observed** |
+| H | `VerifyStoredArchives` stops asking `supportsVerification()` | the untouched-archive assertion | **observed** |
+| I | a known verdict may be erased by a later listing | the verdict-erasure assertion | **observed** |
+| J | registration stops failing closed | three legal assertions | **observed** |
+| K | the refusal carries the unpublished-document list again | the response-names-nothing assertion | **observed** |
+| L | the scaffolding stub restored to both instruction files | eleven instruction assertions | **observed** |
+| M | a legal acceptance becomes editable | the append-only assertion | **observed** |
+
+Every one was observed. Two are worth naming as having been *sharpened* after
+a first attempt passed, because a mutation that does not fail is a statement
+about the test rather than about the code:
+
+* the null-verdict guard in `ReconcileBackupInventory` survived its first
+  mutation. The case the test covered was already caught by the
+  unchanged-verdict check beside it, which meant the guard was load-bearing
+  only in a case nothing asserted: a row that already has a verdict and a
+  datastore that stops reporting one. That test was added, and breakage I then
+  failed as it should;
+* the `WordPressInstaller` implementor check in the real-adapter gate passed
+  by finding nothing, because no provider class is autoloaded in an
+  architecture test. It reads the source now, and asserts the scan is
+  non-empty before asserting what it found.
+
+### 41.11 Regression
+
+Run on the code this section describes, after `migrate:fresh` on the test
+database so the new `legal_acceptances` migration was applied from nothing.
+
+| Check | Result |
+|---|---|
+| Backend suite | **3707 passed**, 142,770 assertions |
+| Pint | passed |
+| PHPStan | 0 errors |
+| Frontend unit and component | **446 passed**, 81 files |
+| ESLint | 0 errors, 0 warnings |
+| TypeScript | no errors |
+| Vite build | succeeded |
+| OpenAPI description | valid |
+
+Two failures reached the branch before this and are worth recording rather
+than quietly fixing. The wider suite found both, and both came from running
+only the directories I had touched:
+
+* `registration.unavailable` had no sentence in either language, so the
+  customer error catalogue gate failed;
+* `docs/openapi.yaml` is generated, and a test asserts the committed file is
+  what the generator produces. I edited the output. The edits are in
+  `resources/openapi/` now and the file is regenerated.
+
+Three pushes carried that red backend job, and the cancellations from each
+superseding push hid it — the last green exact-SHA run before the fix was
+`6386c6f`. The gate worked; the process around it did not, and running the
+whole suite before pushing is the correction.
 ---
 
 ## Appendix — final product matrix
