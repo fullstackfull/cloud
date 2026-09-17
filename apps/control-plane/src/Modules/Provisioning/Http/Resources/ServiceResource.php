@@ -131,10 +131,12 @@ final class ServiceResource extends JsonResource
     private function customerState(): CustomerServiceState
     {
         $pending = $this->resource->getAttribute(CustomerServices::REVIEWS_PENDING);
+        $delivery = $this->resource->getAttribute(CustomerServices::DELIVERY_REVIEWS_PENDING);
 
         return CustomerServiceState::for(
             $this->resource->status,
             is_numeric($pending) && (int) $pending > 0,
+            is_numeric($delivery) && (int) $delivery > 0,
         );
     }
 }

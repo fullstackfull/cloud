@@ -180,16 +180,16 @@ final class NoDeadMethodsTest extends TestCase
         'RedfishDedicatedProvider::bootOrder' => 'boot order is set for an install and never read back',
 
         /*
-         * Backup retention and verification.
+         * Backup retention.
          *
-         * Backups are taken, tracked and restored from. Nothing prunes an
-         * expired archive at the provider and nothing asks the provider to
-         * verify one — the `verified` column is written by the reconciler from
-         * what the provider reports, not by a verification this platform
-         * starts.
+         * Nothing prunes an expired archive at the provider yet. Verification
+         * used to be excused here for the same shape of reason — "the platform
+         * does not start verifications; it records what it is told" — and Gap 8
+         * made that false: `VerifyStoredArchives` sweeps stored archives and
+         * asks the datastore to read them back, so `startVerification` has a
+         * caller and this gate is what noticed.
          */
-        'ProxmoxBackupProvider::startVerification' => 'the platform does not start verifications; it records what it is told',
-        'ProxmoxBackupProvider::supportsVerification' => 'the platform does not start verifications; it records what it is told',
+        'ProxmoxBackupProvider::supportsVerification' => 'the capability is declared by the driver catalogue rather than asked of the adapter',
 
         /*
          * `WalletLedger::debit` was here for the same reason and left for the

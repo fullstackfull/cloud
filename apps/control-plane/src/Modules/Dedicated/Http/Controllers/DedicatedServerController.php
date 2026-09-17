@@ -157,7 +157,12 @@ final class DedicatedServerController
         $found = $this->serverForActingCustomer($server);
         $action = $request->action();
 
-        $operation = $this->changePower->execute($found, $action);
+        $operation = $this->changePower->execute(
+            $found,
+            $action,
+            clientKey: $request->idempotencyKey(),
+            requestedByUserId: (string) $request->user()?->getAuthIdentifier(),
+        );
 
         return (new DedicatedServerResource($found, LatestServerReinstalls::forServers([(string) $found->getKey()])[(string) $found->getKey()] ?? null, LiveServerWork::forServers([$found])[(string) $found->getKey()] ?? null))
             ->additional([

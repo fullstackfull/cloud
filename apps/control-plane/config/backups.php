@@ -65,6 +65,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Verification attempts
+    |--------------------------------------------------------------------------
+    |
+    | How many times the platform will ask a datastore to read an archive back
+    | before leaving that archive for a person.
+    |
+    | Three, because the failures worth retrying are transient — a datastore
+    | mid-garbage-collection, a node that was rebooting — and a datastore that
+    | has refused three times is refusing for a reason no further attempt will
+    | change. Without a limit the sweep would ask a broken provider every five
+    | minutes for the life of every archive it holds.
+    |
+    */
+    'verification_attempts' => (int) env('BACKUP_VERIFICATION_ATTEMPTS', 3),
+
+    /*
+    |--------------------------------------------------------------------------
     | Retention
     |--------------------------------------------------------------------------
     |

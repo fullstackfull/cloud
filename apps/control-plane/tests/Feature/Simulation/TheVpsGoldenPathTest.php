@@ -193,6 +193,19 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
 
         $this->assertNotNull($remote);
         $this->assertSame($machine->hostname, $remote->name);
+
+        /*
+         * And what it was built from. A hostname proves the right machine
+         * exists; the installed image proves it is a machine somebody can log
+         * in to. Until Gap 8 this value was null for every purchased machine,
+         * and the golden path was green anyway — which is why it is asserted
+         * on the main path and not only in the matrix.
+         */
+        $this->assertSame(
+            $estate['template']->provider_reference,
+            $remote->raw['installed_template'] ?? null,
+            'the machine the customer paid for was built with no operating system on it',
+        );
     }
 
     #[Test]

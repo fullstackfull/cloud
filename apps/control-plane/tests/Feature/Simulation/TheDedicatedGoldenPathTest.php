@@ -7,9 +7,11 @@ namespace Tests\Feature\Simulation;
 use Lynomia\Modules\Dedicated\Application\Actions\ChangeDedicatedServerPower;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
+use Lynomia\Modules\Dedicated\Domain\Enums\PowerOperationOutcome;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Infrastructure\DedicatedProviderFactory;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedPowerOperation;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\FakeDedicatedProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -31,26 +33,22 @@ use Tests\Support\CountingDedicatedProvider;
  * yet stop.
  *
  * ---------------------------------------------------------------------------
- * The carried gap
+ * The gap that was carried here, and what closed it
  * ---------------------------------------------------------------------------
  *
- * Gap 6 §28 recorded the verdict: a dedicated power request carries no
- * idempotency key, nothing dedupes it, and two identical requests reach the
- * controller twice. Gap 7's job was to demonstrate that through the real
- * software path rather than through the simulator's own behaviour, and that is
- * the second test below.
+ * Gap 6 §28 recorded the verdict and Gap 7 demonstrated it through the real
+ * software path: a dedicated power request carried no idempotency key, nothing
+ * deduped it, and two identical requests reached the controller twice. The
+ * second reset interrupted the boot the first one started, and the final power
+ * state was identical either way — which is why counting provider calls is
+ * the only assertion that ever caught it.
  *
- * It asserts the *present* behaviour — two provider calls — and its name says
- * so, because a test that asserted one call would fail today and a test that
- * quietly asserted two without saying why would read as a promise. This is a
- * REAL CODE GAP, CARRIED TO GAP 8.
- *
- * The controller adds nothing to this: `DedicatedServerController::power()`
- * authorises, looks the machine up and calls the action. The VPS path has
- * `VpsIdempotencyKey` and `RequestVpsPowerChange` between the request and the
- * hypervisor; the dedicated path has nothing between the request and the
- * chassis, which is why calling the action twice is the same thing a customer
- * pressing a button twice does.
+ * Gap 8 built the place the promise could be kept:
+ * `dedicated_power_operations`, one row per intent, claimed under a unique
+ * index before the controller is called. The two tests below are the pair that
+ * matters — one identity reaches the chassis once, two identities reach it
+ * twice — because a fix that deduplicated a verb forever would have broken
+ * the customer who genuinely reboots twice in a morning.
  */
 #[Group('golden-path')]
 final class TheDedicatedGoldenPathTest extends GoldenPathHarness
@@ -94,7 +92,7 @@ final class TheDedicatedGoldenPathTest extends GoldenPathHarness
     }
 
     #[Test]
-    public function two_identical_power_requests_reach_the_controller_twice_and_that_is_the_carried_gap(): void
+    public function two_requests_carrying_one_idempotency_key_reach_the_controller_once(): void
     {
         [$server, $endpoint] = $this->committedChassis();
 
@@ -112,23 +110,97 @@ final class TheDedicatedGoldenPathTest extends GoldenPathHarness
 
         $power = app(ChangeDedicatedServerPower::class);
 
-        $power->execute($server, DedicatedPowerAction::Cycle);
-        $power->execute($server->fresh(), DedicatedPowerAction::Cycle);
+        $first = $power->execute($server, DedicatedPowerAction::Cycle, clientKey: 'reboot-now-1');
+        $second = $power->execute($server->fresh(), DedicatedPowerAction::Cycle, clientKey: 'reboot-now-1');
 
         /*
-         * Two resets. The chassis was interrupted mid-boot by the second one,
-         * and the final power state is identical either way — which is exactly
-         * why counting the calls is the only assertion that catches this. A
-         * test that looked at `power_state` would have found `on` and passed.
+         * One reset. Counting the calls is still the only assertion that
+         * catches this — `power_state` reads `on` whether the chassis was
+         * reset once or twice, which is exactly how the defect survived two
+         * phases.
          *
-         * What a fix looks like, for whoever picks this up in Gap 8: the VPS
-         * path's shape. A durable key derived from the machine, the verb and
-         * the customer's request, recorded before the provider is called, so
-         * that a replay returns the first operation instead of sending a
-         * second.
+         * `calls` counts state-changing calls only — `powerState` is a read
+         * and the contract forbids a read from mutating — so one intent is one
+         * call, and the verb list says which.
          */
-        $this->assertSame(2, $counting->calls, 'the known dedicated power gap has been closed — update this test');
+        $this->assertSame(1, $counting->calls, 'the chassis was reset twice for one intent');
+
+        // `power_on` rather than `reset`, because the chassis starts off and
+        // `cycle` reads it before acting: "make it boot" on a stopped machine
+        // is a power-on. The verb is asserted so a future change that silently
+        // turned this into a reset of a running machine would be caught here.
+        $this->assertSame(['power_on'], $counting->operations);
         $this->assertSame(PowerState::On, $server->fresh()?->power_state);
+
+        // And the replay is the first request's own answer, not a fresh one.
+        $this->assertSame($first->operation, $second->operation);
+        $this->assertSame($first->endpointId, $second->endpointId);
+        $this->assertSame($first->resultingPowerState, $second->resultingPowerState);
+
+        // One row, settled, because one intent was recorded.
+        $record = DedicatedPowerOperation::query()->sole();
+
+        $this->assertSame(PowerOperationOutcome::Accepted, $record->outcome);
+        $this->assertSame((string) $server->getKey(), $record->dedicated_server_id);
+    }
+
+    #[Test]
+    public function two_different_keys_are_two_intentional_reboots_and_both_execute(): void
+    {
+        /*
+         * The positive twin, and the reason the key is part of the identity
+         * rather than the verb being deduplicated on its own. A customer who
+         * reboots at nine and again at noon meant both, and a platform that
+         * swallowed the second would be broken in a way that is much harder to
+         * notice than a double reset.
+         */
+        [$server, $endpoint] = $this->committedChassis();
+
+        $this->app->singleton(DedicatedProviderFactory::class);
+
+        $counting = new CountingDedicatedProvider(new FakeDedicatedProvider);
+
+        app(DedicatedProviderFactory::class)->swap($endpoint, $counting);
+
+        $power = app(ChangeDedicatedServerPower::class);
+
+        $power->execute($server, DedicatedPowerAction::Cycle, clientKey: 'reboot-at-nine');
+        $power->execute($server->fresh(), DedicatedPowerAction::Cycle, clientKey: 'reboot-at-noon');
+
+        $this->assertSame(2, $counting->calls);
+
+        // The first boots the stopped chassis; the second resets the machine
+        // that is now running. Two verbs, because two intents against a
+        // machine in two different states are two different operations.
+        $this->assertSame(['power_on', 'reset'], $counting->operations);
+        $this->assertSame(2, DedicatedPowerOperation::query()->count());
+    }
+
+    #[Test]
+    public function a_request_with_no_key_at_all_still_reaches_the_controller(): void
+    {
+        /*
+         * The action is reachable from a console command and a support tool as
+         * well as from the customer endpoint, and an operator acting directly
+         * has no client request to identify. That path keeps working and
+         * records nothing — which is honest: there is no intent to remember,
+         * so there is no promise to keep.
+         *
+         * The customer-facing endpoint requires the header; this is the seam
+         * below it.
+         */
+        [$server, $endpoint] = $this->committedChassis();
+
+        $this->app->singleton(DedicatedProviderFactory::class);
+
+        $counting = new CountingDedicatedProvider(new FakeDedicatedProvider);
+
+        app(DedicatedProviderFactory::class)->swap($endpoint, $counting);
+
+        app(ChangeDedicatedServerPower::class)->execute($server, DedicatedPowerAction::Cycle);
+
+        $this->assertSame(1, $counting->calls);
+        $this->assertSame(0, DedicatedPowerOperation::query()->count());
     }
 
     /**

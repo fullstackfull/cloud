@@ -124,11 +124,25 @@ final class ServiceIndexEndpointTest extends ServiceApiTestCase
     {
         [$customer, $user] = $this->accountWithOwner();
 
-        // The job needs a person; the server it rebooted is still running, and
-        // saying otherwise would be a lie in the direction that costs support
-        // a ticket.
+        /*
+         * The job needs a person; the server it rebooted is still running, and
+         * saying otherwise would be a lie in the direction that costs support
+         * a ticket.
+         *
+         * The kind is named here and used not to be. The factory's default is
+         * `create_vps`, so this fixture was a stuck *delivery* rather than the
+         * stuck reboot the test is about — and Gap 8's policy reads those two
+         * differently on purpose: a delivery in doubt eclipses `active`,
+         * because what the customer owns may not exist, and an operational job
+         * does not. Naming the kind is what makes this test assert the thing
+         * its name claims. Both halves of the policy are in
+         * `ThePartialCreatePolicyTest`.
+         */
         $service = $this->serviceFor($customer, ['status' => ServiceStatus::Active, 'activated_at' => now()]);
-        $this->jobFor($service, ['status' => ProvisioningJobStatus::NeedsReview]);
+        $this->jobFor($service, [
+            'kind' => ProvisioningJobKind::Restart,
+            'status' => ProvisioningJobStatus::NeedsReview,
+        ]);
 
         $this->actingAs($user)
             ->getJson('/api/v1/services')

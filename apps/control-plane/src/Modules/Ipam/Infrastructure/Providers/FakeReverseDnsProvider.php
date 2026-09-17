@@ -46,6 +46,18 @@ final class FakeReverseDnsProvider implements ReverseDnsProvider
     public const string TIMEOUT_MARKER = 'ptr-timeout';
 
     /**
+     * The two withdrawals that fail, chosen by address because a withdrawal
+     * names nothing else.
+     *
+     * Both are in 203.0.113.0/24 — RFC 5737's documentation range, the same
+     * one every address in this repository's examples comes from — so neither
+     * can collide with a real address a deployment holds.
+     */
+    public const string REFUSED_WITHDRAWAL_ADDRESS = '203.0.113.199';
+
+    public const string TIMED_OUT_WITHDRAWAL_ADDRESS = '203.0.113.198';
+
+    /**
      * A credential-shaped string the refusal quotes back, because that is what
      * a real zone client does when it fails: it prints the request it sent,
      * headers and all. Nothing stores a provider message without redacting it,
@@ -96,6 +108,44 @@ final class FakeReverseDnsProvider implements ReverseDnsProvider
         // One record per address: a repeat replaces rather than appends, which
         // is the idempotence the interface promises.
         $this->published[$address->value()] = $hostname->value();
+
+        $this->remember();
+    }
+
+    public function clear(IpAddressValue $address): void
+    {
+        $this->restore();
+
+        /*
+         * The fault is chosen by the address, and it has to be: a withdrawal
+         * names no hostname. The caller says "this address answers for
+         * nobody", and the only thing a caller chooses is which address — so
+         * the two markers a withdrawal can hit are two addresses, in the range
+         * RFC 5737 set aside for documentation, which is where every address
+         * in this repository's examples comes from.
+         *
+         * Reading the marker off whatever happens to be published would not
+         * work at all: `publish()` refuses a marked hostname, so a marked name
+         * can never be in the map for `clear()` to find.
+         */
+        if ($address->value() === self::REFUSED_WITHDRAWAL_ADDRESS) {
+            throw ReverseDnsProviderException::refused(
+                $address->value(),
+                sprintf('DELETE /zones/rdns 401 {"error":"refused"} (Authorization: Bearer %s)', self::ZONE_TOKEN),
+            );
+        }
+
+        if ($address->value() === self::TIMED_OUT_WITHDRAWAL_ADDRESS) {
+            throw ReverseDnsProviderException::timedOut($address->value());
+        }
+
+        /*
+         * Nothing to remove is success, not a failure. The interface says so,
+         * and the reason is the sweep: a withdrawal is a statement about the
+         * end state, and an adapter that complained about work already done
+         * would leave a finished row being retried for ever.
+         */
+        unset($this->published[$address->value()]);
 
         $this->remember();
     }

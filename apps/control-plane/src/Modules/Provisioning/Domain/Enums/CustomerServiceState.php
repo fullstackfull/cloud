@@ -73,8 +73,11 @@ enum CustomerServiceState: string
      * and `Terminated` are facts about what the customer owns, and no job
      * outcome is allowed to talk over them.
      */
-    public static function for(ServiceStatus $status, bool $isAwaitingReview = false): self
-    {
+    public static function for(
+        ServiceStatus $status,
+        bool $isAwaitingReview = false,
+        bool $deliveryIsInDoubt = false,
+    ): self {
         $state = match ($status) {
             ServiceStatus::Pending => self::Pending,
             ServiceStatus::Provisioning => self::Provisioning,
@@ -84,6 +87,10 @@ enum CustomerServiceState: string
             ServiceStatus::Terminated => self::Terminated,
             ServiceStatus::Failed => self::Failed,
         };
+
+        if ($deliveryIsInDoubt && $state->isEclipsedByDeliveryReview()) {
+            return self::UnderReview;
+        }
 
         if ($isAwaitingReview && $state->isEclipsedByReview()) {
             return self::UnderReview;
@@ -113,6 +120,41 @@ enum CustomerServiceState: string
     }
 
     /**
+     * Whether a stuck *delivery* job speaks louder than this state.
+     *
+     * A wider rule than the one above, and the difference is the whole point.
+     *
+     * The rule above asks "is the platform still trying to deliver this?" and
+     * answers no for `Active`, on sound reasoning: a failed reboot of a
+     * running server is not a failed server, and a stuck operational job must
+     * not make a customer's working machine read as broken.
+     *
+     * That reasoning does not hold for the job that delivered the service. A
+     * `create_vps` whose hypervisor task ended in failure is not a failed
+     * reboot: the platform accepted the request, wrote the machine row,
+     * activated the service on the strength of the request being accepted, and
+     * then found out the build did not finish. The machine may be half-built,
+     * unbootable or absent. Reporting that as `active` tells a customer that
+     * the thing they are being billed for works, on the strength of a task
+     * that reported failure — and Gap 7 found exactly that, with the drift
+     * report already saying "the platform is billing for, and showing the
+     * customer, a machine whose build the hypervisor says did not finish".
+     *
+     * So a delivery job waiting on a person eclipses everything except the two
+     * states where there is nothing left to be in doubt about: a terminated
+     * service is gone whatever happened to its build, and `under_review` is
+     * already the answer.
+     */
+    public function isEclipsedByDeliveryReview(): bool
+    {
+        return match ($this) {
+            self::Pending, self::Provisioning, self::Failed,
+            self::Active, self::Suspended, self::Reactivating => true,
+            self::Terminated, self::UnderReview => false,
+        };
+    }
+
+    /**
      * The service statuses a row in this customer-facing state can be sitting
      * in, so that filtering a list by one of these words asks the database the
      * same question the serialiser answers.
@@ -133,10 +175,26 @@ enum CustomerServiceState: string
             self::Reactivating => [ServiceStatus::Reactivating],
             self::Terminated => [ServiceStatus::Terminated],
             self::Failed => [ServiceStatus::Failed],
-            // A service waiting on a person can be sitting in any of the three
-            // undelivered statuses, depending on whether the sweeper or the
-            // engine settled its job.
-            self::UnderReview => [ServiceStatus::Pending, ServiceStatus::Provisioning, ServiceStatus::Failed],
+            /*
+             * A service waiting on a person can be sitting in any status but
+             * terminated.
+             *
+             * The three undelivered ones, because that is where the sweeper or
+             * the engine leaves a build it gave up on. And the three delivered
+             * ones as well, because a delivery job that ended in review
+             * eclipses them too — see {@see isEclipsedByDeliveryReview()} —
+             * and a status this list left out would be a row the filter could
+             * never return even though the response prints `under_review` for
+             * it.
+             */
+            self::UnderReview => [
+                ServiceStatus::Pending,
+                ServiceStatus::Provisioning,
+                ServiceStatus::Failed,
+                ServiceStatus::Active,
+                ServiceStatus::Suspended,
+                ServiceStatus::Reactivating,
+            ],
         };
     }
 }

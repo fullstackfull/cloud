@@ -87,6 +87,50 @@ final class CloudflareReverseDnsProvider implements ReverseDnsProvider
         $this->upsert($zoneId, $ptrName, $hostname, $address);
     }
 
+    public function clear(IpAddressValue $address): void
+    {
+        $ptrName = self::ptrNameFor($address);
+
+        $zoneId = $this->zoneServing($ptrName, $address);
+
+        if ($zoneId === null) {
+            /*
+             * No zone to write into means no record to remove. Reported as
+             * done rather than as an error, and the asymmetry with publish()
+             * is deliberate: publishing into a zone the account does not hold
+             * is a lie about a record a receiver will check, and withdrawing
+             * from one is a statement that already holds.
+             */
+            return;
+        }
+
+        $existing = $this->call(
+            'GET',
+            '/zones/'.$zoneId.'/dns_records',
+            ['type' => 'PTR', 'name' => $ptrName, 'per_page' => 1],
+            'read the PTR to withdraw for '.$address->value(),
+            $address,
+        );
+
+        /** @var array<string, mixed>|null $current */
+        $current = is_array($existing['result'] ?? null) ? (array_values($existing['result'])[0] ?? null) : null;
+
+        $id = is_array($current) ? (string) ($current['id'] ?? '') : '';
+
+        if ($id === '') {
+            // Already gone. The interface promises this is success.
+            return;
+        }
+
+        $this->call(
+            'DELETE',
+            '/zones/'.$zoneId.'/dns_records/'.$id,
+            [],
+            'withdraw the PTR for '.$address->value(),
+            $address,
+        );
+    }
+
     /**
      * The PTR name for an address: `10.2.0.192.in-addr.arpa`, or the nibble
      * form under `ip6.arpa`.

@@ -52,6 +52,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $server = $this->serverFor($customer, ['power_state' => PowerState::Off]);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-001')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             // 202: the controller took the instruction, the chassis has not
             // finished acting on it.
@@ -73,6 +74,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-002')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'off'])
             ->assertStatus(202);
 
@@ -105,6 +107,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $this->recordController($server);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-003')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'off'])
             ->assertStatus(202)
             // The 202 carries the whole truth: taken, not finished.
@@ -124,6 +127,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server, PowerState::On);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-004')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             ->assertStatus(202);
 
@@ -142,6 +146,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server, PowerState::Off);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-005')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             ->assertStatus(202);
 
@@ -160,6 +165,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server, PowerState::Unknown);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-006')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             ->assertStatus(202);
 
@@ -175,6 +181,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server, PowerState::On, timeOut: true);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-007')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             // 504, not 502. "The upstream failed" invites a retry; "the
             // platform stopped waiting" is the answer a sensible client treats
@@ -205,6 +212,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         ])->save();
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-008')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             ->assertStatus(502)
             // Not the BMC layer's own code: that exception is written for an
@@ -227,6 +235,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         ])->save();
 
         $response = $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-009')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             ->assertStatus(502);
 
@@ -283,6 +292,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         config()->set('dedicated.credentials', []);
 
         $response = $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-010')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             ->assertStatus(500)
             ->assertJsonPath('error.code', 'dedicated.server_control_unavailable');
@@ -314,6 +324,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-011')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'dedicated.operation_refused')
@@ -345,6 +356,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
             ]);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-012')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             ->assertStatus(202);
     }
@@ -366,6 +378,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
          */
         foreach (range(1, 5) as $ignored) {
             $this->actingAs($user)
+                ->withHeader('Idempotency-Key', 'dedicated-power-013')
                 ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
                 ->assertStatus(202);
         }
@@ -385,6 +398,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $hers = $this->serverFor($theirs);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-014')
             ->postJson("/api/v1/dedicated/{$hers->id}/power", ['action' => 'cycle'])
             ->assertStatus(404)
             ->assertJsonPath('error.code', 'resource.not_found');
@@ -404,6 +418,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         // A customer id arriving in a body is a request to act on somebody
         // else's data. It is not read, so it changes nothing.
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-015')
             ->postJson("/api/v1/dedicated/{$hers->id}/power", [
                 'action' => 'cycle',
                 'customer_id' => $theirs->getKey(),
@@ -420,6 +435,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-016')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             // A customer power cycling a host in the middle of a firmware
             // flash bricks it in a way no support ticket recovers.
@@ -437,6 +453,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $server = $this->serverFor($customer, ['status' => DedicatedServerStatus::Provisioning]);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-017')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'off'])
             ->assertStatus(409)
             ->assertJsonPath('error.details.status', 'provisioning');
@@ -451,6 +468,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-018')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'ipmitool chassis power off'])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'validation.failed')
@@ -467,6 +485,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $server = $this->serverFor($customer);
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-019')
             ->postJson("/api/v1/dedicated/{$server->id}/power", [])
             ->assertStatus(422)
             ->assertJsonStructure(['error' => ['details' => ['fields' => ['action']]]]);
@@ -482,6 +501,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $controller = $this->recordController($server);
 
         $this->actingAs($watcher)
+            ->withHeader('Idempotency-Key', 'dedicated-power-020')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'cycle'])
             ->assertStatus(403)
             ->assertJsonPath('error.code', 'auth.forbidden');
@@ -497,6 +517,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $endpoint = $server->bmcEndpoints()->firstOrFail();
 
         $response = $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-021')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             ->assertStatus(202);
 
@@ -526,6 +547,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         $server->bmcEndpoints()->delete();
 
         $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'dedicated-power-022')
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             // A platform fault, not a customer one: the machine was sold
             // without a way to reach it out of band. Reported in the customer

@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dedicated\Application\Actions;
 
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Dedicated\Domain\DTOs\BmcOperation;
+use Lynomia\Modules\Dedicated\Domain\Enums\BmcProtocol;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
+use Lynomia\Modules\Dedicated\Domain\Enums\PowerOperationOutcome;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\BmcNotConfiguredException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedControlUnavailableException;
@@ -14,6 +18,7 @@ use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedProviderException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\PowerOperationIndeterminateException;
 use Lynomia\Modules\Dedicated\Domain\Services\DedicatedOperationGuard;
 use Lynomia\Modules\Dedicated\Infrastructure\DedicatedProviderFactory;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedPowerOperation;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 
 /**
@@ -55,6 +60,23 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
  * translated into {@see PowerOperationIndeterminateException} and nothing is
  * retried, nothing is rolled back, and no state is written from a guess.
  *
+ * **One intent reaches the chassis once.** A caller's idempotency key becomes
+ * a row in `dedicated_power_operations`, claimed before the controller is
+ * called and settled after it answers. The unique index on that key is what
+ * makes the claim atomic: two concurrent requests carrying one key race for
+ * one insert, the loser blocks on the index until the winner's insert commits
+ * and then reads the winner's row, and the controller is called once. The
+ * claim is committed before the provider is called — not held open across it —
+ * so that window is as short as a single insert rather than as long as a BMC
+ * round trip. A replay after the first request settled is answered from the row —
+ * including when the answer is a refusal or a timeout, because "we do not
+ * know" repeated is still the truth and a second reset is not a way to find
+ * out.
+ *
+ * Two different keys are two intents and both execute: a customer who reboots
+ * at nine and again at noon meant both, and this deliberately does not
+ * deduplicate a verb forever.
+ *
  * ---------------------------------------------------------------------------
  * Every failure leaves through this class in the platform's own words
  * ---------------------------------------------------------------------------
@@ -82,12 +104,18 @@ final readonly class ChangeDedicatedServerPower
     ) {}
 
     /**
-     * @throws DedicatedOperationRefusedException the machine is not in service, or is being rebuilt
+     * @param  string|null  $clientKey  the caller's own idempotency key, when the caller has one
+     *
+     * @throws DedicatedOperationRefusedException the machine is not in service, is being rebuilt, or the same key is still in flight
      * @throws DedicatedControlUnavailableException the controller refused, or cannot be reached at all
      * @throws PowerOperationIndeterminateException the controller stopped answering
      */
-    public function execute(DedicatedServer $server, DedicatedPowerAction $action): BmcOperation
-    {
+    public function execute(
+        DedicatedServer $server,
+        DedicatedPowerAction $action,
+        ?string $clientKey = null,
+        ?string $requestedByUserId = null,
+    ): BmcOperation {
         $this->guard->assertInService($server);
 
         /*
@@ -115,6 +143,20 @@ final readonly class ChangeDedicatedServerPower
                 $action,
                 BmcNotConfiguredException::noEndpoint($serverId),
             );
+        }
+
+        /*
+         * The claim, before anything is sent.
+         *
+         * Placed after the guards and after the endpoint lookup — a request
+         * the platform refuses outright has no business consuming a key — and
+         * before the provider is resolved, because everything from here on can
+         * reach the chassis.
+         */
+        $record = $clientKey === null ? null : $this->claim($server, $action, $clientKey, $requestedByUserId);
+
+        if ($record !== null && $record->outcome->isSettled()) {
+            return $this->replay($record, $server, $action);
         }
 
         try {
@@ -180,17 +222,21 @@ final readonly class ChangeDedicatedServerPower
                  * column is left exactly as it was, because the alternative is
                  * recording a state nobody observed.
                  */
-                throw PowerOperationIndeterminateException::after(
-                    $serverId,
-                    $action,
-                    $e,
-                );
+                $indeterminate = PowerOperationIndeterminateException::after($serverId, $action, $e);
+
+                $this->settle($record, PowerOperationOutcome::Indeterminate, failureCode: $indeterminate->errorCode());
+
+                throw $indeterminate;
             }
 
             // The controller answered and declined. Nothing happened, and the
-            // caller may send the request again — which is all the customer
-            // needs to know, and all they are told.
-            throw DedicatedControlUnavailableException::controllerRefused($serverId, $action, $e);
+            // caller may send the request again — with a new key, because this
+            // one now carries this answer.
+            $refused = DedicatedControlUnavailableException::controllerRefused($serverId, $action, $e);
+
+            $this->settle($record, PowerOperationOutcome::Refused, failureCode: $refused->errorCode());
+
+            throw $refused;
         }
 
         /*
@@ -220,6 +266,133 @@ final readonly class ChangeDedicatedServerPower
             $server->forceFill(['power_state' => $operation->resultingPowerState])->save();
         }
 
+        $this->settle($record, PowerOperationOutcome::Accepted, $operation);
+
         return $operation;
+    }
+
+    /**
+     * Claim this intent, or hand back the row that already owns it.
+     *
+     * The insert is the lock. A read-then-write would let two concurrent
+     * requests both find nothing and both call the controller, which is the
+     * defect this table exists to close; the unique index means one of them
+     * loses at the database and reads the winner's row instead.
+     *
+     * @throws DedicatedOperationRefusedException the winning request has not settled yet
+     */
+    private function claim(
+        DedicatedServer $server,
+        DedicatedPowerAction $action,
+        string $clientKey,
+        ?string $requestedByUserId,
+    ): DedicatedPowerOperation {
+        $key = DedicatedIdempotencyKey::for($server, 'power:'.$action->value, $clientKey);
+
+        try {
+            /*
+             * Wrapped in its own transaction, which is not decoration on
+             * PostgreSQL: a constraint violation aborts the transaction it
+             * happens in, and every statement after it fails with "current
+             * transaction is aborted" until a rollback. The wrapper gives the
+             * failed insert a savepoint to roll back to, so the read below
+             * runs on a healthy connection — the same reason
+             * `ProvisionOrderedService` wraps the service insert it races on.
+             */
+            /** @var DedicatedPowerOperation $claimed */
+            $claimed = DB::transaction(fn (): DedicatedPowerOperation => DedicatedPowerOperation::query()->create([
+                'dedicated_server_id' => $server->getKey(),
+                'customer_id' => $server->customer_id,
+                'requested_by_user_id' => $requestedByUserId,
+                'action' => $action,
+                'idempotency_key' => $key,
+                'outcome' => PowerOperationOutcome::Claimed,
+                'requested_at' => now(),
+            ]));
+
+            return $claimed;
+        } catch (UniqueConstraintViolationException) {
+            /** @var DedicatedPowerOperation $existing */
+            $existing = DedicatedPowerOperation::query()->where('idempotency_key', $key)->firstOrFail();
+
+            if (! $existing->outcome->isSettled()) {
+                throw DedicatedOperationRefusedException::becauseTheSameRequestIsStillInFlight(
+                    (string) $server->getKey(),
+                    $action,
+                );
+            }
+
+            return $existing;
+        }
+    }
+
+    /**
+     * Answer a repeat from what the first request found out.
+     *
+     * The chassis is not touched. A refusal and a timeout are re-raised as the
+     * same exceptions the first caller saw, because an idempotency key
+     * promises the same answer and not a second attempt — and for a timeout
+     * that promise is the safety property: the machine may be mid-reset.
+     *
+     * @throws DedicatedControlUnavailableException
+     * @throws PowerOperationIndeterminateException
+     */
+    private function replay(
+        DedicatedPowerOperation $record,
+        DedicatedServer $server,
+        DedicatedPowerAction $action,
+    ): BmcOperation {
+        $serverId = (string) $server->getKey();
+
+        return match ($record->outcome) {
+            PowerOperationOutcome::Accepted => new BmcOperation(
+                operation: (string) $record->provider_operation,
+                endpointId: (string) $record->bmc_endpoint_id,
+                protocol: $record->bmc_protocol ?? BmcProtocol::Redfish,
+                accepted: (bool) $record->accepted,
+                taskId: $record->provider_task_id,
+                resultingPowerState: $record->resulting_power_state,
+            ),
+            /*
+             * Re-raised with no `previous`. There is no new provider failure
+             * to carry — nothing was sent — and inventing one would put a
+             * fabricated controller response in the log next to the real one
+             * the first request recorded.
+             */
+            PowerOperationOutcome::Refused => throw DedicatedControlUnavailableException::controllerRefused(
+                $serverId,
+                $action,
+            ),
+            PowerOperationOutcome::Indeterminate => throw PowerOperationIndeterminateException::after(
+                $serverId,
+                $action,
+            ),
+            // Unreachable: the caller checked isSettled() first. Kept so that
+            // a fifth outcome added later fails here rather than silently
+            // returning an accepted operation nobody recorded.
+            PowerOperationOutcome::Claimed => throw DedicatedOperationRefusedException::becauseTheSameRequestIsStillInFlight(
+                $serverId,
+                $action,
+            ),
+        };
+    }
+
+    private function settle(
+        ?DedicatedPowerOperation $record,
+        PowerOperationOutcome $outcome,
+        ?BmcOperation $operation = null,
+        ?string $failureCode = null,
+    ): void {
+        $record?->forceFill([
+            'outcome' => $outcome,
+            'accepted' => $operation?->accepted,
+            'resulting_power_state' => $operation?->resultingPowerState,
+            'provider_operation' => $operation?->operation,
+            'bmc_endpoint_id' => $operation?->endpointId,
+            'bmc_protocol' => $operation?->protocol,
+            'provider_task_id' => $operation?->taskId,
+            'failure_code' => $failureCode,
+            'settled_at' => now(),
+        ])->save();
     }
 }

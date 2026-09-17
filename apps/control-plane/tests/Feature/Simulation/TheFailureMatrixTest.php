@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Simulation;
 
 use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
+use Lynomia\Modules\Backups\Application\Actions\VerifyStoredArchives;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -31,6 +32,7 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\IpReservation;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
+use Lynomia\Modules\Provisioning\Domain\Enums\CustomerServiceState;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -279,48 +281,42 @@ final class TheFailureMatrixTest extends GoldenPathHarness
     }
 
     #[Test]
-    public function a_purchased_machine_is_built_with_no_image_at_all_and_that_is_a_carried_gap(): void
+    public function a_purchased_machine_is_built_from_the_image_the_plan_was_sold_with(): void
     {
         /*
          * ---------------------------------------------------------------------
-         * A finding, not a scenario that behaves as intended
+         * What this test used to assert, and why it changed
          * ---------------------------------------------------------------------
          *
-         * The brief asks what happens when the image a plan needs is missing.
-         * The answer this gap found is stranger: the build never asks for one.
+         * Gap 7 found that a purchased VPS reached the hypervisor with no
+         * image at all. Every half worked — the catalogue held installable
+         * images per cluster, preflight checked the mapping, the reinstall
+         * path resolved one and refused without it — and the purchase joined
+         * none of them: `ProvisionOrderedService` wrote the cluster, the pool,
+         * the storage class and a hostname, and no template; `CreateVpsHandler`
+         * passed null; `ProxmoxComputeProvider` omitted `import-from` and
+         * created a disk with nothing on it. The customer paid for a machine
+         * that boots to a firmware prompt.
          *
-         *  - the catalogue holds installable images per cluster, and preflight
-         *    checks them (`mapping.template`, asserted in the VPS gate);
-         *  - the reinstall path resolves one and refuses without it;
-         *  - `ProvisionOrderedService` puts `vcpu`, `memory_mib`, `disk_gib`,
-         *    the cluster, the pool, the storage class and a hostname into the
-         *    payload, and no template;
-         *  - `CreateVpsHandler` reads `template_reference` from the payload and
-         *    passes null when it is absent;
-         *  - `ProxmoxComputeProvider` omits `import-from` for a null reference,
-         *    which creates the disk and imports nothing.
-         *
-         * So a customer's machine is built with an empty disk. Every half of
-         * this works; the workflow never joins them, which is exactly the kind
-         * of gap a phase about workflows exists to find.
-         *
-         * This test asserts today's behaviour, and its name says that is the
-         * gap. A fix is a product decision — which image a plan implies is a
-         * catalogue relationship that does not exist yet — so it is recorded
-         * and carried to Gap 8 rather than invented here.
+         * That test asserted the defect and said so in its name. This one
+         * asserts the fix, over the same path: the image is resolved at the
+         * purchase from the plan's own placement constraints, carried through
+         * the job payload across the queue, and handed to the hypervisor —
+         * which records what it installed.
          */
         $estate = $this->committedVpsEstate();
 
         $plan = $this->committedPlan(ProductKind::Vps, monthlyMinor: 9_000, placement: [
             'cluster_id' => (string) $estate['cluster']->getKey(),
             'ip_pool_id' => (string) $estate['pool']->getKey(),
+            'template_slug' => $estate['template']->slug,
         ]);
 
         $customer = $this->committedCustomer();
 
-        [, $invoice] = $this->orderAndInvoice($customer, $plan, 'matrix-no-image');
+        [, $invoice] = $this->orderAndInvoice($customer, $plan, 'matrix-image');
 
-        $this->payThroughTheProvider($invoice, $customer, 'pi_matrix_no_image');
+        $this->payThroughTheProvider($invoice, $customer, 'pi_matrix_image');
 
         $this->work('payments');
         $this->work(RunProvisioningJob::QUEUE);
@@ -328,20 +324,24 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         $service = Service::query()->where('customer_id', $customer->getKey())->sole();
         $job = ProvisioningJob::query()->where('service_id', $service->getKey())->sole();
 
-        // The build succeeded, which is the problem.
         $this->assertSame(ProvisioningJobStatus::Succeeded, $job->status);
         $this->assertSame(ServiceStatus::Active, $service->fresh()?->status);
 
-        $this->assertArrayNotHasKey(
-            'template_reference',
-            (array) $job->payload,
-            'a template reached the payload — the carried gap has been closed, update this test',
-        );
+        /*
+         * Durable, on the message that crossed the queue — not re-derived in
+         * the worker. An operator who stages a second image between payment
+         * and build must not change what a paid-for order delivers.
+         */
+        $payload = (array) $job->payload;
+
+        $this->assertSame((string) $estate['template']->getKey(), $payload['template_id'] ?? null);
+        $this->assertSame($estate['template']->provider_reference, $payload['template_reference'] ?? null);
 
         /*
-         * And the hypervisor's own record of what it installed: nothing. The
-         * controlled provider records the image it was given under the key the
-         * reinstall uses, which is what makes the absence observable at all.
+         * And the hypervisor's own record of what it installed, read back
+         * through the provider rather than from the platform's own row: the
+         * one place a claim about an image can be checked against the thing
+         * that would have installed it.
          */
         $machine = VirtualMachine::query()->where('service_id', $service->getKey())->sole();
 
@@ -350,7 +350,61 @@ final class TheFailureMatrixTest extends GoldenPathHarness
             ->getVm($estate['node']->provider_name, (string) $machine->provider_id);
 
         $this->assertNotNull($remote);
-        $this->assertNull($remote->raw['installed_template'] ?? null);
+        $this->assertSame(
+            $estate['template']->provider_reference,
+            $remote->raw['installed_template'] ?? null,
+            'the machine was built from a different image than the one the plan was sold with',
+        );
+    }
+
+    #[Test]
+    public function a_plan_with_no_image_to_install_waits_for_an_operator_instead_of_building_an_empty_disk(): void
+    {
+        /*
+         * The negative twin. Two installable images on the cluster and no
+         * `template_slug` on the plan: the platform has no basis for choosing
+         * — the same rule that refuses to pick between two clusters — so
+         * nothing is built, no job exists, and the service carries a reason a
+         * person can act on.
+         *
+         * Asserted through the money path rather than by calling the action,
+         * because the property that matters is that a *paid* order stops here
+         * rather than producing a machine with an empty disk.
+         */
+        $estate = $this->committedVpsEstate();
+
+        $this->outsideTheTransaction(fn (): VmTemplate => VmTemplate::factory()->create([
+            'cluster_id' => $estate['cluster']->getKey(),
+        ]));
+
+        $plan = $this->committedPlan(ProductKind::Vps, monthlyMinor: 9_000, placement: [
+            'cluster_id' => (string) $estate['cluster']->getKey(),
+            'ip_pool_id' => (string) $estate['pool']->getKey(),
+        ]);
+
+        $customer = $this->committedCustomer();
+
+        [, $invoice] = $this->orderAndInvoice($customer, $plan, 'matrix-image-ambiguous');
+
+        $this->payThroughTheProvider($invoice, $customer, 'pi_matrix_image_ambiguous');
+
+        $this->work('payments');
+
+        $service = Service::query()->where('customer_id', $customer->getKey())->sole();
+
+        // No job, so nothing for a worker to build and nothing at the
+        // hypervisor to clean up afterwards.
+        $this->assertSame(0, ProvisioningJob::query()->where('service_id', $service->getKey())->count());
+        $this->assertSame(0, VirtualMachine::query()->where('service_id', $service->getKey())->count());
+
+        // Still pending rather than provisioning: the customer is not shown a
+        // build that is not happening.
+        $this->assertSame(ServiceStatus::Pending, $service->status);
+
+        $this->assertSame(
+            'the plan names no installable OS image, and the cluster offers no single one',
+            ((array) $service->resources)['placement_blocked_reason'] ?? null,
+        );
     }
 
     #[Test]
@@ -383,15 +437,32 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         $this->assertNotNull($settled->last_error, 'the task failed and nothing says why');
 
         /*
-         * A finding, recorded rather than asserted away: the service is left
-         * ACTIVE. The create was accepted, the handler wrote the machine and
-         * activated the service, and the later task failure moves the job and
-         * not the service. Whether an active service whose build failed should
-         * be demoted, or whether the operation record is the right place for
-         * that news, is a product decision — it is carried to Gap 8 in §33 of
-         * the report rather than decided in a test.
+         * The status column is left ACTIVE, and that is now a decision rather
+         * than a finding.
+         *
+         * `services.status` means what the state machine says it means: what
+         * the customer bought and owes for. Rewriting it from a job outcome is
+         * what would let a failed reboot erase a machine's history, so a
+         * failed create task does not touch it either.
+         *
+         * What the customer is TOLD is a different question, and Gap 8
+         * answered it: a `needs_review` job whose kind created the service
+         * eclipses the service's word, so this reads `under_review` and not
+         * `active`. The policy and its whole table are in
+         * `ThePartialCreatePolicyTest`; asserted here as well because this is
+         * the path that found the defect.
          */
         $this->assertSame(ServiceStatus::Active, $service->fresh()?->status);
+
+        $this->assertSame(
+            CustomerServiceState::UnderReview,
+            CustomerServiceState::for(
+                ServiceStatus::Active,
+                isAwaitingReview: true,
+                deliveryIsInDoubt: true,
+            ),
+            'a customer is told their machine is active while its build is waiting for a person',
+        );
     }
 
     #[Test]
@@ -615,8 +686,14 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         $this->assertSame(BackupState::Failed, $settled?->state);
         $this->assertNotNull($settled->failure_reason, 'the archive could not be read back and nothing says so');
 
-        // Not verified, and not silently left as though it had been.
-        $this->assertNotTrue($settled->verified);
+        /*
+         * Not verified, and said so with the third value rather than with the
+         * absence of one. Gap 8 made this explicit: `verified` used to stay
+         * null after a verification that failed, which made "checked and
+         * unreadable" indistinguishable from "nobody has checked" on the one
+         * column a reader is most likely to look at.
+         */
+        $this->assertFalse($settled->verified);
         $this->assertNull($settled->verified_at);
     }
 
@@ -639,18 +716,150 @@ final class TheFailureMatrixTest extends GoldenPathHarness
     }
 
     #[Test]
-    public function a_backup_nobody_verified_is_never_reported_as_verified(): void
+    public function a_backup_nobody_has_asked_about_yet_is_never_reported_as_verified(): void
     {
         /*
-         * The other half of the three-valued answer, and the one nothing
-         * asserted: an ordinary backup that finished. It is `Succeeded`,
-         * which means the datastore wrote it; `verified` stays null, which
-         * means nobody has read it back. Folding those together is how a
+         * The first of the three values, asserted before anything asks. It is
+         * `Succeeded`, which means the datastore wrote it; `verified` is null,
+         * which means nobody has read it back. Folding those together is how a
          * platform comes to tell a customer their backups are fine on the
-         * strength of never having checked — so the null is asserted here as
-         * a value, not treated as the absence of one.
+         * strength of never having checked — so the null is asserted here as a
+         * value, not treated as the absence of one.
          */
-        $backup = $this->outsideTheTransaction(function (): Backup {
+        $backup = $this->committedStoredArchive();
+
+        $this->assertSame(BackupState::Succeeded, $backup->state);
+        $this->assertNull($backup->verified, 'a backup nobody read back is reported as one that was');
+        $this->assertNull($backup->verified_at);
+        $this->assertSame(0, $backup->verification_attempts);
+    }
+
+    #[Test]
+    public function a_stored_archive_is_sent_for_verification_and_comes_back_verified(): void
+    {
+        /*
+         * The whole loop, and the half of it that did not exist until Gap 8.
+         *
+         * `startVerification` was on the provider contract and on both
+         * drivers, `Verifying` was a state with `Succeeded → Verifying →
+         * Verified` in the transition table, and the poller already knew how
+         * to settle a verification into a verdict. Nothing ever put a row into
+         * `Verifying`, so `verified` was null for every backup this platform
+         * had ever taken — which docs/backups.md describes as the difference
+         * between "the job reported success" and "the data is readable".
+         *
+         * Both halves run in their own processes, as the scheduler runs them.
+         */
+        $backup = $this->committedStoredArchive();
+
+        $this->runArtisan('backups:verify');
+
+        $asked = $backup->fresh();
+
+        $this->assertSame(BackupState::Verifying, $asked?->state);
+        $this->assertNotNull($asked->verification_task_id, 'the platform says it is verifying and named no task');
+        $this->assertSame(1, $asked->verification_attempts);
+        $this->assertNotNull($asked->verification_requested_at);
+
+        $this->runArtisan('backups:reconcile');
+        $this->runArtisan('backups:reconcile');
+
+        $settled = $backup->fresh();
+
+        $this->assertSame(BackupState::Verified, $settled?->state);
+        $this->assertTrue($settled->verified);
+        $this->assertNotNull($settled->verified_at);
+    }
+
+    #[Test]
+    public function an_archive_the_datastore_cannot_read_back_is_never_reported_as_verified(): void
+    {
+        // The same loop, the same two commands, and the opposite verdict —
+        // reached through the initiator rather than by putting the row into
+        // `Verifying` by hand.
+        $backup = $this->committedStoredArchive(FakeBackupProvider::FAILING_MARKER);
+
+        $this->runArtisan('backups:verify');
+        $this->runArtisan('backups:reconcile');
+        $this->runArtisan('backups:reconcile');
+
+        $settled = $backup->fresh();
+
+        $this->assertSame(BackupState::Failed, $settled?->state);
+        $this->assertFalse($settled->verified);
+        $this->assertNull($settled->verified_at);
+        $this->assertNotNull($settled->failure_reason);
+    }
+
+    #[Test]
+    public function running_the_verification_sweep_twice_starts_one_verification(): void
+    {
+        /*
+         * The sweep runs every five minutes for the life of the platform, so
+         * "safe to repeat" is not a nicety. A second run must not start a
+         * second verification of the same archive: two tasks against one
+         * archive means the poller settles the row from whichever finishes
+         * first and the other's verdict is lost.
+         *
+         * What makes it safe is the scope rather than a flag: `Succeeded →
+         * Verifying` takes the row out of it.
+         */
+        $backup = $this->committedStoredArchive();
+
+        $this->runArtisan('backups:verify');
+        $this->runArtisan('backups:verify');
+
+        $asked = $backup->fresh();
+
+        $this->assertSame(1, $asked?->verification_attempts, 'a second sweep asked for a second verification');
+        $this->assertSame(BackupState::Verifying, $asked->state);
+    }
+
+    #[Test]
+    public function a_datastore_that_refuses_verification_is_asked_a_bounded_number_of_times(): void
+    {
+        /*
+         * A refusal leaves the archive stored and unverified, which is true,
+         * and the attempt counter is what stops the sweep asking a broken
+         * datastore several hundred times an hour for ever.
+         *
+         * The row stays `Succeeded` deliberately: the archive is there. What
+         * is unknown is whether it can be read, and the null in `verified`
+         * already says exactly that.
+         */
+        $backup = $this->committedStoredArchive(FakeBackupProvider::REFUSAL_MARKER);
+
+        $limit = (int) config('backups.verification_attempts');
+
+        /*
+         * Run in this process rather than through the command, deliberately.
+         * `runArtisan` asserts the command exited cleanly, and a sweep whose
+         * datastore refused exits non-zero on purpose — that exit code is how
+         * an operator finds out a provider is down. What this test is about is
+         * the counter, which is database state either way.
+         */
+        foreach (range(1, $limit + 2) as $ignored) {
+            app(VerifyStoredArchives::class)->execute();
+        }
+
+        $settled = $backup->fresh();
+
+        $this->assertSame(BackupState::Succeeded, $settled?->state);
+        $this->assertNull($settled->verified);
+        $this->assertSame($limit, $settled->verification_attempts, 'the sweep kept asking a datastore that had refused');
+    }
+
+    /**
+     * A stored archive: a backup whose task finished and whose archive the
+     * datastore named, with nothing having read it back.
+     *
+     * The marker travels in the archive id because that is what a verification
+     * names, and the controlled datastore reads its faults from the arguments
+     * it is given.
+     */
+    private function committedStoredArchive(string $marker = ''): Backup
+    {
+        return $this->outsideTheTransaction(function () use ($marker): Backup {
             $customer = $this->committedCustomer();
             $cluster = ComputeCluster::factory()->create(['status' => 'active']);
             $node = ComputeNode::factory()->withCapacity(32, 65_536, 2_000)->create([
@@ -663,25 +872,28 @@ final class TheFailureMatrixTest extends GoldenPathHarness
                 'status' => ServiceStatus::Active,
             ]);
 
-            $machine = VirtualMachine::factory()
-                ->onNode($node)
-                ->forService($service)
-                ->resources(2, 2048, 20)
-                ->create();
+            $datastore = 'pbs-test-01';
 
-            config()->set('backups.datastores.'.$cluster->slug, 'pbs-test-01');
+            config()->set('backups.datastores.'.$cluster->slug, $datastore);
 
-            return app(RequestServiceBackup::class)->execute($machine, notes: 'the nightly one');
+            return Backup::factory()->create([
+                'customer_id' => $customer->getKey(),
+                'service_id' => $service->getKey(),
+                'cluster_id' => $cluster->getKey(),
+                'node_name' => $node->provider_name,
+                'datastore' => $datastore,
+                'state' => BackupState::Succeeded,
+                'archive_id' => 'vzdump-qemu-9101-'.($marker === '' ? 'clean' : $marker).'.vma.zst',
+                'provider' => 'fake',
+                'provider_task_id' => 'UPID:fake-backup:done-'.uniqid(),
+                'started_at' => now()->subMinutes(5),
+                'finished_at' => now(),
+                'verified' => null,
+                'verified_at' => null,
+                'verification_task_id' => null,
+                'failure_reason' => null,
+            ]);
         });
-
-        $this->runArtisan('backups:reconcile');
-        $this->runArtisan('backups:reconcile');
-
-        $settled = $backup->fresh();
-
-        $this->assertSame(BackupState::Succeeded, $settled?->state);
-        $this->assertNull($settled->verified, 'a backup nobody read back is reported as one that was');
-        $this->assertNull($settled->verified_at);
     }
 
     /**
@@ -717,6 +929,13 @@ final class TheFailureMatrixTest extends GoldenPathHarness
                     'ip_pool_id' => (string) $estate['pool']->getKey(),
                     'storage_class' => 'nvme',
                     'hostname' => $hostname,
+                    // The image the purchase would have resolved. Carried here
+                    // so these scenarios are about the failure each one names
+                    // and not about the imageless build the VPS gate covers.
+                    'template_id' => (string) $estate['template']->getKey(),
+                    'template_reference' => (string) $estate['template']->provider_reference,
+                    'os_family' => $estate['template']->os_family->value,
+                    'architecture' => $estate['template']->architecture->value,
                     ...($resources ?? ['vcpu' => 2, 'memory_mib' => 2048, 'disk_gib' => 20]),
                 ],
             ));

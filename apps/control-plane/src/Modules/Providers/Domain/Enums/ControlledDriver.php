@@ -188,19 +188,6 @@ enum ControlledDriver: string
                     .'ResizeVmRequest cannot add one, and no adapter reads one. The GPU compute product asks for this '
                     .'capability and nothing in the repository can answer it.',
             ],
-            self::WordPress => [
-                'uninstall' => 'Neither WordPressInstaller nor WordPressStagingProvider has a removal operation, and '
-                    .'no adapter offers one. An installation is removed today by terminating the hosting account that '
-                    .'holds it, which is a different operation on a different contract.',
-                'ssl' => 'No WordPress contract in the repository reads or issues a certificate. The hosting '
-                    .'contract reports an account\'s SSL status through AccountUsage, which is the hosting category\'s '
-                    .'answer and not this one.',
-            ],
-            self::ReverseDns => [
-                'clear_ptr' => 'ReverseDnsProvider models publication only, deliberately: its own contract says it '
-                    .'has "no remove() that a customer can reach". There is no operation to simulate, so the '
-                    .'capability is not offered rather than quietly satisfied by publishing something else.',
-            ],
             default => [],
         };
     }

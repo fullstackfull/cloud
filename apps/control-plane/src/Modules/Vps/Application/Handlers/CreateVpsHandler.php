@@ -8,6 +8,7 @@ use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
 use Lynomia\Modules\Compute\Domain\DTOs\CloudInitConfig;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\PlacementRequest;
+use Lynomia\Modules\Compute\Domain\Enums\CpuArchitecture;
 use Lynomia\Modules\Compute\Domain\Enums\OsFamily;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
@@ -108,12 +109,44 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             diskGib: (int) ($payload['disk_gib'] ?? 10),
         );
 
+        $templateReference = isset($payload['template_reference']) ? trim((string) $payload['template_reference']) : '';
+
+        if ($templateReference === '') {
+            /*
+             * Refused before a node is reserved, and refused permanently.
+             *
+             * A machine built with no image is a machine with an empty disk:
+             * it boots to a firmware prompt, answers nothing, and looks to the
+             * customer exactly like hardware that does not work. Retrying
+             * cannot add an image, so this is not transient — it is a
+             * placement the catalogue never completed, and it needs an
+             * operator to stage an image or name one on the plan.
+             *
+             * `ProvisionOrderedService` resolves the image at the purchase and
+             * refuses to create a job without one, so reaching here means a
+             * job written by something else. The guard stays because the cost
+             * of the two disagreeing is a customer paying for an empty disk.
+             */
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'vps.create_image_unavailable',
+                'This build names no OS image, so there is nothing to install; the plan or the cluster needs one.',
+                metadata: ['cluster_id' => (string) ($payload['cluster_id'] ?? '')],
+            );
+        }
+
         try {
             $decision = $this->scheduler->place(new PlacementRequest(
                 clusterId: (string) $payload['cluster_id'],
                 resources: $resources,
                 customerId: $job->customer_id,
                 storageClass: StorageClass::tryFrom((string) ($payload['storage_class'] ?? '')) ?? StorageClass::Nvme,
+                // The image's architecture, not the default. A node of the
+                // wrong architecture cannot run the image, and
+                // NodeCapacityPolicy already refuses that pairing — it was
+                // never being told which architecture to refuse.
+                architecture: CpuArchitecture::tryFrom((string) ($payload['architecture'] ?? ''))
+                    ?? CpuArchitecture::X86_64,
             ));
         } catch (NoCapacityAvailableException $e) {
             /*
@@ -243,7 +276,7 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                 memoryMib: $resources->memoryMib,
                 diskGib: $resources->diskGib,
                 storageName: $decision->storageName,
-                templateReference: isset($payload['template_reference']) ? (string) $payload['template_reference'] : null,
+                templateReference: $templateReference,
                 osFamily: OsFamily::tryFrom((string) ($payload['os_family'] ?? '')) ?? OsFamily::Debian,
                 networkBridge: $network->bridge,
                 vlanTag: $network->vlan_id,

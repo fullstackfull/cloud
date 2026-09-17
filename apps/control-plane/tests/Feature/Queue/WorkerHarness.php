@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Queue;
 
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -12,6 +13,7 @@ use Illuminate\Support\Str;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
@@ -23,6 +25,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -167,6 +170,89 @@ abstract class WorkerHarness extends TestCase
     }
 
     /**
+     * The four conditions under which emptying a whole schema is acceptable.
+     *
+     * `truncate <every table> cascade` is the most destructive statement in
+     * this repository, and it is run automatically after every test in two
+     * directories. What makes that safe is not that the code is careful; it is
+     * that it refuses to run anywhere but against a database whose only
+     * purpose is to be thrown away.
+     *
+     * All four must hold, and the reason each one is not enough alone:
+     *
+     *  - **The application environment is `testing`.** Necessary, and nowhere
+     *    near sufficient: `APP_ENV` is one environment variable, and a
+     *    developer running `APP_ENV=testing` against a populated database is
+     *    exactly the accident this guards.
+     *  - **The connection is the harness's own.** A test that changed the
+     *    default connection — which {@see outsideTheTransaction()} does, and
+     *    the concurrency tests do too — must not be able to point this at
+     *    whatever was left set.
+     *  - **The database is the configured test database.** `phpunit.xml` names
+     *    it, so this compares against the same source PHPUnit reads rather
+     *    than against a pattern this class invented.
+     *  - **The name says it is a test database.** The one that distrusts the
+     *    configuration rather than the connection: `.env.testing` is a file
+     *    people copy, and a copy that was never repointed satisfies all three
+     *    conditions above while naming a database full of real rows. The
+     *    browser suite already insists on this for its own database before it
+     *    seeds fixed fixtures.
+     *
+     * A refusal is a `RuntimeException` and not a skip. A harness that cannot
+     * establish where it is must fail loudly in the one place the cause is
+     * visible; a quiet skip would leave the leak this teardown exists to
+     * prevent and report nothing.
+     */
+    private function refuseToTruncateAnythingButATestDatabase(ConnectionInterface $connection): void
+    {
+        if (! app()->environment('testing')) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty a database outside the testing environment (it is "%s").',
+                (string) app()->environment(),
+            ));
+        }
+
+        if ($connection->getName() !== self::CONNECTION) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty anything but its own connection (it was handed "%s").',
+                (string) $connection->getName(),
+            ));
+        }
+
+        $target = (string) $connection->getDatabaseName();
+        $expected = (string) config('database.connections.pgsql.database');
+
+        if ($target === '' || $target !== $expected) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty "%s": the configured test database is "%s".',
+                $target,
+                $expected,
+            ));
+        }
+
+        /*
+         * And the name has to say what the database is for.
+         *
+         * A different question from the one above, which compares the
+         * connection against the test configuration: this one distrusts the
+         * test configuration itself. `.env.testing` is a file somebody copies,
+         * and a copy that was never repointed names a database full of real
+         * rows — at which point conditions one to three all hold and the
+         * schema is emptied anyway.
+         *
+         * The same idiom the browser suite already uses, which insists its own
+         * database is named for what it is before it seeds fixed fixtures into
+         * it.
+         */
+        if (! str_contains(strtolower($target), 'test')) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty "%s": a database it may empty has to be named as a test database.',
+                $target,
+            ));
+        }
+    }
+
+    /**
      * Leaves the committed database as empty as an untouched one.
      *
      * The first version of this teardown remembered every model the test
@@ -195,6 +281,8 @@ abstract class WorkerHarness extends TestCase
     private function emptyTheCommittedDatabase(): void
     {
         $connection = DB::connection(self::CONNECTION);
+
+        $this->refuseToTruncateAnythingButATestDatabase($connection);
 
         /** @var list<object{tablename: string}> $rows */
         $rows = $connection->select(
@@ -487,6 +575,11 @@ abstract class WorkerHarness extends TestCase
             'node_id' => $node->id,
         ]));
 
+        // An installable image staged on the cluster. A create job with no
+        // image is refused permanently — a machine built from nothing boots to
+        // a firmware prompt — so the fixture carries one, as a purchase does.
+        $template = $this->committed(VmTemplate::factory()->make(['cluster_id' => $cluster->id]));
+
         $pool = $this->committed(IpPool::factory()->make(['is_active' => true, 'ip_version' => 4]));
 
         // A pool with no addresses in it allocates nothing, and the worker said
@@ -530,6 +623,10 @@ abstract class WorkerHarness extends TestCase
                 'memory_mib' => 2048,
                 'disk_gib' => 20,
                 'hostname' => $hostname ?? 'worker-test-'.Str::lower(Str::random(6)),
+                'template_id' => (string) $template->getKey(),
+                'template_reference' => (string) $template->provider_reference,
+                'os_family' => $template->os_family->value,
+                'architecture' => $template->architecture->value,
             ],
         ]);
 
