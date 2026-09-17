@@ -20,10 +20,17 @@ use Lynomia\Modules\ProductReadiness\Domain\Exceptions\ProductNotSellable;
  * not touched: this guard is consulted by the actions that CREATE a sale
  * and by nothing that renews, serves or terminates one.
  *
- * Outside production the guard stands aside. Every other environment exists
- * to rehearse the sale against controlled providers that can never reach
- * ready_to_sell, and a guard that refused there would refuse every test and
- * every staging walk-through of the checkout.
+ * Outside production the guard stands aside on the provider question. Every
+ * other environment exists to rehearse the sale against controlled providers
+ * that can never reach ready_to_sell, and a guard that refused there would
+ * refuse every test and every staging walk-through of the checkout.
+ *
+ * It does not stand aside on the software question. A product whose software
+ * state is not complete is outside the approved launch scope, and that is
+ * true in every environment, so the refusal here is unconditional: there is
+ * no rehearsal of selling something the platform has not finished building.
+ * The controlled simulation still exercises such a product's own actions —
+ * what it may not do is reach a sale.
  *
  * The decision itself lives in {@see ProductSellability}, which the catalogue
  * reads too: what this guard would refuse, the catalogue does not offer.

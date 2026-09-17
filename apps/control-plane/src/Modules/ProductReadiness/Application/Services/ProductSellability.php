@@ -8,6 +8,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductReadinessState;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductSoftwareState;
 use Lynomia\Modules\ProductReadiness\Infrastructure\Models\ProductReadiness;
 
 /**
@@ -29,16 +30,25 @@ use Lynomia\Modules\ProductReadiness\Infrastructure\Models\ProductReadiness;
  * implemented; a controlled provider caps a product at ready_for_test and
  * this class reads the row it produced, never the provider.
  *
- * Outside production the answer is always yes. Every other environment exists
- * to rehearse the sale against controlled providers that can never reach
- * ready_to_sell, and a catalogue that hid everything there would hide the
- * checkout from every test and every staging walk-through. That is the same
- * environment check the guard has always made, kept in one place.
+ * Outside production the answer is yes for every product in the approved
+ * launch scope. Those environments exist to rehearse the sale against
+ * controlled providers that can never reach ready_to_sell, and a catalogue
+ * that hid everything there would hide the checkout from every test and every
+ * staging walk-through. That is the same environment check the guard has
+ * always made, kept in one place.
+ *
+ * A product outside that scope — software written, no production-capable
+ * adapter for what it requires — is refused in every environment, including
+ * this one, and the readiness row is never reached for it. The exception is
+ * named rather than implied: {@see PreparedProductRehearsal} may re-admit a
+ * `prepared` product to a rehearsal outside production, and can do nothing
+ * whatsoever in it.
  */
 final readonly class ProductSellability
 {
     public function __construct(
         private Application $app,
+        private PreparedProductRehearsal $rehearsal,
     ) {}
 
     /**
@@ -46,6 +56,36 @@ final readonly class ProductSellability
      */
     public function maySell(Product $product): bool
     {
+        /*
+         * Software state first, and in every environment.
+         *
+         * The readiness row below is an operational judgement about providers
+         * that exist. This is a different question and a prior one: does this
+         * platform contain a production-capable implementation of what the
+         * product requires at all? For a `prepared` product the answer is no
+         * by construction, and no amount of provider configuration can change
+         * it — so the sale is refused in production, in staging and in a
+         * rehearsal alike.
+         *
+         * Deliberately before `enforced()`. The environment exemption exists
+         * so a controlled provider can rehearse a sale that production would
+         * refuse for want of a credential; it was never meant to let a
+         * product with no real adapter be sold anywhere. And deliberately
+         * ahead of the readiness row, so an Admin declaration cannot reach
+         * past it: `ready_to_sell` is a person's statement about providers,
+         * not a licence to sell software that does not exist.
+         *
+         * The single exception is a rehearsal, and it is not an exception in
+         * production: {@see PreparedProductRehearsal} answers false there
+         * before anything else is read. Outside production it lets the
+         * controlled simulation walk a prepared lifecycle end to end, which
+         * is how that software stays covered while it waits for a provider
+         * contract it does not have.
+         */
+        if ($product->softwareState() !== ProductSoftwareState::Complete) {
+            return $this->rehearsal->includes($product);
+        }
+
         if (! $this->enforced()) {
             return true;
         }

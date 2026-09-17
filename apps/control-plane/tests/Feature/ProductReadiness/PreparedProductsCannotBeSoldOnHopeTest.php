@@ -22,6 +22,7 @@ use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\ProductReadiness\Application\Actions\AssessAllProducts;
 use Lynomia\Modules\ProductReadiness\Application\Actions\AssessProduct;
+use Lynomia\Modules\ProductReadiness\Application\Services\ProductSellability;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\ProductReadinessState;
 use Lynomia\Modules\ProductReadiness\Domain\Exceptions\ProductNotSellable;
@@ -310,5 +311,79 @@ final class PreparedProductsCannotBeSoldOnHopeTest extends TestCase
         $response->assertOk()->assertJsonPath('data.examined', count(Product::cases()));
         $this->assertSame(count(Product::cases()), ProductReadiness::query()->count());
         $this->assertSame(count(Product::cases()), count(app(AssessAllProducts::class)->execute()['products']));
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | The rehearsal, and the four things it cannot do
+    |--------------------------------------------------------------------------
+    |
+    | A prepared product is refused a sale everywhere, which would also stop
+    | the suites that walk its lifecycle. PreparedProductRehearsal re-admits
+    | it outside production so that software stays exercised. That is an
+    | affordance which, misplaced, would sell something the platform cannot
+    | deliver — so its bounds are asserted here rather than described.
+    |
+    */
+
+    #[Test]
+    public function the_rehearsal_cannot_reach_into_production_however_it_is_configured(): void
+    {
+        config(['product_readiness.rehearsed_products' => ['wordpress', 'domains']]);
+
+        $this->inProduction();
+
+        $this->assertFalse(app(ProductSellability::class)->maySell(Product::WordPress));
+        $this->assertFalse(app(ProductSellability::class)->maySell(Product::Domains));
+    }
+
+    #[Test]
+    public function a_prepared_product_is_refused_in_production_even_with_a_ready_to_sell_row_behind_it(): void
+    {
+        /*
+         * The row is written directly, which is something DeclareProductSellable
+         * refuses to do for a prepared product. The point is that even if such
+         * a row existed — a stale row, a hand-edited row, a row from before the
+         * product was reclassified — the software state is read first and the
+         * row is never reached.
+         */
+        ProductReadiness::query()->updateOrCreate(
+            ['product' => Product::WordPress->value],
+            ['state' => ProductReadinessState::ReadyToSell->value],
+        );
+
+        $this->inProduction();
+
+        $this->assertFalse(app(ProductSellability::class)->maySell(Product::WordPress));
+    }
+
+    #[Test]
+    public function the_rehearsal_cannot_admit_a_product_that_has_no_software_to_rehearse(): void
+    {
+        // Kubernetes is readiness_only: there is no lifecycle to walk, so
+        // naming it here buys nothing even in the environment that allows
+        // rehearsals at all.
+        config(['product_readiness.rehearsed_products' => ['managed_kubernetes']]);
+
+        $this->assertFalse(app(ProductSellability::class)->maySell(Product::ManagedKubernetes));
+    }
+
+    #[Test]
+    public function withdrawing_the_rehearsal_withdraws_the_prepared_sale_outside_production_too(): void
+    {
+        config(['product_readiness.rehearsed_products' => []]);
+
+        $this->assertFalse(app(ProductSellability::class)->maySell(Product::WordPress));
+        $this->assertFalse(app(ProductSellability::class)->maySell(Product::Domains));
+    }
+
+    #[Test]
+    public function a_product_in_the_approved_launch_scope_never_depends_on_the_rehearsal(): void
+    {
+        config(['product_readiness.rehearsed_products' => []]);
+
+        $this->assertTrue(app(ProductSellability::class)->maySell(Product::Vps));
+        $this->assertTrue(app(ProductSellability::class)->maySell(Product::Dedicated));
+        $this->assertTrue(app(ProductSellability::class)->maySell(Product::SharedHosting));
     }
 }
