@@ -41,7 +41,8 @@ boundary is restated in §33 and it has not moved.
 | Starting HEAD | `680d36633d6b2e92f1792012bd47ea201883d1f3` |
 | Working tree at entry | clean (`git status --short` empty) |
 | Commits after Gap 5 at entry | none |
-| Ending HEAD | the commit that carries this document — its SHA cannot be written inside itself, so it is reported with the CI run that verified it |
+| Ending HEAD, code | `e5df55ae51eb63d6c21d219f233aac3f493cd5e6` — every code, test and fixture change of this gap, verified by CI run 174 (§31) |
+| Ending HEAD, document | one commit later, adding §31's CI record to this file. A SHA cannot be written inside the commit that carries it, and the CI result could not be written before there was one. That commit changes no code, so run 174 remains the gate for everything above |
 
 ---
 
@@ -1268,6 +1269,78 @@ Per family, the brief's minimum — one positive lifecycle, one configuration
 failure, one runtime failure, one idempotency case, one state readback, one
 production guard — is met by these files together with the existing per-family
 suites they deliberately do not duplicate.
+
+### The exact-SHA CI run
+
+| | |
+|---|---|
+| SHA | `e5df55ae51eb63d6c21d219f233aac3f493cd5e6` |
+| Run | 174 |
+| Run id | 35198827539 |
+| Conclusion | success |
+| Jobs | 9 / 9 successful |
+| Backend (PostgreSQL 16 and 18) | success, 7 minutes each |
+| Pint, PHPStan, frontend, API description, infrastructure, security, production guards | success |
+| Browser end-to-end | success on the second run of that job; failed once before it |
+
+That last row is the honest one, and it is written out rather than summarised
+because a re-run that is not explained is a re-run nobody can audit.
+
+**What failed.** Three of 364 browser tests, all on one assertion:
+
+```
+getByRole('region', { name: 'Updates' }).getByText(/Reboot requested/)
+```
+
+in `wave-4.e2e.ts:102` (through the `reboot()` helper at line 30),
+`wave-5-recovery.e2e.ts:104`, and `mobile/what-is-happening.e2e.ts:72`.
+
+**Why it is not this change.** In the same run, on the same commit, in the same
+process against the same database, the identical assertion passed in
+`wave-4.e2e.ts:223` and `:253`, and its looser form in `:275`. The suite's only
+conditional skips are the capture specs
+(`test.skip(process.env.CAPTURES !== '1')`), which accounts for all 14 skips, so
+those three really ran. One assertion that passes three times and fails three
+times in one process is timing, not a defect in a diff: a defect would have
+taken all six.
+
+**The mechanism**, from the code and the run's own request log.
+`WatchedOperationsProvider::watch()` announces the acknowledgement under the
+operation's id, and `announceTerminal()` then replaces the toast *under that
+same id* as soon as the watcher's first read of `/operations/{id}` comes back
+terminal. This suite runs the queue inline, so the work is already finished when
+that first read lands — `wave-4.e2e.ts` says so in its own comment at line 239.
+The interval during which the words "Reboot requested" exist in the DOM is
+therefore one HTTP round trip, and the job log shows exactly one
+`/api/v1/operations/…` read per press, answered in 0.01–0.03 ms, in the same
+second as the power request. Nothing in this gap touches that path: the change
+carries no frontend file at all, and its only compute change is an extra
+`installed_template` key in the `raw` payload of a *newly created* machine.
+
+**What was measured before the re-run**, rather than after it:
+
+| Measurement | Result |
+|---|---|
+| The three specs alone, at this SHA, on a database rebuilt with `migrate:fresh --seed` plus `E2ESeeder` and the fake fleet file deleted | 21 / 21 passed |
+| The whole suite, at this SHA, run as CI runs it | 364 passed, 14 skipped, 0 failed, 33.6 minutes |
+| The same browser job, re-run once on the same commit | 364 passed, 14 skipped, 0 failed, 28.7 minutes |
+
+**What could not be read.** The failing job uploaded its Playwright report, and
+the artifact's blob host is outside this environment's egress policy
+(`connect_rejected`). Classified `BLOCKED_NETWORK`. The diagnosis above rests on
+the job log and the source, not on the artifact — which is why it is stated as a
+mechanism with the log lines that show it, and not as a guess about a screenshot
+nobody here can open.
+
+**What this is not.** It is not a Gap 6 finding, and it is not a fixed test
+either. The acknowledgement is asserted to be *observable*, and the application
+guarantees only that it is *announced*; on a slow enough runner the outcome
+overtakes it. Making it deterministic means either holding an acknowledgement
+for a minimum visible interval or asserting the pair rather than the instant,
+and both are decisions about what the portal promises a customer — the kind of
+decision this gap is explicitly not allowed to take on its own. It is recorded
+here, with its evidence, for whoever owns the customer portal's timing
+guarantees.
 
 ---
 
