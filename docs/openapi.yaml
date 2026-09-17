@@ -21065,6 +21065,20 @@ components:
             type: "string"
         fallback_currency:
           type: "string"
+        legal:
+          type: "object"
+          additionalProperties: false
+          properties:
+            terms_url:
+              type:
+                - "string"
+                - "null"
+              format: "uri"
+            aup_url:
+              type:
+                - "string"
+                - "null"
+              format: "uri"
     RegistrationOptionsResponse:
       type: "object"
       required:

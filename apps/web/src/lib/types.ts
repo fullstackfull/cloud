@@ -1408,10 +1408,24 @@ export interface RegistrationCountry {
   currency_is_explicit: boolean
 }
 
+/**
+ * Where the documents the registration checkbox names are published.
+ *
+ * Null for a document that is not published yet, which is a state the screen
+ * renders rather than hides: the terms of service and the acceptable use
+ * policy are written by people, not by this repository, and a link to a page
+ * nobody has written would be a worse answer than no link.
+ */
+export interface RegistrationLegalDocuments {
+  terms_url: string | null
+  aup_url: string | null
+}
+
 export interface RegistrationOptions {
   countries: RegistrationCountry[]
   currencies: string[]
   fallback_currency: string
+  legal: RegistrationLegalDocuments
 }
 
 /**

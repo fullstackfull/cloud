@@ -1,6 +1,12 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { fixtures, signIn, users } from './support/helpers'
+import {
+  expectOperationReported,
+  fixtures,
+  operationsChannel,
+  signIn,
+  users,
+} from './support/helpers'
 
 /*
  * Knowing what is happening, in a browser.
@@ -26,9 +32,7 @@ async function reboot(page: Page): Promise<void> {
   await page.getByRole('link', { name: fixtures.operableHostname, exact: true }).first().click()
   await page.getByRole('button', { name: 'Reboot' }).first().click()
 
-  await expect(
-    page.getByRole('region', { name: 'Updates' }).getByText(/Reboot requested/),
-  ).toBeVisible()
+  await expectOperationReported(page, 'Reboot')
 }
 
 async function signOut(page: Page): Promise<void> {
@@ -234,13 +238,21 @@ test.describe('an action a customer starts reports itself', () => {
     await page.getByRole('button', { name: 'Reboot' }).first().click()
 
     /*
-     * "Reboot requested" and not "Success". The first is a statement about the
-     * platform having the request; the second would be a claim about a machine
-     * nothing has touched yet.
+     * The lifecycle's own words and never "Success". Whichever end of the
+     * reboot the channel has reached by now, it names the reboot; what it
+     * must never do is announce a bare success, which would be a claim about
+     * a machine rather than a report about an operation.
+     *
+     * Which end it has reached is not this test's business, and asserting it
+     * was the bug: the acknowledgement and the outcome share one toast id, so
+     * "Reboot requested" exists for exactly one HTTP round trip and a browser
+     * asserting it races the server. The sentence itself is held exactly in
+     * `watching-what-was-started.test.tsx`, where the read is a fake and the
+     * timing belongs to the test.
      */
-    const channel = page.getByRole('region', { name: 'Updates' })
-    await expect(channel.getByText(/Reboot requested/)).toBeVisible()
-    await expect(channel.getByText(/^Success/)).toHaveCount(0)
+    await expectOperationReported(page, 'Reboot')
+
+    const channel = operationsChannel(page)
 
     /*
      * The suite runs the queue inline, so the work is already finished by the
@@ -257,8 +269,9 @@ test.describe('an action a customer starts reports itself', () => {
     await page.getByRole('link', { name: fixtures.operableHostname, exact: true }).first().click()
     await page.getByRole('button', { name: 'Reboot' }).first().click()
 
-    const channel = page.getByRole('region', { name: 'Updates' })
-    await expect(channel.getByText(/Reboot requested/)).toBeVisible()
+    await expectOperationReported(page, 'Reboot')
+
+    const channel = operationsChannel(page)
 
     // Off to the invoices, which is where a customer goes next.
     await page.getByRole('navigation', { name: /main navigation/i }).getByRole('link', { name: 'Invoices' }).click()
@@ -279,7 +292,7 @@ test.describe('an action a customer starts reports itself', () => {
     await page.getByRole('link', { name: fixtures.operableHostname, exact: true }).first().click()
     await page.getByRole('button', { name: 'Reboot' }).first().click()
 
-    await expect(page.getByRole('region', { name: 'Updates' }).getByText(/Reboot/)).toBeVisible()
+    await expectOperationReported(page, 'Reboot')
 
     await page.reload()
 

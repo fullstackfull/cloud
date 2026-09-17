@@ -15,6 +15,61 @@ import { useRegistrationOptions } from '@/lib/queries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 import { useMutation } from '@tanstack/react-query'
 
+import type { RegistrationLegalDocuments } from '@/lib/types'
+import type { TFunction } from 'i18next'
+import type { ReactNode } from 'react'
+
+/**
+ * Links to the documents a customer is being asked to accept, or nothing.
+ *
+ * The checkbox sentence names a terms of service and an acceptable use
+ * policy, and for a long time named them with no way to read either. The URLs
+ * are the operator's to publish — the documents are written and reviewed by
+ * people, not generated here — so they arrive with the rest of what a
+ * registration form is allowed to offer and the screen renders whichever of
+ * the two exists.
+ *
+ * Returning undefined for the unpublished case is deliberate, and it is not
+ * the same as rendering an empty line: `CheckboxField` omits the hint
+ * paragraph entirely, so an unpublished document leaves no gap under the
+ * sentence and no link that goes nowhere. That state is a launch prerequisite
+ * recorded as one, rather than a placeholder page pretending to be terms.
+ */
+function legalDocuments(
+  legal: RegistrationLegalDocuments | undefined,
+  t: TFunction,
+): ReactNode {
+  const documents = [
+    { url: legal?.terms_url, label: t('auth.termsDocument') },
+    { url: legal?.aup_url, label: t('auth.aupDocument') },
+  ].filter((document): document is { url: string; label: string } =>
+    typeof document.url === 'string' && document.url !== '',
+  )
+
+  if (documents.length === 0) {
+    return undefined
+  }
+
+  return (
+    <span className="flex flex-wrap gap-x-3 gap-y-1">
+      {documents.map((document) => (
+        <a
+          key={document.label}
+          href={document.url}
+          target="_blank"
+          // noopener because the document is on somebody else's origin, and a
+          // tab opened with a handle on this one can navigate it away from a
+          // half-filled registration form.
+          rel="noreferrer noopener"
+          className="font-medium text-brand-600 hover:underline"
+        >
+          {document.label}
+        </a>
+      ))}
+    </span>
+  )
+}
+
 interface RegistrationPayload {
   name: string
   email: string
@@ -223,6 +278,7 @@ export function RegisterPage() {
 
       <CheckboxField
         label={t('auth.acceptTerms')}
+        hint={legalDocuments(options.data?.legal, t)}
         checked={acceptsTerms}
         onChange={(event) => { setAcceptsTerms(event.target.checked); }}
         error={fieldErrors?.['accepts_terms']?.[0]}

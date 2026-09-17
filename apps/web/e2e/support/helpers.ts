@@ -261,3 +261,70 @@ export async function documentLanguage(page: Page): Promise<{ lang: string; dir:
     dir: document.documentElement.dir,
   }))
 }
+
+/**
+ * The operations channel, showing where one operation stands.
+ *
+ * ---------------------------------------------------------------------------
+ * The UX contract, stated once
+ * ---------------------------------------------------------------------------
+ *
+ * Three specs used to assert that the channel said "Reboot requested" after a
+ * press. That assertion both passed and failed inside a single CI run, in the
+ * same process against the same database, and the mechanism is in the code
+ * rather than in the browser: the acknowledgement is announced under the
+ * operation's id and REPLACED under that same id the moment the watcher's
+ * first read comes back terminal. One id, one message — which is the right
+ * design, because two toasts for one reboot is worse — and the browser suite
+ * runs the queue inline, so the work is often already finished by the time
+ * that first read lands. The window in which the words "Reboot requested"
+ * exist is one HTTP round trip.
+ *
+ * So the contract is not "the acknowledgement is visible". It is: **the
+ * channel always says where this operation stands, in the lifecycle's own
+ * words** — the request, or its outcome, and never a bare "Success" that
+ * claims something about a machine nobody has touched. That is the promise the
+ * product actually makes, and it is the one a customer relies on.
+ *
+ * The exact acknowledgement sentence is still asserted exactly, in
+ * `watching-what-was-started.test.tsx`, where the read is a controlled fake
+ * and the timing is the test's own. A browser cannot assert it without racing
+ * the server, and a test that races is not evidence about the product.
+ */
+export function operationsChannel(page: Page) {
+  return page.getByRole('region', { name: 'Updates' })
+}
+
+/**
+ * Waits until the channel reports this action, whichever end of its lifecycle
+ * it has reached.
+ *
+ * `action` is the label the portal uses — "Reboot", "Rebuild" — and the
+ * pattern covers every title `WatchedOperations` can announce for one
+ * operation: the request, the five outcomes, and the one the watcher writes
+ * when it stops checking. All seven come from `operations.*`, so a message
+ * this helper accepts is always one the copy catalogue defines, and the set
+ * being complete is what makes the assertion true at every moment rather than
+ * at one — a helper that accepted six of the seven would be the same race in
+ * a different place.
+ */
+export async function expectOperationReported(page: Page, action: string): Promise<void> {
+  const channel = operationsChannel(page)
+
+  await expect(
+    channel.getByText(
+      new RegExp(
+        `${action} (requested|completed|did not finish` +
+          `|stopped and we are looking at it|cancelled|is taking longer than usual)` +
+          `|We could not confirm the result of ${action}`,
+      ),
+    ),
+  ).toBeVisible()
+
+  /*
+   * And never the word that would be a claim rather than a report. This part
+   * cannot race: no branch of the channel ever announces a bare "Success", so
+   * a count of zero is true at every moment rather than only at one.
+   */
+  await expect(channel.getByText(/^Success/)).toHaveCount(0)
+}

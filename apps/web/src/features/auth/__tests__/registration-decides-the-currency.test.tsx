@@ -29,11 +29,17 @@ const OPTIONS = {
     ],
     currencies: ['KWD', 'USD', 'EUR', 'GBP', 'SAR', 'AED'],
     fallback_currency: 'USD',
+    // Unpublished, which is the state the platform is in until somebody
+    // writes the documents. The two tests at the bottom cover both answers.
+    legal: { terms_url: null, aup_url: null },
   },
   meta: { countries_count: 3, currencies_count: 6 },
 }
 
-function stubFetch(onRegister?: (body: unknown) => void) {
+function stubFetch(
+  onRegister?: (body: unknown) => void,
+  legal: { terms_url: string | null; aup_url: string | null } = OPTIONS.data.legal,
+) {
   return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
     const path = url.split('?')[0] ?? url
@@ -41,7 +47,7 @@ function stubFetch(onRegister?: (body: unknown) => void) {
     let body: unknown = null
 
     if (path.endsWith('/registration/options')) {
-      body = OPTIONS
+      body = { ...OPTIONS, data: { ...OPTIONS.data, legal } }
     } else if (path.endsWith('/register')) {
       onRegister?.(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
       body = { data: { message: 'ok' }, meta: { email_verification_required: true } }
@@ -176,5 +182,71 @@ describe('registration decides the currency out loud', () => {
     const offered = [...currency.querySelectorAll('option')].map((option) => option.value)
 
     expect(offered).toEqual(OPTIONS.data.currencies)
+  })
+
+  /*
+   * The documents the checkbox names.
+   *
+   * The sentence beside the box says a customer accepts a terms of service and
+   * an acceptable use policy, and for a long time offered no way to read
+   * either. The documents are a business and legal deliverable rather than
+   * something this repository writes, so the screen's job is to link them
+   * when they exist and to say nothing when they do not — and publishing them
+   * has to be configuration rather than a code change, which is why the URLs
+   * travel with the rest of the registration options.
+   */
+  it('links the documents the customer is accepting, once they are published', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubFetch(undefined, {
+        terms_url: 'https://legal.example/terms',
+        aup_url: 'https://legal.example/aup',
+      }),
+    )
+
+    renderPage()
+
+    const terms = await screen.findByRole('link', { name: /terms of service/i })
+    const aup = await screen.findByRole('link', { name: /acceptable use policy/i })
+
+    expect(terms).toHaveAttribute('href', 'https://legal.example/terms')
+    expect(aup).toHaveAttribute('href', 'https://legal.example/aup')
+
+    // A document on somebody else's origin, opened without a handle on this
+    // tab — a half-filled registration form must not be navigable by it.
+    expect(terms).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
+
+  it('offers no link at all while the documents are unpublished', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+
+    renderPage()
+
+    // The checkbox is there and still required: acceptance is recorded either
+    // way, and that half is the platform's. What must not appear is a link
+    // that goes nowhere or an empty line pretending to be one.
+    expect(await screen.findByRole('checkbox')).toBeRequired()
+    expect(screen.queryByRole('link', { name: /terms of service/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /acceptable use policy/i })).toBeNull()
+  })
+
+  it('links the one document that is published without inventing the other', async () => {
+    /*
+     * Two documents, published separately, and a screen that waits for both
+     * would show neither. This is also the shape the server produces when it
+     * drops a URL it will not hand a browser — a script scheme in the
+     * configuration comes back as null, and null is a state this page already
+     * renders. `TheRegistrationOptionsNameTheLegalDocumentsTest` is where that
+     * refusal itself is asserted.
+     */
+    vi.stubGlobal(
+      'fetch',
+      stubFetch(undefined, { terms_url: null, aup_url: 'https://legal.example/aup' }),
+    )
+
+    renderPage()
+
+    expect(await screen.findByRole('link', { name: /acceptable use policy/i })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /terms of service/i })).toBeNull()
   })
 })

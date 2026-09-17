@@ -81,6 +81,8 @@
     },
     "companyName": "Company name",
     "acceptTerms": "I accept the terms of service and the acceptable use policy.",
+    "termsDocument": "Terms of service",
+    "aupDocument": "Acceptable use policy",
     "haveAccount": "Already have an account?",
     "checkYourEmailTitle": "Check your email",
     "checkYourEmailBody": "We sent a verification link to {{email}}. Your account is created; verify the address to start ordering.",

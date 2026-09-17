@@ -1584,6 +1584,27 @@ return [
             'countries' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
             'currencies' => ['type' => 'array', 'items' => ['type' => 'string']],
             'fallback_currency' => ['type' => 'string'],
+
+            /*
+             * Where the documents the acceptance checkbox names are
+             * published. Null for a document that is not published yet, and
+             * that is a state a client renders rather than treats as an
+             * error: the terms of service and the acceptable use policy are
+             * written by people, and a URL to a page nobody has written would
+             * read as a prerequisite that has been met.
+             *
+             * Here rather than built into a client, so publishing them is an
+             * operator setting a variable instead of somebody shipping a new
+             * portal build.
+             */
+            'legal' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'properties' => [
+                    'terms_url' => ['type' => ['string', 'null'], 'format' => 'uri'],
+                    'aup_url' => ['type' => ['string', 'null'], 'format' => 'uri'],
+                ],
+            ],
         ],
     ],
 

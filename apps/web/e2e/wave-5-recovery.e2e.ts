@@ -1,6 +1,12 @@
 import { expect, test, type Page, type Request } from '@playwright/test'
 
-import { fixtures, forgetSessions, signIn, users } from './support/helpers'
+import {
+  expectOperationReported,
+  fixtures,
+  forgetSessions,
+  signIn,
+  users,
+} from './support/helpers'
 
 /*
  * Wave 5, §35–§37: what the portal does when a request cannot happen.
@@ -123,9 +129,7 @@ test.describe('a session that ends mid-click', () => {
 
     await page.getByRole('button', { name: 'Reboot' }).first().click()
 
-    await expect(
-      page.getByRole('region', { name: 'Updates' }).getByText(/Reboot requested/),
-    ).toBeVisible()
+    await expectOperationReported(page, 'Reboot')
 
     expect(powerRequests(), 'the second request is the second press').toBe(2)
   })
