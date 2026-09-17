@@ -1324,6 +1324,28 @@ Three pushes carried that red backend job, and the cancellations from each
 superseding push hid it — the last green exact-SHA run before the fix was
 `6386c6f`. The gate worked; the process around it did not, and running the
 whole suite before pushing is the correction.
+
+A third followed, from the same root cause one layer out. With both of those
+fixed, run 185 on `f44a19c` was green in eight of nine jobs and the browser
+suite failed: two of 364 specs, journeys A and B of `money.e2e.ts`, both at
+`getByRole('button', { name: /create account/i }).click()`. The button was
+disabled, correctly — that job prepares its environment with
+`cp .env.example .env`, and `.env.example` now carries the four legal keys
+empty, so registration was closed in the very environment whose first act is
+to register a customer.
+
+The fix is in `playwright.config.ts`, not in the workflow: the suite starts
+the API, so the suite says what that API needs, and a developer running it
+locally gets the same answer as CI rather than depending on their own `.env`.
+The refusal itself is still asserted against unset configuration in the
+feature suite, so publishing documents for the rehearsal costs nothing in
+coverage.
+
+Worth naming as a pattern rather than three accidents: every one of the three
+was a place my change reached that I had not run. The backend suite found the
+first two and CI found the third, which is the order of expense, and the
+correction in each case is the same — run the gate that covers what the change
+touches, not the directory the change is in.
 ---
 
 ## Appendix — final product matrix

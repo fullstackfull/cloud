@@ -135,6 +135,27 @@ const apiEnvironment = {
    * issues has to point at the web server this suite starts.
    */
   PAYMENTS_FAKE_AUTHORISE_URL: `${WEB_ORIGIN}/fake-gateway/authorise`,
+
+  /*
+   * Two legal documents, published, because registration fails closed without
+   * them and journeys A and B both begin by registering.
+   *
+   * Set here rather than in the CI workflow so the suite carries its own
+   * requirement: the browser job copies `.env.example`, where all four of
+   * these are deliberately empty, and a developer running this locally has
+   * whatever their `.env` holds. Either way the API this suite starts is told
+   * what it needs, and the specs that register are testing the portal rather
+   * than the deployment's launch prerequisites.
+   *
+   * The addresses use the reserved `.test` TLD and the revisions are
+   * obviously synthetic. Nothing here is a published policy, and the
+   * `registration.unavailable` refusal itself is asserted against unset
+   * configuration in TheRegistrationOptionsNameTheLegalDocumentsTest.
+   */
+  LEGAL_TERMS_URL: 'https://legal.lynomia.test/terms',
+  LEGAL_TERMS_VERSION: 'e2e-terms-1',
+  LEGAL_AUP_URL: 'https://legal.lynomia.test/acceptable-use',
+  LEGAL_AUP_VERSION: 'e2e-aup-1',
 }
 
 /**
