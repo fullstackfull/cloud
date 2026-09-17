@@ -8,6 +8,7 @@ use Lynomia\Modules\Ipam\Domain\Contracts\ReverseDnsProvider;
 use Lynomia\Modules\Ipam\Domain\Exceptions\ReverseDnsProviderException;
 use Lynomia\Modules\Ipam\Domain\ValueObjects\Hostname;
 use Lynomia\Modules\Ipam\Domain\ValueObjects\IpAddressValue;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use RuntimeException;
 
 /**
@@ -24,6 +25,11 @@ use RuntimeException;
  * record: it reports the record as published, which is how a customer's mail
  * starts being rejected by every receiver that checks PTRs while the platform's
  * own dashboard says the name is live.
+ *
+ * With `dns.fake_reverse.state_path` set it remembers across processes, because
+ * a PTR is published by a worker and read back by a request, and a simulator
+ * that forgets at that boundary can prove the contract and not the workflow.
+ * Unset, which is the default, it keeps everything in memory.
  */
 final class FakeReverseDnsProvider implements ReverseDnsProvider
 {
@@ -50,6 +56,9 @@ final class FakeReverseDnsProvider implements ReverseDnsProvider
     /** @var array<string, string> address => hostname */
     private array $published = [];
 
+    /** Where this remembers between processes, or null to keep it in memory. */
+    private readonly ?ControlledSimulationStore $store;
+
     public function __construct()
     {
         // Checked on construction rather than by whoever builds it, so the
@@ -60,10 +69,14 @@ final class FakeReverseDnsProvider implements ReverseDnsProvider
                 .'it reports PTR records as published without publishing them.'
             );
         }
+
+        $this->store = ControlledSimulationStore::fromConfig('dns.fake_reverse.state_path');
     }
 
     public function publish(IpAddressValue $address, Hostname $hostname): void
     {
+        $this->restore();
+
         if (str_contains($hostname->value(), self::TIMEOUT_MARKER)) {
             throw ReverseDnsProviderException::timedOut($address->value());
         }
@@ -83,16 +96,49 @@ final class FakeReverseDnsProvider implements ReverseDnsProvider
         // One record per address: a repeat replaces rather than appends, which
         // is the idempotence the interface promises.
         $this->published[$address->value()] = $hostname->value();
+
+        $this->remember();
     }
 
     /** The hostname this fake believes is published for an address, if any. */
     public function publishedFor(string $address): ?string
     {
+        $this->restore();
+
         return $this->published[$address] ?? null;
     }
 
     public function publishedCount(): int
     {
+        $this->restore();
+
         return count($this->published);
+    }
+
+    /**
+     * What the last process left, when there is a file to read it from.
+     *
+     * Read at the start of every operation rather than once in the constructor,
+     * because the file is the truth whenever there is one: two processes are
+     * both writing it, and an instance that read it at construction would
+     * answer from a picture that was already old.
+     */
+    private function restore(): void
+    {
+        $state = $this->store?->read();
+
+        if ($state === null) {
+            return;
+        }
+
+        /** @var array<string, string> $published */
+        $published = $state['published'] ?? [];
+
+        $this->published = $published;
+    }
+
+    private function remember(): void
+    {
+        $this->store?->write(['published' => $this->published]);
     }
 }

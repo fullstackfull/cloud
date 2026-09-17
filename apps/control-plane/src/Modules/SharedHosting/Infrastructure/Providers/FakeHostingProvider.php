@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\SharedHosting\Infrastructure\Providers;
 
 use Carbon\CarbonImmutable;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressInstaller;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressStagingProvider;
@@ -108,12 +109,27 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
      */
     private array $accounts = [];
 
+    /** Where this remembers between processes, or null to keep it in memory. */
+    private readonly ?ControlledSimulationStore $store;
+
     public function __construct()
     {
         // Constructed, not resolved, is the moment worth guarding: a binding
         // overridden at runtime or a node row whose panel column says "fake"
         // never passes through config, but neither can avoid this constructor.
         FakeHostingProviderGuard::assertNotProduction(self::NAME);
+
+        /*
+         * An account is created by a worker and suspended, read or terminated
+         * by another process entirely, so this family needs to remember across
+         * processes when it is asked to. Unset by default: in one process the
+         * arrays are the whole truth and a shared file would leak one test's
+         * accounts into the next test's.
+         */
+        $this->store = ControlledSimulationStore::fromConfig('hosting.fake.state_path', [
+            RemoteAccount::class,
+            WordPressInstallation::class,
+        ]);
     }
 
     public function panel(): HostingPanel
@@ -124,6 +140,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function createAccount(HostingNode $node, CreateAccountRequest $request): HostingAccountResult
     {
         $this->assertNoMarkers($node, $request->username, 'create_account');
+
+        $this->restore();
 
         $key = $this->nodeKey($node);
 
@@ -147,6 +165,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
             diskUsedMib: self::derivedDiskMib($request->username),
             ipAddress: $request->ipAddress ?? '203.0.113.10',
         );
+
+        $this->remember();
 
         return new HostingAccountResult(
             username: $request->username,
@@ -174,6 +194,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
             ipAddress: $account->ipAddress,
             raw: ['suspension_reason' => $reason],
         );
+
+        $this->remember();
     }
 
     public function unsuspendAccount(HostingNode $node, string $username): void
@@ -189,6 +211,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
             diskUsedMib: $account->diskUsedMib,
             ipAddress: $account->ipAddress,
         );
+
+        $this->remember();
     }
 
     public function terminateAccount(HostingNode $node, string $username): void
@@ -196,6 +220,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         $this->require($node, $username, 'terminate_account');
 
         unset($this->accounts[$this->nodeKey($node)][$username]);
+
+        $this->remember();
     }
 
     public function changePackage(HostingNode $node, string $username, string $packageName): void
@@ -210,6 +236,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
             diskUsedMib: $account->diskUsedMib,
             ipAddress: $account->ipAddress,
         );
+
+        $this->remember();
     }
 
     public function changePassword(HostingNode $node, string $username, string $password): void
@@ -261,6 +289,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
          */
         $this->refuseMarkedNode($node, 'list accounts on '.$node->hostname);
 
+        $this->restore();
+
         return array_values($this->accounts[$this->nodeKey($node)] ?? []);
     }
 
@@ -285,6 +315,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
 
     public function nodeHealth(HostingNode $node): NodeHealth
     {
+        $this->restore();
+
         return new NodeHealth(
             online: $node->status->holdsAccounts(),
             loadOne: $node->load_average,
@@ -365,6 +397,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     {
         $this->assertNoMarkers($node, $username, $operation);
 
+        $this->restore();
+
         $account = $this->accounts[$this->nodeKey($node)][$username] ?? null;
 
         if ($account === null) {
@@ -382,6 +416,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     {
         $this->assertNoMarkers($node, $request->username, 'install_wordpress');
         $this->require($node, $request->username, 'install_wordpress');
+
+        $this->restore();
 
         $key = $this->nodeKey($node);
         $domain = strtolower($request->domain);
@@ -411,6 +447,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
          */
         $this->installations[$key][$domain] = $installation;
 
+        $this->remember();
+
         if (str_contains($domain, self::INSTALL_TIMEOUT_MARKER)) {
             throw HostingProviderException::requestFailed(self::NAME, 'install_wordpress', [
                 'node' => $node->hostname,
@@ -426,6 +464,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     {
         // Markers only, not the in-memory account: see the note below.
         $this->assertNoMarkers($node, $request->username, 'copy_wordpress');
+
+        $this->restore();
 
         $key = $this->nodeKey($node);
         $source = strtolower($request->sourceDomain);
@@ -458,6 +498,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         // stopped answering has usually finished the copy.
         $this->installations[$key][$target] = $copy;
 
+        $this->remember();
+
         if (str_contains($target, self::COPY_TIMEOUT_MARKER)) {
             throw HostingProviderException::requestFailed(self::NAME, 'copy_wordpress', [
                 'node' => $node->hostname,
@@ -472,6 +514,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function pushWordPressToProduction(HostingNode $node, WordPressPushRequest $request): WordPressInstallation
     {
         $this->assertNoMarkers($node, $request->username, 'push_wordpress');
+
+        $this->restore();
 
         $key = $this->nodeKey($node);
         $production = strtolower($request->productionDomain);
@@ -492,12 +536,16 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
             ], indeterminate: true);
         }
 
-        return $this->installations[$key][$production] ??= new WordPressInstallation(
+        $pushed = $this->installations[$key][$production] ??= new WordPressInstallation(
             domain: $production,
             siteUrl: 'https://'.$production,
             adminUrl: 'https://'.$production.'/wp-admin/',
             version: '6.7.1',
         );
+
+        $this->remember();
+
+        return $pushed;
     }
 
     public function wordPressInstallation(
@@ -506,6 +554,8 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         string $domain,
     ): WordPressInstallation {
         $this->assertNoMarkers($node, $username, 'wordpress_installation');
+
+        $this->restore();
 
         $domain = strtolower($domain);
         $found = $this->installations[$this->nodeKey($node)][$domain] ?? null;
@@ -545,5 +595,37 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     private static function derivedBandwidthMib(string $username): int
     {
         return 500 + (int) (hexdec(substr(hash('sha256', 'bw'.$username), 0, 4)) % 20000);
+    }
+
+    /**
+     * What the last process left, when there is a file to read it from.
+     *
+     * Read at the start of every operation rather than once in the
+     * constructor: two processes write this file, and an instance that read it
+     * when it was built would answer from a picture that was already old.
+     */
+    private function restore(): void
+    {
+        $state = $this->store?->read();
+
+        if ($state === null) {
+            return;
+        }
+
+        /** @var array<string, array<string, RemoteAccount>> $accounts */
+        $accounts = $state['accounts'] ?? [];
+        /** @var array<string, array<string, WordPressInstallation>> $installations */
+        $installations = $state['installations'] ?? [];
+
+        $this->accounts = $accounts;
+        $this->installations = $installations;
+    }
+
+    private function remember(): void
+    {
+        $this->store?->write([
+            'accounts' => $this->accounts,
+            'installations' => $this->installations,
+        ]);
     }
 }

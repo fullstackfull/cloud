@@ -23,6 +23,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -65,6 +66,39 @@ abstract class WorkerHarness extends TestCase
 
     /** Where the fake hypervisor keeps its fleet for this test. */
     private string $fleetPath = '';
+
+    /**
+     * Every controlled simulator that has to be the same simulator in two
+     * processes, as `config key => environment variable`.
+     *
+     * Compute and the registrar were here first, one field each, because they
+     * were the only two families that could remember anything across a process
+     * boundary at all. The other five could not, which is why every proof in
+     * this directory used to be about compute or a domain name. One list
+     * rather than seven fields: a family added to
+     * {@see ControlledSimulationStore}
+     * and not added here is a family whose worker starts with an empty
+     * provider, and the test that noticed would fail somewhere far away from
+     * the reason.
+     *
+     * @var array<string, string>
+     */
+    private const array SIMULATION_STATE = [
+        'compute.fake.state_path' => 'COMPUTE_FAKE_STATE_PATH',
+        'dedicated.fake.state_path' => 'DEDICATED_FAKE_STATE_PATH',
+        'hosting.fake.state_path' => 'HOSTING_FAKE_STATE_PATH',
+        'backups.fake.state_path' => 'BACKUPS_FAKE_STATE_PATH',
+        'dns.fake.state_path' => 'DNS_FAKE_STATE_PATH',
+        'dns.fake_reverse.state_path' => 'DNS_FAKE_REVERSE_STATE_PATH',
+        'domains.fake.state_path' => 'DOMAINS_FAKE_STATE_PATH',
+    ];
+
+    /**
+     * The file each of those families is using for this test.
+     *
+     * @var array<string, string> config key => path
+     */
+    private array $simulationPaths = [];
 
     /**
      * The fleet file, for a subclass that starts a process of its own.
@@ -122,8 +156,22 @@ abstract class WorkerHarness extends TestCase
         // inline, which is the whole point.
         config()->set('queue.default', 'redis');
 
-        $this->fleetPath = sys_get_temp_dir().'/lynomia-fake-fleet-'.getmypid().'-'.uniqid().'.state';
-        config()->set('compute.fake.state_path', $this->fleetPath);
+        /*
+         * One directory per test, so that two tests running one after another
+         * cannot see each other's providers and a run that died without its
+         * teardown cannot seed the next one.
+         */
+        $root = sys_get_temp_dir().'/lynomia-simulation-'.getmypid().'-'.uniqid();
+
+        foreach (array_keys(self::SIMULATION_STATE) as $key) {
+            $path = $root.'/'.str_replace('.', '-', $key).'.state';
+
+            $this->simulationPaths[$key] = $path;
+
+            config()->set($key, $path);
+        }
+
+        $this->fleetPath = $this->simulationPaths['compute.fake.state_path'];
     }
 
     protected function tearDown(): void
@@ -140,9 +188,17 @@ abstract class WorkerHarness extends TestCase
 
         $this->committed = [];
 
-        if ($this->fleetPath !== '' && is_file($this->fleetPath)) {
-            @unlink($this->fleetPath);
+        foreach ($this->simulationPaths as $path) {
+            if (is_file($path)) {
+                @unlink($path);
+            }
         }
+
+        if ($this->simulationPaths !== []) {
+            @rmdir(dirname((string) reset($this->simulationPaths)));
+        }
+
+        $this->simulationPaths = [];
 
         try {
             Redis::connection()->flushdb();
@@ -312,13 +368,78 @@ abstract class WorkerHarness extends TestCase
                  * absence of a mail server rather than the queue.
                  */
                 'MAIL_MAILER' => 'array',
-                // The same fleet, so the worker's hypervisor has heard of the
-                // machines this test created.
-                'COMPUTE_FAKE_STATE_PATH' => $this->fleetPath,
+                // The same providers, so the worker's hypervisor has heard of
+                // the machines this test created — and its panel of the
+                // accounts, its datastore of the archives, its zone of the
+                // records, and its registrar of the names.
+                ...$this->simulationEnvironment(),
             ],
             null,
             $timeoutSeconds,
         );
+    }
+
+    /**
+     * Runs an artisan command in its own process, with this test's database,
+     * queue and controlled providers.
+     *
+     * The same environment the worker gets, because a scheduled command is the
+     * other kind of process a workflow crosses: the poller that confirms what
+     * a worker built, the reconciler that compares the platform with a panel.
+     * A command run without it gets providers that have never heard of
+     * anything this test arranged.
+     */
+    protected function runArtisan(string $command, int $timeoutSeconds = 120): Process
+    {
+        $process = new Process(
+            [PHP_BINARY, 'artisan', $command, '--no-interaction'],
+            base_path(),
+            [
+                'APP_ENV' => 'testing',
+                'QUEUE_CONNECTION' => 'redis',
+                'REDIS_DB' => (string) self::REDIS_DATABASE,
+                'DB_DATABASE' => config('database.connections.pgsql.database'),
+                'DB_PASSWORD' => config('database.connections.pgsql.password'),
+                'MAIL_MAILER' => 'array',
+                ...$this->simulationEnvironment(),
+            ],
+            null,
+            $timeoutSeconds,
+        );
+
+        $process->run();
+
+        $this->assertTrue(
+            $process->isSuccessful(),
+            'artisan '.$command.' failed: '.$process->getErrorOutput().$process->getOutput(),
+        );
+
+        return $process;
+    }
+
+    /**
+     * The state paths, as environment variables for another process.
+     *
+     * @return array<string, string>
+     */
+    protected function simulationEnvironment(): array
+    {
+        $environment = [];
+
+        foreach (self::SIMULATION_STATE as $key => $variable) {
+            $environment[$variable] = $this->simulationPaths[$key] ?? '';
+        }
+
+        return $environment;
+    }
+
+    /**
+     * The file one family is using, for a test that wants to assert on it or
+     * hand it to a process of its own.
+     */
+    protected function simulationPath(string $configKey): string
+    {
+        return $this->simulationPaths[$configKey] ?? '';
     }
 
     /**

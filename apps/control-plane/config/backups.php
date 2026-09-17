@@ -113,4 +113,20 @@ return [
 
     'file_restore_max_paths' => (int) env('BACKUP_FILE_RESTORE_MAX_PATHS', 50),
 
+    /*
+     * Where the controlled backup simulator keeps what it remembers, so that
+     * more than one process can see the same thing.
+     *
+     * Unset by default, and unset everywhere but the tests that need it: an
+     * in-memory simulator is the right one inside a single process, and a
+     * shared file would let one test's archives leak into the next test's.
+     * It exists because a workflow in this platform crosses a request, a queue
+     * and a worker, and a simulator that forgets at the process boundary can
+     * take part in a contract test but not in a workflow.
+     *
+     * @see \Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore
+     */
+    'fake' => [
+        'state_path' => env('BACKUPS_FAKE_STATE_PATH'),
+    ],
 ];

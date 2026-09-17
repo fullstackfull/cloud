@@ -16,6 +16,7 @@ use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedProviderException;
 use Lynomia\Modules\Dedicated\Domain\Services\FakeDedicatedProviderGuard;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 
 /**
  * A controller that touches no hardware and reaches no network.
@@ -79,6 +80,9 @@ final class FakeDedicatedProvider implements DedicatedProvider
      */
     private array $pxeArmed = [];
 
+    /** Where this remembers between processes, or null to keep it in memory. */
+    private readonly ?ControlledSimulationStore $store;
+
     public function __construct(
         private readonly BmcProtocol $protocol = BmcProtocol::Redfish,
     ) {
@@ -87,6 +91,15 @@ final class FakeDedicatedProvider implements DedicatedProvider
         // configuration both avoid a boot-time check, and neither can avoid
         // this constructor.
         FakeDedicatedProviderGuard::assertNotProduction(self::NAME);
+
+        /*
+         * A dedicated machine is powered on by a request and read back by a
+         * worker — a reinstall is exactly that shape — so this family needs to
+         * remember across processes when it is asked to.
+         */
+        $this->store = ControlledSimulationStore::fromConfig('dedicated.fake.state_path', [
+            PowerState::class,
+        ]);
     }
 
     /**
@@ -184,7 +197,11 @@ final class FakeDedicatedProvider implements DedicatedProvider
     {
         $this->assertReachable($endpoint, 'set_one_time_pxe');
 
+        $this->restore();
+
         $this->pxeArmed[(string) $endpoint->getKey()] = true;
+
+        $this->remember();
 
         return new BmcOperation(
             operation: 'set_one_time_pxe',
@@ -207,6 +224,8 @@ final class FakeDedicatedProvider implements DedicatedProvider
         // PXE appears first only while an override is armed, and the override
         // is consumed by the next reset — which is what "one-time" means and
         // what a test asserting the machine does not reinstall itself checks.
+        $this->restore();
+
         return $this->pxeArmed[(string) $endpoint->getKey()] ?? false
             ? ['Pxe', 'Hdd', 'Cd']
             : ['Hdd', 'Pxe', 'Cd'];
@@ -228,6 +247,8 @@ final class FakeDedicatedProvider implements DedicatedProvider
      */
     public function isPxeArmed(BmcEndpoint $endpoint): bool
     {
+        $this->restore();
+
         return $this->pxeArmed[(string) $endpoint->getKey()] ?? false;
     }
 
@@ -245,6 +266,8 @@ final class FakeDedicatedProvider implements DedicatedProvider
     {
         $this->assertReachable($endpoint, $operation);
 
+        $this->restore();
+
         $key = (string) $endpoint->getKey();
         $this->power[$key] = $state;
 
@@ -254,6 +277,8 @@ final class FakeDedicatedProvider implements DedicatedProvider
         if ($operation === 'reset' || $operation === 'power_on') {
             $this->pxeArmed[$key] = false;
         }
+
+        $this->remember();
 
         return new BmcOperation(
             operation: $operation,
@@ -266,9 +291,43 @@ final class FakeDedicatedProvider implements DedicatedProvider
 
     private function currentPower(BmcEndpoint $endpoint): PowerState
     {
+        $this->restore();
+
         // Machines are off until something turns them on, which is the state a
         // freshly racked server is actually in.
         return $this->power[(string) $endpoint->getKey()] ?? PowerState::Off;
+    }
+
+    /**
+     * What the last process left, when there is a file to read it from.
+     *
+     * Read at the start of every operation rather than once in the
+     * constructor: two processes write this file, and an instance that read it
+     * when it was built would answer from a picture that was already old.
+     */
+    private function restore(): void
+    {
+        $state = $this->store?->read();
+
+        if ($state === null) {
+            return;
+        }
+
+        /** @var array<string, PowerState> $power */
+        $power = $state['power'] ?? [];
+        /** @var array<string, bool> $pxe */
+        $pxe = $state['pxe_armed'] ?? [];
+
+        $this->power = $power;
+        $this->pxeArmed = $pxe;
+    }
+
+    private function remember(): void
+    {
+        $this->store?->write([
+            'power' => $this->power,
+            'pxe_armed' => $this->pxeArmed,
+        ]);
     }
 
     /**

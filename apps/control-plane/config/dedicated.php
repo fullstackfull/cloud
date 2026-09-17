@@ -52,4 +52,21 @@ return [
         'hold_minutes' => (int) env('DEDICATED_RESERVATION_HOLD_MINUTES', 120),
         'send_to_review_when_unavailable' => true,
     ],
+
+    /*
+     * Where the controlled BMC simulator keeps what it remembers, so that
+     * more than one process can see the same thing.
+     *
+     * Unset by default, and unset everywhere but the tests that need it: an
+     * in-memory simulator is the right one inside a single process, and a
+     * shared file would let one test's power states leak into the next test's.
+     * It exists because a workflow in this platform crosses a request, a queue
+     * and a worker, and a simulator that forgets at the process boundary can
+     * take part in a contract test but not in a workflow.
+     *
+     * @see \Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore
+     */
+    'fake' => [
+        'state_path' => env('DEDICATED_FAKE_STATE_PATH'),
+    ],
 ];
