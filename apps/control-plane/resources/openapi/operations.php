@@ -1513,6 +1513,55 @@ return [
         'body' => ['datacenter_id', 'name', 'row', 'units', 'power_notes', 'network_notes'],
         'response' => $one('Rack', 201),
     ],
+    'api.admin.infrastructure.templates.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The images a cluster may install',
+        'description' => <<<'TEXT'
+        Withdrawn entries are included, because "why is this image not being
+        offered?" is answered by the row that says it was withdrawn. `active=1`
+        narrows it to the ones still offered.
+
+        `meta.installable` is the number that decides whether a VPS can be
+        built at all: an entry that is active and has a provider reference.
+        Placement resolves a plan's declared `template_slug` against exactly
+        that set, and a build that finds none is refused rather than started.
+        TEXT,
+        'permission' => 'infrastructure.view',
+        'query' => ['cluster', 'active'],
+        'response' => ['envelope' => 'list', 'schema' => 'VmTemplate'],
+    ],
+    'api.admin.infrastructure.templates.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record an installable image',
+        'description' => <<<'TEXT'
+        Recorded by an operator rather than discovered, because the hypervisor
+        knows which of its guests are templates and does not know which of them
+        this platform may sell, what to call them in two languages, or whether
+        the operating system needs a licence.
+
+        A second call for the same cluster and slug is a correction, not a
+        conflict — an image rebuilt under a new reference, or a version
+        upgraded in place — and answers 200 rather than 201. It also restores a
+        withdrawn entry, so deactivating one is never a one-way door.
+
+        `provider_reference` may be omitted while the image has not been staged
+        on the cluster. The entry then exists as a commercial intention and
+        placement refuses it, which is visible as `installable: false`.
+        TEXT,
+        'permission' => 'infrastructure.manage',
+        'body' => [
+            'cluster_id', 'slug', 'name', 'os_family', 'os_version', 'architecture',
+            'provider_reference', 'cloud_init', 'guest_agent', 'requires_licence', 'licence_note',
+        ],
+        'response' => $one('VmTemplate', 201),
+    ],
+    'api.admin.infrastructure.templates.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop offering an image',
+        'description' => 'Deactivated, never deleted: machines already built point at the row, and "which image is this server running?" is the first question asked when a rebuild goes wrong. Placement and the customer reinstall list both filter on the same flag, so one call removes it from both.',
+        'permission' => 'infrastructure.manage',
+        'response' => $one('VmTemplate'),
+    ],
     'api.admin.infrastructure.profiles.index' => [
         'tag' => 'Operator',
         'summary' => 'The software profiles this build can put on a machine',

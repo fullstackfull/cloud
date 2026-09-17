@@ -1304,6 +1304,36 @@ return [
             'machines' => ['type' => 'integer'],
         ],
     ],
+    /*
+     * An installable image, as an operator sees it.
+     *
+     * `name` is the whole localised map rather than one resolved string: an
+     * operator is editing a catalogue entry, and a form shown only the reader's
+     * own language would drop the other one on save. `installable` is computed
+     * — an entry with no provider reference is a commercial intention rather
+     * than something a machine can be built from, and placement refuses it.
+     */
+    'VmTemplate' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'cluster_id' => ['type' => ['string', 'null']],
+            'cluster' => ['type' => ['string', 'null']],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            'os_family' => ['type' => 'string', 'description' => 'debian, ubuntu, rocky, alma, windows or other.'],
+            'os_version' => ['type' => 'string'],
+            'architecture' => ['type' => 'string', 'description' => 'x86_64 or aarch64.'],
+            'provider_reference' => ['type' => ['string', 'null'], 'description' => 'How the hypervisor names the image, exactly as it spells it. Null until the image is staged on the cluster.'],
+            'cloud_init' => ['type' => 'boolean'],
+            'guest_agent' => ['type' => 'boolean'],
+            'requires_licence' => ['type' => 'boolean'],
+            'licence_note' => ['type' => ['string', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'installable' => ['type' => 'boolean', 'description' => 'Active and staged, which is what placement requires. Computed, not stored.'],
+        ],
+    ],
     'SoftwareProfile' => [
         'type' => 'object',
         'additionalProperties' => false,

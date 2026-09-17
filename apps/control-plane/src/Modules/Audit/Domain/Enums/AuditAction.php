@@ -249,6 +249,8 @@ enum AuditAction: string
     case DatacenterRegistered = 'infrastructure.datacenter.registered';
     case RackRegistered = 'infrastructure.rack.registered';
     case GpuDeviceRegistered = 'infrastructure.gpu.registered';
+    case VmTemplateRecorded = 'infrastructure.template.recorded';
+    case VmTemplateWithdrawn = 'infrastructure.template.withdrawn';
     case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
     case DesiredStateCleared = 'infrastructure.desired_state.cleared';
     case PlanComputed = 'infrastructure.plan.computed';

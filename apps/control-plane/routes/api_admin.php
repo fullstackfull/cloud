@@ -22,6 +22,7 @@ use Lynomia\Modules\Infrastructure\Http\Controllers\PreflightController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SiteController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SoftwareProfileController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\VmTemplateController;
 use Lynomia\Modules\ProductReadiness\Http\Controllers\ProductReadinessController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
 use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
@@ -330,6 +331,31 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('infrastructure/racks', [SiteController::class, 'storeRack'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.racks.store');
+
+    /*
+     * The images a cluster may install.
+     *
+     * Operator data, for the same reason racks and datacenters are: onboarding
+     * a real cluster must be somebody filling in the Control Center rather
+     * than a developer editing a seeder. Everything downstream reads the same
+     * table — placement resolves a plan's declared slug against it, and a VPS
+     * build that finds no image is refused rather than started.
+     *
+     * DELETE withdraws rather than destroys: machines already built point at
+     * the row, and "which image is this server running" is the first question
+     * asked when a rebuild goes wrong.
+     */
+    Route::get('infrastructure/templates', [VmTemplateController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.templates.index');
+
+    Route::post('infrastructure/templates', [VmTemplateController::class, 'store'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.templates.store');
+
+    Route::delete('infrastructure/templates/{template}', [VmTemplateController::class, 'destroy'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.templates.withdraw');
 
     Route::get('infrastructure/profiles', [SoftwareProfileController::class, 'index'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
