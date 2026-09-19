@@ -172,6 +172,33 @@ def main() -> int:
             check("an untrusted certificate for that same name is refused, not a forgery",
                   not forged, sentence)
 
+    # --- target parsing -----------------------------------------------------
+    # An operator types these. A typo must produce a sentence, not a traceback,
+    # and an IPv6 BMC address must survive being split.
+    for target, expected in [
+        ("pve-1.mgmt.example-corp", ("pve-1.mgmt.example-corp", 443)),
+        ("pve-1.mgmt.example-corp:8006", ("pve-1.mgmt.example-corp", 8006)),
+        ("10.20.30.11:2087", ("10.20.30.11", 2087)),
+        ("[fd00::1]:443", ("fd00::1", 443)),
+        ("[fd00::1]", ("fd00::1", 443)),
+        ("fd00::1", ("fd00::1", 443)),
+    ]:
+        try:
+            check(f"{target!r} splits to {expected}", trust.split_target(target) == expected,
+                  str(trust.split_target(target)))
+        except ValueError as wrong:
+            check(f"{target!r} splits to {expected}", False, str(wrong))
+
+    for bad in ("host:notaport", "host:0", "host:70000", "[fd00::1:443", ":443"):
+        try:
+            trust.split_target(bad)
+            check(f"{bad!r} is refused with a sentence", False, "it was accepted")
+        except ValueError as wrong:
+            check(f"{bad!r} is refused with a sentence", bool(str(wrong)), str(wrong))
+
+    check("a bad --target exits 2 rather than raising",
+          trust.main(["check-runner-trust.py", "--target", "host:notaport"]) == 2)
+
     # --- on-link networks ---------------------------------------------------
     networks = trust.local_networks()
     check("the on-link networks read without iproute2 are /24 prefixes",

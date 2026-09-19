@@ -274,10 +274,53 @@ def check_documentation_addresses() -> Finding:
     )
 
 
+def split_target(target: str) -> tuple[str, int]:
+    """Split HOST[:PORT] into its parts, including for an IPv6 literal.
+
+    An IPv6 address is full of colons, so `partition(":")` turns `fd00::1` into
+    the host `fd00` on a port that will not parse. Bracket form is the way a URL
+    has always disambiguated it, and a BMC on a unique-local address is an
+    ordinary thing to be asked about — `EndpointPolicy` accepts one.
+
+    Raises ValueError with a sentence the operator can act on, rather than
+    letting `int()` raise a traceback at them for a typo.
+    """
+    rest = target.strip()
+
+    if rest.startswith("["):
+        closing = rest.find("]")
+
+        if closing == -1:
+            raise ValueError(f"{target!r} opens a bracket for an IPv6 address and never closes it.")
+
+        host, remainder = rest[1:closing], rest[closing + 1 :]
+
+        if remainder and not remainder.startswith(":"):
+            raise ValueError(f"{target!r} has {remainder!r} after the address, which is not a port.")
+
+        port_text = remainder[1:]
+    elif rest.count(":") > 1:
+        # An unbracketed IPv6 literal. Accept it with the default port rather
+        # than guessing which colon was meant to be the separator.
+        host, port_text = rest, ""
+    else:
+        host, _, port_text = rest.partition(":")
+
+    if host == "":
+        raise ValueError(f"{target!r} names no host.")
+
+    if port_text == "":
+        return host, 443
+
+    if not port_text.isdigit() or not 1 <= int(port_text) <= 65535:
+        raise ValueError(f"{target!r} has {port_text!r} where a port between 1 and 65535 should be.")
+
+    return host, int(port_text)
+
+
 def check_wrong_name_for(target: str) -> Finding:
     """Present a name that cannot be valid for a real host and see what comes back."""
-    host, _, port_text = target.partition(":")
-    port = int(port_text) if port_text else 443
+    host, port = split_target(target)
     forged, sentence = forged_identity_at(host, port)
 
     if forged:
@@ -328,6 +371,15 @@ def main(argv: list[str]) -> int:
         "Read-only: one handshake, no credential, no request.",
     )
     arguments = parser.parse_args(argv[1:])
+
+    # Every target is parsed before anything is dialled, so a typo in the third
+    # one does not surface after two probes have already run.
+    for target in arguments.target:
+        try:
+            split_target(target)
+        except ValueError as wrong:
+            print(f"Cannot read --target: {wrong}", file=sys.stderr)
+            return 2
 
     findings = [check_impossible_name(), check_documentation_addresses()]
     findings.extend(check_wrong_name_for(target) for target in arguments.target)
