@@ -8,6 +8,31 @@ provider was contacted, and every `REAL_*` status is still NONE.
 
 ---
 
+## 0. What the full suite caught
+
+Three gates failed on the first complete run, all of them mine, and two are
+worth recording because neither would have been obvious in review.
+
+**A schema name collided with a customer-facing type.** I named the operator
+schema `HostingPackage`. `apps/web/src/lib/types.ts` already had a
+customer-facing `HostingPackage` interface carrying `plan_name` and the quota
+fields, and no schema had ever existed under that name — so introducing one
+silently re-pointed that type's contract check at my operator schema, which
+declares none of its fields. The operator schemas are `OperatorProduct`,
+`OperatorPlan`, `OperatorPrice` and `OperatorHostingPackage` now, matching the
+resource class names.
+
+**Nested fields read as the parent's fields.** The description check finds a
+resource's fields by reading every `'key' =>` literal in `toArray`, so the
+price array I built inline and the `limits` object I nested both read as
+fields of their parent. The fix is in the resources rather than the check:
+`OperatorPriceResource` exists as its own class and is used as a collection,
+and the package limits are flat — which also matches the request that sets
+them and the customer resource that reads them.
+
+The third was ordinary: thirty new request fields with no human-readable name,
+added in English and Arabic.
+
 ## 1. The finding
 
 E-11 was found while doing 30B.0-E's hosting-package work — mapping real panel
@@ -258,6 +283,50 @@ The plan form's fields follow the product's kind rather than offering a generic
 JSON box — a VPS plan is asked for its compute triple, a dedicated plan for its
 hardware profile — because a generic box is how a plan gets saved without the
 values a build silently defaults.
+
+## 11a. Deliberate breakages
+
+Twelve, each applied alone and restored before the next, with the five suites
+green before the first and after the last.
+
+| # | Breakage | Expected | Result |
+| --- | --- | --- | --- |
+| A | the product writer returns 404 | bootstrap fails | ✅ 1/3 |
+| B | the plan writer returns 404 | bootstrap fails | ✅ 1/3 |
+| C | the price writer returns 404 | bootstrap fails | ✅ 1/3 |
+| D | the hosting package writer returns 404 | bootstrap fails | ✅ 2/3 |
+| E | permission middleware removed from a mutation | authorization fails | ✅ 17/19 |
+| F | `catalog.view` — the customer's permission — on the price route | authorization fails | ❌ **passed 19/19** |
+| G | `integer` relaxed to `numeric` on an amount | money fails | ✅ 4/5 |
+| H | the price upsert stops finding the existing row | money fails | ✅ 3/5 |
+| I | setting a price also rewrites `order_items` | history fails | ✅ 4/5 |
+| J | WordPress added to `ProductKind` | prepared-product safety fails | ✅ 7/9 |
+| K | `CatalogueSeeder`'s production refusal removed | bootstrap fails | ✅ 2/3 |
+| L | withdrawal becomes `forceDelete()` | withdrawal fails | ✅ 3/5 |
+
+### F is why this section exists
+
+Eleven behaved. **F did not, and it was the most expensive one to have got
+wrong.** Putting `catalog.view` — the one permission every customer holds — on
+the endpoint that sets prices left the authorization suite passing 19 of 19.
+
+The cause was a gap in the test rather than in the code. The data provider
+covers the product, plan and hosting-package routes; the price routes are not
+in it, because a provider cannot create the plan they need a id for. So the
+customer case was asserted against every endpoint except the one where the
+wrong guard actually moves money.
+
+`nobody_without_pricing_authority_reaches_the_price_endpoints` closes it:
+unauthenticated, a customer, and staff without pricing authority, against both
+the set and the withdraw route. Re-running F against it now fails — the
+customer reaches 422 validation instead of 403, which is exactly the hole the
+breakage opens.
+
+Writing that test surfaced a second defect in the first attempt: `actingAs`
+persists for the rest of a test, so a loop that interleaved unauthenticated and
+authenticated calls made its second "unauthenticated" request as whoever the
+previous iteration logged in, and read 403 where it meant 401. The calls are
+ordered so every unauthenticated one happens before anything authenticates.
 
 ## 12. What this does not close
 

@@ -1313,7 +1313,7 @@ return [
      * — an entry with no provider reference is a commercial intention rather
      * than something a machine can be built from, and placement refuses it.
      */
-    'CatalogueProduct' => [
+    'OperatorProduct' => [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
@@ -1328,7 +1328,7 @@ return [
             'plans_count' => ['type' => 'integer'],
         ],
     ],
-    'CataloguePrice' => [
+    'OperatorPrice' => [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
@@ -1342,7 +1342,7 @@ return [
             'available_until' => ['type' => ['string', 'null'], 'format' => 'date-time'],
         ],
     ],
-    'CataloguePlan' => [
+    'OperatorPlan' => [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
@@ -1358,11 +1358,11 @@ return [
             'is_active' => ['type' => 'boolean'],
             'is_public' => ['type' => 'boolean'],
             'sort_order' => ['type' => 'integer'],
-            'prices' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/CataloguePrice']],
+            'prices' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/OperatorPrice']],
             'priced_in' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Currencies with an active price. Empty means nobody can buy this plan, however listed it looks.'],
         ],
     ],
-    'HostingPackage' => [
+    'OperatorHostingPackage' => [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
@@ -1372,7 +1372,17 @@ return [
             'plan_id' => ['type' => ['string', 'null']],
             'is_active' => ['type' => 'boolean'],
             'mapped' => ['type' => 'boolean', 'description' => 'Whether a plan points at it. A package with no plan is configuration nobody can order under.'],
-            'limits' => ['type' => 'object', 'additionalProperties' => ['type' => ['integer', 'null']], 'description' => 'Quota and CloudLinux limits. Null is the model\'s unlimited, not zero.'],
+            'disk_quota_mib' => ['type' => ['integer', 'null'], 'description' => 'Null is unlimited, never zero.'],
+            'bandwidth_quota_mib' => ['type' => ['integer', 'null']],
+            'max_addon_domains' => ['type' => ['integer', 'null']],
+            'max_subdomains' => ['type' => ['integer', 'null']],
+            'max_databases' => ['type' => ['integer', 'null']],
+            'max_email_accounts' => ['type' => ['integer', 'null']],
+            'cpu_limit_percent' => ['type' => ['integer', 'null'], 'description' => 'CloudLinux. Recorded whether or not CloudLinux is licensed on the node.'],
+            'memory_limit_mib' => ['type' => ['integer', 'null']],
+            'io_limit_kbps' => ['type' => ['integer', 'null']],
+            'process_limit' => ['type' => ['integer', 'null']],
+            'entry_process_limit' => ['type' => ['integer', 'null']],
         ],
     ],
     'VmTemplate' => [

@@ -46,21 +46,15 @@ final class OperatorPlanResource extends JsonResource
             'is_active' => $plan->is_active,
             'is_public' => $plan->is_public,
             'sort_order' => $plan->sort_order,
+            /*
+             * A collection rather than `->toArray()` on each: the description
+             * check treats a resource merged with `->toArray(` as publishing
+             * the parent's fields, and these are a nested list under a key of
+             * their own.
+             */
             'prices' => $this->when(
                 $plan->relationLoaded('prices'),
-                fn (): array => array_map(
-                    static fn (PlanPrice $price): array => [
-                        'id' => (string) $price->getKey(),
-                        'currency' => $price->currency,
-                        'billing_period' => $price->billing_period,
-                        'recurring_amount_minor' => $price->recurring_amount_minor,
-                        'setup_amount_minor' => $price->setup_amount_minor,
-                        'is_active' => $price->is_active,
-                        'available_from' => $price->available_from?->toIso8601String(),
-                        'available_until' => $price->available_until?->toIso8601String(),
-                    ],
-                    $prices,
-                ),
+                fn (): mixed => OperatorPriceResource::collection($prices),
             ),
             'priced_in' => $this->when(
                 $plan->relationLoaded('prices'),

@@ -6,7 +6,9 @@ namespace Tests\Feature\Catalog;
 
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
@@ -104,8 +106,7 @@ final class OnlyAnOperatorMayChangeWhatIsSoldTest extends TestCase
     #[Test]
     public function pricing_is_its_own_permission(): void
     {
-        $product = Product::factory()->create(['kind' => 'vps']);
-        $plan = Plan::factory()->for($product)->create();
+        $plan = $this->plan();
 
         // Support holds neither catalogue permission.
         $support = User::factory()->create();
@@ -123,5 +124,69 @@ final class OnlyAnOperatorMayChangeWhatIsSoldTest extends TestCase
         $this->actingAs($billing)
             ->postJson('/api/admin/catalogue/plans/'.$plan->getKey().'/prices', [])
             ->assertUnprocessable();
+    }
+
+    /**
+     * The price endpoints, against the same three refusals as everything else.
+     *
+     * They are not in the data provider above because they need a plan to
+     * exist first, and a provider cannot make one. That exemption was a hole:
+     * a deliberate breakage that put `catalog.view` — the permission every
+     * customer holds — on the price route left this suite passing 19 of 19.
+     * The one endpoint where the wrong guard actually moves money was the one
+     * endpoint no customer test reached, which is the most expensive shape a
+     * gap in a gate can have.
+     */
+    #[Test]
+    public function nobody_without_pricing_authority_reaches_the_price_endpoints(): void
+    {
+        $plan = $this->plan();
+        $set = '/api/admin/catalogue/plans/'.$plan->getKey().'/prices';
+        $withdraw = $set.'/'.$this->price($plan);
+
+        $calls = [['POST', $set], ['DELETE', $withdraw]];
+
+        /*
+         * Every unauthenticated call first, before anything authenticates.
+         * `actingAs` persists for the rest of the test, so a loop that mixed
+         * the two would make its second "unauthenticated" request as whoever
+         * the first iteration logged in — and read 403 where it meant 401,
+         * which is how a test comes to assert the wrong refusal and pass.
+         */
+        foreach ($calls as [$method, $uri]) {
+            $this->json($method, $uri, [])->assertUnauthorized();
+        }
+
+        // A customer, who holds catalog.view and nothing else.
+        $customer = User::factory()->create();
+        $customer->syncRoles([Role::Customer->value]);
+        $this->assertTrue($customer->can(Permission::CatalogView->value));
+
+        foreach ($calls as [$method, $uri]) {
+            $this->actingAs($customer)->json($method, $uri, [])->assertForbidden();
+        }
+
+        // Staff with no pricing authority.
+        $noc = User::factory()->create();
+        $noc->syncRoles([Role::Noc->value]);
+
+        foreach ($calls as [$method, $uri]) {
+            $this->actingAs($noc)->json($method, $uri, [])->assertForbidden();
+        }
+    }
+
+    private function plan(): Plan
+    {
+        return Plan::factory()->for(Product::factory()->create(['kind' => 'vps']))->create();
+    }
+
+    private function price(Plan $plan): string
+    {
+        return (string) PlanPrice::factory()->create([
+            'plan_id' => $plan->getKey(),
+            'currency' => 'KWD',
+            'billing_period' => BillingPeriod::Monthly,
+            'recurring_amount_minor' => 9_000,
+        ])->getKey();
     }
 }

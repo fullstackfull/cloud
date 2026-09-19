@@ -37,19 +37,21 @@ final class OperatorHostingPackageResource extends JsonResource
             'plan_id' => $package->plan_id === null ? null : (string) $package->plan_id,
             'is_active' => $package->is_active,
             'mapped' => $package->plan_id !== null,
-            'limits' => [
-                'disk_quota_mib' => $package->disk_quota_mib,
-                'bandwidth_quota_mib' => $package->bandwidth_quota_mib,
-                'max_addon_domains' => $package->max_addon_domains,
-                'max_subdomains' => $package->max_subdomains,
-                'max_databases' => $package->max_databases,
-                'max_email_accounts' => $package->max_email_accounts,
-                'cpu_limit_percent' => $package->cpu_limit_percent,
-                'memory_limit_mib' => $package->memory_limit_mib,
-                'io_limit_kbps' => $package->io_limit_kbps,
-                'process_limit' => $package->process_limit,
-                'entry_process_limit' => $package->entry_process_limit,
-            ],
+            // Flat, matching the request that sets them and the customer
+            // resource that reads them. Null is the model's unlimited, never
+            // zero: a package granting zero disk is an account that cannot
+            // hold a file, recorded as configured.
+            'disk_quota_mib' => $package->disk_quota_mib,
+            'bandwidth_quota_mib' => $package->bandwidth_quota_mib,
+            'max_addon_domains' => $package->max_addon_domains,
+            'max_subdomains' => $package->max_subdomains,
+            'max_databases' => $package->max_databases,
+            'max_email_accounts' => $package->max_email_accounts,
+            'cpu_limit_percent' => $package->cpu_limit_percent,
+            'memory_limit_mib' => $package->memory_limit_mib,
+            'io_limit_kbps' => $package->io_limit_kbps,
+            'process_limit' => $package->process_limit,
+            'entry_process_limit' => $package->entry_process_limit,
         ];
     }
 }

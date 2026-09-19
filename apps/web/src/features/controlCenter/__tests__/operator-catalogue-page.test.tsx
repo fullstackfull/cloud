@@ -34,7 +34,11 @@ const UNPRICED = { ...PRICED, id: 'pl2', slug: 'unpriced', name: { en: 'Unpriced
 
 const PACKAGE = {
   id: 'hp1', slug: 'hosting-starter', panel_package_name: 'lyn_starter',
-  plan_id: 'pl1', is_active: true, mapped: true, limits: {},
+  plan_id: 'pl1', is_active: true, mapped: true,
+  disk_quota_mib: 10240, bandwidth_quota_mib: null, max_addon_domains: null,
+  max_subdomains: null, max_databases: null, max_email_accounts: null,
+  cpu_limit_percent: null, memory_limit_mib: null, io_limit_kbps: null,
+  process_limit: null, entry_process_limit: null,
 }
 
 let posted: Array<{ path: string; body: unknown }> = []

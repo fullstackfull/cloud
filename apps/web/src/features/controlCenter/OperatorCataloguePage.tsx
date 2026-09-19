@@ -14,18 +14,18 @@ import {
   BILLING_PERIODS,
   PRODUCT_KINDS,
   type BillingPeriod,
-  type CataloguePlan,
-  type CatalogueProduct,
+  type OperatorPlan,
+  type OperatorProduct,
   type ProductKind,
-  useCataloguePlans,
-  useCatalogueProducts,
+  useOperatorPlans,
+  useOperatorProducts,
   useHostingPackages,
   useMapHostingPackage,
-  useRecordCataloguePlan,
-  useRecordCatalogueProduct,
+  useRecordOperatorPlan,
+  useRecordOperatorProduct,
   useSetPlanPrice,
-  useWithdrawCataloguePlan,
-  useWithdrawCatalogueProduct,
+  useWithdrawOperatorPlan,
+  useWithdrawOperatorProduct,
   useWithdrawHostingPackage,
   useWithdrawPlanPrice,
 } from '@/lib/controlCenterQueries'
@@ -49,15 +49,15 @@ import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 export function OperatorCataloguePage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const products = useCatalogueProducts()
-  const plans = useCataloguePlans()
+  const products = useOperatorProducts()
+  const plans = useOperatorPlans()
   const packages = useHostingPackages()
   const [addingProduct, setAddingProduct] = useState(false)
   const [addingPlan, setAddingPlan] = useState(false)
   const [addingPackage, setAddingPackage] = useState(false)
   const [pricing, setPricing] = useState<string | null>(null)
-  const withdrawProduct = useWithdrawCatalogueProduct()
-  const withdrawPlan = useWithdrawCataloguePlan()
+  const withdrawProduct = useWithdrawOperatorProduct()
+  const withdrawPlan = useWithdrawOperatorPlan()
   const withdrawPackage = useWithdrawHostingPackage()
   const withdrawPrice = useWithdrawPlanPrice()
 
@@ -240,7 +240,7 @@ export function OperatorCataloguePage() {
 function ProductForm({ onDone }: { onDone: () => void }) {
   const { t } = useTranslation()
   const describe = useApiErrorMessage()
-  const record = useRecordCatalogueProduct()
+  const record = useRecordOperatorProduct()
   const [kind, setKind] = useState<ProductKind>('vps')
   const [slug, setSlug] = useState('')
   const [nameEn, setNameEn] = useState('')
@@ -291,10 +291,10 @@ function ProductForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-function PlanForm({ products, onDone }: { products: CatalogueProduct[]; onDone: () => void }) {
+function PlanForm({ products, onDone }: { products: OperatorProduct[]; onDone: () => void }) {
   const { t } = useTranslation()
   const describe = useApiErrorMessage()
-  const record = useRecordCataloguePlan()
+  const record = useRecordOperatorPlan()
   const [productId, setProductId] = useState('')
   const [slug, setSlug] = useState('')
   const [nameEn, setNameEn] = useState('')
@@ -387,7 +387,7 @@ function PlanForm({ products, onDone }: { products: CatalogueProduct[]; onDone: 
   )
 }
 
-function PriceForm({ plan, onDone }: { plan: CataloguePlan; onDone: () => void }) {
+function PriceForm({ plan, onDone }: { plan: OperatorPlan; onDone: () => void }) {
   const { t } = useTranslation()
   const describe = useApiErrorMessage()
   const set = useSetPlanPrice()
@@ -457,7 +457,7 @@ function PriceForm({ plan, onDone }: { plan: CataloguePlan; onDone: () => void }
   )
 }
 
-function PackageForm({ plans, onDone }: { plans: CataloguePlan[]; onDone: () => void }) {
+function PackageForm({ plans, onDone }: { plans: OperatorPlan[]; onDone: () => void }) {
   const { t } = useTranslation()
   const describe = useApiErrorMessage()
   const map = useMapHostingPackage()

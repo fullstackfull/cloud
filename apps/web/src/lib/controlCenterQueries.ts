@@ -1070,7 +1070,7 @@ export const BILLING_PERIODS = ['hourly', 'daily', 'monthly', 'quarterly', 'year
 
 export type BillingPeriod = (typeof BILLING_PERIODS)[number]
 
-export interface CatalogueProduct {
+export interface OperatorProduct {
   id: string
   kind: ProductKind
   slug: string
@@ -1082,7 +1082,7 @@ export interface CatalogueProduct {
   plans_count?: number
 }
 
-export interface CataloguePrice {
+export interface OperatorPrice {
   id: string
   currency: string
   billing_period: BillingPeriod
@@ -1093,7 +1093,7 @@ export interface CataloguePrice {
   available_until: string | null
 }
 
-export interface CataloguePlan {
+export interface OperatorPlan {
   id: string
   product_id: string
   slug: string
@@ -1106,18 +1106,28 @@ export interface CataloguePlan {
   is_active: boolean
   is_public: boolean
   sort_order: number
-  prices?: CataloguePrice[]
+  prices?: OperatorPrice[]
   priced_in?: string[]
 }
 
-export interface HostingPackage {
+export interface OperatorHostingPackage {
   id: string
   slug: string
   panel_package_name: string
   plan_id: string | null
   is_active: boolean
   mapped: boolean
-  limits: Record<string, number | null>
+  disk_quota_mib: number | null
+  bandwidth_quota_mib: number | null
+  max_addon_domains: number | null
+  max_subdomains: number | null
+  max_databases: number | null
+  max_email_accounts: number | null
+  cpu_limit_percent: number | null
+  memory_limit_mib: number | null
+  io_limit_kbps: number | null
+  process_limit: number | null
+  entry_process_limit: number | null
 }
 
 interface Counted<T> {
@@ -1129,10 +1139,10 @@ function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ['admin', 'catalogue'] })
 }
 
-export function useCatalogueProducts() {
+export function useOperatorProducts() {
   return useQuery({
     queryKey: ['admin', 'catalogue', 'products'],
-    queryFn: () => admin.get<Counted<CatalogueProduct>>('/catalogue/products'),
+    queryFn: () => admin.get<Counted<OperatorProduct>>('/catalogue/products'),
   })
 }
 
@@ -1146,29 +1156,29 @@ export interface RecordProductInput {
   sort_order?: number
 }
 
-export function useRecordCatalogueProduct() {
+export function useRecordOperatorProduct() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (input: RecordProductInput) => admin.post<Envelope<CatalogueProduct>>('/catalogue/products', input),
+    mutationFn: (input: RecordProductInput) => admin.post<Envelope<OperatorProduct>>('/catalogue/products', input),
     onSuccess: () => { invalidateCatalogue(queryClient) },
   })
 }
 
-export function useWithdrawCatalogueProduct() {
+export function useWithdrawOperatorProduct() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({ id }: { id: string }) =>
-      admin.delete<Envelope<CatalogueProduct>>(`/catalogue/products/${encodeURIComponent(id)}`),
+      admin.delete<Envelope<OperatorProduct>>(`/catalogue/products/${encodeURIComponent(id)}`),
     onSuccess: () => { invalidateCatalogue(queryClient) },
   })
 }
 
-export function useCataloguePlans(productId?: string) {
+export function useOperatorPlans(productId?: string) {
   return useQuery({
     queryKey: ['admin', 'catalogue', 'plans', productId],
-    queryFn: () => admin.get<Counted<CataloguePlan>>('/catalogue/plans', { product: productId }),
+    queryFn: () => admin.get<Counted<OperatorPlan>>('/catalogue/plans', { product: productId }),
   })
 }
 
@@ -1181,21 +1191,21 @@ export interface RecordPlanInput {
   is_public: boolean
 }
 
-export function useRecordCataloguePlan() {
+export function useRecordOperatorPlan() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (input: RecordPlanInput) => admin.post<Envelope<CataloguePlan>>('/catalogue/plans', input),
+    mutationFn: (input: RecordPlanInput) => admin.post<Envelope<OperatorPlan>>('/catalogue/plans', input),
     onSuccess: () => { invalidateCatalogue(queryClient) },
   })
 }
 
-export function useWithdrawCataloguePlan() {
+export function useWithdrawOperatorPlan() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: ({ id }: { id: string }) =>
-      admin.delete<Envelope<CataloguePlan>>(`/catalogue/plans/${encodeURIComponent(id)}`),
+      admin.delete<Envelope<OperatorPlan>>(`/catalogue/plans/${encodeURIComponent(id)}`),
     onSuccess: () => { invalidateCatalogue(queryClient) },
   })
 }
@@ -1215,7 +1225,7 @@ export function useSetPlanPrice() {
 
   return useMutation({
     mutationFn: ({ planId, ...body }: SetPriceInput) =>
-      admin.post<Envelope<CataloguePlan>>(
+      admin.post<Envelope<OperatorPlan>>(
         ['/catalogue/plans', encodeURIComponent(planId), 'prices'].join('/'),
         body,
       ),
@@ -1234,7 +1244,7 @@ export function useWithdrawPlanPrice() {
        * browser. The gate is blunt on purpose and it is right to be, so the
        * path is built in parts instead of the rule being loosened.
        */
-      admin.delete<Envelope<CataloguePlan>>(
+      admin.delete<Envelope<OperatorPlan>>(
         ['/catalogue/plans', encodeURIComponent(planId), 'prices', encodeURIComponent(priceId)].join('/'),
       ),
     onSuccess: () => { invalidateCatalogue(queryClient) },
@@ -1244,7 +1254,7 @@ export function useWithdrawPlanPrice() {
 export function useHostingPackages() {
   return useQuery({
     queryKey: ['admin', 'catalogue', 'hosting-packages'],
-    queryFn: () => admin.get<Counted<HostingPackage>>('/catalogue/hosting-packages'),
+    queryFn: () => admin.get<Counted<OperatorHostingPackage>>('/catalogue/hosting-packages'),
   })
 }
 
@@ -1261,7 +1271,7 @@ export function useMapHostingPackage() {
 
   return useMutation({
     mutationFn: (input: MapHostingPackageInput) =>
-      admin.post<Envelope<HostingPackage>>('/catalogue/hosting-packages', input),
+      admin.post<Envelope<OperatorHostingPackage>>('/catalogue/hosting-packages', input),
     onSuccess: () => { invalidateCatalogue(queryClient) },
   })
 }
@@ -1271,7 +1281,7 @@ export function useWithdrawHostingPackage() {
 
   return useMutation({
     mutationFn: ({ id }: { id: string }) =>
-      admin.delete<Envelope<HostingPackage>>(`/catalogue/hosting-packages/${encodeURIComponent(id)}`),
+      admin.delete<Envelope<OperatorHostingPackage>>(`/catalogue/hosting-packages/${encodeURIComponent(id)}`),
     onSuccess: () => { invalidateCatalogue(queryClient) },
   })
 }
