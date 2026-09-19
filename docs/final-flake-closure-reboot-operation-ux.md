@@ -293,3 +293,25 @@ It reads like a broken lockfile and is not one. Three things say so:
 It was not patched around, because the honest fix for a transient fallback is to
 observe whether it recurs. It did not: the same job on the next push, run 198,
 passed in one second.
+
+## 10. The full browser suite
+
+Run as CI runs it, on a database rebuilt by the suite's own `globalSetup`, with
+`retries: 0`:
+
+```
+  14 skipped
+  364 passed (30.0m)
+```
+
+| | |
+|---|---|
+| Passed | 364 |
+| Failed | 0 |
+| Skipped | 14 |
+| Duration | 30.0 minutes |
+
+Every one of the 14 skips is `captures.e2e.ts`, the visual-record specs, which
+carry `test.skip(process.env.CAPTURES !== '1')`. That is the suite's only
+conditional skip and it accounts for all 14 — so nothing was skipped that this
+patch touches, and the three reboot specs really ran.
