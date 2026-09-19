@@ -368,12 +368,43 @@ The browser row is the one that matters here, and it is worth stating plainly:
 **green on the first attempt, with no job re-run.** Gap 6's exact-SHA run needed
 a second attempt of that job and said so; this one did not.
 
+And the run on the finished document, `3612a3f`:
+
+| | |
+|---|---|
+| Run | 200 |
+| Run id | 35469007495 |
+| SHA | `3612a3f2352d1e7ba3c67d8ddcf27990607a29df` |
+| Attempt | 1 |
+| Conclusion | **success** |
+
+### The run I cancelled
+
 Run 198, on the functional commit `6c4d342` alone, was **cancelled** — by my own
 push of the documentation commit, because `ci.yml` carries
 `concurrency: cancel-in-progress: true` per ref. That is a mistake in how I
 sequenced the pushes, not a CI failure, and it is recorded rather than quietly
 replaced by the run that did finish. `78355a8` is `6c4d342` plus this document
-and nothing else.
+and nothing else, so nothing about the code was left unproven — but "exact-SHA
+CI on the functional commit" was, strictly, missing.
+
+It was re-run rather than argued around, once nothing else was in flight, so
+that a completed successful attempt exists on `6c4d342` itself:
+
+| | |
+|---|---|
+| Run | 198 |
+| Run id | 35465846606 |
+| SHA | `6c4d342755e73d040c0a2180024e9448ac7f50de` — the functional commit |
+| Attempt | **2** |
+| Conclusion | **success** |
+| Jobs | **9 / 9 successful** |
+| Browser end-to-end | success, 30m07s |
+| Backend PostgreSQL 16 / 18 | success, 10m26s / 8m31s |
+
+Three complete runs therefore exist across this patch — `6c4d342`, `78355a8`
+and `3612a3f` — and all three are green on all nine jobs, with the browser suite
+passing on every one of them without a job re-run.
 
 ## 13. The gates, run locally
 
