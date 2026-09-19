@@ -442,6 +442,70 @@ its identity, licence status and scope, and whether CloudLinux or LiteSpeed are
 required by the packages Lynomia intends to sell. **No licence is to be
 purchased or activated automatically.**
 
+## 22a. Architecture finding — the sellable catalogue has no production write path
+
+Found by doing §36's work: mapping real hosting packages onto Lynomia plans.
+Raised rather than fixed, because the fix is application code and this phase is
+environment preparation.
+
+**Nothing can create a catalogue row in production.** Checked exhaustively:
+
+| Model | Writers in `src/` or `app/` | Other writers |
+| --- | --- | --- |
+| `Product` (catalogue) | **none** | `CatalogueSeeder` |
+| `Plan` (catalogue) | **none** — `PlanEngine` constructs `Infrastructure\Domain\DTOs\Plan`, a deployment plan, not this | `CatalogueSeeder` |
+| `PlanPrice` | **none** | `CatalogueSeeder` |
+| `HostingPackage` | **none** | `CatalogueSeeder`, `E2ESeeder`, `LoadReferenceTopologyForSimulation` |
+
+`Catalog`'s controllers are `index` and `show`. There is no `store`, no request
+object for one, and no route: a search of every non-GET route mentioning plan,
+product or catalogue returns only deployment plans and readiness assessments.
+
+And the one seeder that writes them refuses to run where it would matter:
+
+```php
+if (app()->isProduction()) {
+    throw new RuntimeException(
+        'CatalogueSeeder must never run in production: prices are an operator
+         decision, not a fixture.'
+    );
+}
+```
+
+That refusal is correct — a seeder that invents prices will eventually invoice
+somebody for them — but nothing was built to replace it.
+
+**What it costs.** `CreateHostingAccountHandler` requires a `hosting_package_id`
+and refuses when the package does not exist. The preflight already reports
+`mapping.hosting_package` as **FAIL** for Shared Hosting: "No hosting package is
+mapped, so an account has no plan to be created under." So a real panel
+onboarded through the Control Center would have zero packages, every Shared
+Hosting order would be refused, and the only ways forward would be raw SQL or a
+code change. One level up, an order is placed against a `Plan`, and a production
+deployment can have none of those either.
+
+**This is the same defect class Gap 8 found in `vm_templates`, and by Gap 8's own
+test.** That gap was called a blocker rather than a rough edge on the grounds
+that "onboarding infrastructure this platform already models must not require a
+code change; a product that cannot be delivered without one is not
+code-complete". The catalogue meets that description exactly, and it is wider:
+`vm_templates` blocked VPS builds, this blocks every sellable product's
+existence.
+
+**Not decided here.** Whether it moves `SOFTWARE_CODE_COMPLETE` is a scope
+judgement for the owner of that claim, and this document does not flip it.
+What is recorded is that the finding meets the standard Gap 8 itself applied,
+and that closing it is an application-code task of its own: operator write paths
+for product, plan, price and hosting package, with the authorisation, audit,
+two-language naming and per-currency price rules the rest of the Admin API
+already carries. **It is not closed by hardcoding a value, by re-enabling the
+development seeder in production, or by loading the reference topology.**
+
+**It does not block the trusted 30B.0.** A read-only preflight will report the
+mapping as failed, which is the correct answer and costs nothing. It blocks
+30B.3, the real Shared Hosting account lifecycle, and it blocks `READY_TO_SELL`
+independently of everything else in this phase.
+
 ## 23. BMC inventory
 
 **NOT BUILT.** `managed_servers` is empty. Per testable machine the private
@@ -564,10 +628,14 @@ tree stays clean afterwards.
 | **E-8** | Hosting panel licence position `UNKNOWN` | `BLOCKED_LICENCE` | operator — §22 |
 | **E-9** | The real internal DNS suffix is not chosen, and `.internal` would need an architecture decision | configuration, not a blocker label | operator — §8 |
 | **E-10** | No non-customer validation subnet or IP pool identified | configuration, not a blocker label | operator — §21 |
+| **E-11** | **The sellable catalogue has no production write path** — no product, plan, price or hosting package can be created outside a seeder that refuses to run in production. Blocks 30B.3 and `READY_TO_SELL`, not the trusted 30B.0 | architecture finding, not an environment blocker | **application change, §22a** |
 
 E-9 and E-10 are deliberately not forced into a canonical blocker label. They are
 configuration states with precise next actions, and calling them
-`BLOCKED_NETWORK` would misdescribe both.
+`BLOCKED_NETWORK` would misdescribe both. E-11 is not an environment blocker at
+all — no runner, route or credential closes it — which is why it is named
+separately rather than folded into the list a person with estate access can work
+through.
 
 ## 31. Readiness for the trusted 30B.0
 
@@ -584,6 +652,7 @@ Against the §61 exit criteria:
 | `CredentialReference` rows | **NOT READY** — 0, path known |
 | `ProviderInstance` rows | **NOT READY** — 0, path known |
 | Site / provider mappings | **NOT READY** — 0 |
+| Hosting package mappings | **NOT READY** — 0, and no production write path exists to create one (§22a) |
 | Disposable template | **NOT RECORDED** — write path exists |
 | Storage target | **NOT IDENTIFIED** |
 | Network / bridge | **NOT IDENTIFIED** |
@@ -599,7 +668,8 @@ tool and its proof (§5), the private inventory layout with its validation
 demonstrated (§7), the naming rules established by execution (§8), the exact
 credential contract and per-family read-only scopes (§9–14), the onboarding call
 sequence (§15, §16, §18), the EndpointPolicy compatibility matrix (§27), the
-D-1 correction (§2), and the bytecode cleanup (§29).
+D-1 correction (§2), the catalogue write-path finding (§22a), and the bytecode
+cleanup (§29).
 
 **Waiting on a person with access to the estate**: E-1 through E-10.
 
