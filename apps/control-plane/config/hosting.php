@@ -97,4 +97,20 @@ return [
         'verify_batch' => (int) env('HOSTING_VERIFY_BATCH', 200),
     ],
 
+    /*
+     * Where the controlled panel simulator keeps what it remembers, so that
+     * more than one process can see the same thing.
+     *
+     * Unset by default, and unset everywhere but the tests that need it: an
+     * in-memory simulator is the right one inside a single process, and a
+     * shared file would let one test's accounts leak into the next test's.
+     * It exists because a workflow in this platform crosses a request, a queue
+     * and a worker, and a simulator that forgets at the process boundary can
+     * take part in a contract test but not in a workflow.
+     *
+     * @see \Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore
+     */
+    'fake' => [
+        'state_path' => env('HOSTING_FAKE_STATE_PATH'),
+    ],
 ];

@@ -24,6 +24,17 @@ export function TwoFactorSection() {
 
   const enabled = user?.two_factor_enabled === true
 
+  /*
+   * Recovery codes issued by the enrolment that just completed.
+   *
+   * Held here rather than inside the enrolment panel, because confirming
+   * enrolment refetches the user, the account flips to "enabled", and the
+   * panel that was showing the codes unmounts — the codes were on screen for
+   * one render and gone, and they are shown exactly once. They stay until
+   * the customer says they have saved them.
+   */
+  const [issued, setIssued] = useState<string[] | null>(null)
+
   return (
     <Card
       title={t('security.twoFactor')}
@@ -36,12 +47,25 @@ export function TwoFactorSection() {
         )
       }
     >
-      {enabled ? <EnabledPanel /> : <EnrolmentPanel />}
+      {issued !== null ? (
+        <div className="flex flex-col gap-4">
+          <RecoveryCodes codes={issued} />
+          <div>
+            <Button variant="secondary" onClick={() => { setIssued(null); }}>
+              {t('security.recoveryCodesSaved')}
+            </Button>
+          </div>
+        </div>
+      ) : enabled ? (
+        <EnabledPanel />
+      ) : (
+        <EnrolmentPanel onEnrolled={setIssued} />
+      )}
     </Card>
   )
 }
 
-function EnrolmentPanel() {
+function EnrolmentPanel({ onEnrolled }: { onEnrolled: (codes: string[]) => void }) {
   const { t } = useTranslation()
   const describeError = useApiErrorMessage()
 
@@ -50,13 +74,21 @@ function EnrolmentPanel() {
 
   const [enrolment, setEnrolment] = useState<TwoFactorEnrolment | null>(null)
   const [code, setCode] = useState('')
-  const [codes, setCodes] = useState<string[] | null>(null)
+
+  /*
+   * Whether the password step is open, and the password typed into it.
+   *
+   * The server requires the current password to begin enrolment, for the
+   * same reason it requires it to end it: a session that has been taken over
+   * must not be able to change how the account is signed in to. The step is
+   * asked for here rather than assumed — the disable flow below already
+   * works this way — and the password is held only until the request is
+   * sent.
+   */
+  const [askingPassword, setAskingPassword] = useState(false)
+  const [password, setPassword] = useState('')
 
   const displayed = describeError(begin.error ?? confirm.error)
-
-  if (codes !== null) {
-    return <RecoveryCodes codes={codes} />
-  }
 
   if (enrolment === null) {
     return (
@@ -69,16 +101,56 @@ function EnrolmentPanel() {
 
         <p className="text-sm text-[var(--text-secondary)]">{t('security.twoFactorWhy')}</p>
 
-        <div>
-          <Button
-            loading={begin.isPending}
-            onClick={() => {
-              begin.mutate(undefined, { onSuccess: setEnrolment })
+        {askingPassword ? (
+          <form
+            className="flex max-w-md flex-col gap-3"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault()
+              begin.mutate(password, {
+                onSuccess: (next) => {
+                  setEnrolment(next)
+                  setPassword('')
+                  setAskingPassword(false)
+                },
+              })
             }}
           >
-            {t('security.enableTwoFactor')}
-          </Button>
-        </div>
+            <Field
+              label={t('security.currentPassword')}
+              type="password"
+              value={password}
+              onChange={(event) => { setPassword(event.target.value); }}
+              autoComplete="current-password"
+              required
+              hint={t('security.enableTwoFactorHint')}
+              error={displayed?.fields?.['current_password']?.[0]}
+            />
+
+            <div className="flex gap-2">
+              <Button type="submit" loading={begin.isPending}>
+                {t('security.enableContinue')}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setAskingPassword(false)
+                  setPassword('')
+                  begin.reset()
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div>
+            <Button onClick={() => { setAskingPassword(true); }}>
+              {t('security.enableTwoFactor')}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }
@@ -89,7 +161,7 @@ function EnrolmentPanel() {
       noValidate
       onSubmit={(event) => {
         event.preventDefault()
-        confirm.mutate(code, { onSuccess: setCodes })
+        confirm.mutate(code, { onSuccess: onEnrolled })
       }}
     >
       {displayed !== null ? (

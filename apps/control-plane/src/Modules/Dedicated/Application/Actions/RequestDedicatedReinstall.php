@@ -97,6 +97,7 @@ final readonly class RequestDedicatedReinstall
         string $confirmation,
         string $idempotencyKey,
         ?OsInstallProfile $profile = null,
+        ?string $requestedByUserId = null,
     ): ProvisioningJob {
         /*
          * Compared first, and compared exactly — no trimming of internal
@@ -137,6 +138,7 @@ final readonly class RequestDedicatedReinstall
             provider: $server->preferredBmcEndpoint()?->protocol->value ?? 'unknown',
             serviceId: $server->service_id,
             customerId: $server->customer_id,
+            requestedByUserId: $requestedByUserId,
             payload: [
                 'dedicated_server_id' => (string) $server->getKey(),
                 // The stable name of the machine, so the job record still says

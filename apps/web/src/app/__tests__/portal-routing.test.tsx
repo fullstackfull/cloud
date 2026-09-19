@@ -256,7 +256,15 @@ describe('portal routing', () => {
 
   it('renders a not-found page for an address the portal does not serve', async () => {
     vi.stubGlobal('fetch', stubFetch(SIGNED_IN))
-    visit('/vps/01JEXAMPLE')
+    /*
+     * A path with no route at all. It used to be `/vps/01JEXAMPLE`, which
+     * Wave 3 turned into a real address — a machine's own page — so the
+     * assertion moved to something the portal genuinely does not serve. What
+     * happens to an id that does not belong to the acting customer is a
+     * different guarantee, enforced by the API rather than by the router: the
+     * page asks for the machine and is answered 404.
+     */
+    visit('/vps/01JEXAMPLE/telemetry')
 
     render(<App />)
 

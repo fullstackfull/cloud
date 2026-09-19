@@ -21,6 +21,7 @@ use Lynomia\Modules\Billing\Infrastructure\Queries\CustomerSubscriptions;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QuotePlanChange;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
@@ -47,6 +48,7 @@ final class SubscriptionController
         private readonly CancelCustomerSubscription $cancelSubscription,
         private readonly QuotePlanChange $quotePlanChange,
         private readonly ApplyPlanChange $applyPlanChange,
+        private readonly ServiceIdentities $identities,
     ) {}
 
     protected function acting(): ActingCustomer
@@ -66,12 +68,22 @@ final class SubscriptionController
         /** @var LengthAwarePaginator<int, Subscription> $subscriptions */
         $subscriptions = CustomerSubscriptions::of($this->actingCustomer->get())
             ->when($status !== null, fn ($query) => $query->where('status', $status->value))
+            // Loaded so that every row can say what it is for: the plan the
+            // agreement is on, the product that plan belongs to, and the
+            // services it pays for. Without them two identical subscriptions
+            // are two identical rows, and cancelling one is a guess.
+            ->with(['plan.product', 'services'])
             // The ULID tie-breaks subscriptions created in the same
             // millisecond — two plans bought in one checkout — so paging is
             // stable and a row cannot appear on two pages.
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($request->perPage());
+
+        // One resolution for the whole page: four queries, not four per row.
+        $this->identities->attach(
+            $subscriptions->getCollection()->flatMap(static fn (Subscription $s) => $s->services),
+        );
 
         return response()->json([
             'data' => SubscriptionResource::collection($subscriptions->getCollection()),
@@ -90,8 +102,11 @@ final class SubscriptionController
         $this->authoriseWithinAccount($request, 'billing.view');
 
         $found = CustomerSubscriptions::of($this->actingCustomer->get())
+            ->with(['plan.product', 'services'])
             ->whereKey($subscription)
             ->firstOrFail();
+
+        $this->identities->attach($found->services);
 
         return (new SubscriptionResource($found))->response();
     }

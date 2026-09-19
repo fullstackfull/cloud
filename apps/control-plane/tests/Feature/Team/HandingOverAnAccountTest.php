@@ -15,6 +15,51 @@ use PHPUnit\Framework\Attributes\Test;
 final class HandingOverAnAccountTest extends TeamApiTestCase
 {
     #[Test]
+    public function the_accounts_own_id_is_no_longer_what_confirms_the_transfer(): void
+    {
+        /*
+         * The confirmation used to be the account's ULID, which is unique and
+         * unreadable — nobody types twenty-six characters of base32, they copy
+         * them, and a copied value is not a moment of recognition. It is now
+         * the account's name.
+         *
+         * Asserted from the other direction as well as the right one, because
+         * "the new value works" would also pass if the server had stopped
+         * checking.
+         */
+        [$customer, $owner] = $this->accountWithOwner();
+        $successor = $this->memberOf($customer, CustomerRole::Administrator);
+        $membership = $this->membership($customer, $successor);
+
+        $this->actingAs($owner)->withHeaders($this->actingFor($customer))
+            ->postJson('/api/v1/team/transfer-ownership', [
+                'member_id' => (string) $membership->getKey(),
+                'confirm_account_name' => (string) $customer->getKey(),
+            ])
+            ->assertStatus(422);
+
+        // And nothing moved.
+        $this->assertSame(CustomerRole::Owner, $owner->fresh()?->roleWithin((string) $customer->getKey()));
+    }
+
+    #[Test]
+    public function whitespace_a_copy_leaves_behind_is_forgiven_and_nothing_else_is(): void
+    {
+        [$customer, $owner] = $this->accountWithOwner();
+        $successor = $this->memberOf($customer, CustomerRole::Administrator);
+        $membership = $this->membership($customer, $successor);
+
+        $this->actingAs($owner)->withHeaders($this->actingFor($customer))
+            ->postJson('/api/v1/team/transfer-ownership', [
+                'member_id' => (string) $membership->getKey(),
+                'confirm_account_name' => '  '.$customer->display_name.'  ',
+            ])
+            ->assertOk();
+
+        $this->assertSame(CustomerRole::Owner, $successor->fresh()?->roleWithin((string) $customer->getKey()));
+    }
+
+    #[Test]
     public function the_owner_hands_over_and_becomes_an_administrator_in_the_same_act(): void
     {
         [$customer, $owner] = $this->accountWithOwner();
@@ -24,7 +69,7 @@ final class HandingOverAnAccountTest extends TeamApiTestCase
         $this->actingAs($owner)->withHeaders($this->actingFor($customer))
             ->postJson('/api/v1/team/transfer-ownership', [
                 'member_id' => (string) $membership->getKey(),
-                'confirm_account_id' => (string) $customer->getKey(),
+                'confirm_account_name' => $customer->display_name,
             ])
             ->assertOk()
             ->assertJsonPath('data.role', 'owner');
@@ -49,7 +94,7 @@ final class HandingOverAnAccountTest extends TeamApiTestCase
         $this->actingAs($ambitious)->withHeaders($this->actingFor($customer))
             ->postJson('/api/v1/team/transfer-ownership', [
                 'member_id' => (string) $membership->getKey(),
-                'confirm_account_id' => (string) $customer->getKey(),
+                'confirm_account_name' => $customer->display_name,
             ])
             ->assertForbidden()
             ->assertJsonPath('error.code', 'membership.only_the_owner_may_transfer');
@@ -67,7 +112,7 @@ final class HandingOverAnAccountTest extends TeamApiTestCase
         $this->actingAs($owner)->withHeaders($this->actingFor($customer))
             ->postJson('/api/v1/team/transfer-ownership', [
                 'member_id' => (string) $membership->getKey(),
-                'confirm_account_id' => 'not-the-account-id',
+                'confirm_account_name' => 'Some Other Company',
             ])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'membership.transfer_not_confirmed');
@@ -93,7 +138,7 @@ final class HandingOverAnAccountTest extends TeamApiTestCase
         $this->actingAs($owner)->withHeaders($this->actingFor($customer))
             ->postJson('/api/v1/team/transfer-ownership', [
                 'member_id' => (string) $pending->getKey(),
-                'confirm_account_id' => (string) $customer->getKey(),
+                'confirm_account_name' => $customer->display_name,
             ])
             ->assertNotFound();
 

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Dedicated\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Lynomia\Http\Concerns\ReadsIdempotencyKey;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
 
 /**
@@ -24,27 +25,32 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
  * be a second, unscoped way to name a target.
  *
  * ---------------------------------------------------------------------------
- * Why there is no Idempotency-Key here, when the reinstall endpoint requires
- * one
+ * The Idempotency-Key, and why it is here now
  * ---------------------------------------------------------------------------
  *
- * An idempotency key is a promise that a repeat is free. The platform can keep
- * that promise for a reinstall, because the engine's job table has a unique
- * index to keep it in — and it cannot keep it for a power request, which is
- * sent straight to a controller with nothing between the two to remember it.
- * A required header that the platform then ignored would be worse than no
- * header: a client would retry believing it was protected.
+ * This endpoint used to refuse the header, and the reasoning was sound at the
+ * time: an idempotency key is a promise that a repeat is free, the platform
+ * had nowhere to keep that promise for a request sent straight to a
+ * controller, and a required header that was then ignored would be worse than
+ * none because a client would retry believing it was protected.
  *
- * What makes repeating these safe is the vocabulary instead. `on` and `off`
- * are levels rather than edges — repeating either converges on the state the
- * caller asked for — and `cycle` reads the chassis first, so a repeat against
- * a machine that has since gone down powers it on rather than resetting it a
- * second time. The one case a key would genuinely help with, two resets of a
- * running machine, is also the case where the customer pressing the button
- * twice usually meant it.
+ * The argument was about a missing table, not about the header. The vocabulary
+ * covered most of it — `on` and `off` are levels rather than edges, and
+ * `cycle` reads the chassis first — but not the case that costs something: two
+ * `cycle` requests against a running machine send two resets, and the second
+ * interrupts the boot the first one started. The final power state is
+ * identical either way, which is what made it invisible.
+ *
+ * `dedicated_power_operations` is that table. The key is claimed there before
+ * the controller is called, so the promise is one the platform can keep, and
+ * it is required here for the same reason it is required on the reinstall
+ * route: an operation that cannot be safely repeated must be something the
+ * caller can identify.
  */
 final class PowerActionRequest extends FormRequest
 {
+    use ReadsIdempotencyKey;
+
     /**
      * @return array<string, mixed>
      */
@@ -57,7 +63,7 @@ final class PowerActionRequest extends FormRequest
              * that leaves a customer believing their server is rebooting.
              */
             'action' => ['required', Rule::enum(DedicatedPowerAction::class)],
-        ];
+        ] + $this->idempotencyKeyRules();
     }
 
     /**
@@ -65,8 +71,8 @@ final class PowerActionRequest extends FormRequest
      */
     public function messages(): array
     {
-        return [
-            'action.required' => 'Name the power action: on, off or cycle.',
+        return $this->idempotencyKeyMessages() + [
+            'action.required' => __('validation.requests.dedicated.power_action_required'),
         ];
     }
 

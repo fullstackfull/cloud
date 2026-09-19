@@ -1,3 +1,5 @@
+import path from 'node:path'
+
 import { defineConfig, devices } from '@playwright/test'
 
 /*
@@ -19,6 +21,53 @@ const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5174)
 
 const API_ORIGIN = `http://127.0.0.1:${API_PORT}`
 const WEB_ORIGIN = `http://localhost:${WEB_PORT}`
+
+/*
+ * Where the fake hypervisor keeps its fleet between processes.
+ *
+ * The fake is constructed per request, so without a state file every API
+ * request starts with an empty hypervisor and a power action on a seeded
+ * machine is refused as "no such machine" — which is a fact about the
+ * harness, not about the platform. The seeder registers the operable machine
+ * here (see E2ESeeder::operableMachine) and the API process reads it back.
+ */
+/*
+ * The mail the API sends during a run, one JSON object per line. The
+ * registration spec reads it, finds the verification link, and follows it.
+ */
+export const MAIL_OUTBOX_PATH = path.resolve(
+  import.meta.dirname,
+  'e2e/.artifacts/outbox.jsonl',
+)
+
+/*
+ * Where the fake payment provider records the decisions taken on its
+ * controlled gateway page, so that a later server-side retrieve agrees with
+ * what the customer clicked.
+ */
+export const FAKE_PAYMENTS_STATE_PATH = path.resolve(
+  import.meta.dirname,
+  'e2e/.artifacts/fake-payments.json',
+)
+
+export const FAKE_COMPUTE_STATE_PATH = path.resolve(
+  import.meta.dirname,
+  '../control-plane/storage/framework/testing/e2e-fake-compute-fleet.dat',
+)
+
+/*
+ * The fake registrar's portfolio, shared between the seeder and the API.
+ *
+ * Without it the seeded name exists in the database and nowhere else, and
+ * every control that asks the registrar something — the transfer code, the
+ * lock, a renewal — answers "e2e-held.test is not held by this account". The
+ * audit recorded that refusal as raw provider text reaching the customer; it
+ * was a fixture with no registrar behind it. See E2ESeeder::domainFixtures.
+ */
+export const FAKE_REGISTRAR_STATE_PATH = path.resolve(
+  import.meta.dirname,
+  '../control-plane/storage/framework/testing/e2e-fake-registrar.dat',
+)
 
 /*
  * The API is served from the control plane with its own database. `APP_ENV` is
@@ -54,7 +103,14 @@ const apiEnvironment = {
    * beside this suite, and standing one up would only prove that Symfony can
    * talk to it. What the specs are about is what the portal shows.
    */
-  MAIL_MAILER: 'log',
+  /*
+   * Mail is written to a file the suite can read, so the registration journey
+   * follows the real signed verification link out of the real message rather
+   * than writing `email_verified_at` and calling that proof. See
+   * OutboxTransport: it refuses to be constructed in production.
+   */
+  MAIL_MAILER: 'outbox',
+  MAIL_OUTBOX_PATH: MAIL_OUTBOX_PATH,
   APP_URL: API_ORIGIN,
   DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e',
   FRONTEND_URL: WEB_ORIGIN,
@@ -70,6 +126,50 @@ const apiEnvironment = {
    * that references it renders as missing.
    */
   LYNOMIA_E2E_REGISTRAR_SECRET: 'not-a-real-secret',
+
+  COMPUTE_FAKE_STATE_PATH: FAKE_COMPUTE_STATE_PATH,
+  DOMAINS_FAKE_STATE_PATH: FAKE_REGISTRAR_STATE_PATH,
+  PAYMENTS_FAKE_STATE_PATH: FAKE_PAYMENTS_STATE_PATH,
+  /*
+   * The fake gateway's page lives in the portal, so the redirect the provider
+   * issues has to point at the web server this suite starts.
+   */
+  PAYMENTS_FAKE_AUTHORISE_URL: `${WEB_ORIGIN}/fake-gateway/authorise`,
+
+  /*
+   * Two legal documents, published, because registration fails closed without
+   * them and journeys A and B both begin by registering.
+   *
+   * Set here rather than in the CI workflow so the suite carries its own
+   * requirement: the browser job copies `.env.example`, where all four of
+   * these are deliberately empty, and a developer running this locally has
+   * whatever their `.env` holds. Either way the API this suite starts is told
+   * what it needs, and the specs that register are testing the portal rather
+   * than the deployment's launch prerequisites.
+   *
+   * The addresses use the reserved `.test` TLD and the revisions are
+   * obviously synthetic. Nothing here is a published policy, and the
+   * `registration.unavailable` refusal itself is asserted against unset
+   * configuration in TheRegistrationOptionsNameTheLegalDocumentsTest.
+   */
+  LEGAL_TERMS_URL: 'https://legal.lynomia.test/terms',
+  LEGAL_TERMS_VERSION: 'e2e-terms-1',
+  LEGAL_AUP_URL: 'https://legal.lynomia.test/acceptable-use',
+  LEGAL_AUP_VERSION: 'e2e-aup-1',
+}
+
+/**
+ * An image that ships a browser rather than downloading one sets
+ * PLAYWRIGHT_CHROMIUM_EXECUTABLE to it. Left unset — on a developer's machine,
+ * and in CI — Playwright uses the build it manages itself, which is the
+ * arrangement that keeps the pinned version and the binary in step. Written as
+ * an override rather than as a hard-coded path because a path in this file
+ * would be a path that only works in one place.
+ */
+function chromiumExecutable(): { launchOptions?: { executablePath: string } } {
+  return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE !== undefined
+    ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+    : {}
 }
 
 export default defineConfig({
@@ -100,24 +200,72 @@ export default defineConfig({
     video: 'off',
   },
 
+  /*
+   * Five surfaces, four projects.
+   *
+   * `chromium` is the desktop suite as it has always been: every spec, one
+   * project, English unless a describe block asks for Arabic. Three customer
+   * projects sit beside it rather than multiplying it: the phone project runs
+   * only `e2e/mobile/`, on a real phone descriptor (viewport, touch, mobile
+   * user agent — not a desktop window made narrow), and the Arabic project
+   * runs only `e2e/arabic/`, with the browser's own language set to Arabic
+   * so the portal picks it the way a customer's browser would. The narrow
+   * project runs only `e2e/narrow/` at 360px — the specs the phone project
+   * also runs, so that both widths are measured rather than one inferred from
+   * the other. Each drives real journeys; none reruns the Control Center.
+   *
+   * The projects share one database and run one after another (one worker),
+   * so a spec that changes fixtures names its own — a zone the phone claims
+   * is not a zone the Arabic run expects to find absent.
+   */
   projects: [
     {
       name: 'chromium',
+      testIgnore: ['**/mobile/**', '**/arabic/**', '**/narrow/**'],
       use: {
         ...devices['Desktop Chrome'],
-        /*
-         * An image that ships a browser rather than downloading one sets
-         * PLAYWRIGHT_CHROMIUM_EXECUTABLE to it. Left unset — on a developer's
-         * machine, and in CI — Playwright uses the build it manages itself,
-         * which is the arrangement that keeps the pinned version and the
-         * binary in step.
-         *
-         * Written as an override rather than as a hard-coded path because a
-         * path in this file would be a path that only works in one place.
-         */
-        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE !== undefined
-          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
-          : {}),
+        ...chromiumExecutable(),
+      },
+    },
+    {
+      name: 'customer-mobile',
+      // `narrow/` runs here as well as in the project below, so that every
+      // assertion in it is made at 393 *and* at 360 rather than at one width
+      // with the other inferred.
+      testMatch: ['**/mobile/*.e2e.ts', '**/narrow/*.e2e.ts'],
+      use: {
+        // 393 × 851, touch, mobile user agent: the closest descriptor Playwright
+        // ships to the 390 × 844 phone the audit measured against.
+        ...devices['Pixel 5'],
+        ...chromiumExecutable(),
+      },
+    },
+    {
+      /*
+       * 360px, and it is a separate project rather than a viewport option on
+       * the one above.
+       *
+       * 360 is the narrowest width the portal claims to work at, and it is not
+       * 393 minus a bit: a row that fits at 393 with four pixels to spare
+       * fails at 360, and the failure has to name which width it was. Galaxy
+       * S8 is the descriptor Playwright ships at exactly 360 × 740, with touch
+       * and a mobile user agent, so this is a real phone rather than a desktop
+       * window made narrow.
+       */
+      name: 'customer-narrow',
+      testMatch: '**/narrow/*.e2e.ts',
+      use: {
+        ...devices['Galaxy S8'],
+        ...chromiumExecutable(),
+      },
+    },
+    {
+      name: 'customer-arabic',
+      testMatch: '**/arabic/*.e2e.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        locale: 'ar',
+        ...chromiumExecutable(),
       },
     },
   ],

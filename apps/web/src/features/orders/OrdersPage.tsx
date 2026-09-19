@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 
@@ -9,15 +8,20 @@ import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDate } from '@/lib/format'
 import { useOrders } from '@/lib/queries'
 import type { Order } from '@/lib/types'
+import { useUrlPage } from '@/lib/urlState'
 
 export function OrdersPage() {
   const { t } = useTranslation()
   const locale = useActiveLocale()
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useOrders(page)
 
   const columns: Array<Column<Order>> = [
@@ -48,7 +52,7 @@ export function OrdersPage() {
 
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable

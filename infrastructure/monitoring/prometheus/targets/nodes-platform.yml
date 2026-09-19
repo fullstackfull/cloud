@@ -1,19 +1,37 @@
+# -----------------------------------------------------------------------------
+# REFERENCE TARGET LIST — describes no machine that exists.
+#
+# Every name here is a host from the example inventory in
+# infrastructure/ansible/inventories/production/hosts.yml, under `.example`,
+# which IANA reserves for documents. The real target list is operator-supplied
+# and lives with the private inventory: Prometheus re-reads a file_sd file
+# within seconds, so replacing this file is the whole deployment step.
+#
+# It is written in the reference namespace on purpose. A committed list of
+# plausible-looking internal hostnames is one copy-paste from being configured
+# as real, and this platform's own endpoint policy refuses `.internal` names
+# outright — so a list under that zone disagreed with the application that
+# reads it.
+# -----------------------------------------------------------------------------
 # The machines the control plane itself runs on, plus its data stores.
 - targets:
-    - cp-app-01.kw.lynomia.internal:9100
-    - cp-app-02.kw.lynomia.internal:9100
+    - cp-1.prod.example:9100
+    - cp-2.prod.example:9100
+    - cp-3.prod.example:9100
   labels:
     role: application
     service: control-plane
 
 - targets:
-    - cp-db-01.kw.lynomia.internal:9100
+    - db-1.prod.example:9100
+    - db-2.prod.example:9100
   labels:
     role: database
     service: control-plane-db
 
 - targets:
-    - cp-redis-01.kw.lynomia.internal:9100
+    - redis-1.prod.example:9100
+    - redis-2.prod.example:9100
   labels:
     role: redis
     service: control-plane-queue
@@ -22,7 +40,7 @@
     # Proxmox Backup Server. This host also runs the node_exporter textfile
     # collector that publishes backup and verification results — see
     # rules/backups.yml and the README.
-    - pbs-01.kw.lynomia.internal:9100
+    - pbs-1.prod.example:9100
   labels:
     role: backup
     service: backups

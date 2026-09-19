@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { fixtures, signIn, users } from './support/helpers'
 
@@ -6,6 +6,33 @@ import { fixtures, signIn, users } from './support/helpers'
  * The overview and the site registry: the estate on one screen with what
  * needs a person first, and the places machines can be.
  */
+
+/**
+ * The datacenter holding the rack this suite registers, found by the rack
+ * rather than by name.
+ *
+ * The rack is the suite's own fixture; the datacenter around it belongs to the
+ * seeded estate, which is declared in the control plane's
+ * resources/reference-topology/topology.php and free to rename its places. A
+ * spec that named it asserted a fact about the estate it never meant to, and
+ * broke when the estate was renamed — which is exactly what happened.
+ */
+async function datacenterHoldingTheRack(page: Page): Promise<string> {
+  const rack = page.getByRole('listitem', { name: fixtures.rack, exact: true })
+  const row = page.getByRole('listitem').filter({ has: rack }).first()
+  await expect(rack).toBeVisible()
+
+  const name = await row.getAttribute('aria-label')
+
+  if (name === null || name === '') {
+    throw new Error(
+      `The sites screen shows rack ${fixtures.rack} but the datacenter around it has no accessible name, ` +
+        'so neither an operator using a screen reader nor this spec can say where the rack is.',
+    )
+  }
+
+  return name
+}
 
 test.describe('an operator opening the control centre', () => {
   test.beforeEach(async ({ page }) => {
@@ -22,8 +49,15 @@ test.describe('an operator opening the control centre', () => {
     await expect(attention.getByText(/credential\(s\) not on the controller/i)).toBeVisible()
     await expect(attention.getByText(/machine\(s\) never classified/i)).toBeVisible()
 
-    await expect(page.getByRole('link', { name: /^machines$/i })).toBeVisible()
-    await expect(page.getByRole('link', { name: /^datacenters$/i })).toBeVisible()
+    /*
+     * Scoped to the page rather than the document: since Wave 3 the operator
+     * navigation is a persistent column rather than a menu that had to be
+     * opened, so "Machines" is legitimately both a navigation entry and a
+     * card on this screen. The card is what this spec is about.
+     */
+    const overview = page.getByRole('main')
+    await expect(overview.getByRole('link', { name: /^machines$/i })).toBeVisible()
+    await expect(overview.getByRole('link', { name: /^datacenters$/i })).toBeVisible()
 
     await attention.getByText(/credential\(s\) not on the controller/i).click()
     await expect(page.getByRole('heading', { name: /^credentials$/i })).toBeVisible()
@@ -33,15 +67,18 @@ test.describe('an operator opening the control centre', () => {
     await page.goto('/admin/control-center/sites')
     await expect(page.getByRole('heading', { name: /^sites$/i })).toBeVisible()
 
-    const datacenter = page.getByRole('listitem', { name: fixtures.datacenter })
-    await expect(datacenter.getByRole('listitem', { name: fixtures.rack })).toBeVisible()
+    // `exact` matters: the rack registered below is named from the clock and
+    // can begin with the fixture's name (E2E-R1PEL once did, on CI).
+    const place = await datacenterHoldingTheRack(page)
+    const datacenter = page.getByRole('listitem', { name: place, exact: true })
+    await expect(datacenter.getByRole('listitem', { name: fixtures.rack, exact: true })).toBeVisible()
     await expect(datacenter).toContainText(/PDU-1/)
 
     const name = `E2E-R${Date.now().toString(36).slice(-4).toUpperCase()}`
     await page.getByRole('button', { name: /register a rack/i }).click()
     const form = page.getByRole('form', { name: /register a rack/i })
-    await form.getByLabel(/^datacenter$/i).selectOption({ label: fixtures.datacenter })
-    await form.getByLabel(/rack name/i).fill(name)
+    await form.getByLabel(/^datacenter$/i).selectOption({ label: place })
+    await form.getByLabel(/rack code/i).fill(name)
     await form.getByLabel(/^row$/i).fill('B')
     await form.getByLabel(/power notes/i).fill('PDU-2')
     await form.getByRole('button', { name: /register a rack/i }).click()
@@ -52,8 +89,8 @@ test.describe('an operator opening the control centre', () => {
     // The same name again: refused by the platform, said on the form.
     await page.getByRole('button', { name: /register a rack/i }).click()
     const again = page.getByRole('form', { name: /register a rack/i })
-    await again.getByLabel(/^datacenter$/i).selectOption({ label: fixtures.datacenter })
-    await again.getByLabel(/rack name/i).fill(fixtures.rack)
+    await again.getByLabel(/^datacenter$/i).selectOption({ label: place })
+    await again.getByLabel(/rack code/i).fill(fixtures.rack)
     await again.getByRole('button', { name: /register a rack/i }).click()
     await expect(again.getByText(/already has a rack named/i)).toBeVisible()
   })
@@ -66,10 +103,14 @@ test.describe('in Arabic', () => {
     await signIn(page, users.operator, { headingPattern: /مرحب|أهل/ })
     await page.goto('/admin/control-center')
     await expect(page.getByRole('heading', { name: /نظرة عامة على البنية التحتية/ })).toBeVisible()
-    await expect(page.getByText(/يحتاج إلى شخص/)).toBeVisible()
+    // The heading, named: the screen's own subtitle contains the same phrase,
+    // and asserting on the text alone matches both.
+    await expect(page.getByRole('heading', { name: 'يحتاج إلى شخص' })).toBeVisible()
 
     await page.goto('/admin/control-center/sites')
     await expect(page.getByRole('heading', { name: /المواقع/ })).toBeVisible()
-    await expect(page.getByRole('listitem', { name: fixtures.datacenter }).getByRole('listitem', { name: fixtures.rack })).toBeVisible()
+    const place = await datacenterHoldingTheRack(page)
+    const datacenter = page.getByRole('listitem', { name: place, exact: true })
+    await expect(datacenter.getByRole('listitem', { name: fixtures.rack, exact: true })).toBeVisible()
   })
 })

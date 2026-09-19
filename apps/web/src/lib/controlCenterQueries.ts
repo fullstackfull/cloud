@@ -249,6 +249,14 @@ export function useServers(page: number, environment?: Environment | '') {
   })
 }
 
+/**
+ * One machine, read on its own.
+ *
+ * W5.7 dead-code audit: no screen calls this yet. The machines screen renders
+ * the selected row out of the page it already has, which is one request rather
+ * than two. Kept because a machine's own page is the obvious next screen and
+ * the endpoint is shipped. Classified FUTURE_PREPARED, not dead.
+ */
 export function useServer(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'servers', 'one', id],
@@ -521,6 +529,15 @@ export function useDisableProvider() {
   })
 }
 
+/**
+ * Re-runs a provider's readiness assessment.
+ *
+ * W5.7 dead-code audit: no screen calls this yet. Kept rather than deleted —
+ * `POST /providers/{id}/assess` is a shipped operator endpoint, and the
+ * Providers screen offers "test connection" (which proves the credential)
+ * without yet offering "assess" (which re-derives what the account can do).
+ * Classified FUTURE_PREPARED, not dead.
+ */
 export function useAssessProvider() {
   const queryClient = useQueryClient()
 
@@ -650,6 +667,70 @@ export function useProductDependencies() {
   return useQuery({
     queryKey: ['admin', 'readiness', 'dependencies'],
     queryFn: () => admin.get<{ data: ProductDependency[] }>('/readiness/dependencies'),
+  })
+}
+
+/* -------------------------------------------------------------------------
+ | Unified infrastructure preflight
+ |
+ | One endpoint, one service, two modes. The screen renders what the backend
+ | decided and judges nothing itself: whether a finding blocks, what the next
+ | action is and whether anything may claim real verification are all the
+ | service's answers, so the Control Center and `infra:preflight` can never
+ | disagree about the same provider.
+ |
+ | It is a mutation rather than a query on purpose. A preflight is an act with
+ | a cost — in real mode it sends requests to somebody else's API — so it
+ | happens when an operator asks, never on render, and it is never served from
+ | a cache. A cached success shown as a fresh run is the one thing a diagnostic
+ | must not do.
+ */
+
+export type PreflightMode = 'simulation' | 'read_only_real'
+
+export type PreflightCheckStatus = 'pass' | 'fail' | 'blocked' | 'warning' | 'not_applicable' | 'not_tested'
+
+export type PreflightCheck = {
+  id: string
+  category: string
+  status: PreflightCheckStatus
+  target: string
+  summary: string
+  evidence_class: 'configuration' | 'simulation' | 'real_read' | 'none'
+  blocker_reason: string | null
+  next_action: string | null
+  duration_ms: number
+  verified: string | null
+}
+
+export type PreflightReport = {
+  mode: PreflightMode
+  mode_label: string
+  // What the checks ran against, beside how they ran. A complete green over a
+  // model of an estate says nothing about an estate.
+  reference_topology: boolean
+  topology_label: string
+  scope: string
+  target: string | null
+  started_at: string
+  finished_at: string
+  duration_ms: number
+  overall_status: PreflightCheckStatus
+  passed: boolean
+  counts: Record<string, number>
+  checks: PreflightCheck[]
+  blockers: PreflightCheck[]
+  warnings: PreflightCheck[]
+  blocker_reasons: string[]
+  verification_levels: string[]
+  real_verification_claims: string[]
+  next_actions: string[]
+}
+
+export function useRunPreflight() {
+  return useMutation({
+    mutationFn: ({ mode, scope, target }: { mode: PreflightMode; scope: string; target?: string | null }) =>
+      admin.post<Envelope<PreflightReport>>('/infrastructure/preflight', { mode, scope, target: target ?? null }),
   })
 }
 

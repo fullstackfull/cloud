@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Backups\Http\Controllers\BackupController;
+use Lynomia\Modules\Backups\Http\Controllers\BackupFileController;
 
 /*
  * backups — customer surface.
@@ -18,16 +19,14 @@ use Lynomia\Modules\Backups\Http\Controllers\BackupController;
  * cannot be omitted.
  *
  * ---------------------------------------------------------------------------
- * What is deliberately not here yet
+ * Deletion
  * ---------------------------------------------------------------------------
  *
- * **No delete.** Deleting a backup is irreversible and interacts with the
- * datastore's own prune policy, which the platform does not own. Until the
- * platform can say what a customer's retention actually is, a delete button
- * would remove a copy on the strength of a policy nobody has agreed.
- *
- * Both are recorded in docs/build-status.md as not implemented rather than
- * left to be discovered as a missing route.
+ * Deletion IS here (DELETE {backup} below, with an undo window and a keep
+ * route), since Phase 30A+.4 gave the platform a retention policy of its own
+ * to delete against. An earlier edition of this comment said the opposite —
+ * that no delete would exist until retention was owned — and it outlived the
+ * route it described. See docs/customer-capability-matrix.md for the row.
  */
 
 Route::prefix('vps/{vm}/backups')->as('backups.')->group(function (): void {
@@ -86,4 +85,31 @@ Route::prefix('vps/{vm}/backups')->as('backups.')->group(function (): void {
      * for nothing.
      */
     Route::post('{backup}/keep', [BackupController::class, 'keep'])->name('keep');
+
+    /*
+     * Files out of a backup, for the providers that can open one. Every
+     * route here answers 409 `backup.file_level_unsupported` for the others,
+     * and the backup row says which it is before anything is clicked.
+     */
+    Route::get('{backup}/files', [BackupFileController::class, 'index'])->name('files.index');
+
+    Route::post('{backup}/files/downloads', [BackupFileController::class, 'download'])
+        ->middleware('throttle:30,1,backup-file-download:')
+        ->name('files.downloads.store');
+
+    Route::post('{backup}/files/restore', [BackupFileController::class, 'restore'])
+        ->middleware('throttle:5,1,backup-file-restore:')
+        ->name('files.restore');
+
+    Route::get('{backup}/file-restores', [BackupFileController::class, 'restores'])->name('files.restores');
 });
+
+/*
+ * Following a download link. Not under the machine: the link already names
+ * exactly one file of one backup, and carries a token that is spent on the
+ * first request. The session and the account are still required.
+ */
+Route::get('backups/downloads/{token}', [BackupFileController::class, 'fetch'])
+    ->where('token', '[0-9a-f]{64}')
+    ->middleware('throttle:30,1,backup-file-fetch:')
+    ->name('backups.downloads.show');

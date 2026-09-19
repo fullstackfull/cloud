@@ -32,7 +32,6 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
             ->getJson('/api/v1/wallet')
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.wallet_id', $wallet->id)
             ->assertJsonPath('data.0.currency', 'KWD')
             // Money is an object, never a bare number: KWD has three minor
             // digits and a client that assumes two shows 155.00 for 15.500.
@@ -52,7 +51,6 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
             ->getJson('/api/v1/wallet')
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.wallet_id', null)
             ->assertJsonPath('data.0.currency', 'KWD')
             ->assertJsonPath('data.0.balance.minor_units', 0)
             ->assertJsonPath('data.0.balance.amount', '0.000');
@@ -111,7 +109,6 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
             ->assertOk()
             // My own account currency, reported at zero — not their 40.000.
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.wallet_id', null)
             ->assertJsonPath('data.0.balance.minor_units', 0);
 
         // Not merely absent from the balance: their wallet's id never appears
@@ -139,7 +136,7 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
         $this->assertArrayNotHasKey('created_at', $balance);
 
         $this->assertSame(
-            ['wallet_id', 'currency', 'balance', 'updated_at'],
+            ['currency', 'balance', 'updated_at'],
             array_keys($balance),
         );
     }
@@ -192,7 +189,6 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
             ->getJson('/api/v1/wallet', ['X-Lynomia-Customer' => $first->id])
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.wallet_id', $firstWallet->id)
             ->assertJsonPath('data.0.balance.minor_units', 11_000);
 
         $this->assertStringNotContainsString($secondWallet->id, $onFirst->getContent() ?: '');
@@ -201,7 +197,6 @@ final class WalletBalanceEndpointTest extends WalletApiTestCase
             ->getJson('/api/v1/wallet', ['X-Lynomia-Customer' => $second->id])
             ->assertOk()
             ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.wallet_id', $secondWallet->id)
             ->assertJsonPath('data.0.balance.minor_units', 77_000);
 
         $this->assertStringNotContainsString($firstWallet->id, $onSecond->getContent() ?: '');

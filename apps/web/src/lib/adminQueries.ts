@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { request } from '@/lib/api'
-import type { Envelope, Money, Paginated } from '@/lib/types'
+import type { CountryCurrencyChange, Envelope, Money, Paginated } from '@/lib/types'
 
 /**
  * The administrative surface.
@@ -250,7 +250,8 @@ export function useReconcileCluster() {
 
 export interface AdminNode {
   id: string
-  name: string
+  /* What the hypervisor calls this node; `id` is what Lynomia calls it. */
+  provider_name: string
   cluster: string | null
   cluster_id: string | null
   datacenter: string | null
@@ -428,6 +429,14 @@ export function useSetTicketPriority() {
   )
 }
 
+/**
+ * Hands a ticket to a member of staff.
+ *
+ * W5.7 dead-code audit: no screen calls this yet. `PUT
+ * /support/tickets/{id}/assignee` is shipped and audited; the operator support
+ * screen replies and resolves, and assignment is queue management the product
+ * has not designed a surface for. Classified FUTURE_PREPARED, not dead.
+ */
 export function useAssignTicket() {
   return useTicketMutation((payload: { id: string; user_id: string | null }) =>
     admin.put<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(payload.id)}/assignee`, {
@@ -452,4 +461,37 @@ export function useReopenTicket() {
   return useTicketMutation((id: string) =>
     admin.post<Envelope<OperatorTicket>>(`/support/tickets/${encodeURIComponent(id)}/reopen`, {}),
   )
+}
+
+/* --------------------------------------------- account country/currency */
+
+export interface AdminCountryCurrencyChange extends CountryCurrencyChange {
+  customer: { id: string; display_name: string | null; billing_email: string | null }
+}
+
+export function useAdminCountryCurrencyChanges(page: number, state: string) {
+  return useQuery({
+    queryKey: ['admin', 'country-currency-changes', page, state],
+    queryFn: () =>
+      admin.get<Paginated<AdminCountryCurrencyChange>>('/customers/country-currency-changes', {
+        page,
+        state: state === '' ? undefined : state,
+      }),
+  })
+}
+
+export function useDecideCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, verdict, note, applyAt }: { id: string; verdict: 'approve' | 'reject'; note: string; applyAt?: string }) =>
+      admin.post<Envelope<AdminCountryCurrencyChange>>(
+        `/customers/country-currency-changes/${encodeURIComponent(id)}/${verdict}`,
+        verdict === 'approve' && applyAt !== undefined && applyAt !== '' ? { note, apply_at: applyAt } : { note },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'country-currency-changes'] })
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'customers'] })
+    },
+  })
 }

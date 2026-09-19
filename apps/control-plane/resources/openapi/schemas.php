@@ -18,30 +18,52 @@ declare(strict_types=1);
  * down.
  */
 
+/**
+ * The properties of a token as it is normally read.
+ *
+ * Named once because two schemas publish them: `ApiToken`, and
+ * `IssuedApiToken`, which is the same object with the secret added. See below.
+ */
+$apiTokenProperties = [
+    'id' => ['$ref' => '#/components/schemas/Ulid'],
+    'name' => ['type' => ['string', 'null']],
+    'status' => ['type' => ['string', 'null']],
+    'abilities' => ['type' => 'array', 'items' => ['type' => 'string']],
+    'allowed_ip_ranges' => ['type' => ['array', 'null'], 'items' => ['type' => 'string']],
+    'rate_limit_per_minute' => ['type' => ['integer', 'null']],
+    'last_used_at' => ['$ref' => '#/components/schemas/Timestamp'],
+    'last_used_ip' => ['type' => ['string', 'null']],
+    'expires_at' => ['$ref' => '#/components/schemas/Timestamp'],
+    'revoked_at' => ['$ref' => '#/components/schemas/Timestamp'],
+    'revoked_reason' => ['type' => ['string', 'null']],
+    'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+];
+
 return [
     'ApiToken' => [
         'type' => 'object',
         'additionalProperties' => false,
-        'properties' => [
-            'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'name' => ['type' => ['string', 'null']],
-            'status' => ['type' => ['string', 'null']],
-            'abilities' => ['type' => 'array', 'items' => ['type' => 'string']],
-            'allowed_ip_ranges' => ['type' => 'array', 'items' => ['type' => 'string']],
-            'rate_limit_per_minute' => ['type' => ['integer', 'null']],
-            'last_used_at' => ['$ref' => '#/components/schemas/Timestamp'],
-            'last_used_ip' => ['type' => ['string', 'null']],
-            'expires_at' => ['$ref' => '#/components/schemas/Timestamp'],
-            'revoked_at' => ['$ref' => '#/components/schemas/Timestamp'],
-            'revoked_reason' => ['type' => ['string', 'null']],
-            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
-        ],
+        'properties' => $apiTokenProperties,
     ],
+    /*
+     * The whole token, not only the secret.
+     *
+     * IssuedApiTokenResource merges ApiTokenResource's output and adds
+     * `token`, so the response carries the id, the name, the abilities and the
+     * rest alongside the value. This schema used to declare `token` alone,
+     * with `additionalProperties: false` — which is not an omission but an
+     * active claim that nothing else is there, on the one endpoint whose
+     * response a customer can never ask for again.
+     *
+     * Found by the client-and-description gate: the portal's IssuedApiToken
+     * extends ApiToken and so reads eleven fields this schema denied.
+     */
     'IssuedApiToken' => [
         'type' => 'object',
         'additionalProperties' => false,
         'description' => 'The only response that ever carries a token value. The platform stores a hash and cannot show it again.',
         'properties' => [
+            ...$apiTokenProperties,
             'token' => ['type' => 'string'],
         ],
     ],
@@ -70,6 +92,67 @@ return [
             'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'failure_reason' => ['type' => ['string', 'null']],
+            'files' => ['$ref' => '#/components/schemas/BackupFileSupport'],
+        ],
+    ],
+    'BackupFileSupport' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'Whether this backup can be opened file by file, and if not, why not — the same reason the file routes refuse with.',
+        'properties' => [
+            'supported' => ['type' => 'boolean'],
+            'reason' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'BackupFileEntry' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'path' => ['type' => 'string', 'description' => 'Absolute inside the archive.'],
+            'name' => ['type' => 'string'],
+            'kind' => ['type' => 'string', 'enum' => ['file', 'directory', 'symlink', 'other']],
+            'size_bytes' => ['type' => ['integer', 'null']],
+            'modified_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'downloadable' => ['type' => 'boolean'],
+            'browsable' => ['type' => 'boolean'],
+            'restorable' => ['type' => 'boolean', 'description' => 'False for a symlink, always: links are never followed out of a backup.'],
+        ],
+    ],
+    'BackupFileListing' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'path' => ['type' => 'string'],
+            'parent' => ['type' => ['string', 'null']],
+            'truncated' => ['type' => 'boolean'],
+            'entries' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/BackupFileEntry']],
+        ],
+    ],
+    'BackupFileDownload' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'path' => ['type' => 'string'],
+            'expires_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'url' => ['type' => 'string', 'description' => 'Relative to the API origin. Carries the single-use token; shown once.'],
+        ],
+    ],
+    'BackupFileRestore' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'backup_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'state' => ['type' => ['string', 'null'], 'description' => 'requested, running, succeeded, failed or needs_review. `needs_review` is a restore the provider did not confirm: the files may or may not have been written, and it is never retried.'],
+            'is_in_flight' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'paths' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'path_count' => ['type' => 'integer'],
+            'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'failure_reason' => ['type' => ['string', 'null']],
         ],
     ],
     'DnsZone' => [
@@ -84,7 +167,7 @@ return [
             'is_being_deleted' => ['type' => 'boolean'],
             'needs_attention' => ['type' => 'boolean'],
             'nameservers' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'What the domain must be delegated to at the registrar. Until it is, this zone serves nobody — no state on this object means the domain is working.'],
-            'failure_reason' => ['type' => ['string', 'null'], 'description' => 'The provider\'s own words, with anything credential-shaped removed before it was stored.'],
+            'failure_reason' => ['type' => ['string', 'null'], 'description' => 'Whether the last operation failed, said in the language the request asked for. The provider\'s own words stay with support.'],
             'record_count' => ['type' => ['integer', 'null']],
             'last_synced_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -115,6 +198,26 @@ return [
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'DomainContact' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'The registrant this platform gave the registry. Personal data: a real name, a home address and a telephone number, encrypted at rest, '
+            .'published only to the account that owns the name and only under `service.manage`. The registrar\'s own handle for the contact stays behind.',
+        'properties' => [
+            'role' => ['type' => 'string', 'description' => 'Always `registrant`: the only role the update accepts and therefore the only one a customer can act on.'],
+            'name' => ['type' => 'string'],
+            'organisation' => ['type' => ['string', 'null']],
+            'email' => ['type' => 'string'],
+            'phone' => ['type' => 'string'],
+            'address_line_one' => ['type' => 'string'],
+            'address_line_two' => ['type' => ['string', 'null']],
+            'city' => ['type' => 'string'],
+            'region' => ['type' => ['string', 'null']],
+            'postal_code' => ['type' => ['string', 'null']],
+            'country' => ['type' => 'string', 'description' => 'ISO 3166-1 alpha-2.'],
+            'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
     'DomainRedemption' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -143,7 +246,6 @@ return [
             'invoice_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'is_in_flight' => ['type' => 'boolean'],
             'needs_attention' => ['type' => 'boolean', 'description' => 'True when a person has to decide. An operation in this state must not be retried by the client: the money may already have moved.'],
-            'failure_message' => ['type' => ['string', 'null'], 'description' => 'The registrar\'s own words, with anything credential-shaped removed before it was stored.'],
             'completed_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
@@ -247,10 +349,105 @@ return [
             'admin_username' => ['type' => ['string', 'null']],
             'wordpress_version' => ['type' => ['string', 'null']],
             'locale' => ['type' => ['string', 'null']],
-            'failure_reason' => ['type' => ['string', 'null'], 'description' => 'The panel\'s own words, with anything credential-shaped removed before it was stored.'],
+            'failure_reason' => ['type' => ['string', 'null'], 'description' => 'Whether the last operation failed, said in the language the request asked for. The panel\'s own words stay with support.'],
             'hosting_account_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'verified_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'kind' => ['type' => 'string', 'enum' => ['production', 'staging', 'clone'], 'description' => 'A staging copy belongs to its parent and is the only kind that can be pushed back; a clone is a production site that started as a copy.'],
+            'parent_site_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'copies' => ['$ref' => '#/components/schemas/WordPressCopySupport'],
+        ],
+    ],
+    'WordPressCopySupport' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'What this site\'s panel toolkit can do with it right now, and the reason when nothing.',
+        'properties' => [
+            'staging' => ['type' => 'boolean'],
+            'clone' => ['type' => 'boolean'],
+            'push_to_production' => ['type' => 'boolean'],
+            'reason' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'WordPressSiteOperation' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'site_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'target_site_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'kind' => ['type' => 'string', 'enum' => ['create_staging', 'clone', 'push_to_production']],
+            'state' => ['type' => ['string', 'null'], 'description' => 'requested, running, succeeded, failed or indeterminate. `indeterminate` is a toolkit that did not answer; for a push, production may be half-overwritten, and it is never retried.'],
+            'is_in_flight' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'scope' => ['type' => ['string', 'null'], 'enum' => ['files', 'database', 'both', null]],
+            'impact' => ['oneOf' => [['$ref' => '#/components/schemas/WordPressPushImpact'], ['type' => 'null']]],
+            'failure_reason' => ['type' => ['string', 'null']],
+            'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'WordPressPushImpact' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'staging_domain' => ['type' => 'string'],
+            'production_domain' => ['type' => 'string'],
+            'scope' => ['type' => 'string'],
+            'copy_made_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'production_verified_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'platform_backup' => ['type' => 'null', 'description' => 'Always null: this platform holds no backup of a shared-hosting site, and says so rather than implying one.'],
+            'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+        ],
+    ],
+    'ZoneExport' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'filename' => ['type' => 'string'],
+            'content' => ['type' => 'string', 'description' => 'BIND-compatible zone text.'],
+            'record_count' => ['type' => 'integer'],
+        ],
+    ],
+    'ZoneImportEntry' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'kind' => ['type' => 'string', 'enum' => ['add', 'update', 'remove', 'unchanged', 'refused', 'ignored']],
+            'line' => ['type' => ['integer', 'null'], 'description' => 'The line of the file, where the entry came from one.'],
+            'type' => ['type' => ['string', 'null']],
+            'name' => ['type' => ['string', 'null']],
+            'content' => ['type' => ['string', 'null'], 'description' => 'The value, or for a refused or ignored line the line\'s text.'],
+            'ttl' => ['type' => ['integer', 'null']],
+            'priority' => ['type' => ['integer', 'null']],
+            'existing_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'reason' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'ZoneImportPlan' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'zone_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'zone' => ['type' => 'string'],
+            'mode' => ['type' => 'string', 'enum' => ['merge', 'replace']],
+            'applicable' => ['type' => 'boolean', 'description' => 'False while any entry is refused.'],
+            'fingerprint' => ['type' => 'string', 'description' => 'sha256 over the changes and the zone\'s current records; send it back to apply.'],
+            'counts' => ['type' => 'object', 'additionalProperties' => ['type' => 'integer']],
+            'entries' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/ZoneImportEntry']],
+        ],
+    ],
+    'ZoneImportResult' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'zone_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'mode' => ['type' => 'string'],
+            'added' => ['type' => 'integer'],
+            'updated' => ['type' => 'integer'],
+            'removed' => ['type' => 'integer'],
+            'unchanged' => ['type' => 'integer'],
         ],
     ],
     'DnsRecord' => [
@@ -320,6 +517,51 @@ return [
             'paid_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'voided_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            /*
+             * Present when one invoice is being read as a document — the
+             * detail screen and the printable view — and absent from a list.
+             *
+             * The snapshot is the billing profile as it stood when the invoice
+             * was issued, not the customer's profile today: an issued document
+             * does not change when somebody moves office.
+             */
+            'billing_snapshot' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'payments' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/InvoicePayment']],
+            'wallet_credits' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/InvoiceWalletCredit']],
+        ],
+    ],
+    /*
+     * A payment and a wallet entry as an invoice document reports them:
+     * Billing's own views, because a module may not reach into another
+     * module's HTTP layer.
+     */
+    'InvoicePayment' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'from_account_credit' => ['type' => 'boolean', 'description' => 'True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it.'],
+            'kind' => ['type' => ['string', 'null']],
+            'status' => ['type' => ['string', 'null']],
+            'is_settled' => ['type' => 'boolean'],
+            'amount' => ['$ref' => '#/components/schemas/Money'],
+            'failure_code' => ['type' => ['string', 'null']],
+            'processed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'InvoiceWalletCredit' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => ['string', 'null']],
+            'amount' => ['$ref' => '#/components/schemas/Money'],
+            'direction' => ['type' => 'string'],
+            'balance_after' => ['$ref' => '#/components/schemas/Money'],
+            'description' => ['type' => ['string', 'null']],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
     'Subscription' => [
@@ -333,6 +575,15 @@ return [
             'recurring_amount' => ['$ref' => '#/components/schemas/Money'],
             'plan_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'order_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+
+            /*
+             * What the agreement is for. Present when the caller asked for a
+             * subscription rather than a page of them.
+             */
+            'plan' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'product' => ['type' => ['object', 'null'], 'additionalProperties' => true],
+            'services' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+
             'current_period_start' => ['type' => ['string', 'null']],
             'current_period_end' => ['type' => ['string', 'null']],
             'next_invoice_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -394,10 +645,28 @@ return [
             'serial' => ['type' => ['string', 'null']],
             'manufacturer' => ['type' => ['string', 'null']],
             'model' => ['type' => ['string', 'null']],
-            'hardware_profile' => ['type' => ['object', 'null'], 'additionalProperties' => true],
             'status' => ['type' => ['string', 'null']],
             'power_state' => ['type' => ['string', 'null']],
             'is_powered_on' => ['type' => 'boolean'],
+            /*
+             * Whether each disruptive control would be accepted right now,
+             * and if not, why — published from the same facts the dedicated
+             * operation guard refuses on (power is refused only while a
+             * REINSTALL is live; a reinstall while ANY job is), so a client never enables a button the API
+             * already knows it will answer 409 to. The guard stays the
+             * authority: this is what a screen should say, the refusal is what
+             * the endpoint does.
+             */
+            'actions' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['power', 'reinstall', 'blocked_reason'],
+                'properties' => [
+                    'power' => ['type' => 'boolean'],
+                    'reinstall' => ['type' => 'boolean'],
+                    'blocked_reason' => ['type' => ['string', 'null']],
+                ],
+            ],
             'service_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'activated_at' => ['$ref' => '#/components/schemas/Timestamp'],
             /*
@@ -421,8 +690,10 @@ return [
         'additionalProperties' => false,
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'state' => ['type' => ['string', 'null']],
-            'is_settled' => ['type' => 'boolean'],
+            'state' => ['$ref' => '#/components/schemas/CustomerOperationState'],
+            'is_terminal' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'retry_advice' => ['$ref' => '#/components/schemas/RetryAdvice'],
             'requested_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -437,6 +708,63 @@ return [
             'quantity' => ['type' => ['integer', 'null']],
             'health' => ['type' => ['string', 'null']],
             'needs_attention' => ['type' => 'boolean'],
+        ],
+    ],
+    'CountryCurrencyImpact' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'What the change would touch, as last analysed. Amounts are minor units in the currency named beside them; nothing is converted.',
+        'properties' => [
+            'facts' => ['type' => 'object', 'additionalProperties' => true],
+            'blockers' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'What must change before this can be applied, in words. Empty when the request may be approved.'],
+            'warnings' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'What will be true afterwards; not a reason to refuse.'],
+        ],
+    ],
+    'CountryCurrencyChange' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'customer_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'state' => ['type' => ['string', 'null'], 'description' => 'requested, blocked, awaiting_approval, scheduled, applied, needs_review, rejected or withdrawn.'],
+            'is_open' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'from_country' => ['type' => ['string', 'null']],
+            'to_country' => ['type' => ['string', 'null']],
+            'from_currency' => ['type' => 'string'],
+            'to_currency' => ['type' => 'string'],
+            'reason' => ['type' => 'string'],
+            'impact' => ['$ref' => '#/components/schemas/CountryCurrencyImpact'],
+            'decision_note' => ['type' => ['string', 'null']],
+            'analysed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'decided_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'scheduled_for' => ['$ref' => '#/components/schemas/Timestamp'],
+            'applied_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'AdminCountryCurrencyChange' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'customer_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'state' => ['type' => ['string', 'null'], 'description' => 'requested, blocked, awaiting_approval, scheduled, applied, needs_review, rejected or withdrawn.'],
+            'is_open' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'from_country' => ['type' => ['string', 'null']],
+            'to_country' => ['type' => ['string', 'null']],
+            'from_currency' => ['type' => 'string'],
+            'to_currency' => ['type' => 'string'],
+            'reason' => ['type' => 'string'],
+            'impact' => ['$ref' => '#/components/schemas/CountryCurrencyImpact'],
+            'decision_note' => ['type' => ['string', 'null']],
+            'analysed_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'decided_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'scheduled_for' => ['$ref' => '#/components/schemas/Timestamp'],
+            'applied_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'customer' => ['type' => 'object', 'additionalProperties' => true],
         ],
     ],
     'Customer' => [
@@ -846,6 +1174,70 @@ return [
             'superseded_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'PreflightReport' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'What a preflight run established, and what prevents the thing it was asked about from '
+            .'being used. Carries no secret, no credential reference variable, no raw provider response and no '
+            .'stack trace: every summary is a sentence written by the check that produced it.',
+        'properties' => [
+            'mode' => ['type' => 'string', 'enum' => ['simulation', 'read_only_real']],
+            'mode_label' => ['type' => 'string', 'description' => 'SIMULATION or READ_ONLY_REAL, for display. A simulation result that does not say so is one somebody quotes as proof.'],
+            'reference_topology' => ['type' => 'boolean', 'description' => 'True when the run looked at rows out of the reference topology, which is a model of an estate rather than an estate. Carried separately from the mode: the mode says how the checks ran, this says what they ran against.'],
+            'topology_label' => ['type' => 'string', 'description' => 'REFERENCE TOPOLOGY or CONFIGURED INFRASTRUCTURE, for display beside the mode.'],
+            'scope' => ['type' => 'string', 'enum' => ['estate', 'site', 'provider', 'product', 'machine']],
+            'target' => ['type' => ['string', 'null']],
+            'started_at' => ['type' => 'string', 'format' => 'date-time'],
+            'finished_at' => ['type' => 'string', 'format' => 'date-time'],
+            'duration_ms' => ['type' => 'integer'],
+            'overall_status' => ['type' => 'string', 'enum' => ['pass', 'fail', 'blocked', 'warning', 'not_applicable', 'not_tested']],
+            'passed' => ['type' => 'boolean', 'description' => 'False if any check is failing or blocked. One blocker makes the whole report blocking; there is no average.'],
+            'counts' => [
+                'type' => 'object',
+                'additionalProperties' => ['type' => 'integer'],
+                'description' => 'total, pass, fail, blocked, warning, not_applicable and not_tested.',
+            ],
+            'checks' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/PreflightCheck']],
+            'blockers' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/PreflightCheck']],
+            'warnings' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/PreflightCheck']],
+            'blocker_reasons' => [
+                'type' => 'array',
+                'items' => ['type' => 'string', 'enum' => ['blocked_credentials', 'blocked_hardware', 'blocked_network', 'blocked_licence', 'blocked_configuration', 'blocked_dependency', 'not_implemented']],
+            ],
+            'verification_levels' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'real_verification_claims' => [
+                'type' => 'array',
+                'items' => ['type' => 'string'],
+                'description' => 'The individual check ids a real provider answered, by id. Always empty in simulation '
+                    .'mode. There is no field saying the estate is verified, because no such fact exists: a read that '
+                    .'succeeded has earned exactly that read.',
+            ],
+            'next_actions' => ['type' => 'array', 'items' => ['type' => 'string']],
+        ],
+    ],
+
+    'PreflightCheck' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One thing a preflight asked, and what it found.',
+        'properties' => [
+            'id' => ['type' => 'string', 'description' => 'Stable and machine-readable, so automation can match on it across wording changes.'],
+            'category' => ['type' => 'string'],
+            'status' => ['type' => 'string', 'enum' => ['pass', 'fail', 'blocked', 'warning', 'not_applicable', 'not_tested']],
+            'target' => ['type' => 'string'],
+            'summary' => ['type' => 'string'],
+            'evidence_class' => [
+                'type' => 'string',
+                'enum' => ['configuration', 'simulation', 'real_read', 'none'],
+                'description' => 'Where the answer came from, which decides what it may be used to claim. Only real_read can support a real-infrastructure claim.',
+            ],
+            'blocker_reason' => ['type' => ['string', 'null']],
+            'next_action' => ['type' => ['string', 'null'], 'description' => 'The thing to go and do. Never "fix configuration".'],
+            'duration_ms' => ['type' => 'integer'],
+            'verified' => ['type' => ['string', 'null']],
+        ],
+    ],
+
     'InfrastructureOverview' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -910,6 +1302,36 @@ return [
             'power_notes' => ['type' => ['string', 'null']],
             'network_notes' => ['type' => ['string', 'null']],
             'machines' => ['type' => 'integer'],
+        ],
+    ],
+    /*
+     * An installable image, as an operator sees it.
+     *
+     * `name` is the whole localised map rather than one resolved string: an
+     * operator is editing a catalogue entry, and a form shown only the reader's
+     * own language would drop the other one on save. `installable` is computed
+     * — an entry with no provider reference is a commercial intention rather
+     * than something a machine can be built from, and placement refuses it.
+     */
+    'VmTemplate' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'cluster_id' => ['type' => ['string', 'null']],
+            'cluster' => ['type' => ['string', 'null']],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            'os_family' => ['type' => 'string', 'description' => 'debian, ubuntu, rocky, alma, windows or other.'],
+            'os_version' => ['type' => 'string'],
+            'architecture' => ['type' => 'string', 'description' => 'x86_64 or aarch64.'],
+            'provider_reference' => ['type' => ['string', 'null'], 'description' => 'How the hypervisor names the image, exactly as it spells it. Null until the image is staged on the cluster.'],
+            'cloud_init' => ['type' => 'boolean'],
+            'guest_agent' => ['type' => 'boolean'],
+            'requires_licence' => ['type' => 'boolean'],
+            'licence_note' => ['type' => ['string', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'installable' => ['type' => 'boolean', 'description' => 'Active and staged, which is what placement requires. Computed, not stored.'],
         ],
     ],
     'SoftwareProfile' => [
@@ -1038,6 +1460,18 @@ return [
             'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'OrderService' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => ['string', 'null']],
+            'identity' => ['type' => ['string', 'null']],
+            'resource' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => 'The row that fulfils this service, as `{kind, id}` — the same handle the service and notification documents carry, because a service id is not the id of the machine or account behind it.'],
+            'state' => ['type' => ['string', 'null']],
+            'is_usable' => ['type' => 'boolean'],
+        ],
+    ],
     'OrderItem' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -1062,6 +1496,14 @@ return [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
+            /*
+             * The chain a customer reads: this order produced that invoice,
+             * and these services now exist because it was paid. Present when
+             * one order is read rather than a page of them.
+             */
+            'invoice_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'invoice_number' => ['type' => ['string', 'null']],
+            'services' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/OrderService']],
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'number' => ['type' => ['string', 'null']],
             'status' => ['type' => ['string', 'null']],
@@ -1092,10 +1534,9 @@ return [
             'status' => ['type' => ['string', 'null']],
             'amount' => ['$ref' => '#/components/schemas/Money'],
             'invoice_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
-            'provider' => ['type' => ['string', 'null']],
+            'from_account_credit' => ['type' => 'boolean', 'description' => 'True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it.'],
             'is_settled' => ['type' => 'boolean'],
             'failure_code' => ['type' => ['string', 'null']],
-            'failure_message' => ['type' => ['string', 'null']],
             'processed_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
@@ -1112,8 +1553,148 @@ return [
             'type' => ['type' => ['string', 'null']],
             'redirect_url' => ['type' => ['string', 'null']],
             'client_secret' => ['type' => ['string', 'null']],
+            /*
+             * True only while the provider has not made its mind up. It is the
+             * one state in which a client must not start a second payment:
+             * the money may already be moving.
+             */
+            'is_awaiting_provider' => ['type' => 'boolean'],
             'failure_code' => ['type' => ['string', 'null']],
-            'failure_message' => ['type' => ['string', 'null']],
+        ],
+    ],
+
+    /*
+     * A basket priced without being bought. Every amount is a Money object —
+     * minor units and a currency — because a client formats money and never
+     * computes it.
+     */
+    'OrderQuote' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'currency' => ['type' => ['string', 'null']],
+            'billing_period' => ['type' => ['string', 'null']],
+
+            'lines' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+            'description' => ['type' => ['string', 'null']],
+            'plan_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
+            'quantity' => ['type' => 'integer'],
+            'unit_recurring' => ['$ref' => '#/components/schemas/Money'],
+            'unit_setup' => ['$ref' => '#/components/schemas/Money'],
+            'gross' => ['$ref' => '#/components/schemas/Money'],
+
+            'setup' => ['$ref' => '#/components/schemas/Money'],
+            'subtotal' => ['$ref' => '#/components/schemas/Money'],
+            'discount' => ['$ref' => '#/components/schemas/Money'],
+            'tax' => ['$ref' => '#/components/schemas/Money'],
+            'total' => ['$ref' => '#/components/schemas/Money'],
+
+            'tax_rate' => ['type' => ['string', 'null']],
+            'tax_name' => ['type' => ['string', 'null']],
+            'coupon_code' => ['type' => ['string', 'null']],
+
+            /*
+             * What the same lines cost next time: the setup fee and the coupon
+             * are both dropped, because neither happens again.
+             */
+            'renewal' => ['type' => 'object', 'additionalProperties' => true],
+            'includes_setup' => ['type' => 'boolean'],
+            'includes_coupon' => ['type' => 'boolean'],
+        ],
+    ],
+
+    /*
+     * The countries and currencies a registration form may offer. Names are
+     * absent on purpose: every client already has CLDR's translations.
+     */
+    'RegistrationOptions' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'countries' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+            'currencies' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'fallback_currency' => ['type' => 'string'],
+
+            /*
+             * The documents the acceptance checkbox names, and whether this
+             * deployment will accept a registration at all.
+             *
+             * Only published documents appear, so there is no null to render:
+             * a URL without a revision is a page whose acceptance nobody
+             * could pin to a revision, a revision without a URL is a revision
+             * nobody can read, and both are omitted. Registration is refused
+             * entirely until every document is published — an unwritten
+             * policy is not a lenient one.
+             *
+             * `registration_permitted` is the same answer the registration
+             * endpoint will give, so a form can say so before collecting a
+             * password. It is not the enforcement; that is server-side.
+             *
+             * Here rather than built into a client, so publishing is an
+             * operator setting variables instead of somebody shipping a new
+             * portal build.
+             */
+            'legal' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'properties' => [
+                    'registration_permitted' => ['type' => 'boolean'],
+                    'documents' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'properties' => [
+                                'type' => ['type' => 'string', 'enum' => ['terms', 'aup']],
+                                'url' => ['type' => 'string', 'format' => 'uri'],
+                                // A stable identifier, never a title: it is
+                                // stored with the acceptance so the platform
+                                // can say which text was agreed to.
+                                'version' => ['type' => 'string'],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    ],
+
+    /*
+     * What registration answers, which is deliberately not the account.
+     *
+     * The endpoint used to be documented as returning a User at 201. It has
+     * long answered 202 with a sentence and nothing identifying: answering
+     * differently for an address that already has an account is a membership
+     * oracle, and returning the created account is the same disclosure by
+     * another route. The document said otherwise until this was noticed.
+     */
+    'RegistrationAccepted' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'message' => ['type' => 'string'],
+        ],
+    ],
+
+    /*
+     * The controlled gateway, which exists only outside production.
+     */
+    'ControlledGatewayPage' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'payment' => ['$ref' => '#/components/schemas/Payment'],
+            'provider' => ['type' => ['string', 'null']],
+            'reference' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'ControlledGatewayDecision' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'payment' => ['$ref' => '#/components/schemas/Payment'],
+            'webhook_status' => ['type' => ['string', 'null']],
+            'webhook_was_duplicate' => ['type' => 'boolean'],
         ],
     ],
     'ProvisioningEvent' => [
@@ -1122,12 +1703,81 @@ return [
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'kind' => ['type' => ['string', 'null']],
-            'state' => ['type' => ['string', 'null']],
-            'is_settled' => ['type' => 'boolean'],
+            'state' => ['$ref' => '#/components/schemas/CustomerOperationState'],
+            'is_terminal' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'retry_advice' => ['$ref' => '#/components/schemas/RetryAdvice'],
             'failure_reason' => ['type' => ['string', 'null']],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'ActivityItem' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['type' => 'string', 'description' => 'source:rowId — unique across the sources the feed unions, and the cursor\'s tie-breaker. Opaque to clients.'],
+            'occurred_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'category' => ['type' => 'string', 'enum' => ['cloud', 'hosting', 'domains', 'billing', 'support', 'backups'], 'description' => 'The part of the account this belongs to. The only values ?category= accepts, and the filter chooses which sources are read rather than trimming a page.'],
+            'message_code' => ['type' => 'string', 'description' => 'A translation key, not a sentence: the server says what happened and the client says it in the reader\'s language.'],
+            'state' => ['$ref' => '#/components/schemas/CustomerOperationState'],
+            'is_terminal' => ['type' => 'boolean'],
+            'needs_attention' => ['type' => 'boolean'],
+            'retry_advice' => ['$ref' => '#/components/schemas/RetryAdvice'],
+            'actor' => ['type' => 'object', 'additionalProperties' => true, 'description' => '{type, display_name}. `type` is customer_user, system or unknown. A name appears only for customer_user; unknown is the honest answer where the source records no requester, and is never guessed.'],
+            'resource' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => '{kind, id, identity} for rows about something the portal has a page for, else null. A handle rather than a path, so the client owns the routing map.'],
+            'reference' => ['type' => ['string', 'null'], 'description' => 'Something the customer can quote to support — an invoice number, a ticket reference. Never an internal id chosen for uniqueness alone.'],
+        ],
+    ],
+    'CustomerOperation' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => ['string', 'null']],
+            'action' => ['type' => ['string', 'null'], 'description' => 'The customer\'s own verb where there is one — `restart`, not the kind. `stop` and `shutdown` are one kind, and reporting the kind would tell a customer the plug was pulled on a graceful shutdown.'],
+            'state' => ['$ref' => '#/components/schemas/CustomerOperationState'],
+            'is_terminal' => ['type' => 'boolean', 'description' => 'The client polls while this is false and stops when it is true.'],
+            'needs_attention' => ['type' => 'boolean'],
+            'retry_advice' => ['$ref' => '#/components/schemas/RetryAdvice'],
+            'failure_reason' => ['type' => ['string', 'null'], 'description' => 'The customer\'s bounded version of why, never the provider\'s sentence.'],
+            'resource' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => 'What to watch once this finishes, so the client does not infer it.'],
+            'requested_at' => ['$ref' => '#/components/schemas/Timestamp', 'description' => 'When the customer asked. A client measures "this is taking longer than usual" from here rather than from when its own tab opened, so a reload does not restart the clock on work that has been stuck for an hour.'],
+            'started_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'poll_after_ms' => ['type' => ['integer', 'null'], 'description' => 'When to read again, or null once there is nothing left to wait for. A client that schedules only from this field cannot poll a finished operation.'],
+        ],
+    ],
+    'CustomerOperationState' => [
+        'type' => 'string',
+        'enum' => ['queued', 'processing', 'succeeded', 'failed', 'needs_review', 'indeterminate', 'cancelled'],
+        'description' => 'The seven words a customer is told about asynchronous work. needs_review is not failed: it stopped and a person at Lynomia must look. indeterminate is neither failed nor succeeded: the platform asked something outside itself and never heard back, so the result is genuinely unknown. Neither is ever collapsed into failed. Provider execution states are not published.',
+    ],
+    'RetryAdvice' => [
+        'type' => 'string',
+        'enum' => ['safe_to_retry', 'wait', 'support_required', 'not_retryable'],
+        'description' => 'Whether the customer may ask again. Clients draw a retry control from safe_to_retry and from nothing else — which is what stops one appearing beside an operation whose result nobody knows.',
+    ],
+    'NotificationUnreadCount' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'unread' => ['type' => 'integer'],
+        ],
+    ],
+    'AccountOverview' => [
+        'type' => 'object',
+        'additionalProperties' => true,
+        'description' => 'The dashboard in one read: attention items in server-decided priority order, a service summary, money owed grouped by currency, upcoming renewals, the unread count, and recent services and activity. Money is never summed across currencies — an account billed in two has two amounts owing, and a single total would be arithmetic nobody can perform.',
+        'properties' => [
+            'attention' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'Ordered by severity, then how long it has been true, then a stable id. Ordered by the server so an Arabic dashboard and an English one agree, and capped so a first page cannot become a billing history.'],
+            'services' => ['type' => 'object', 'additionalProperties' => true],
+            'billing' => ['type' => 'object', 'additionalProperties' => true, 'description' => '{due: [{invoices, amount}]} — one entry per currency, and no total.'],
+            'renewals' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'Amount is null where the platform has no authoritative one: a domain\'s renewal price comes from the catalogue at renewal time, and printing one here would be quoting a guess.'],
+            'unread_notifications' => ['type' => 'integer'],
+            'recent' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'A few services, and the newest activity rows — from the same account feed as /activity, so the dashboard has no history logic of its own.'],
         ],
     ],
     'Service' => [
@@ -1137,12 +1787,13 @@ return [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'kind' => ['type' => ['string', 'null']],
             'label' => ['type' => ['string', 'null']],
+            'identity' => ['type' => ['string', 'null'], 'description' => 'The name the customer knows this by — a hostname, a primary domain, a serial. The label beside it comes from the catalogue and is the same string for everyone who bought the plan. Null while the service is still being created.'],
+            'resource' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => 'The row that fulfils this service, as `{kind, id}`. A service\'s own id is not the machine\'s, the hosting account\'s or the chassis\'s, so the id a link needs is published rather than guessed. `kind` is a customer-facing family (`vps`, `dedicated`, `hosting`, `wordpress`) and the client owns the route it maps to. Null until something has been created.'],
             'state' => ['type' => ['string', 'null']],
             'is_usable' => ['type' => 'boolean'],
             'resources' => ['type' => ['object', 'null'], 'additionalProperties' => true],
             'plan_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'order_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
-            'order_item_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'subscription_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'activated_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'suspended_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -1163,6 +1814,8 @@ return [
             'status' => ['type' => ['string', 'null']],
             'package' => ['type' => ['object', 'null'], 'additionalProperties' => true],
             'slug' => ['type' => ['string', 'null']],
+            'plan_name' => ['type' => ['string', 'null'], 'description' => 'The catalogue plan the customer is billed for, in the language of the request. The slug beside it is the platform\'s join key and is not a product name.'],
+            'panel_type' => ['type' => ['string', 'null'], 'description' => '`cpanel` or `directadmin`: which panel the customer signs into. Null where the platform will not name it — no node assigned yet, or a controlled fake — and a client then says "hosting control panel", which is true in every case. Nothing else about the node is published.'],
             'disk_quota_mib' => ['type' => ['integer', 'null']],
             'bandwidth_quota_mib' => ['type' => ['integer', 'null']],
             'max_addon_domains' => ['type' => ['integer', 'null']],
@@ -1214,18 +1867,35 @@ return [
             'ttl_seconds' => ['type' => ['integer', 'null']],
         ],
     ],
+    'InstallableTemplate' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'An operating system this machine may be rebuilt with. The cluster it is staged on, the hypervisor\'s handle for it and its '
+            .'supply-chain checksum are the platform\'s business and stay behind.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'name' => ['type' => 'string', 'description' => 'In the language of the request.'],
+            'os_family' => ['type' => 'string'],
+            'os_version' => ['type' => 'string'],
+            'architecture' => ['type' => 'string'],
+            'supports_ssh_keys' => ['type' => 'boolean', 'description' => 'Whether the image can be configured on first boot. Without it the platform cannot install a key, so a form that collected one would be collecting something it intends to drop.'],
+            'requires_licence' => ['type' => 'boolean'],
+        ],
+    ],
     'ProvisioningOperation' => [
         'type' => 'object',
         'additionalProperties' => false,
+        'description' => 'The receipt a 202 returns for a VPS power action or rebuild. It reports the same state, in the same vocabulary, as GET /operations/{operation} — which is what a client polls afterwards, and where the poll hint lives.',
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'service_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'kind' => ['type' => ['string', 'null']],
-            'action' => ['type' => ['string', 'null']],
-            'status' => ['type' => ['string', 'null']],
-            'is_settled' => ['type' => 'boolean'],
+            'action' => ['type' => ['string', 'null'], 'description' => 'The customer\'s own verb where there is one — `restart`, not the kind.'],
+            'state' => ['$ref' => '#/components/schemas/CustomerOperationState'],
+            'is_terminal' => ['type' => 'boolean'],
             'needs_attention' => ['type' => 'boolean'],
-            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'retry_advice' => ['$ref' => '#/components/schemas/RetryAdvice'],
+            'requested_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'finished_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
@@ -1246,6 +1916,24 @@ return [
             'os_version' => ['type' => ['string', 'null']],
             'addresses' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
             'is_operable' => ['type' => 'boolean'],
+            /*
+             * Whether each disruptive control would be accepted right now,
+             * and if not, why — published from the same facts the operation
+             * guard refuses on, so a client never enables a button the API
+             * already knows it will answer 409 to. The guard stays the
+             * authority: this is what a screen should say, the refusal is what
+             * the endpoint does.
+             */
+            'actions' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'required' => ['power', 'reinstall', 'blocked_reason'],
+                'properties' => [
+                    'power' => ['type' => 'boolean'],
+                    'reinstall' => ['type' => 'boolean'],
+                    'blocked_reason' => ['type' => ['string', 'null']],
+                ],
+            ],
             /*
              * The machine's most recent rebuild, or null if it has never had
              * one. `data_destroyed` is the field a client should read before
@@ -1303,7 +1991,6 @@ return [
         'type' => 'object',
         'additionalProperties' => false,
         'properties' => [
-            'wallet_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'currency' => ['type' => ['string', 'null']],
             'balance' => ['$ref' => '#/components/schemas/Money'],
             'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
@@ -1314,7 +2001,6 @@ return [
         'additionalProperties' => false,
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'wallet_id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']]],
             'kind' => ['type' => ['string', 'null']],
             'amount' => ['$ref' => '#/components/schemas/Money'],
             'direction' => ['type' => ['string', 'null']],
@@ -1421,7 +2107,13 @@ return [
         'additionalProperties' => false,
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
-            'name' => ['type' => ['string', 'null']],
+            // The hypervisor's own name for the node, not the platform's
+            // identity for it — that is `id`. It was published as `name`,
+            // which implied the opposite and made a rename look possible.
+            'provider_name' => [
+                'description' => "The hypervisor's own name for this node. The platform's identity for it is `id`.",
+                'type' => ['string', 'null'],
+            ],
             'cluster' => ['type' => ['string', 'null']],
             'cluster_id' => ['type' => ['string', 'null']],
             'datacenter' => ['type' => ['string', 'null']],
@@ -1534,7 +2226,6 @@ return [
             'priority' => ['type' => 'string'],
             'service_id' => ['type' => ['string', 'null']],
             'invoice_id' => ['type' => ['string', 'null']],
-            'assigned_to' => ['type' => ['string', 'null'], 'description' => 'A name, not a user id.'],
             'opened_by' => ['type' => ['string', 'null']],
             'last_reply_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'last_reply_by' => ['type' => ['string', 'null']],
@@ -1612,6 +2303,29 @@ return [
             'joined_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'TeamRole' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One team role and what the server will actually let it do. The capability list is computed from the role\'s own permission list - the one `AuthorisesWithinAccount` reads before every write - and an architecture test asserts that the published set and the enforced set are equal in both directions. Two permissions the role model declares are deliberately absent because nothing enforces them: closing the account, which is a support conversation at launch, and managing payment methods, of which the platform stores none.',
+        'properties' => [
+            'id' => ['type' => 'string', 'description' => 'owner, administrator, billing, technical or member.'],
+            'is_owner' => ['type' => 'boolean'],
+            'assignable' => ['type' => 'boolean', 'description' => 'Whether a member may be given this role. False for owner: an account has one owner and ownership moves by transfer, which names both sides in one act.'],
+            'capabilities' => [
+                'type' => 'array',
+                'description' => 'The whole matrix, not only what this role holds: "can this role see billing?" has two useful answers, and a list of only the yeses makes the reader compare five lists to find the no.',
+                'items' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'id' => ['type' => 'string', 'description' => 'The customer-facing capability id the portal translates.'],
+                        'permission' => ['type' => 'string', 'description' => 'The canonical permission the API checks, published so the claim is verifiable.'],
+                        'granted' => ['type' => 'boolean'],
+                    ],
+                ],
+            ],
+        ],
+    ],
     'TeamInvitation' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -1660,7 +2374,9 @@ return [
             'title' => ['type' => ['string', 'null']],
             'body' => ['type' => ['string', 'null']],
             'is_failure' => ['type' => 'boolean'],
-            'link' => ['type' => ['string', 'null'], 'description' => 'A portal path, not a URL, so it stays correct when the host changes.'],
+            'link' => ['type' => ['string', 'null'], 'description' => 'A portal path, not a URL, so it stays correct when the host changes. A collection path: the resource below is the precise destination where there is one.'],
+            'resource' => ['type' => ['object', 'null'], 'additionalProperties' => true, 'description' => 'What this notification is about, as `{kind, id}` — resolved from the notification\'s stored subject, never inferred from its text. `kind` is a customer-facing family (`vps`, `dedicated`, `hosting`, `wordpress`, `invoice`), and the client owns the route it maps to. Null where the subject has no page of its own.'],
+            'kind' => ['type' => ['string', 'null']],
             'read_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],

@@ -53,6 +53,13 @@ final class VirtualMachineResource extends JsonResource
         VirtualMachine $resource,
         private readonly array $addresses = [],
         private readonly ?VmReinstall $reinstall = null,
+        /**
+         * Why the operation guard would refuse this machine's service today,
+         * or null when nothing is queued, running or stranded on it. Resolved
+         * for the whole page in one query ({@see UnresolvedServiceWork}) and
+         * handed in, for the same reason the addresses are.
+         */
+        private readonly ?string $unresolvedWork = null,
     ) {
         parent::__construct($resource);
     }
@@ -99,6 +106,21 @@ final class VirtualMachineResource extends JsonResource
             'is_operable' => $this->service?->status->isUsable() === true && $this->existsRemotely(),
 
             /*
+             * Whether each disruptive control would be accepted right now, and
+             * if not, why — answered from the same facts the guard refuses on
+             * ({@see \Lynomia\Modules\Vps\Domain\Services\VpsOperationGuard}),
+             * so the portal never enables a button the API already knows it
+             * will answer 409 to. `is_operable` alone was not enough: it
+             * says the service is active and the machine exists, and a machine
+             * whose last rebuild timed out is both of those and still refused,
+             * because a person has to look before anything else touches it.
+             *
+             * The guard remains the authority. This is what the screen says;
+             * the refusal is what the endpoint does.
+             */
+            'actions' => $this->actions(),
+
+            /*
              * The machine's most recent rebuild, when it has had one.
              *
              * Present so the portal can say what is happening rather than
@@ -124,6 +146,27 @@ final class VirtualMachineResource extends JsonResource
             ],
 
             'created_at' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{power: bool, reinstall: bool, blocked_reason: string|null}
+     */
+    private function actions(): array
+    {
+        $reason = match (true) {
+            $this->service?->status->isUsable() !== true => 'service_not_active',
+            ! $this->existsRemotely() => 'not_provisioned',
+            $this->unresolvedWork !== null => $this->unresolvedWork,
+            default => null,
+        };
+
+        // Power and reinstall are refused on exactly the same facts today, and
+        // are published separately so a client does not have to know that.
+        return [
+            'power' => $reason === null,
+            'reinstall' => $reason === null,
+            'blocked_reason' => $reason,
         ];
     }
 }

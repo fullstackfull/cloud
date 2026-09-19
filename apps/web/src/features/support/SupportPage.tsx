@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Badge } from '@/components/Badge'
@@ -7,7 +8,17 @@ import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { DataTable, type Column } from '@/components/DataTable'
 import { Field } from '@/components/Field'
+import { FileField } from '@/components/FileField'
+import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
+import { SelectField } from '@/components/SelectField'
+import { TextareaField } from '@/components/TextareaField'
+import {
+  draftBody,
+  draftSubject,
+  readSupportContext,
+} from '@/features/support/supportContext'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -19,6 +30,7 @@ import {
 } from '@/lib/queries'
 import type { Ticket, TicketPriority, TicketStatus } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUnsavedChanges } from '@/lib/useUnsavedChanges'
 
 /**
  * A ticket waiting on the customer is the one they can do something about, and
@@ -47,20 +59,40 @@ export function SupportPage() {
 
   const { data: tickets, isPending, error: listError } = useTickets()
   const [openId, setOpenId] = useState<string | null>(null)
-  const { data: opened } = useTicket(openId)
+  const { data: opened, error: openedError } = useTicket(openId)
 
   const openTicket = useOpenTicket()
   const reply = useReplyToTicket()
   const close = useCloseTicket()
 
-  const [subject, setSubject] = useState('')
-  const [body, setBody] = useState('')
+  /*
+   * AS-14. A link from the thing that went wrong arrives with the thing that
+   * went wrong in it.
+   *
+   * Read once, as the initial value of the fields, rather than pushed into
+   * them by an effect: an effect that wrote to a field the customer was
+   * already typing in would overwrite their sentence on every render, and a
+   * draft that fights the person writing it is worse than an empty form.
+   * Nothing is submitted — this is a filled-in form, and the send button is
+   * still theirs to press.
+   */
+  const [searchParams] = useSearchParams()
+  const [context] = useState(() => readSupportContext(searchParams))
+
+  const [subject, setSubject] = useState(() =>
+    context === null ? '' : draftSubject(context, t),
+  )
+  const [body, setBody] = useState(() => (context === null ? '' : draftBody(context, t)))
   const [category, setCategory] = useState('technical')
   const [priority, setPriority] = useState<TicketPriority>('normal')
   const [files, setFiles] = useState<File[]>([])
   const [replyBody, setReplyBody] = useState('')
 
-  const displayed = describeError(listError ?? openTicket.error ?? reply.error ?? close.error)
+  const displayed = describeError(openTicket.error ?? reply.error ?? close.error)
+
+  // A described fault and a half-written reply are both worth a prompt before
+  // the browser discards them.
+  useUnsavedChanges(subject.trim() !== '' || body.trim() !== '' || replyBody.trim() !== '')
   const ticket = opened?.data ?? null
 
   const columns: Array<Column<Ticket>> = [
@@ -119,13 +151,30 @@ export function SupportPage() {
 
       <div className="flex flex-col gap-4">
         <Card title={t('support.yourTickets')}>
-          <DataTable
-            columns={columns}
-            rows={tickets?.data ?? []}
-            rowKey={(row) => row.id}
-            empty={isPending ? t('common.loading') : t('support.noTickets')}
-          />
+          {/*
+            * A refused or failed read is reported, never rendered as "no
+            * requests": a customer with an open ticket who sees an empty list
+            * opens a second one.
+            */}
+          <LoadFailure error={listError} />
+          {listError !== null ? null : isPending ? (
+            <Loading />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={tickets.data}
+              rowKey={(row) => row.id}
+              empty={t('support.noTickets')}
+            />
+          )}
         </Card>
+
+        {/*
+          A request the customer opened and cannot read is not a request that
+          does not exist. Without this the panel simply does not appear, and
+          the obvious reading is that the ticket went away.
+        */}
+        <LoadFailure error={openedError} />
 
         {ticket !== null ? (
           <Card title={ticket.subject} description={ticket.reference}>
@@ -141,7 +190,7 @@ export function SupportPage() {
                         ? t('support.fromSupport', { name: message.author ?? '' })
                         : (message.author ?? t('support.fromYou'))}
                     </span>
-                    <span dir="ltr">{formatDateTime(message.created_at, locale)}</span>
+                    <span>{formatDateTime(message.created_at, locale)}</span>
                   </div>
                   <p className="whitespace-pre-wrap text-sm">{message.body}</p>
                   {message.attachments.length > 0 ? (
@@ -181,15 +230,12 @@ export function SupportPage() {
                   )
                 }}
               >
-                <label className="flex flex-col gap-1 text-sm">
-                  <span>{t('support.yourReply')}</span>
-                  <textarea
-                    className="min-h-24 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                    value={replyBody}
-                    onChange={(event) => { setReplyBody(event.target.value) }}
-                    required
-                  />
-                </label>
+                <TextareaField
+                  label={t('support.yourReply')}
+                  value={replyBody}
+                  onChange={(event) => { setReplyBody(event.target.value) }}
+                  required
+                />
 
                 <div className="flex gap-2">
                   <Button type="submit" loading={reply.isPending}>
@@ -215,13 +261,36 @@ export function SupportPage() {
         ) : null}
 
         <Card title={t('support.newTitle')} description={t('support.newSubtitle')}>
+          {/*
+            Said out loud, because a form that is already full when you arrive
+            at it is confusing until somebody explains why.
+          */}
+          {context === null ? null : (
+            <div className="mb-3">
+              <Alert tone="info">{t('support.contextNotice')}</Alert>
+            </div>
+          )}
+
           <form
             className="flex max-w-2xl flex-col gap-3"
             noValidate
             onSubmit={(event) => {
               event.preventDefault()
               openTicket.mutate(
-                { subject, body, category, priority, files },
+                {
+                  subject,
+                  body,
+                  category,
+                  priority,
+                  files,
+                  /*
+                   * Attached only when the link carried one. The endpoint
+                   * resolves it against the acting account and answers 404 for
+                   * anything else, so a hand-edited link cannot point a ticket
+                   * at another tenant's machine.
+                   */
+                  ...(context?.serviceId === undefined ? {} : { service_id: context.serviceId }),
+                },
                 {
                   onSuccess: (created) => {
                     setSubject('')
@@ -242,63 +311,52 @@ export function SupportPage() {
             />
 
             <div className="flex flex-wrap gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span>{t('support.category')}</span>
-                <select
-                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                  value={category}
-                  onChange={(event) => { setCategory(event.target.value) }}
-                >
-                  {['technical', 'billing', 'provisioning', 'abuse', 'other'].map((option) => (
-                    <option key={option} value={option}>
-                      {t(`support.categories.${option}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                label={t('support.category')}
+                value={category}
+                onChange={(event) => { setCategory(event.target.value) }}
+                options={['technical', 'billing', 'provisioning', 'abuse', 'other'].map((option) => ({
+                  value: option,
+                  label: t(`support.categories.${option}`),
+                }))}
+              />
 
-              <label className="flex flex-col gap-1 text-sm">
-                <span>{t('support.priority')}</span>
-                {/*
-                  Three options, not four. Urgent is what pages somebody out of
-                  hours, and a priority a customer can select for themselves
-                  stops meaning anything within a month — so it is an
-                  operator's judgement, and the backend refuses it here.
-                */}
-                <select
-                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                  value={priority}
-                  onChange={(event) => { setPriority(event.target.value as TicketPriority) }}
-                >
-                  {(['low', 'normal', 'high'] as const).map((option) => (
-                    <option key={option} value={option}>
-                      {t(`support.priorities.${option}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {/*
+                Three options, not four. Urgent is what pages somebody out of
+                hours, and a priority a customer can select for themselves
+                stops meaning anything within a month — so it is an operator's
+                judgement, and the backend refuses it here.
+              */}
+              <SelectField
+                label={t('support.priority')}
+                value={priority}
+                onChange={(event) => { setPriority(event.target.value as TicketPriority) }}
+                options={(['low', 'normal', 'high'] as const).map((option) => ({
+                  value: option,
+                  label: t(`support.priorities.${option}`),
+                }))}
+              />
             </div>
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{t('support.describe')}</span>
-              <textarea
-                className="min-h-32 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                value={body}
-                onChange={(event) => { setBody(event.target.value) }}
-                required
-              />
-            </label>
+            {/*
+              A support request is prose, so it follows the page's own
+              direction: an Arabic customer writes it right to left.
+            */}
+            <TextareaField
+              label={t('support.describe')}
+              rows={6}
+              value={body}
+              onChange={(event) => { setBody(event.target.value) }}
+              required
+              error={displayed?.fields?.['body']?.[0]}
+            />
 
-            <label className="flex flex-col gap-1 text-sm">
-              <span>{t('support.attachments')}</span>
-              <input
-                type="file"
-                multiple
-                className="text-sm"
-                onChange={(event) => { setFiles(Array.from(event.target.files ?? [])) }}
-              />
-              <span className="text-xs text-[var(--text-muted)]">{t('support.attachmentsHint')}</span>
-            </label>
+            <FileField
+              label={t('support.attachments')}
+              hint={t('support.attachmentsHint')}
+              multiple
+              onChange={(event) => { setFiles(Array.from(event.target.files ?? [])) }}
+            />
 
             <div>
               <Button type="submit" loading={openTicket.isPending}>

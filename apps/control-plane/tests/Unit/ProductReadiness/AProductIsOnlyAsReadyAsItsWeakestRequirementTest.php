@@ -218,6 +218,41 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
         $this->assertStringContainsString('dns-live is not_ready (blocked)', $verdict->detail);
     }
 
+    /**
+     * The estate that found this had two instances in one category: one the
+     * reference topology declares and nobody has configured, and one assessed
+     * and waiting for a credential. Ranking on "has a blocker been recorded"
+     * put the untouched draft first, so the screen asked an operator to
+     * finish configuring a provider nobody had started instead of naming the
+     * credential that was missing.
+     */
+    #[Test]
+    public function a_draft_nobody_assessed_does_not_outrank_an_instance_blocked_on_one_named_thing(): void
+    {
+        $untouched = $this->provider(
+            ProviderCategory::Dns,
+            state: ProviderState::Draft,
+            readiness: ReadinessState::NotReady,
+            name: 'dns-declared',
+        );
+
+        $assessed = $this->provider(
+            ProviderCategory::Dns,
+            state: ProviderState::Blocked,
+            readiness: ReadinessState::NotReady,
+            blocker: BlockerReason::Credentials,
+            name: 'dns-live',
+        );
+
+        // Declared first, which is the order a seeded estate produces: the
+        // reference topology loads before anything is assessed.
+        $verdict = $this->evaluate(Product::Dns, [...$this->sharedMet(), $untouched, $assessed]);
+
+        $this->assertSame(BlockerReason::Credentials, $verdict->blocker);
+        $this->assertStringContainsString('dns-live', $verdict->detail);
+        $this->assertStringNotContainsString('dns-declared', $verdict->detail);
+    }
+
     #[Test]
     public function a_disabled_provider_is_not_proven_whatever_it_proved_before(): void
     {
@@ -260,6 +295,21 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
     #[Test]
     public function a_dependency_that_was_declared_sellable_only_lends_production_not_the_declaration(): void
     {
+        $verdict = $this->evaluate(
+            Product::Backups,
+            [...$this->sharedMet(), $this->provider(ProviderCategory::Backup)],
+            ['vps' => ProductReadinessState::ReadyToSell],
+        );
+
+        // ready_to_sell is a person's declaration about one product. It lends
+        // the dependent everything the providers earned and not the sentence
+        // somebody signed: the dependent has to be declared on its own.
+        $this->assertSame(ProductReadinessState::ReadyForProduction, $verdict->state);
+    }
+
+    #[Test]
+    public function a_prepared_dependent_is_capped_by_its_own_software_however_ready_its_dependency_is(): void
+    {
         $installer = $this->provider(ProviderCategory::WordPressInstaller, 'cpanel');
 
         $verdict = $this->evaluate(
@@ -268,7 +318,15 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
             ['shared_hosting' => ProductReadinessState::ReadyToSell],
         );
 
-        $this->assertSame(ProductReadinessState::ReadyForProduction, $verdict->state);
+        /*
+         * This used to read ready_for_production, on the same providers and
+         * the same declared dependency. What changed is not the lending rule
+         * above but WordPress: there is no production-capable installer in the
+         * repository, so the product is prepared and prepared caps at
+         * ready_for_real_validation. A perfect dependency cannot lift a
+         * product past software that does not exist.
+         */
+        $this->assertSame(ProductReadinessState::ReadyForRealValidation, $verdict->state);
     }
 
     #[Test]

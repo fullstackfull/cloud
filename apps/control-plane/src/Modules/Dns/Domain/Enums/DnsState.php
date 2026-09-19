@@ -101,10 +101,19 @@ enum DnsState: string
     private function allowed(): array
     {
         return match ($this) {
-            // A publish either lands, is refused, or does not answer. It can
-            // also be abandoned: a customer who deletes a record that has not
-            // published yet gets a delete, not a wait.
-            self::Pending => [self::Active, self::Failed, self::Indeterminate, self::Deleting, self::Deleted],
+            /*
+             * A publish either lands, is refused, or does not answer. It can
+             * also be abandoned: a customer who deletes a record that has not
+             * published yet gets a delete, not a wait.
+             *
+             * And it can be corrected. Pending to Pending is a move, not a
+             * no-op: an edit writes a new value and re-queues the publish, and
+             * a record waiting for the provider is the most likely one for a
+             * customer to be fixing a typo in. Without it, `isEditable()`
+             * promised an edit the enum then refused, and the refusal was a
+             * 500.
+             */
+            self::Pending => [self::Pending, self::Active, self::Failed, self::Indeterminate, self::Deleting, self::Deleted],
 
             // Re-publishing an existing row (an edited record) puts it back to
             // pending rather than editing in place, so that a screen never
@@ -115,9 +124,19 @@ enum DnsState: string
             // clear it: the row can be corrected and re-published, or dropped.
             self::Failed => [self::Pending, self::Deleted, self::Deleting],
 
-            // Only a look at the provider settles this — reconciliation finds
-            // it live, finds it absent, or gives up and asks for a person.
-            self::Indeterminate => [self::Active, self::Deleting, self::Deleted, self::NeedsReview],
+            /*
+             * Only a look at the provider settles this — reconciliation finds
+             * it live, finds it absent, or gives up and asks for a person.
+             *
+             * Pending is here for the person, not for the platform. Wave 4's
+             * rule is that an indeterminate external operation is never retried
+             * automatically, and that rule is about the platform deciding by
+             * itself; a customer who edits the record has decided. It was also
+             * the only move they had: without it, a record the provider never
+             * answered about could not be corrected at all, and the attempt
+             * answered 500.
+             */
+            self::Indeterminate => [self::Pending, self::Active, self::Deleting, self::Deleted, self::NeedsReview],
 
             self::Deleting => [self::Deleted, self::Indeterminate, self::NeedsReview],
 
@@ -126,9 +145,15 @@ enum DnsState: string
             // the new one's.
             self::Deleted => [],
 
-            // A person has looked. They can put it back into service, remove
-            // it, or confirm it is already gone.
-            self::NeedsReview => [self::Active, self::Deleting, self::Deleted],
+            /*
+             * A person has looked. They can put it back into service, remove
+             * it, or confirm it is already gone.
+             *
+             * Pending is the same permission as Active by a safer route: it
+             * publishes the value through the provider rather than declaring it
+             * live, which is what a customer's correction should do.
+             */
+            self::NeedsReview => [self::Pending, self::Active, self::Deleting, self::Deleted],
         };
     }
 }

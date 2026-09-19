@@ -5,6 +5,7 @@ import { useParams } from 'react-router'
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
+import { Field } from '@/components/Field'
 import { PageHeader } from '@/components/PageHeader'
 import { useConsoleSession } from '@/lib/queries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -169,24 +170,53 @@ export function ConsolePage() {
           <span className="text-xs text-[var(--text-muted)]">{t(`console.state.${state}`)}</span>
         </div>
 
+        {/*
+          The terminal's transcript.
+
+          `tabIndex={0}` is what makes it usable without a mouse, and its
+          absence was a real defect rather than a missing nicety: a scrollable
+          region that cannot take focus cannot be scrolled by keyboard at all.
+          Page Up, Page Down, Home and End do nothing to an unfocusable box, so
+          everything above the last screenful of a rebuild's output was
+          unreachable to somebody not using a pointer — on the screen whose
+          whole purpose is reading output.
+
+          `role="log"` rather than a bare region, because that is what this is:
+          an append-only record where the new lines are at the end. Assistive
+          technology treats it as a polite live region, so output arriving
+          while the customer reads is announced without interrupting, and
+          arriving output does not re-announce the whole transcript.
+
+          Left to right whatever the page's direction, and monospaced: console
+          output aligned by spaces is unreadable in a proportional font, and
+          mirrored it is worse than unreadable.
+        */}
         <pre
           ref={output}
           dir="ltr"
-          // A terminal is left to right whatever the page is, and monospaced:
-          // console output aligned by spaces is unreadable in a proportional
-          // font, and mirrored it is worse than unreadable.
+          tabIndex={0}
+          role="log"
           className="technical h-96 overflow-auto whitespace-pre-wrap rounded bg-[var(--surface-sunken)] p-3 text-xs"
           aria-label={t('console.output')}
         >
           {lines.join('')}
         </pre>
 
-        <label className="mt-3 block">
-          <span className="sr-only">{t('console.input')}</span>
-          <input
-            type="text"
+        {/*
+          Uncontrolled on purpose: a terminal line is submitted and cleared on
+          Enter, and routing every keystroke through React state would put a
+          re-render between the customer and a console they are typing into.
+
+          The label is hidden rather than absent — the box sits directly under
+          a terminal that visibly explains it, but a screen reader reaching the
+          control on its own still needs to be told what it is.
+        */}
+        <div className="mt-3">
+          <Field
+            label={t('console.input')}
+            labelHidden
             dir="ltr"
-            className="technical w-full rounded border border-[var(--border)] bg-[var(--surface)] p-2 text-sm"
+            className="technical w-full"
             placeholder={t('console.inputPlaceholder')}
             disabled={state !== 'open'}
             onKeyDown={(event) => {
@@ -197,7 +227,7 @@ export function ConsolePage() {
               field.value = ''
             }}
           />
-        </label>
+        </div>
 
         <p className="mt-3 text-xs text-[var(--text-muted)]">{t('console.textOnly')}</p>
       </Card>

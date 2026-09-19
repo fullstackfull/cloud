@@ -32,7 +32,7 @@ final class RestoreBackupRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'confirmation.required' => 'Type the machine\'s hostname to confirm. A restore replaces every disk on it.',
+            'confirmation.required' => __('validation.requests.backup.restore_confirmation_required'),
         ];
     }
 

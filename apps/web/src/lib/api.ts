@@ -8,6 +8,9 @@
  * what the cookie flow avoids.
  */
 
+import i18n, { isSupportedLocale } from '@/i18n'
+import { reportSessionExpired } from '@/lib/sessionExpiry'
+
 export interface ApiErrorBody {
   code: string
   message: string
@@ -59,6 +62,20 @@ export class NetworkError extends Error {
 
 const BASE_URL = (import.meta.env['VITE_API_BASE']) ?? '/api/v1'
 
+/**
+ * The `Accept-Language` value for the active portal language.
+ *
+ * Narrowed to a language the platform serves: the API negotiates the same set
+ * and would fall back to English for anything else, so sending "de" would
+ * silently produce an English answer on a page the customer chose to read in
+ * Arabic. Exported for the test that proves the header follows the switch.
+ */
+export function acceptLanguage(): string {
+  const base = i18n.language.split('-')[0] ?? 'en'
+
+  return isSupportedLocale(base) ? base : 'en'
+}
+
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
   return match?.[1] !== undefined ? decodeURIComponent(match[1]) : null
@@ -88,6 +105,12 @@ export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
   signal?: AbortSignal
+  /**
+   * Overrides the language the request is answered in. Almost never needed:
+   * every request carries the active portal language (see `acceptLanguage`),
+   * and the one legitimate exception is a call made on behalf of a person
+   * whose language differs from the operator's screen.
+   */
   locale?: string
   /**
    * Extra headers for the few endpoints that take one.
@@ -97,6 +120,19 @@ export interface RequestOptions {
    * header of the same name.
    */
   headers?: Record<string, string>
+  /**
+   * The key that makes a retry of this request the same operation.
+   *
+   * Sent as the `Idempotency-Key` header, which is the one place the API
+   * reads it from: every guarded endpoint (placing an order, power actions,
+   * reinstalls, plan changes, paying from credit) merges the header over the
+   * body and validates the result, so a key in the body alone is a request
+   * with no key at all. It used to be sent in the body by five of the six
+   * callers, and every one of them was answered 422 with a field error that
+   * named no visible field. One option here, set by one helper, means the
+   * transport cannot drift per call site again.
+   */
+  idempotencyKey?: string
   /**
    * Treat `path` as a full path from the origin rather than relative to
    * `/api/v1`.
@@ -122,8 +158,20 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     'X-Requested-With': 'XMLHttpRequest',
   }
 
-  if (options.locale !== undefined) {
-    headers['Accept-Language'] = options.locale
+  /*
+   * The language the screen is in is the language the answer must be in.
+   *
+   * Set here, once, rather than by each hook: the audit found no request
+   * carried the header at all, so every refusal, validation sentence and
+   * localised reason reached an Arabic customer in English. The API reads the
+   * header on every route (SetRequestLocale) and answers in that language; a
+   * language switch changes the header on the very next request because it is
+   * read from the live i18n instance, not captured at module load.
+   */
+  headers['Accept-Language'] = options.locale ?? acceptLanguage()
+
+  if (options.idempotencyKey !== undefined) {
+    headers['Idempotency-Key'] = options.idempotencyKey
   }
 
   /*
@@ -170,6 +218,21 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (!response.ok) {
     const error = extractError(payload)
+
+    /*
+     * A refusal for want of a session is announced, once, so the shell can
+     * offer a deliberate way back in rather than leaving the customer on a
+     * page of failed reads.
+     *
+     * Announced and not acted on. Nothing here retries, redirects or
+     * remembers the request: a mutation that came back 401 must never be
+     * replayed after signing in, because the portal cannot know whether the
+     * server accepted it before the session went.
+     */
+    if (response.status === 401) {
+      reportSessionExpired()
+    }
+
     throw new ApiError(
       response.status,
       error ?? { code: `http.${response.status}`, message: response.statusText },
@@ -196,6 +259,18 @@ function extractError(payload: unknown): ApiErrorBody | null {
   if (typeof code !== 'string' || typeof message !== 'string') return null
 
   return error as ApiErrorBody
+}
+
+/**
+ * A fresh idempotency key for one deliberate press of a control.
+ *
+ * Minted once per press, never per retry: two deliberate reboots are two
+ * operations, and only a retry of the same press should collapse into one.
+ * Callers that hold a key across retries (the checkout) mint it once and keep
+ * it in state.
+ */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID()
 }
 
 export const api = {

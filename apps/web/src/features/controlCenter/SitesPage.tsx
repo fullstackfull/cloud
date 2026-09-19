@@ -7,6 +7,7 @@ import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useDatacenters, useRacks, useRegions, useRegisterDatacenter, useRegisterRack } from '@/lib/controlCenterQueries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
@@ -39,7 +40,7 @@ export function SitesPage() {
 
       <Card>
         {datacenters.isPending || racks.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : datacenters.error ? (
           <LoadFailure error={datacenters.error} />
         ) : racks.error ? (
@@ -109,8 +110,8 @@ function DatacenterForm({ onDone }: { onDone: () => void }) {
               {(regions.data?.data ?? []).map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
             </select>
           </div>
-          <Field label={t('admin.sites.slug')} value={slug} onChange={(e) => { setSlug(e.target.value); }} error={fieldError('slug')} dir="ltr" required />
-          <Field label={t('admin.sites.name')} value={name} onChange={(e) => { setName(e.target.value); }} error={fieldError('name')} required />
+          <Field label={t('admin.sites.slug')} hint={t('admin.sites.slugHint')} value={slug} onChange={(e) => { setSlug(e.target.value); }} error={fieldError('slug')} dir="ltr" required />
+          <Field label={t('admin.sites.name')} hint={t('admin.sites.nameHint')} value={name} onChange={(e) => { setName(e.target.value); }} error={fieldError('name')} required />
           <Field label={t('admin.sites.facility')} value={facility} onChange={(e) => { setFacility(e.target.value); }} error={fieldError('facility')} />
         </div>
         {failure !== null && failure.fields === null ? <Alert tone="error">{failure.message}</Alert> : null}
@@ -162,7 +163,7 @@ function RackForm({ onDone }: { onDone: () => void }) {
               {(datacenters.data?.data ?? []).map((dc) => <option key={dc.id} value={dc.id}>{dc.name}</option>)}
             </select>
           </div>
-          <Field label={t('admin.sites.rackName')} value={name} onChange={(e) => { setName(e.target.value); }} error={fieldError('name')} dir="ltr" required />
+          <Field label={t('admin.sites.rackName')} hint={t('admin.sites.rackCodeHint')} value={name} onChange={(e) => { setName(e.target.value); }} error={fieldError('name')} dir="ltr" required />
           <Field label={t('admin.sites.rowLabel')} value={row} onChange={(e) => { setRow(e.target.value); }} error={fieldError('row')} dir="ltr" />
           <Field label={t('admin.sites.unitsLabel')} type="number" min={1} max={60} value={units} onChange={(e) => { setUnits(e.target.value); }} error={fieldError('units')} dir="ltr" required />
           <Field label={t('admin.sites.powerNotes')} value={power} onChange={(e) => { setPower(e.target.value); }} error={fieldError('power_notes')} />

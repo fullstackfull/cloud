@@ -146,12 +146,32 @@ final class TheControlCenterRefusesTheDangerousInputsTest extends TestCase
         $production->forceFill(['credential_reference_id' => $staging->getKey()])->save();
         $tested = $this->actingAs($this->operator)->postJson("/api/admin/providers/{$production->getKey()}/connection-test");
 
-        // The test runs — the fake driver exists in this environment — but
-        // with no secret, because the staging reference was never resolved
-        // for a production target. The fake answers as a real endpoint
-        // would to an empty credential.
-        $tested->assertOk();
-        $this->assertNotSame(ConnectionState::Connected, $production->fresh()->connection_state);
+        /*
+         * Refused outright, and nothing recorded.
+         *
+         * This assertion used to read assertOk(): the test ran with no secret
+         * — the staging reference was never resolved for a production target —
+         * and the fake answered AuthFailed, as a real endpoint would to an
+         * empty credential. That satisfied the property this test is about,
+         * and it was the wrong answer to give an operator twice over. It
+         * recorded a connection test against a provider that does not exist,
+         * and it said "authentication failed", which sends somebody to the
+         * credential centre to fix a credential that is not the problem.
+         *
+         * Phase 30B-SIM refuses it instead. A controlled driver cannot answer
+         * for a production row at all, because a production row is what the
+         * readiness engine consults before a product is offered for sale, and
+         * this is reported as what it is: there is no tester here that can
+         * establish anything about it.
+         */
+        $tested->assertUnprocessable();
+        $tested->assertJsonPath('error.code', 'unknown_driver');
+
+        $this->assertSame(
+            ConnectionState::NotTested,
+            $production->fresh()->connection_state,
+            'Nothing was dialled, so nothing was recorded.',
+        );
         $this->assertFalse($production->fresh()->connection_state->usable());
         $this->assertStringNotContainsString('not-a-real-secret', $tested->getContent());
         $this->assertStringNotContainsString('not-a-real-secret', (string) json_encode(DB::table('audit_log')->pluck('context')->all()));

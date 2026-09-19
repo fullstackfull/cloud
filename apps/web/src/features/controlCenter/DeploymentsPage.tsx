@@ -12,6 +12,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useCancelDeployment, useDeployments, useResolveDeployment, type DeploymentJob } from '@/lib/controlCenterQueries'
 import { formatDateTime } from '@/lib/format'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
@@ -63,7 +64,7 @@ export function DeploymentsPage() {
 
       <Card>
         {isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : error ? (
           <LoadFailure error={error} />
         ) : (

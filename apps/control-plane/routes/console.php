@@ -147,6 +147,50 @@ Schedule::command('backups:reconcile')
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
 /*
+ * Verification.
+ *
+ * The other half of the loop above, on the same cadence and offset by two
+ * minutes so the two sweeps do not contend for the same datastore in the same
+ * second. This one asks a datastore to read an archive back; the reconciler
+ * finds out what it said.
+ *
+ * Nothing used to run this, because nothing used to exist to run: the
+ * provider contract, both drivers, the state and the verdict were all in
+ * place, and no caller ever started a verification. `verified` was therefore
+ * null on every backup this platform had ever taken, and "succeeded" meant
+ * "the job reported success" rather than "the data is readable" — which is
+ * the distinction docs/backups.md says verification exists to make.
+ *
+ * A row leaves the sweep's scope the moment it is asked, and a datastore that
+ * refuses is asked a bounded number of times, so running this every five
+ * minutes for ever is safe.
+ */
+Schedule::command('backups:verify')
+    ->cron('2-59/5 * * * *')
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
+ * Reverse DNS withdrawal.
+ *
+ * Every ten minutes, and the interval is chosen against the address
+ * quarantine rather than against the zone API: a released address must stop
+ * answering with the previous holder's hostname before it can be handed to
+ * anybody, and the quarantine is what buys the time to do that.
+ *
+ * Nothing used to run this because nothing used to exist to run.
+ * `IpAllocator::withdrawReverseDns()` marked a released record `removing` and
+ * said a reconciler would act on it; there was no reconciler, so every address
+ * this platform ever released kept its old PTR.
+ */
+Schedule::command('ipam:withdraw-reverse-dns')
+    ->everyTenMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
+/*
  * Retention.
  *
  * Hourly rather than more often, because the unit it works in is days and the
@@ -185,6 +229,20 @@ Schedule::command('backups:reconcile-inventory')
  * exponential backoff per task on top, so a fleet of slow builds does not
  * become a fleet of API calls.
  */
+/*
+ * Scheduled account country/currency changes, every five minutes.
+ *
+ * An operator may approve a change for a later moment — the start of the
+ * next billing month, typically. This applies the ones whose moment has
+ * come, after checking the account's facts one last time; one that has
+ * grown a blocker since approval is held for a person, not applied.
+ */
+Schedule::command('customers:apply-country-currency-changes')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
 Schedule::command('compute:poll-tasks')
     ->everyFiveMinutes()
     ->withoutOverlapping(10)

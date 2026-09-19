@@ -25,11 +25,18 @@ test.describe('in English', () => {
   test('a finished site says all four steps are done', async ({ page }) => {
     const card = page.locator('section', { hasText: LIVE }).first()
 
-    await expect(page.getByRole('heading', { name: LIVE })).toBeVisible()
+    await expect(page.getByRole('heading', { name: LIVE, exact: true })).toBeVisible()
 
     // The last step is the only one that is this platform's own observation.
     await expect(card.getByText(/we loaded the site and it answered/i)).toBeVisible()
-    await expect(card.getByRole('link', { name: new RegExp(LIVE) })).toBeVisible()
+
+    /*
+     * And the way into WordPress itself, which since Wave 3 is on the site's
+     * own page rather than printed as a URL on a list.
+     */
+    await card.getByRole('link', { name: LIVE, exact: true }).click()
+    await expect(page.getByRole('heading', { level: 1, name: LIVE })).toBeVisible()
+    await expect(page.getByRole('link', { name: /open wordpress/i })).toBeVisible()
   })
 
   test('a site waiting on the customer says so, and says what to do', async ({ page }) => {
@@ -81,7 +88,7 @@ test.describe('in Arabic', () => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
     await page.goto('/wordpress')
 
-    const heading = page.getByRole('heading', { name: LIVE })
+    const heading = page.getByRole('heading', { name: LIVE, exact: true })
     await expect(heading).toBeVisible()
 
     // A domain name is technical and must not be mirrored.

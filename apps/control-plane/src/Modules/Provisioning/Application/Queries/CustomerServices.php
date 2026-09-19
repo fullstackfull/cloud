@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Provisioning\Domain\Enums\CustomerServiceState;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -63,6 +64,16 @@ final class CustomerServices
     public const string REVIEWS_PENDING = 'jobs_awaiting_review_count';
 
     /**
+     * The same question narrowed to the job that delivered the service.
+     *
+     * A separate column rather than a flag on the first, because the two
+     * answers eclipse different states: any stuck job hides a build in
+     * progress, and only a stuck *delivery* job is allowed to talk over an
+     * active service. See {@see CustomerServiceState::isEclipsedByDeliveryReview()}.
+     */
+    public const string DELIVERY_REVIEWS_PENDING = 'delivery_jobs_awaiting_review_count';
+
+    /**
      * @return HasMany<Service, Customer>
      */
     public static function of(Customer $customer): HasMany
@@ -76,6 +87,7 @@ final class CustomerServices
             // instead of a boolean each one spells differently.
             ->withCount([
                 'jobs as '.self::REVIEWS_PENDING => self::awaitingReview(...),
+                'jobs as '.self::DELIVERY_REVIEWS_PENDING => self::awaitingDeliveryReview(...),
             ]);
 
         return $relation;
@@ -104,9 +116,43 @@ final class CustomerServices
         ));
 
         if ($state === CustomerServiceState::UnderReview) {
-            $query->whereHas('jobs', self::awaitingReview(...));
-        } elseif ($state->isEclipsedByReview()) {
-            $query->whereDoesntHave('jobs', self::awaitingReview(...));
+            /*
+             * Either kind of stuck job, but only where that kind is allowed to
+             * eclipse the row's status: an active service is `under_review`
+             * for a stuck delivery and not for a stuck reboot, so asking for
+             * "any stuck job" here would return active machines whose only
+             * problem was a failed restart — rows the response prints as
+             * `active`.
+             */
+            $query->where(function (Builder $scoped): void {
+                $scoped
+                    ->where(function (Builder $anyReview): void {
+                        $anyReview
+                            ->whereIn('services.status', self::statusesEclipsedBy(
+                                static fn (CustomerServiceState $state): bool => $state->isEclipsedByReview(),
+                            ))
+                            ->whereHas('jobs', self::awaitingReview(...));
+                    })
+                    ->orWhere(function (Builder $deliveryReview): void {
+                        $deliveryReview
+                            ->whereIn('services.status', self::statusesEclipsedBy(
+                                static fn (CustomerServiceState $state): bool => $state->isEclipsedByDeliveryReview(),
+                            ))
+                            ->whereHas('jobs', self::awaitingDeliveryReview(...));
+                    });
+            });
+        } elseif ($state->isEclipsedByDeliveryReview()) {
+            /*
+             * The wider exclusion, for every state a delivery review can hide.
+             * `?state=active` must not return a machine the response prints as
+             * `under_review`, and for the states that any review eclipses the
+             * delivery subset is covered by the same clause.
+             */
+            $query->whereDoesntHave('jobs', self::awaitingDeliveryReview(...));
+
+            if ($state->isEclipsedByReview()) {
+                $query->whereDoesntHave('jobs', self::awaitingReview(...));
+            }
         }
 
         return $query;
@@ -124,5 +170,50 @@ final class CustomerServices
     private static function awaitingReview(Builder $query): void
     {
         $query->where('provisioning_jobs.status', ProvisioningJobStatus::NeedsReview->value);
+    }
+
+    /**
+     * Stuck jobs that were delivering the service rather than operating it.
+     *
+     * "Delivering" is not a new idea here: `createsResource()` already names
+     * the three kinds that bring a service into existence, and it is the same
+     * property the engine uses to decide whether an unclassified failure might
+     * have left something behind at the provider.
+     *
+     * @param  Builder<ProvisioningJob>  $query
+     */
+    private static function awaitingDeliveryReview(Builder $query): void
+    {
+        self::awaitingReview($query);
+
+        $query->whereIn('provisioning_jobs.kind', array_map(
+            static fn (ProvisioningJobKind $kind): string => $kind->value,
+            array_values(array_filter(
+                ProvisioningJobKind::cases(),
+                static fn (ProvisioningJobKind $kind): bool => $kind->createsResource(),
+            )),
+        ));
+    }
+
+    /**
+     * The service statuses whose customer-facing word a review may replace.
+     *
+     * Derived from the enum rather than listed again, so the filter and the
+     * serialiser cannot come to disagree about which states a review hides.
+     *
+     * @param  callable(CustomerServiceState): bool  $eclipses
+     * @return list<string>
+     */
+    private static function statusesEclipsedBy(callable $eclipses): array
+    {
+        $statuses = [];
+
+        foreach (ServiceStatus::cases() as $status) {
+            if ($eclipses(CustomerServiceState::for($status))) {
+                $statuses[] = $status->value;
+            }
+        }
+
+        return $statuses;
     }
 }

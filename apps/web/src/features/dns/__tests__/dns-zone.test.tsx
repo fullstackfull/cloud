@@ -1,0 +1,354 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { MemoryRouter, Route, Routes } from 'react-router'
+
+import {
+  DnsZoneDangerSection,
+  DnsZoneDetailPage,
+  DnsZoneOverviewSection,
+  DnsZoneRecordsSection,
+  DnsZoneTransferSection,
+} from '@/features/dns/DnsZoneDetailPage'
+/*
+ * Imported for its side effect: this is what initialises i18next. Pages that
+ * happen to import a locale helper get it for free, and a test asserting on
+ * English text without it is really asserting that a translation key is
+ * missing.
+ */
+import '@/i18n'
+
+/**
+ * One zone's own page, tested where the browser suite cannot reach cheaply.
+ *
+ * Wave 3 gave the zone an address of its own — `/dns/example.test` — and moved
+ * the delegation, the records, the import and the release onto it. Everything
+ * asserted here was asserted before that move and must survive it: that the
+ * screen says what has to happen at the registrar (a zone here serves nothing
+ * until the domain is delegated, and no badge means otherwise), that the
+ * record form sends a fully-qualified name rather than whatever was typed in
+ * the box, that giving up a zone needs its name typed, that an indeterminate
+ * zone is not offered a retry, and that an import applies exactly the plan it
+ * previewed.
+ *
+ * The one new guarantee is the edit: it goes through the endpoint's own PATCH
+ * rather than a delete followed by an add.
+ */
+
+const ZONE = {
+  id: '01JZONE',
+  name: 'example.test',
+  service_id: null,
+  state: 'active',
+  is_live: true,
+  is_being_deleted: false,
+  needs_attention: false,
+  nameservers: ['a.ns.fake.test', 'b.ns.fake.test'],
+  failure_reason: null,
+  record_count: 1,
+  last_synced_at: null,
+  created_at: '2026-03-01T00:00:00+00:00',
+}
+
+const RECORD = {
+  id: '01JRECORD',
+  zone_id: '01JZONE',
+  type: 'A',
+  name: 'www.example.test',
+  content: '203.0.113.10',
+  ttl: 1,
+  priority: null,
+  caa_flags: null,
+  caa_tag: null,
+  caa_value: null,
+  state: 'active',
+  is_live: true,
+  is_being_deleted: false,
+  needs_attention: false,
+  failure_reason: null,
+  last_published_at: '2026-03-01T00:00:00+00:00',
+  created_at: '2026-03-01T00:00:00+00:00',
+}
+
+const PLAN = {
+  zone_id: '01JZONE',
+  zone: 'example.test',
+  mode: 'merge',
+  applicable: true,
+  fingerprint: 'a'.repeat(64),
+  counts: { add: 1, update: 0, remove: 0, unchanged: 1, refused: 0, ignored: 1, kept: 0 },
+  entries: [
+    { kind: 'add', line: 2, type: 'A', name: 'api.example.test', content: '203.0.113.20', ttl: 3600, priority: null, existing_id: null, reason: null },
+    { kind: 'unchanged', line: 1, type: 'A', name: 'www.example.test', content: '203.0.113.10', ttl: 1, priority: null, existing_id: '01JRECORD', reason: null },
+    { kind: 'ignored', line: 3, type: null, name: null, content: '@ IN NS a.ns.fake.test.', ttl: null, priority: null, existing_id: null, reason: 'the nameservers set the apex NS' },
+  ],
+}
+
+const REFUSED_PLAN = {
+  ...PLAN,
+  applicable: false,
+  counts: { ...PLAN.counts, refused: 1 },
+  entries: [
+    ...PLAN.entries,
+    { kind: 'refused', line: 4, type: null, name: null, content: '$INCLUDE /etc/passwd', ttl: null, priority: null, existing_id: null, reason: '$INCLUDE names a file on somebody\'s disk; a zone file may not do that here.' },
+  ],
+}
+
+interface Stubs {
+  onAdd?: (body: unknown) => void
+  onChange?: (body: unknown) => void
+  onRelease?: (body: unknown) => void
+  onApply?: (body: unknown) => void
+  zone?: Record<string, unknown>
+  plan?: Record<string, unknown>
+}
+
+function stubFetch({ onAdd, onChange, onRelease, onApply, zone, plan }: Stubs = {}) {
+  return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = input instanceof Request ? input.url : String(input)
+    const path = url.split('?')[0] ?? url
+    const row = zone ?? ZONE
+
+    let body: unknown = null
+
+    if (path.endsWith('/sanctum/csrf-cookie')) {
+      body = null
+    } else if (path.endsWith('/import/plan')) {
+      body = { data: plan ?? PLAN }
+    } else if (path.endsWith('/import')) {
+      onApply?.(JSON.parse(typeof init?.body === 'string' ? init.body : '{}'))
+      body = { data: { zone_id: '01JZONE', mode: 'merge', added: 1, updated: 0, removed: 0, unchanged: 1 } }
+    } else if (path.endsWith('/export')) {
+      body = { data: { filename: 'example.test.zone', content: '$ORIGIN example.test.\nwww 300 IN A 203.0.113.10\n', record_count: 1 } }
+    } else if (path.endsWith('/records') && init?.method === 'POST') {
+      onAdd?.(JSON.parse(typeof init.body === 'string' ? init.body : '{}'))
+      body = { data: RECORD }
+    } else if (path.endsWith('/records')) {
+      body = { data: [RECORD], meta: { total: 1 } }
+    } else if (init?.method === 'PATCH') {
+      onChange?.(JSON.parse(typeof init.body === 'string' ? init.body : '{}'))
+      body = { data: { ...RECORD, content: '203.0.113.99' } }
+    } else if (path.endsWith('/dns/zones/example.test')) {
+      body = { data: zone ?? ZONE }
+    } else if (init?.method === 'DELETE') {
+      onRelease?.(JSON.parse(typeof init.body === 'string' ? init.body : '{}'))
+      body = { data: { ...row, state: 'deleted' } }
+    } else if (path.endsWith('/dns/zones')) {
+      body = { data: [row], meta: { total: 1 } }
+    } else {
+      throw new Error(`Unstubbed request: ${url}`)
+    }
+
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      statusText: '',
+      text: () => Promise.resolve(JSON.stringify(body)),
+    } as Response)
+  })
+}
+
+/**
+ * The zone's page with its sections mounted as the application mounts them:
+ * child routes, so each one is an address rather than a panel.
+ */
+function renderZone(path = '/dns/example.test') {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <QueryClientProvider client={client}>
+        <Routes>
+          <Route path="/dns/:identity" element={<DnsZoneDetailPage />}>
+            <Route index element={<DnsZoneOverviewSection />} />
+            <Route path="records" element={<DnsZoneRecordsSection />} />
+            <Route path="transfer" element={<DnsZoneTransferSection />} />
+            <Route path="danger" element={<DnsZoneDangerSection />} />
+          </Route>
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  )
+}
+
+describe("a zone's own page", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('says what has to happen at the registrar before any of this takes effect', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+
+    renderZone()
+
+    expect(await screen.findByText('a.ns.fake.test')).toBeInTheDocument()
+    expect(screen.getByText(/does not check who owns a domain/i)).toBeInTheDocument()
+  })
+
+  it('sends a fully-qualified name rather than what was typed in the box', async () => {
+    const added = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onAdd: added }))
+    const user = userEvent.setup()
+
+    renderZone('/dns/example.test/records')
+
+    await user.type(await screen.findByLabelText(/name \(blank for/i), 'www')
+    await user.type(screen.getByLabelText(/^value$/i), '203.0.113.10')
+    await user.click(screen.getByRole('button', { name: /add record/i }))
+
+    // Not 'www'. A form that sends the fragment and lets the server guess is a
+    // form that publishes www.example.test.example.test the first time
+    // somebody types the whole name.
+    await waitFor(() => {
+      expect(added).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'www.example.test', content: '203.0.113.10', type: 'A' }),
+      )
+    })
+  })
+
+  it('will not give up a domain until its name is typed back', async () => {
+    const released = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onRelease: released }))
+    const user = userEvent.setup()
+
+    renderZone('/dns/example.test/danger')
+
+    await user.click(await screen.findByRole('button', { name: /give up domain/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    const confirm = within(dialog).getByRole('button', { name: /give up domain/i })
+
+    expect(confirm).toBeDisabled()
+    expect(within(dialog).getByText(/stops resolving/i)).toBeInTheDocument()
+
+    await user.type(within(dialog).getByRole('textbox'), 'example.test')
+    expect(confirm).toBeEnabled()
+
+    await user.click(confirm)
+
+    await waitFor(() => {
+      expect(released).toHaveBeenCalledWith({ confirm_zone_name: 'example.test' })
+    })
+  })
+
+  it('does not tell a customer to try again when the platform does not know what happened', async () => {
+    vi.stubGlobal(
+      'fetch',
+      stubFetch({
+        zone: { ...ZONE, state: 'indeterminate', is_live: false, needs_attention: true },
+      }),
+    )
+
+    renderZone()
+
+    // The zone may be perfectly fine. Repeating the request is the one thing
+    // that could make it worse, so the message says so.
+    expect(await screen.findByText(/cannot say whether it took effect/i)).toBeInTheDocument()
+    expect(screen.getByText(/could duplicate it/i)).toBeInTheDocument()
+  })
+
+  it('applies exactly the plan it previewed, and only after the zone name is typed back', async () => {
+    const applied = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onApply: applied }))
+    const user = userEvent.setup()
+
+    renderZone('/dns/example.test/transfer')
+
+    const text = "www IN A 203.0.113.10\napi IN A 203.0.113.20\n@ IN NS a.ns.fake.test.\n"
+    await user.type(await screen.findByLabelText(/or paste the zone text/i), text)
+    await user.click(screen.getByRole('button', { name: /preview changes/i }))
+
+    const planned = await screen.findByTestId('zone-import-plan')
+    expect(within(planned).getByText('api.example.test A 203.0.113.20')).toBeInTheDocument()
+    // The ignored line is listed with its reason, not dropped on the floor.
+    expect(within(planned).getByText(/nameservers set the apex NS/i)).toBeInTheDocument()
+
+    await user.click(within(planned).getByRole('button', { name: /apply this plan/i }))
+
+    const dialog = await screen.findByRole('dialog')
+    const confirm = within(dialog).getByRole('button', { name: /apply this plan/i })
+    expect(confirm).toBeDisabled()
+    await user.type(within(dialog).getByRole('textbox'), 'example.test')
+    await user.click(confirm)
+
+    // The preview's fingerprint travels with the apply: the server applies
+    // what was shown or refuses, never a plan nobody saw.
+    await waitFor(() => {
+      expect(applied).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: 'merge', fingerprint: 'a'.repeat(64) }),
+      )
+    })
+    expect(await screen.findByText(/imported: 1 added/i)).toBeInTheDocument()
+  })
+
+  it('applies nothing while any line is refused, and says which line and why', async () => {
+    const applied = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onApply: applied, plan: REFUSED_PLAN }))
+    const user = userEvent.setup()
+
+    renderZone('/dns/example.test/transfer')
+
+    await user.type(await screen.findByLabelText(/or paste the zone text/i), '$INCLUDE /etc/passwd')
+    await user.click(screen.getByRole('button', { name: /preview changes/i }))
+
+    const planned = await screen.findByTestId('zone-import-plan')
+    expect(within(planned).getByText(/nothing will be applied while any line is refused/i)).toBeInTheDocument()
+    expect(within(planned).getByText(/names a file on somebody/i)).toBeInTheDocument()
+    expect(within(planned).getByRole('button', { name: /apply this plan/i })).toBeDisabled()
+    expect(applied).not.toHaveBeenCalled()
+  })
+
+  it('exports the zone as text the customer can read and take away', async () => {
+    vi.stubGlobal('fetch', stubFetch())
+    const user = userEvent.setup()
+
+    renderZone('/dns/example.test/transfer')
+
+    await user.click(await screen.findByRole('button', { name: /export zone file/i }))
+
+    expect(await screen.findByTestId('zone-export')).toHaveTextContent('www 300 IN A 203.0.113.10')
+    expect(screen.getByRole('link', { name: /download example\.test\.zone/i })).toHaveAttribute('download', 'example.test.zone')
+  })
+
+  it('changes a record through the endpoint that changes it, never a delete and an add', async () => {
+    const changed = vi.fn()
+    const added = vi.fn()
+    const removed = vi.fn()
+    vi.stubGlobal('fetch', stubFetch({ onChange: changed, onAdd: added, onRelease: removed }))
+    const user = userEvent.setup()
+
+    renderZone('/dns/example.test/records')
+
+    await user.click(await screen.findByRole('button', { name: /^edit$/i }))
+
+    const dialog = await screen.findByRole('dialog')
+
+    // The record being changed, named in the dialogue, so nobody edits the
+    // wrong row. Neither the name nor the type is offered: the endpoint
+    // accepts neither, because a record with a different name is a different
+    // record.
+    expect(within(dialog).getByText('www.example.test')).toBeInTheDocument()
+    expect(within(dialog).queryByLabelText(/^name/i)).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText(/^type$/i)).not.toBeInTheDocument()
+
+    const value = within(dialog).getByLabelText(/^value$/i)
+    await user.clear(value)
+    await user.type(value, '203.0.113.99')
+    await user.click(within(dialog).getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => {
+      expect(changed).toHaveBeenCalledWith({ content: '203.0.113.99', ttl: 1 })
+    })
+
+    /*
+     * The whole point of the PATCH: a delete followed by an add drops the
+     * record at the provider and creates another, so anything resolving in
+     * between gets nothing, and a failure halfway leaves the customer with
+     * neither the old value nor the new one.
+     */
+    expect(added).not.toHaveBeenCalled()
+    expect(removed).not.toHaveBeenCalled()
+  })
+})

@@ -2,10 +2,15 @@ import { Outlet } from 'react-router'
 import { useTranslation } from 'react-i18next'
 
 import { LocaleSwitcher } from '@/components/LocaleSwitcher'
+import { useRouteFocus } from '@/lib/useRouteFocus'
 
 /** The signed-out shell: one centred card, and a way to change language. */
 export function PublicLayout() {
   const { t } = useTranslation()
+
+  // Sign-in to registration to forgotten-password is a navigation like any
+  // other, and the card it lands on has a heading worth announcing.
+  useRouteFocus()
 
   return (
     <div className="flex min-h-dvh flex-col bg-[var(--surface)]">

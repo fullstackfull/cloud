@@ -22,8 +22,8 @@ groups:
             Compare against the control-plane scrape: if the application is scraping fine
             but the probe fails, the fault is in DNS, the load balancer or TLS, not in
             the application.
-          runbook_url: https://docs.lynomia.internal/runbooks/endpoint-down
-          dashboard_url: https://grafana.lynomia.internal/d/lynomia-platform/platform-overview
+          runbook_url: https://docs.prod.example/runbooks/endpoint-down
+          dashboard_url: https://grafana.prod.example/d/lynomia-platform/platform-overview
 
       - alert: EndpointSlow
         expr: probe_duration_seconds{job="blackbox-http"} > 5
@@ -37,7 +37,7 @@ groups:
             External response time for {{ $labels.service }} has been above five seconds
             for ten minutes. Customers experience this as a broken site long before
             anything actually returns an error.
-          runbook_url: https://docs.lynomia.internal/runbooks/endpoint-down
+          runbook_url: https://docs.prod.example/runbooks/endpoint-down
 
       - alert: ProbeFailingWithHttpError
         # Split from EndpointDown because the responses mean different things: a
@@ -54,7 +54,7 @@ groups:
             The endpoint is reachable and answering with a server error, so the load
             balancer and TLS are fine and the fault is inside the application. The
             correlation ID in the response body finds the request in Loki.
-          runbook_url: https://docs.lynomia.internal/runbooks/endpoint-down
+          runbook_url: https://docs.prod.example/runbooks/endpoint-down
 
   - name: probes.tls
     rules:
@@ -74,7 +74,7 @@ groups:
             Renewal has not happened yet. This is the most predictable outage there is
             and it takes the portal down completely when it lands, usually on a weekend.
             Check the ACME client's last run before assuming it will sort itself out.
-          runbook_url: https://docs.lynomia.internal/runbooks/certificate-expiry
+          runbook_url: https://docs.prod.example/runbooks/certificate-expiry
 
       - alert: CertificateExpiringCritical
         expr: >-
@@ -89,7 +89,7 @@ groups:
             Automatic renewal has had two weeks and has not worked. Renew by hand today.
             Once it expires, every customer sees a browser interstitial and every API
             client fails TLS verification at once.
-          runbook_url: https://docs.lynomia.internal/runbooks/certificate-expiry
+          runbook_url: https://docs.prod.example/runbooks/certificate-expiry
 
       - alert: CertificateExpired
         expr: probe_ssl_earliest_cert_expiry - time() <= 0
@@ -102,7 +102,7 @@ groups:
           description: >-
             Customers are seeing a security warning right now and every API integration
             is failing verification.
-          runbook_url: https://docs.lynomia.internal/runbooks/certificate-expiry
+          runbook_url: https://docs.prod.example/runbooks/certificate-expiry
 
   - name: probes.monitoring
     rules:
@@ -120,7 +120,7 @@ groups:
             One or more rules in {{ $labels.rule_group }} cannot be evaluated, so the
             alerts they define cannot fire. Their silence currently means nothing.
           runbook: docs/runbooks/monitoring-blind.md
-          runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
+          runbook_url: https://docs.prod.example/runbooks/monitoring-health
 
       - alert: AlertmanagerNotificationsFailing
         expr: increase(alertmanager_notifications_failed_total[15m]) > 0
@@ -134,7 +134,7 @@ groups:
             Alerts are firing and not reaching anyone. Every other alert in this system
             is currently unable to do its job.
           runbook: docs/runbooks/monitoring-blind.md
-          runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
+          runbook_url: https://docs.prod.example/runbooks/monitoring-health
 
       - alert: LokiIngestionStopped
         # The logs half of the pipeline. Alloy going quiet looks exactly like an
@@ -153,4 +153,4 @@ groups:
             Both are worth knowing before the next incident, when the logs are the first
             thing anyone reaches for.
           runbook: docs/runbooks/monitoring-blind.md
-          runbook_url: https://docs.lynomia.internal/runbooks/monitoring-health
+          runbook_url: https://docs.prod.example/runbooks/monitoring-health

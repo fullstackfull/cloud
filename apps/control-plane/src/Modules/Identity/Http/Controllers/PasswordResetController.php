@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
+use Lynomia\Http\Responses\ApiError;
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Identity\Application\Actions\RecordLoginActivity;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -76,12 +78,11 @@ final class PasswordResetController
         );
 
         if ($status !== Password::PasswordReset) {
-            return response()->json([
-                'error' => [
-                    'code' => 'password.reset_failed',
-                    'message' => 'This reset link is invalid or has expired.',
-                ],
-            ], 422);
+            return ApiError::make(
+                'password.reset_failed',
+                ErrorCatalogue::message('password.reset_failed', [], 'This reset link is invalid or has expired.'),
+                422,
+            )->toResponse($request);
         }
 
         return response()->json(status: 204);

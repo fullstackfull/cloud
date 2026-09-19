@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Admin\Http\Controllers\AuditController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
+use Lynomia\Modules\Admin\Http\Controllers\CountryCurrencyChangeController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
 use Lynomia\Modules\Admin\Http\Controllers\DomainsController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
@@ -17,9 +18,11 @@ use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\PreflightController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SiteController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\SoftwareProfileController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\VmTemplateController;
 use Lynomia\Modules\ProductReadiness\Http\Controllers\ProductReadinessController;
 use Lynomia\Modules\Providers\Http\Controllers\ConnectionTestController;
 use Lynomia\Modules\Providers\Http\Controllers\CredentialController;
@@ -60,6 +63,27 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('customers', [CustomerController::class, 'index'])
         ->middleware('permission:'.Permission::CustomerViewAny->value)
         ->name('customers.index');
+
+    /*
+     * Requests to change an account's country or currency. Reading the
+     * queue is `customer.view_any`; deciding one is `customer.update`, the
+     * permission for changing what an account says about itself — which is
+     * exactly what this changes, after the platform has checked the facts.
+     *
+     * Declared before `customers/{customer}`: routes match in order, and a
+     * literal segment declared after a parameter is a 404 for ever.
+     */
+    Route::get('customers/country-currency-changes', [CountryCurrencyChangeController::class, 'index'])
+        ->middleware('permission:'.Permission::CustomerViewAny->value)
+        ->name('customers.country_currency_changes.index');
+
+    Route::post('customers/country-currency-changes/{change}/approve', [CountryCurrencyChangeController::class, 'approve'])
+        ->middleware('permission:'.Permission::CustomerUpdate->value)
+        ->name('customers.country_currency_changes.approve');
+
+    Route::post('customers/country-currency-changes/{change}/reject', [CountryCurrencyChangeController::class, 'reject'])
+        ->middleware('permission:'.Permission::CustomerUpdate->value)
+        ->name('customers.country_currency_changes.reject');
 
     Route::get('customers/{customer}', [CustomerController::class, 'show'])
         ->middleware('permission:'.Permission::CustomerView->value)
@@ -268,6 +292,26 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.overview');
 
+    /*
+     | The unified preflight: what exactly prevents this from being used.
+     |
+     | The route requires the operator view, which is what a simulation run
+     | needs — it reads this platform's own records and rehearses against
+     | controlled providers. A read-only-real run sends real credentials to
+     | real endpoints, which is the same act as pressing "test connection", so
+     | the controller requires provider.manage for that mode as well. The
+     | second half cannot be middleware: the permission depends on the mode,
+     | and middleware does not see the body.
+     |
+     | Throttled because an operator clicking a button repeatedly must not
+     | become a burst of outbound requests at somebody else's API. Nothing here
+     | writes, in either mode, so the throttle is protecting providers rather
+     | than this platform.
+     */
+    Route::post('infrastructure/preflight', [PreflightController::class, 'run'])
+        ->middleware(['permission:'.Permission::InfrastructureView->value, 'throttle:preflight'])
+        ->name('infrastructure.preflight');
+
     Route::get('infrastructure/regions', [SiteController::class, 'regions'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.regions.index');
@@ -287,6 +331,31 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('infrastructure/racks', [SiteController::class, 'storeRack'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.racks.store');
+
+    /*
+     * The images a cluster may install.
+     *
+     * Operator data, for the same reason racks and datacenters are: onboarding
+     * a real cluster must be somebody filling in the Control Center rather
+     * than a developer editing a seeder. Everything downstream reads the same
+     * table — placement resolves a plan's declared slug against it, and a VPS
+     * build that finds no image is refused rather than started.
+     *
+     * DELETE withdraws rather than destroys: machines already built point at
+     * the row, and "which image is this server running" is the first question
+     * asked when a rebuild goes wrong.
+     */
+    Route::get('infrastructure/templates', [VmTemplateController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.templates.index');
+
+    Route::post('infrastructure/templates', [VmTemplateController::class, 'store'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.templates.store');
+
+    Route::delete('infrastructure/templates/{template}', [VmTemplateController::class, 'destroy'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.templates.withdraw');
 
     Route::get('infrastructure/profiles', [SoftwareProfileController::class, 'index'])
         ->middleware('permission:'.Permission::InfrastructureView->value)

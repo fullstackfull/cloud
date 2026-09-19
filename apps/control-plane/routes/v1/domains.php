@@ -24,6 +24,21 @@ use Lynomia\Modules\Domains\Http\Controllers\DomainSearchController;
  */
 Route::prefix('domains')->as('domains.')->group(function (): void {
     /*
+     * A name is addressed by the name itself as well as by its id.
+     *
+     * `/domains/example.com` is what a customer sends a colleague and reads
+     * back to support; a ULID is neither. Both forms resolve through the same
+     * `where` on the acting customer, so a name from another account 404s
+     * exactly as an unknown id does.
+     *
+     * The pattern accepts what a hostname is made of and nothing else: no
+     * slash, so a path cannot be smuggled through the parameter, and no
+     * leading or trailing separator. The literal segments above — search,
+     * quotes, transfers — are declared first and therefore win.
+     */
+    $identity = '[A-Za-z0-9](?:[A-Za-z0-9.\\-]{0,253}[A-Za-z0-9])?';
+
+    /*
      * Tighter than the shared ceiling, and tighter than most write endpoints,
      * because a search is the one read on this platform that costs a third
      * party something: every uncached name is a registrar call against an
@@ -57,31 +72,50 @@ Route::prefix('domains')->as('domains.')->group(function (): void {
         ->name('transfers.store');
 
     Route::get('{domain}', [DomainController::class, 'show'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->name('show');
 
     Route::post('{domain}/renewals', [DomainController::class, 'renew'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->middleware('throttle:10,1,domain-order:')
         ->name('renewals.store');
 
     Route::post('{domain}/redemptions', [DomainController::class, 'redeem'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->middleware('throttle:10,1,domain-order:')
         ->name('redemptions.store');
 
     Route::put('{domain}/nameservers', [DomainController::class, 'setNameservers'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->middleware('throttle:30,1,domain-manage:')
         ->name('nameservers.update');
 
+    /*
+     * Reading the registrant back. `service.manage` in the controller, because
+     * it is a person's home address — see DomainContactResource.
+     */
+    Route::get('{domain}/contacts', [DomainController::class, 'contacts'])
+        ->where('domain', $identity)
+        ->middleware('throttle:30,1,domain-manage:')
+        ->name('contacts.show');
+
     Route::put('{domain}/contacts', [DomainController::class, 'updateContacts'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->middleware('throttle:30,1,domain-manage:')
         ->name('contacts.update');
 
+    /*
+     * Auto-renew: whether the platform raises the next invoice before this
+     * name lapses. A setting rather than an act, so it takes no idempotency
+     * key; it shares the management limiter with the nameservers and the lock.
+     */
+    Route::put('{domain}/auto-renew', [DomainController::class, 'setAutoRenew'])
+        ->where('domain', $identity)
+        ->middleware('throttle:30,1,domain-manage:')
+        ->name('auto_renew.update');
+
     Route::put('{domain}/transfer-lock', [DomainController::class, 'setLock'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->middleware('throttle:30,1,domain-manage:')
         ->name('transfer_lock.update');
 
@@ -92,7 +126,7 @@ Route::prefix('domains')->as('domains.')->group(function (): void {
      * name on an account is the shape of a domain theft.
      */
     Route::post('{domain}/authorisation-code', [DomainController::class, 'authorisationCode'])
-        ->whereUlid('domain')
+        ->where('domain', $identity)
         ->middleware('throttle:5,1,domain-auth-code:')
         ->name('authorisation_code.store');
 });

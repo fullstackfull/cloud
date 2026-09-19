@@ -61,7 +61,14 @@ final class MetricsQueryBudgetTest extends TestCase
     // collector makes for all six of its tables.
     // 38: the scope addendum's domain-redemption series is one grouped query
     // over domain_operations, beside the disposition query that was there.
-    private const int BUDGET = 38;
+    // 39: zone imports by outcome, one grouped query over dns_zone_imports.
+    // 45: the backup collector, which produces the six series backups.yml has
+    // alerted on since Phase 30B and nothing wrote. Three queries, not six:
+    // the two guest-level facts share one GROUP BY and the two datastore-level
+    // facts share another, because each pair is two aggregations over the same
+    // grouping. The third is the per-group verification status, which groups
+    // differently and cannot join them without a cross product.
+    private const int BUDGET = 45;
 
     private MetricsRegistry $registry;
 

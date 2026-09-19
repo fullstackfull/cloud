@@ -15,6 +15,7 @@ use Lynomia\Modules\Domains\Application\Actions\OrderDomainRedemption;
 use Lynomia\Modules\Domains\Application\Actions\OrderDomainRegistration;
 use Lynomia\Modules\Domains\Application\Actions\OrderDomainRenewal;
 use Lynomia\Modules\Domains\Application\Actions\OrderDomainTransfer;
+use Lynomia\Modules\Domains\Application\Actions\SetDomainAutoRenew;
 use Lynomia\Modules\Domains\Application\Actions\SetDomainNameservers;
 use Lynomia\Modules\Domains\Application\Actions\SetTransferLock;
 use Lynomia\Modules\Domains\Application\Actions\UpdateDomainContacts;
@@ -23,13 +24,16 @@ use Lynomia\Modules\Domains\Domain\Enums\DomainContactRole;
 use Lynomia\Modules\Domains\Http\Requests\OrderDomainRequest;
 use Lynomia\Modules\Domains\Http\Requests\RedeemDomainRequest;
 use Lynomia\Modules\Domains\Http\Requests\RenewDomainRequest;
+use Lynomia\Modules\Domains\Http\Requests\SetAutoRenewRequest;
 use Lynomia\Modules\Domains\Http\Requests\SetNameserversRequest;
 use Lynomia\Modules\Domains\Http\Requests\SetTransferLockRequest;
 use Lynomia\Modules\Domains\Http\Requests\TransferDomainRequest;
 use Lynomia\Modules\Domains\Http\Requests\UpdateContactsRequest;
+use Lynomia\Modules\Domains\Http\Resources\DomainContactResource;
 use Lynomia\Modules\Domains\Http\Resources\DomainOperationResource;
 use Lynomia\Modules\Domains\Http\Resources\DomainResource;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainContact;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 
@@ -56,6 +60,7 @@ final class DomainController
         private readonly OrderDomainRedemption $redemptions,
         private readonly OrderDomainTransfer $transfers,
         private readonly SetDomainNameservers $nameservers,
+        private readonly SetDomainAutoRenew $autoRenew,
         private readonly UpdateDomainContacts $contacts,
         private readonly SetTransferLock $lock,
         private readonly IssueAuthorisationCode $authorisationCodes,
@@ -216,6 +221,62 @@ final class DomainController
         return (new DomainResource($updated))->response();
     }
 
+    /**
+     * Whether the platform prepares another term for this name.
+     *
+     * A setting, so a plain PUT with no idempotency key and no typed
+     * confirmation: it is reversible in one click, and Wave 0's confirmation
+     * policy puts friction in front of the irreversible, not in front of
+     * everything. Audited, because a name lost to auto-renew being off is a
+     * question about who turned it off and when.
+     */
+    public function setAutoRenew(SetAutoRenewRequest $request, string $domain): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.manage');
+
+        $found = $this->scoped($domain);
+        $wanted = (bool) $request->validated('auto_renew');
+
+        $updated = app(RecordActAtomically::class)->execute(
+            fn (): Domain => $this->autoRenew->execute($found, $wanted),
+            fn (Domain $changed) => new AuditedAct(
+                action: AuditAction::DomainAutoRenewChanged,
+                subject: $changed,
+                customerId: (string) $changed->customer_id,
+                context: ['domain' => $changed->name, 'auto_renew' => $changed->auto_renew],
+            ),
+        );
+
+        return (new DomainResource($updated))->response();
+    }
+
+    /**
+     * The registrant on record for this name.
+     *
+     * `service.manage`, not `service.view`: this is a person's name, home
+     * address and telephone number, and a member who may look at the account's
+     * services is not owed them. See {@see DomainContactResource} for the rest
+     * of the reasoning, and for what stays behind.
+     *
+     * 404 when no contact has been recorded — a name transferred in before its
+     * contacts were read back has none — rather than an empty object that a
+     * form would fill itself with blanks from.
+     */
+    public function contacts(Request $request, string $domain): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'service.manage');
+
+        $found = $this->scoped($domain);
+
+        /** @var DomainContact $registrant */
+        $registrant = DomainContact::query()
+            ->where('domain_id', $found->getKey())
+            ->where('role', DomainContactRole::Registrant->value)
+            ->firstOrFail();
+
+        return (new DomainContactResource($registrant))->response();
+    }
+
     public function updateContacts(UpdateContactsRequest $request, string $domain): JsonResponse
     {
         $this->authoriseWithinAccount($request, 'service.manage');
@@ -311,11 +372,27 @@ final class DomainController
         );
     }
 
-    private function scoped(string $id): Domain
+    /**
+     * One of the acting customer's names, by id or by the name itself.
+     *
+     * The portal's addresses are readable — `/domains/example.com`, not a
+     * ULID — because a customer sends one to a colleague and reads it back to
+     * support. Both forms resolve through the same `where` on the acting
+     * customer, so neither is an oracle: another account's name and a name
+     * that was never registered answer with the same 404.
+     *
+     * The name is lower-cased before it is matched. A registry treats a
+     * domain case-insensitively and so does the platform, and a customer who
+     * typed a capital should not be told their domain does not exist.
+     */
+    private function scoped(string $idOrName): Domain
     {
         /** @var Domain */
         return Domain::query()
             ->where('customer_id', $this->actingCustomer->id())
-            ->findOrFail($id);
+            ->where(fn ($query) => $query
+                ->where('id', $idOrName)
+                ->orWhere('name', mb_strtolower($idOrName)))
+            ->firstOrFail();
     }
 }

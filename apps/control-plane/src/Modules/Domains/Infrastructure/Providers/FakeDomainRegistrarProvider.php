@@ -16,6 +16,7 @@ use Lynomia\Modules\Domains\Domain\Enums\RegistrarCapability;
 use Lynomia\Modules\Domains\Domain\Exceptions\DomainRegistrarException;
 use Lynomia\Modules\Domains\Domain\Services\FakeRegistrarGuard;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 
 /**
  * A registrar that behaves like one, without being one.
@@ -99,15 +100,20 @@ final class FakeDomainRegistrarProvider implements DomainRegistrarProvider
     /** @var array<string, array{state: string, expires_at: ?string}> */
     private array $transfers = [];
 
-    private ?string $statePath;
+    /**
+     * Where the portfolio is kept when more than one process needs to see it,
+     * or null to keep it in memory.
+     *
+     * @see config('domains.fake.state_path')
+     * @see ControlledSimulationStore
+     */
+    private readonly ?ControlledSimulationStore $store;
 
     public function __construct()
     {
         FakeRegistrarGuard::assertNotProduction(self::NAME);
 
-        $path = config('domains.fake.state_path');
-
-        $this->statePath = is_string($path) && $path !== '' ? $path : null;
+        $this->store = ControlledSimulationStore::fromConfig('domains.fake.state_path');
     }
 
     public function name(): string
@@ -540,58 +546,34 @@ final class FakeDomainRegistrarProvider implements DomainRegistrarProvider
     }
 
     /**
-     * The portfolio, from the file when there is one.
+     * The portfolio as the last process left it, when there is a file to read
+     * from.
      */
     private function read(): void
     {
-        if ($this->statePath === null || ! is_file($this->statePath)) {
+        $state = $this->store?->read();
+
+        if ($state === null) {
             return;
         }
 
-        $contents = @file_get_contents($this->statePath);
+        /** @var array<string, array{expires_at: string, nameservers: list<string>, locked: bool, registered_at: string}> $held */
+        $held = $state['held'] ?? [];
+        /** @var array<string, array{state: string, expires_at: ?string}> $transfers */
+        $transfers = $state['transfers'] ?? [];
 
-        if ($contents === false || $contents === '') {
-            return;
-        }
-
-        /** @var array{held?: array<string, array{expires_at: string, nameservers: list<string>, locked: bool, registered_at: string}>, transfers?: array<string, array{state: string, expires_at: ?string}>}|false $state */
-        $state = @unserialize($contents, ['allowed_classes' => false]);
-
-        if (! is_array($state)) {
-            return;
-        }
-
-        $this->held = $state['held'] ?? [];
-        $this->transfers = $state['transfers'] ?? [];
+        $this->held = $held;
+        $this->transfers = $transfers;
     }
 
     /**
      * Publishes the portfolio for other processes.
-     *
-     * Written beside and renamed, so a worker reading while this writes sees
-     * either the old portfolio or the new one and never half of either.
      */
     private function write(): void
     {
-        if ($this->statePath === null) {
-            return;
-        }
-
-        $directory = dirname($this->statePath);
-
-        if (! is_dir($directory)) {
-            @mkdir($directory, 0o755, recursive: true);
-        }
-
-        $temporary = $this->statePath.'.'.getmypid().'.tmp';
-
-        if (@file_put_contents($temporary, serialize([
+        $this->store?->write([
             'held' => $this->held,
             'transfers' => $this->transfers,
-        ])) === false) {
-            return;
-        }
-
-        @rename($temporary, $this->statePath);
+        ]);
     }
 }

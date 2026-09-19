@@ -406,7 +406,7 @@ final class CatalogueBrowsingTest extends TestCase
     }
 
     #[Test]
-    public function browsing_requires_an_authenticated_verified_login(): void
+    public function browsing_requires_a_login_but_not_a_verified_address(): void
     {
         $this->getJson('/api/v1/catalog/products')
             ->assertStatus(401)
@@ -417,6 +417,28 @@ final class CatalogueBrowsingTest extends TestCase
             User::factory()->unverified()->create(),
         );
 
-        $this->actingAs($unverified)->getJson('/api/v1/catalog/products')->assertStatus(403);
+        /*
+         * The catalogue is the one customer surface that does not require a
+         * proved address. A customer three minutes into their first session is
+         * looking at prices, and refusing them teaches them only that the
+         * product does not work; reading a price moves no money.
+         *
+         * Everything that does move money still refuses them, and says which
+         * refusal it is rather than reporting a permissions problem.
+         */
+        $this->actingAs($unverified)->getJson('/api/v1/catalog/products')->assertOk();
+
+        $this->actingAs($unverified)
+            ->getJson('/api/v1/invoices')
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'auth.email_unverified');
+
+        $this->actingAs($unverified)
+            ->postJson('/api/v1/orders/quote', [
+                'items' => [['plan_id' => '01JQ0000000000000000000000', 'quantity' => 1]],
+                'billing_period' => 'monthly',
+            ])
+            ->assertStatus(403)
+            ->assertJsonPath('error.code', 'auth.email_unverified');
     }
 }

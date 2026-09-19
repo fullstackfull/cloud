@@ -10,10 +10,13 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Coupon;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -88,6 +91,32 @@ class Order extends Model
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    /**
+     * The invoice issued for this order.
+     *
+     * One order, one invoice: IssueInvoiceForOrder writes it when the order is
+     * placed, and the customer surface links the two in both directions. A
+     * screen that could show an order and not the invoice it produced leaves
+     * the customer to match them up by amount and date, which is exactly the
+     * guesswork the platform is supposed to remove.
+     *
+     * @return HasOne<Invoice, $this>
+     */
+    public function invoice(): HasOne
+    {
+        return $this->hasOne(Invoice::class);
+    }
+
+    /**
+     * The services this order brought into being, once it is paid.
+     *
+     * @return HasMany<Service, $this>
+     */
+    public function services(): HasMany
+    {
+        return $this->hasMany(Service::class);
     }
 
     /**

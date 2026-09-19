@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dedicated\Domain\Exceptions;
 
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
@@ -74,6 +75,29 @@ final class DedicatedOperationRefusedException extends DomainException
         return $exception->withContext([
             'dedicated_server_id' => $serverId,
             'in_flight_kind' => $kind->value,
+        ]);
+    }
+
+    /**
+     * The same idempotency key is already in flight against this machine.
+     *
+     * The row was claimed and the controller has not answered yet. Two things
+     * this deliberately does not do: send the instruction again, and report
+     * the first request as finished. A power request that is still waiting on
+     * a BMC is the one moment when the honest answer is "ask again shortly" —
+     * the alternative is a second reset of a chassis that may already be
+     * going down.
+     */
+    public static function becauseTheSameRequestIsStillInFlight(string $serverId, DedicatedPowerAction $action): self
+    {
+        $exception = new self(sprintf(
+            'A "%s" request with this idempotency key is still being carried out on this server. Ask again shortly.',
+            $action->value,
+        ));
+
+        return $exception->withContext([
+            'dedicated_server_id' => $serverId,
+            'action' => $action->value,
         ]);
     }
 

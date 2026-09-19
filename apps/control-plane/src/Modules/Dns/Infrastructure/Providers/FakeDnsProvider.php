@@ -9,6 +9,7 @@ use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsZone;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use RuntimeException;
 
 /**
@@ -52,6 +53,9 @@ final class FakeDnsProvider implements DnsProvider
 
     private int $nextId = 1;
 
+    /** Where this remembers between processes, or null to keep it in memory. */
+    private readonly ?ControlledSimulationStore $store;
+
     public function __construct()
     {
         // Checked on construction rather than by whoever builds it, so the
@@ -62,6 +66,12 @@ final class FakeDnsProvider implements DnsProvider
                 .'it reports records as published without publishing them.'
             );
         }
+
+        $this->store = ControlledSimulationStore::fromConfig('dns.fake.state_path', [
+            DnsZone::class,
+            DnsRecord::class,
+            DnsRecordType::class,
+        ]);
     }
 
     public function name(): string
@@ -76,6 +86,8 @@ final class FakeDnsProvider implements DnsProvider
      */
     public function withZone(string $name): DnsZone
     {
+        $this->restore();
+
         $id = 'zone-'.$this->nextId++;
 
         /*
@@ -88,16 +100,22 @@ final class FakeDnsProvider implements DnsProvider
         $this->zones[$zone->name()] = $zone;
         $this->records[$zone->id()] = [];
 
+        $this->remember();
+
         return $zone;
     }
 
     public function zones(): array
     {
+        $this->restore();
+
         return array_values($this->zones);
     }
 
     public function findZone(string $name): ?DnsZone
     {
+        $this->restore();
+
         // A marked name misbehaves on *every* operation, not only the ones
         // that write. A provider that has stopped answering has stopped
         // answering questions too, and the platform's most dangerous moment is
@@ -142,13 +160,19 @@ final class FakeDnsProvider implements DnsProvider
      */
     public function deleteZone(DnsZone $zone): void
     {
+        $this->restore();
+
         $this->refuseMarkedZone($zone->name(), 'delete zone '.$zone->name());
 
         unset($this->zones[$zone->name()], $this->records[$zone->id()]);
+
+        $this->remember();
     }
 
     public function records(DnsZone $zone, ?DnsRecordType $type = null, ?string $name = null): array
     {
+        $this->restore();
+
         $this->refuseMarkedZone($zone->name(), 'list records in '.$zone->name());
 
         $held = array_values($this->records[$zone->id()] ?? []);
@@ -164,6 +188,8 @@ final class FakeDnsProvider implements DnsProvider
 
     public function publish(DnsZone $zone, DnsRecord $record): DnsRecord
     {
+        $this->restore();
+
         $this->refuseMarkedNames($record, 'publish '.$record->type()->value.' '.$record->name());
 
         $key = $record->type()->value.'|'.$record->name();
@@ -177,14 +203,20 @@ final class FakeDnsProvider implements DnsProvider
 
         $this->records[$zone->id()][$key] = $stored;
 
+        $this->remember();
+
         return $stored;
     }
 
     public function delete(DnsZone $zone, DnsRecord $record): void
     {
+        $this->restore();
+
         $this->refuseMarkedNames($record, 'delete '.$record->type()->value.' '.$record->name());
 
         unset($this->records[$zone->id()][$record->type()->value.'|'.$record->name()]);
+
+        $this->remember();
     }
 
     /**
@@ -218,5 +250,39 @@ final class FakeDnsProvider implements DnsProvider
                 sprintf('POST /zones/dns_records 403 {"success":false} (Authorization: Bearer %s)', self::ZONE_TOKEN),
             );
         }
+    }
+
+    /**
+     * What the last process left, when there is a file to read it from.
+     *
+     * Read at the start of every operation rather than once in the
+     * constructor: two processes write this file, and an instance that read it
+     * when it was built would answer from a picture that was already old.
+     */
+    private function restore(): void
+    {
+        $state = $this->store?->read();
+
+        if ($state === null) {
+            return;
+        }
+
+        /** @var array<string, DnsZone> $zones */
+        $zones = $state['zones'] ?? [];
+        /** @var array<string, array<string, DnsRecord>> $records */
+        $records = $state['records'] ?? [];
+
+        $this->zones = $zones;
+        $this->records = $records;
+        $this->nextId = max(1, (int) ($state['next_id'] ?? 1));
+    }
+
+    private function remember(): void
+    {
+        $this->store?->write([
+            'zones' => $this->zones,
+            'records' => $this->records,
+            'next_id' => $this->nextId,
+        ]);
     }
 }

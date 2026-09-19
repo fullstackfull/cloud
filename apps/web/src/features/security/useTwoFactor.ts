@@ -23,8 +23,17 @@ export interface TwoFactorEnrolment {
  */
 export function useBeginTwoFactorEnrolment() {
   return useMutation({
-    mutationFn: async (): Promise<TwoFactorEnrolment> => {
-      const response = await api.post<Envelope<TwoFactorEnrolment>>('/me/two-factor')
+    /*
+     * The current password travels with the request, because the server
+     * requires it — enrolling a second factor changes how the account is
+     * signed in to, and a hijacked session must not be able to do that.
+     * Until Wave 0 this call sent no body at all and was answered 422, so
+     * two-factor authentication could not be turned on from the portal.
+     */
+    mutationFn: async (currentPassword: string): Promise<TwoFactorEnrolment> => {
+      const response = await api.post<Envelope<TwoFactorEnrolment>>('/me/two-factor', {
+        current_password: currentPassword,
+      })
       return response.data
     },
   })

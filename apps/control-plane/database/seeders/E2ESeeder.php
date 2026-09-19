@@ -9,25 +9,39 @@ use Database\Seeders\Concerns\AnnouncesProgress;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Date;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
+use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
+use Lynomia\Modules\Dedicated\Domain\Enums\BmcProtocol;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\BmcEndpoint;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedReinstall;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
+use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
+use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Infrastructure\Models\DnsRecord;
+use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
+use Lynomia\Modules\Domains\Domain\Enums\DomainContactRole;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
+use Lynomia\Modules\Domains\Infrastructure\Models\DomainContact;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainTld;
+use Lynomia\Modules\Domains\Infrastructure\Providers\FakeDomainRegistrarProvider;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerType;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -79,7 +93,8 @@ use Lynomia\Modules\Support\Infrastructure\Models\SupportMessage;
 use Lynomia\Modules\Support\Infrastructure\Models\SupportTicket;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use Lynomia\Modules\Vps\Infrastructure\Models\VmReinstall;
-use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use RuntimeException;
 
 /**
@@ -103,6 +118,17 @@ class E2ESeeder extends Seeder
     /** The machine the VPS specs open. */
     public const string VPS_HOSTNAME = 'e2e-web-01';
 
+    /**
+     * A machine with nothing unresolved against it.
+     *
+     * `e2e-web-01` deliberately carries a rebuild whose outcome nobody knows,
+     * so every disruptive control on it is refused until a person has looked
+     * — and since Wave 0 the screen says so and disables them. That leaves
+     * nothing to press. This machine is the one the power, reinstall and
+     * duplicate-submission specs actually drive.
+     */
+    public const string OPERABLE_HOSTNAME = 'e2e-app-02';
+
     /** The physical machine the dedicated specs open. */
     public const string DEDICATED_SERIAL = 'E2E-SN-000117';
 
@@ -122,6 +148,43 @@ class E2ESeeder extends Seeder
      */
     public const string LARGE_INVOICE_NUMBER = 'INV-E2E-0003';
 
+    /*
+     * Invoices the Wave 2 money journeys spend.
+     *
+     * Their own, because those journeys pay invoices and the browser projects
+     * share one database: a spec that settles INV-E2E-0003 leaves the Arabic
+     * run looking for an open invoice that is now paid. One invoice per
+     * journey that moves money, named for what it is for.
+     */
+    public const string CREDIT_THEN_CARD_INVOICE_NUMBER = 'INV-E2E-W2-0001';
+
+    public const string DECLINE_INVOICE_NUMBER = 'INV-E2E-W2-0002';
+
+    public const string PHONE_PAYMENT_INVOICE_NUMBER = 'INV-E2E-W2-0003';
+
+    public const string ARABIC_DECLINE_INVOICE_NUMBER = 'INV-E2E-W2-0004';
+
+    /**
+     * The account those journeys spend from, which is not the shared one.
+     *
+     * Paying an invoice is not a read: it moves a wallet balance, writes a
+     * payment row and tells the customer about it. Run against the shared
+     * fixture, the money journeys left every later spec looking at an account
+     * whose credit was gone, whose notification count had grown by four and
+     * which had one more subscription than the seeder wrote — nine failures
+     * that were all about the harness. This login owns the invoices above and
+     * its own wallet, so what the money journeys spend is theirs to spend.
+     */
+    public const string MONEY_EMAIL = 'money@lynomia.local';
+
+    /**
+     * 15.000 KWD, and deliberately not the shared account's 12.750.
+     *
+     * Two accounts holding the same balance would let a spec that signed in as
+     * the wrong one pass anyway.
+     */
+    public const int MONEY_CREDIT_MINOR = 15_000;
+
     /**
      * A ticket in mid-conversation, with an internal note on it.
      *
@@ -137,6 +200,9 @@ class E2ESeeder extends Seeder
 
     /** The address the machine answers on, asserted by name on two screens. */
     public const string VPS_ADDRESS = '198.51.100.24';
+
+    /** The operable machine's address, in the same seeded subnet. */
+    public const string OPERABLE_ADDRESS = '198.51.100.25';
 
     /** The shared hosting account the hosting screens are proved against. */
     public const string HOSTING_USERNAME = 'e2ehost';
@@ -177,6 +243,16 @@ class E2ESeeder extends Seeder
     /** A lapsed name in a namespace whose registry has published no policy. */
     private const string LOST_DOMAIN = 'e2e-lost.example';
 
+    /**
+     * A name the money account renews.
+     *
+     * Renewing raises an invoice, so it is not the shared account's name: the
+     * Wave 2 lesson was that a journey which spends money on a shared fixture
+     * breaks whatever reads that fixture next. Its expiry sits inside the
+     * renewal window so the screen has something to say about why.
+     */
+    public const string RENEWABLE_DOMAIN = 'e2e-renew.test';
+
     /** A site that works, one waiting on its customer, one waiting on a person. */
     private const string LIVE_SITE = 'e2e-live-site.test';
 
@@ -197,9 +273,13 @@ class E2ESeeder extends Seeder
         $this->virtualMachine($customer);
         $this->dedicatedServer($customer);
         $this->subscriptions($customer);
-        $this->notifications($customer);
+        // After the invoices: a notification about an invoice carries that
+        // invoice as its subject, and the inbox resolves the subject into the
+        // destination the row opens.
         $this->invoices($customer);
+        $this->notifications($customer);
         $this->wallet($customer);
+        $this->moneyJourneys();
         $this->billingAdmin();
         $this->address($customer);
         $this->hostingAccount($customer);
@@ -207,8 +287,12 @@ class E2ESeeder extends Seeder
         $this->workNobodyCanSettle($customer);
         $this->whatReconciliationFound($customer);
         $this->domains($customer);
+        $this->domainFixtures($customer);
         $this->wordpressSites($customer);
         $this->team($customer);
+        // After the team: the two people in the feed are the owner and the
+        // teammate the previous line creates.
+        $this->whoAskedForWhat($customer);
         $this->ticket($customer);
         $this->credentials();
         $this->licences();
@@ -270,6 +354,132 @@ class E2ESeeder extends Seeder
             'node_name' => 'e2e-node',
             'datastore' => 'e2e-datastore',
         ]);
+
+        $this->operableMachine($customer, $node);
+    }
+
+    /**
+     * The machine the browser suite is allowed to reboot, stop and rebuild.
+     *
+     * Its own service, active, on the same node, with no job in any state
+     * against it — so the fake compute provider carries every request out
+     * synchronously and the screen can be asserted on a real outcome rather
+     * than on a refusal.
+     */
+    private function operableMachine(Customer $customer, ComputeNode $node): void
+    {
+        if (VirtualMachine::query()->where('hostname', self::OPERABLE_HOSTNAME)->exists()) {
+            return;
+        }
+
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'kind' => 'vps',
+            'label' => 'Cloud VPS — '.self::OPERABLE_HOSTNAME,
+        ]);
+
+        $template = $this->installableTemplateOn($node);
+
+        $machine = VirtualMachine::factory()
+            ->onNode($node)
+            ->forService($service)
+            ->resources(1, 2048, 40)
+            ->create([
+                'hostname' => self::OPERABLE_HOSTNAME,
+                // Taken from the template rather than stated beside it. A
+                // machine whose recorded OS disagrees with the image it was
+                // built from is a fixture that lies about itself, and the two
+                // drift the moment the topology changes either one.
+                'os_family' => $template->os_family->value,
+                'os_version' => $template->os_version,
+                'template_id' => $template->getKey(),
+                // A rebuild replaces the disk on the storage the platform
+                // recorded for it, and refuses rather than guesses when none
+                // is recorded. The name is the one the fake was told below.
+                'storage_name' => 'local-lvm',
+            ]);
+
+        /*
+         * And the same machine as the fake hypervisor sees it.
+         *
+         * A row written straight into the database is a machine the platform
+         * believes in and the hypervisor has never heard of, so the first
+         * power request is answered "no such machine" and the job goes to
+         * review — which is the fake modelling drift correctly, and useless
+         * for a fixture whose whole purpose is to be operated. Registering it
+         * through the provider's own create call puts it in the shared fleet
+         * file the browser suite's API process reads (COMPUTE_FAKE_STATE_PATH);
+         * without that variable the call is harmless and forgotten.
+         */
+        (new FakeComputeProvider)->createVirtualMachine(new CreateVmRequest(
+            nodeName: $node->provider_name,
+            vmId: (int) $machine->provider_id,
+            hostname: self::OPERABLE_HOSTNAME,
+            vcpu: 1,
+            memoryMib: 2048,
+            diskGib: 40,
+            storageName: 'local-lvm',
+        ));
+    }
+
+    /**
+     * The image the browser suite rebuilds onto, resolved from the estate
+     * rather than named.
+     *
+     * ---------------------------------------------------------------------
+     * Why this is not a slug
+     * ---------------------------------------------------------------------
+     *
+     * It was one: `where('slug', 'debian-13')`, which was the slug the old
+     * development seeder happened to write. Gap 4 moved the estate into
+     * resources/reference-topology/topology.php, where a template's logical key
+     * is deliberately separated from the provider's own identifier — the whole
+     * point being that a real cluster keeps the logical key and changes only
+     * the provider reference. The reference estate publishes `debian-stable`,
+     * so the old lookup found nothing and the browser job died on a
+     * ModelNotFoundException naming a model, which tells whoever reads it
+     * nothing about what the estate owes this suite.
+     *
+     * So this asks for what the suite actually needs, in the properties the
+     * topology already represents: an image that is installable — active, with
+     * a provider reference, which is exactly {@see VmTemplate::scopeInstallable()} —
+     * on this node's cluster, for the architecture the node reports through
+     * {@see ComputeNode::architecture()}, which is the same answer placement
+     * uses. Any template satisfying that will do; the ordering is only so that
+     * two runs of the same estate build the same fixture.
+     *
+     * Nothing here is staged, forced or written back onto the template. The
+     * reference estate supplies its own provider references, so an image is
+     * installable because the canonical source says so.
+     */
+    private function installableTemplateOn(ComputeNode $node): VmTemplate
+    {
+        $architecture = $node->architecture();
+
+        $template = VmTemplate::query()
+            ->installable()
+            ->where('cluster_id', $node->cluster_id)
+            ->where('architecture', $architecture)
+            ->orderBy('slug')
+            ->first();
+
+        if ($template !== null) {
+            return $template;
+        }
+
+        /*
+         * Named as a contract between the estate and this suite, because that
+         * is what has broken. A reader of this sentence knows which file to
+         * open and what it has to provide; a reader of ModelNotFoundException
+         * knows only that a row was missing.
+         */
+        throw new RuntimeException(sprintf(
+            'The browser suite needs an installable %s image on cluster %s to rebuild onto, and the seeded estate has none. '
+            .'An installable template is active and carries a provider reference. The estate is declared in '
+            .'resources/reference-topology/topology.php; add or re-enable one there rather than naming a template here.',
+            $architecture->value,
+            $node->cluster_id,
+        ));
     }
 
     /**
@@ -309,7 +519,7 @@ class E2ESeeder extends Seeder
             'label' => 'Dedicated — '.self::DEDICATED_SERIAL,
         ]);
 
-        DedicatedServer::factory()
+        $server = DedicatedServer::factory()
             ->inDatacenter($datacenter)
             ->create([
                 'serial' => self::DEDICATED_SERIAL,
@@ -318,6 +528,19 @@ class E2ESeeder extends Seeder
                 'customer_id' => $customer->getKey(),
                 'service_id' => $service->getKey(),
             ]);
+
+        /*
+         * Its out-of-band controller, answered by the fake BMC adapter that
+         * DEDICATED_PROVIDER=fake selects. Without an endpoint row the power
+         * and reinstall endpoints answer 500 ("no controller"), which is a
+         * fact about the fixture, not about the platform — and the browser
+         * suite has to press those buttons.
+         */
+        BmcEndpoint::factory()->forServer($server)->create([
+            'protocol' => BmcProtocol::Redfish,
+            'address' => '192.0.2.117',
+            'credentials_reference' => 'e2e-bmc-password',
+        ]);
     }
 
     private function subscriptions(Customer $customer): void
@@ -328,7 +551,22 @@ class E2ESeeder extends Seeder
 
         $plan = Plan::query()->orderBy('created_at')->firstOrFail();
 
-        Subscription::factory()
+        /*
+         * A second, different plan for the second subscription.
+         *
+         * The fixture used to put both subscriptions on the same plan at the
+         * same price, which made the two rows on the screen identical — and a
+         * screen that cannot tell two subscriptions apart cannot be tested for
+         * telling two subscriptions apart. The second plan is whatever the
+         * catalogue's next tier is; if the catalogue has only one plan, the
+         * fixture falls back to it and the hostnames still differ.
+         */
+        $secondPlan = Plan::query()
+            ->where('id', '!=', $plan->getKey())
+            ->orderBy('created_at')
+            ->first() ?? $plan;
+
+        $renewing = Subscription::factory()
             ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
             ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
             ->create([
@@ -337,17 +575,44 @@ class E2ESeeder extends Seeder
                 'status' => SubscriptionStatus::Active,
             ]);
 
-        Subscription::factory()
+        /*
+         * The renewing subscription owns the operable machine, so a plan
+         * change on it has a service to resize. The machine was seeded with
+         * exactly the smallest tier's shape, which is what this subscription's
+         * plan describes; without the link the change-plan screen quoted every
+         * option against a subscription that governed nothing, and confirming
+         * one moved money for a resize that could never run.
+         */
+        VirtualMachine::query()
+            ->where('hostname', self::OPERABLE_HOSTNAME)
+            ->firstOrFail()
+            ->service()
+            ->update(['subscription_id' => $renewing->getKey(), 'resources' => $plan->resources]);
+
+        $ending = Subscription::factory()
             ->startingOn(CarbonImmutable::now()->startOfMonth(), BillingPeriod::Monthly)
-            ->priced(self::SUBSCRIPTION_AMOUNT_MINOR)
+            // A different price as well as a different plan, so the two rows
+            // differ in every column a customer would use to tell them apart.
+            ->priced(self::SUBSCRIPTION_AMOUNT_MINOR + 3000)
             ->create([
                 'customer_id' => $customer->getKey(),
-                'plan_id' => $plan->getKey(),
+                'plan_id' => $secondPlan->getKey(),
                 'status' => SubscriptionStatus::Active,
                 // Cancelled at the end of the period the customer has already
                 // paid for, which is what "ends on" means on the screen.
                 'cancel_at' => CarbonImmutable::now()->endOfMonth(),
             ]);
+
+        /*
+         * And it owns the other machine, so the screen can say which server
+         * each agreement pays for. Cancelling the wrong one of two identical
+         * rows is how a customer loses a production machine.
+         */
+        VirtualMachine::query()
+            ->where('hostname', self::VPS_HOSTNAME)
+            ->firstOrFail()
+            ->service()
+            ->update(['subscription_id' => $ending->getKey()]);
     }
 
     /**
@@ -363,12 +628,34 @@ class E2ESeeder extends Seeder
             return;
         }
 
+        /*
+         * Both carry their subject, because the real notifier does.
+         *
+         * Until Wave 3 the inbox published only the collection path in `link`,
+         * so a fixture without a subject looked complete. It is the subject
+         * that the inbox now resolves into a `{kind, id}` handle — which is
+         * what makes "your server is ready" open the server rather than the
+         * list of servers — and a fixture without one would let that go
+         * untested against a screen that appeared to work.
+         */
+        $service = VirtualMachine::query()
+            ->where('hostname', self::VPS_HOSTNAME)
+            ->firstOrFail()
+            ->service;
+
         Notification::factory()->ofType(NotificationType::ServiceReady)->create([
             'customer_id' => $customer->getKey(),
             'data' => ['service' => self::VPS_HOSTNAME],
+            'subject_type' => $service?->getMorphClass(),
+            'subject_id' => $service?->getKey(),
             'link' => '/vps',
             'idempotency_key' => 'e2e:service-ready',
         ]);
+
+        $invoice = Invoice::query()
+            ->where('customer_id', $customer->getKey())
+            ->where('number', self::OPEN_INVOICE_NUMBER)
+            ->first();
 
         Notification::factory()->ofType(NotificationType::InvoiceIssued)->read()->create([
             'customer_id' => $customer->getKey(),
@@ -377,6 +664,8 @@ class E2ESeeder extends Seeder
                 'amount' => 'KWD 9.000',
                 'due_date' => CarbonImmutable::now()->addDays(7)->toDateString(),
             ],
+            'subject_type' => $invoice?->getMorphClass(),
+            'subject_id' => $invoice?->getKey(),
             'link' => '/invoices',
             'idempotency_key' => 'e2e:invoice-issued',
         ]);
@@ -432,6 +721,30 @@ class E2ESeeder extends Seeder
             'service_id' => $machine->service_id,
             'assignable_type' => VirtualMachine::class,
             'assignable_id' => $machine->getKey(),
+            'is_primary' => true,
+            'assigned_at' => now(),
+            'released_at' => null,
+        ]);
+
+        /*
+         * The operable machine's address too. A rebuild writes the machine's
+         * live address back into the new guest and refuses when there is
+         * none, so a machine the browser suite rebuilds has to have one.
+         */
+        $operable = VirtualMachine::query()->where('hostname', self::OPERABLE_HOSTNAME)->firstOrFail();
+
+        $second = IpAddress::factory()->create([
+            'subnet_id' => $subnet->getKey(),
+            'address' => self::OPERABLE_ADDRESS,
+            'status' => IpAddressStatus::Assigned,
+        ]);
+
+        IpAssignment::factory()->create([
+            'ip_address_id' => $second->getKey(),
+            'customer_id' => $customer->getKey(),
+            'service_id' => $operable->service_id,
+            'assignable_type' => VirtualMachine::class,
+            'assignable_id' => $operable->getKey(),
             'is_primary' => true,
             'assigned_at' => now(),
             'released_at' => null,
@@ -754,12 +1067,148 @@ class E2ESeeder extends Seeder
      * has to say so — a spinner would leave them refreshing a page while
      * nothing happens, because nothing is going to until they act.
      */
+    /**
+     * What the domain and DNS screens need in order to be driven at all.
+     *
+     * Three gaps, each of which made a real control untestable:
+     *
+     * **The registrar had never heard of the seeded name.** e2e-held.test was
+     * written straight into the database, so every action that asks the
+     * registrar something — the transfer code, the lock, a renewal — came back
+     * "e2e-held.test is not held by this account". That is the fake refusing
+     * correctly; the fixture was the thing that was wrong. The name is
+     * registered in the fake's own portfolio here, which is the same file the
+     * API process reads.
+     *
+     * **There was no registrant.** The contacts screen has nothing to show and
+     * nothing to correct without one.
+     *
+     * **There was no zone behind the name.** The relation from a domain to its
+     * DNS zone is an explicit column, and with nothing in it the domain screen
+     * cannot show where the name is served from.
+     *
+     * The renewable name belongs to the money account rather than the shared
+     * one, because renewing raises an invoice: Wave 2 established that a
+     * journey which spends money on a shared fixture breaks whatever reads
+     * that fixture next.
+     */
+    private function domainFixtures(Customer $customer): void
+    {
+        $registrar = app(FakeDomainRegistrarProvider::class);
+
+        $held = Domain::query()->where('name', self::HELD_DOMAIN)->first();
+
+        if ($held instanceof Domain) {
+            $registrar->seedHolding(
+                name: $held->name,
+                expiresAt: CarbonImmutable::instance($held->expires_at ?? CarbonImmutable::now()->addMonths(6)),
+                nameservers: $held->nameservers ?? [],
+                locked: $held->transfer_locked,
+            );
+
+            DomainContact::query()->firstOrCreate(
+                ['domain_id' => $held->getKey(), 'role' => DomainContactRole::Registrant->value],
+                [
+                    'name' => 'E2E Registrant',
+                    'organisation' => 'Lynomia E2E',
+                    'email' => 'registrant@lynomia.local',
+                    'phone' => '+96522220000',
+                    'address_line_one' => 'Block 1, Street 1, Building 1',
+                    'city' => 'Kuwait City',
+                    'postal_code' => '13001',
+                    'country' => 'KW',
+                ],
+            );
+
+            $zone = DnsZone::query()->firstOrCreate(
+                ['name' => $held->name],
+                [
+                    'customer_id' => $customer->getKey(),
+                    'state' => DnsState::Active,
+                    'provider' => 'fake',
+                    'provider_zone_id' => 'zone-e2e-held',
+                    'nameservers' => $held->nameservers ?? [],
+                    'last_synced_at' => now(),
+                ],
+            );
+
+            /*
+             * Two records, of two kinds. One is enough to render a table and
+             * not enough to prove an edit changed the right row.
+             */
+            DnsRecord::query()->firstOrCreate(
+                ['dns_zone_id' => $zone->getKey(), 'type' => DnsRecordType::A->value, 'name' => $held->name],
+                [
+                    // TEST-NET-3, reserved for documentation.
+                    'content' => '203.0.113.10',
+                    'ttl' => 3600,
+                    'state' => DnsState::Active,
+                    'provider_record_id' => 'record-e2e-a',
+                    'last_published_at' => now(),
+                ],
+            );
+
+            DnsRecord::query()->firstOrCreate(
+                ['dns_zone_id' => $zone->getKey(), 'type' => DnsRecordType::TXT->value, 'name' => $held->name],
+                [
+                    'content' => 'v=spf1 -all',
+                    'ttl' => 300,
+                    'state' => DnsState::Active,
+                    'provider_record_id' => 'record-e2e-txt',
+                    'last_published_at' => now(),
+                ],
+            );
+
+            if ($held->dns_zone_id === null) {
+                $held->dns_zone_id = (string) $zone->getKey();
+                $held->save();
+            }
+        }
+
+        $money = Customer::query()->where('billing_email', self::MONEY_EMAIL)->first();
+
+        if (! $money instanceof Customer) {
+            return;
+        }
+
+        $renewable = Domain::query()->updateOrCreate(
+            ['name' => self::RENEWABLE_DOMAIN],
+            [
+                'customer_id' => $money->getKey(),
+                'tld' => 'test',
+                'state' => DomainState::Active,
+                'provider' => 'fake',
+                'provider_reference' => 'fake-e2e-renew',
+                'term_years' => 1,
+                'auto_renew' => true,
+                'transfer_locked' => true,
+                'nameservers' => ['ns1.lynomia.test', 'ns2.lynomia.test'],
+                'registered_at' => now()->subYear()->addDays(20),
+                // Inside the renewal lead time, so the screen has a reason to
+                // offer the renewal and something true to say about urgency.
+                'expires_at' => now()->addDays(20),
+            ],
+        );
+
+        $registrar->seedHolding(
+            name: $renewable->name,
+            expiresAt: CarbonImmutable::instance($renewable->expires_at ?? CarbonImmutable::now()->addDays(20)),
+            nameservers: $renewable->nameservers ?? [],
+            locked: true,
+        );
+    }
+
     private function wordpressSites(Customer $customer): void
     {
+        $account = HostingAccount::query()->where('username', self::HOSTING_USERNAME)->first();
+
         WordPressSite::query()->updateOrCreate(
             ['domain' => self::LIVE_SITE],
             [
                 'customer_id' => $customer->getKey(),
+                // On the seeded account, on a fake node: the one site the
+                // browser suite can copy and push.
+                'hosting_account_id' => $account?->getKey(),
                 'domain_source' => WordPressDomainSource::External,
                 'state' => WordPressSiteState::Ready,
                 'dns_ready' => true,
@@ -912,6 +1361,59 @@ class E2ESeeder extends Seeder
     }
 
     /**
+     * Two finished operations, asked for by two different people.
+     *
+     * AR-13's whole question is "who rebooted the server at 3am", and a feed
+     * seeded only with work the platform started answers it with "not
+     * recorded" every time — which would let a browser spec pass while proving
+     * nothing about attribution. So one of these names the account owner and
+     * the other names the teammate, and the activity spec reads both.
+     *
+     * Succeeded, both of them, and old enough to sit below the stranded work
+     * the account already carries: these exist to be read, not to be acted on.
+     */
+    private function whoAskedForWhat(Customer $customer): void
+    {
+        $machine = VirtualMachine::query()->where('hostname', self::OPERABLE_HOSTNAME)->first();
+
+        if ($machine === null) {
+            return;
+        }
+
+        $owner = User::query()->where('email', 'customer@lynomia.local')->first();
+        $teammate = User::query()->where('email', self::TEAMMATE_EMAIL)->first();
+
+        if ($owner === null || $teammate === null) {
+            return;
+        }
+
+        foreach ([
+            ['user' => $owner, 'kind' => ProvisioningJobKind::Restart, 'action' => 'reboot', 'minutes' => 90],
+            ['user' => $teammate, 'kind' => ProvisioningJobKind::Start, 'action' => 'start', 'minutes' => 120],
+        ] as $entry) {
+            $key = sprintf('e2e-activity:%s:%s', $entry['kind']->value, $entry['user']->getKey());
+
+            if (ProvisioningJob::query()->where('idempotency_key', $key)->exists()) {
+                continue;
+            }
+
+            ProvisioningJob::factory()->create([
+                'kind' => $entry['kind'],
+                'customer_id' => $customer->getKey(),
+                'service_id' => $machine->service_id,
+                'requested_by_user_id' => $entry['user']->getKey(),
+                'status' => ProvisioningJobStatus::Succeeded,
+                'idempotency_key' => $key,
+                'payload' => ['power_action' => $entry['action']],
+                'provider' => 'fake',
+                'created_at' => now()->subMinutes($entry['minutes']),
+                'started_at' => now()->subMinutes($entry['minutes']),
+                'finished_at' => now()->subMinutes($entry['minutes'] - 1),
+            ]);
+        }
+    }
+
+    /**
      * One live ticket with three messages, one of which is internal.
      */
     private function ticket(Customer $customer): void
@@ -968,40 +1470,213 @@ class E2ESeeder extends Seeder
             return;
         }
 
-        Invoice::factory()->for($customer)->totalling(Money::of('9.000', 'KWD'))->create([
+        /*
+         * Every seeded invoice carries its lines and a billing snapshot.
+         *
+         * They used to be totals and nothing else, which was enough while the
+         * portal showed only totals. An invoice screen and a printable
+         * document need what was bought, for which period, at what unit price,
+         * and the name and address the document is addressed to — and a
+         * fixture without them lets a blank document look finished.
+         */
+        $this->invoiceWithLines($customer, [
             'number' => self::OPEN_INVOICE_NUMBER,
             'status' => InvoiceStatus::Open,
             'amount_paid_minor' => 0,
             'issued_at' => now()->subDays(2),
             'due_at' => now()->addDays(12),
-        ]);
+        ], Money::of('9.000', 'KWD'), 'Cloud VPS — Starter (monthly)');
 
-        Invoice::factory()->for($customer)->totalling(Money::of('40.000', 'KWD'))->create([
+        $this->invoiceWithLines($customer, [
             'number' => self::LARGE_INVOICE_NUMBER,
             'status' => InvoiceStatus::Open,
             'amount_paid_minor' => 0,
             'issued_at' => now()->subDay(),
             'due_at' => now()->addDays(20),
-        ]);
+        ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
 
-        Invoice::factory()->for($customer)->totalling(Money::of('25.500', 'KWD'))->create([
+        $this->invoiceWithLines($customer, [
             'number' => self::PAID_INVOICE_NUMBER,
             'status' => InvoiceStatus::Paid,
             'amount_paid_minor' => 25500,
             'issued_at' => now()->subMonth(),
             'due_at' => now()->subMonth()->addDays(14),
             'paid_at' => now()->subMonth()->addDay(),
+        ], Money::of('25.500', 'KWD'), 'Cloud VPS — Starter (monthly)');
+    }
+
+    /**
+     * One invoice, its single line, and the billing details the document is
+     * addressed to.
+     *
+     * The line is the whole invoice: one plan, one period, no tax — Kuwait's
+     * rate is zero — so the document adds up exactly, which is the only way a
+     * printed page is worth looking at.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function invoiceWithLines(
+        Customer $customer,
+        array $attributes,
+        Money $total,
+        string $description,
+    ): void {
+        $invoice = Invoice::factory()->for($customer)->totalling($total)->create($attributes + [
+            'billing_snapshot' => [
+                'customer_id' => (string) $customer->getKey(),
+                'type' => $customer->type->value,
+                'display_name' => $customer->display_name,
+                'legal_name' => $customer->legal_name,
+                'tax_id' => $customer->tax_id,
+                'billing_email' => $customer->billing_email,
+                'billing_phone' => $customer->billing_phone,
+                'address' => [
+                    'line1' => $customer->address_line1,
+                    'line2' => $customer->address_line2,
+                    'city' => $customer->city,
+                    'state' => $customer->state,
+                    'postal_code' => $customer->postal_code,
+                    'country' => $customer->country,
+                ],
+                'captured_at' => ($attributes['issued_at'] ?? now())->toIso8601String(),
+            ],
         ]);
+
+        $invoice->items()->create([
+            'kind' => InvoiceItemKind::Plan,
+            'description' => $description,
+            'quantity' => 1,
+            'unit_amount_minor' => $total->minorUnits(),
+            'discount_minor' => 0,
+            'tax_minor' => 0,
+            'total_minor' => $total->minorUnits(),
+            'tax_rate' => '0',
+            'tax_name' => null,
+            'period_start' => $attributes['issued_at'] ?? now(),
+            'period_end' => ($attributes['issued_at'] ?? now())->copy()->addMonth(),
+        ]);
+    }
+
+    /**
+     * The account the Wave 2 money journeys spend from, and what it owns.
+     *
+     * A verified login, one wallet with credit in it, and the four invoices
+     * the journeys pay. Separate from the shared fixture on purpose: those
+     * journeys settle invoices, and settling one credits a ledger, writes a
+     * payment and posts a notification. Every one of those is a fact a later
+     * spec reads, so the account that changes has to be the account nobody
+     * else asserts on.
+     *
+     * The invoices stay one per journey, for the reason their constants give:
+     * the browser projects share a database and run one after another.
+     */
+    private function moneyJourneys(): void
+    {
+        $user = User::firstOrCreate(
+            ['email' => self::MONEY_EMAIL],
+            [
+                'name' => 'Money Journeys',
+                'password' => 'password',
+                'email_verified_at' => Date::now(),
+                'password_changed_at' => Date::now(),
+            ],
+        );
+
+        $user->syncRoles([Role::Customer->value]);
+
+        $customer = Customer::firstOrCreate(
+            ['billing_email' => self::MONEY_EMAIL],
+            [
+                'type' => CustomerType::Individual,
+                'display_name' => 'Money Journeys',
+                'currency' => 'KWD',
+                'country' => 'KW',
+                'address_line1' => 'Block 4, Street 12, Building 7',
+                'city' => 'Kuwait City',
+                'postal_code' => '13001',
+            ],
+        );
+
+        $customer->members()->firstOrCreate(
+            ['user_id' => $user->getKey()],
+            ['role' => CustomerRole::Owner, 'accepted_at' => Date::now()],
+        );
+
+        $ledger = app(WalletLedger::class);
+        $wallet = $ledger->walletFor($customer, 'KWD');
+
+        if (! $wallet->transactions()->exists()) {
+            $ledger->credit(
+                wallet: $wallet,
+                amount: Money::ofMinor(self::MONEY_CREDIT_MINOR, 'KWD'),
+                kind: WalletTransactionKind::Promotional,
+                description: 'Credit for the money journeys',
+            );
+        }
+
+        if (Invoice::query()->where('number', self::CREDIT_THEN_CARD_INVOICE_NUMBER)->exists()) {
+            return;
+        }
+
+        /*
+         * Worth more than the credit above, so paying it from credit leaves a
+         * remainder for a card — the mixed payment the invoice has to show as
+         * two rows.
+         */
+        $this->invoiceWithLines($customer, [
+            'number' => self::CREDIT_THEN_CARD_INVOICE_NUMBER,
+            'status' => InvoiceStatus::Open,
+            'amount_paid_minor' => 0,
+            'issued_at' => now()->subDay(),
+            'due_at' => now()->addDays(20),
+        ], Money::of('40.000', 'KWD'), 'Dedicated server — monthly rental');
+
+        foreach ([
+            self::DECLINE_INVOICE_NUMBER,
+            self::PHONE_PAYMENT_INVOICE_NUMBER,
+            self::ARABIC_DECLINE_INVOICE_NUMBER,
+        ] as $number) {
+            $this->invoiceWithLines($customer, [
+                'number' => $number,
+                'status' => InvoiceStatus::Open,
+                'amount_paid_minor' => 0,
+                'issued_at' => now()->subDays(2),
+                'due_at' => now()->addDays(12),
+            ], Money::of('9.000', 'KWD'), 'Cloud VPS — Starter (monthly)');
+        }
     }
 
     private function wallet(Customer $customer): void
     {
-        Wallet::query()->updateOrCreate(
-            ['customer_id' => $customer->getKey(), 'currency' => 'KWD'],
-            // A non-zero balance so the wallet screen renders an amount rather
-            // than an empty state, and a value with fils so the formatting is
-            // actually exercised.
-            ['balance_minor' => 12750],
+        $ledger = app(WalletLedger::class);
+        $wallet = $ledger->walletFor($customer, 'KWD');
+
+        if ($wallet->transactions()->exists()) {
+            return;
+        }
+
+        /*
+         * Credited through the ledger, not written onto the wallet row.
+         *
+         * The balance the screen shows is the ledger's own, and the screen now
+         * shows the history behind it — so a fixture that set the balance
+         * directly produced a wallet holding 12.750 KWD that had, according to
+         * the ledger, never received anything. Two credits and one refund, so
+         * the history has more than one shape in it and a value with fils, so
+         * the formatting is actually exercised.
+         */
+        $ledger->credit(
+            wallet: $wallet,
+            amount: Money::ofMinor(9000, 'KWD'),
+            kind: WalletTransactionKind::Promotional,
+            description: 'Launch credit',
+        );
+
+        $ledger->credit(
+            wallet: $wallet->refresh(),
+            amount: Money::ofMinor(3750, 'KWD'),
+            kind: WalletTransactionKind::Refund,
+            description: 'Refund of an overpayment',
         );
     }
 

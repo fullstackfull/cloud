@@ -18,6 +18,7 @@ use Lynomia\Modules\Dns\Http\Requests\ClaimZoneRequest;
 use Lynomia\Modules\Dns\Http\Requests\ReleaseZoneRequest;
 use Lynomia\Modules\Dns\Http\Resources\DnsZoneResource;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
+use Lynomia\Modules\Dns\Infrastructure\Queries\CustomerZones;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
@@ -141,12 +142,10 @@ final class DnsZoneController
     private function scoped(string $zone): DnsZone
     {
         /** @var DnsZone $found */
-        $found = DnsZone::query()
-            ->where('customer_id', $this->actingCustomer->id())
-            ->where('state', '!=', DnsState::Deleted->value)
-            ->withCount('liveRecords')
-            ->whereKey($zone)
-            ->firstOrFail();
+        $found = CustomerZones::identified(
+            CustomerZones::of((string) $this->actingCustomer->id())->withCount('liveRecords'),
+            $zone,
+        )->firstOrFail();
 
         return $found;
     }

@@ -21,12 +21,15 @@
     "next": "Next",
     "pagination": "Pagination",
     "pageOf": "Page {{page}} of {{lastPage}} · {{total}} in total",
-    "remove": "Remove"
+    "remove": "Remove",
+    "dismiss": "Dismiss",
+    "breadcrumbs": "You are here",
+    "edit": "Edit",
+    "actions": "Actions"
   },
   "nav": {
     "apiKeys": "API Keys",
     "backups": "Backups",
-    "catalogue": "Catalogue",
     "dashboard": "Dashboard",
     "dedicated": "Dedicated Servers",
     "dns": "DNS",
@@ -35,7 +38,6 @@
     "invoices": "Invoices",
     "ips": "IP Addresses",
     "monitoring": "Monitoring",
-    "more": "More",
     "notifications": "Notifications",
     "orders": "Orders",
     "paymentMethods": "Payment Methods",
@@ -49,7 +51,18 @@
     "usage": "Usage",
     "vps": "Cloud VPS",
     "wallet": "Wallet & Credits",
-    "wordpress": "WordPress"
+    "wordpress": "WordPress",
+    "menu": "Menu",
+    "payments": "Payments",
+    "allServices": "All Services",
+    "groups": {
+      "services": "Services",
+      "billing": "Billing",
+      "account": "Account"
+    },
+    "buy": "Buy",
+    "activity": "Activity",
+    "skipToContent": "Skip to main content"
   },
   "auth": {
     "signInTitle": "Sign in to Lynomia Cloud",
@@ -68,6 +81,10 @@
     },
     "companyName": "Company name",
     "acceptTerms": "I accept the terms of service and the acceptable use policy.",
+    "termsDocument": "Terms of service",
+    "aupDocument": "Acceptable use policy",
+    "documentVersion": "version {{version}}",
+    "registrationUnavailable": "Registration is not open yet. The documents you would be agreeing to have not been published.",
     "haveAccount": "Already have an account?",
     "checkYourEmailTitle": "Check your email",
     "checkYourEmailBody": "We sent a verification link to {{email}}. Your account is created; verify the address to start ordering.",
@@ -78,7 +95,14 @@
     "resetTitle": "Choose a new password",
     "resetSubmit": "Set new password",
     "resetDone": "Your password has been changed. You can sign in with it now.",
-    "resetLinkInvalid": "This reset link is missing its token. Request a new one."
+    "resetLinkInvalid": "This reset link is missing its token. Request a new one.",
+    "country": "Billing country",
+    "chooseCountry": "Choose a country",
+    "countryHint": "This decides the currency your invoices are issued in.",
+    "currency": "Billing currency",
+    "currencyAwaitingCountry": "Choose a country first.",
+    "currencyRecommended": "We bill customers in that country in {{currency}}. You can choose another currency we support.",
+    "currencyFallback": "We do not price in that country’s own currency, so we bill in {{currency}}. You can choose another currency we support."
   },
   "errors": {
     "auth.invalid_credentials": "These credentials do not match our records.",
@@ -90,20 +114,29 @@
     "validation.failed": "Please correct the highlighted fields.",
     "resource.not_found": "The requested resource does not exist.",
     "server.error": "Something went wrong on our side.",
+    "unknown": "This did not succeed, and we do not have a description of why.",
     "network": "We could not reach the server. Check your connection and try again.",
     "rateLimited": "Too many attempts. Please wait a moment and try again.",
     "referenceId": "Reference: {{requestId}}",
     "pageNotFound": "Page not found",
-    "pageNotFoundBody": "The address you opened does not match anything in the portal."
+    "pageNotFoundBody": "The address you opened does not match anything in the portal.",
+    "request.idempotency_key_rejected": "This request could not be protected against being sent twice, so it was not sent. Reload the page and try again; if it keeps happening, tell support."
   },
   "status": {
     "active": "Active",
+    "applied": "Applied",
     "applying": "Applying",
     "auth_failed": "Authentication failed",
+    "credential_malformed": "Credential unusable",
+    "identity_mismatch": "Wrong endpoint",
     "available": "Available",
     "awaiting_approval": "Awaiting approval",
     "awaiting_registry": "Waiting on the registry",
     "blocked": "Blocked",
+    "pass": "Passed",
+    "fail": "Failed",
+    "warning": "Warning",
+    "not_applicable": "Not applicable",
     "bmc_configuring": "Configuring the BMC",
     "cancelled": "Cancelled",
     "closed": "Closed",
@@ -156,12 +189,14 @@
     "preflight": "Preflight",
     "premium": "Premium",
     "preparing": "Preparing",
+    "processing": "Processing",
     "profiled": "Profiled",
     "provider_unavailable": "Provider unavailable",
     "provisioning": "Provisioning",
     "provisioning_failed": "Could not be built",
     "provisioning_timeout": "The platform stopped waiting",
     "pxe_booting": "Booting over the network",
+    "quarantined": "Quarantined",
     "queued": "Queued",
     "queued_for_provisioning": "Waiting to be built",
     "reactivating": "Reactivating",
@@ -175,10 +210,12 @@
     "redeem": "Redemption",
     "redemption": "Redemption",
     "refunded": "Refunded",
+    "refused": "Refused",
     "register": "Registration",
     "registered": "Registered",
     "registration_pending": "Registering",
     "reinstalling": "Rebuilding",
+    "rejected": "Rejected",
     "removing": "Removing",
     "renew": "Renewal",
     "requested": "Requested",
@@ -189,6 +226,7 @@
     "revoked": "Revoked",
     "rotation_due": "Rotation due",
     "running": "Running",
+    "scheduled": "Scheduled",
     "stopped": "Stopped",
     "succeeded": "Succeeded",
     "suspended": "Suspended",
@@ -208,7 +246,144 @@
     "validating": "Validating",
     "verified": "Verified",
     "verifying": "Verifying",
-    "void": "Void"
+    "void": "Void",
+    "withdrawn": "Withdrawn"
+  },
+  "activity": {
+    "vps": {
+      "created": "Cloud server created",
+      "destroyed": "Cloud server destroyed",
+      "started": "Cloud server started",
+      "stopped": "Cloud server stopped",
+      "restarted": "Cloud server restarted",
+      "reinstalled": "Cloud server rebuilt",
+      "resized": "Cloud server plan changed"
+    },
+    "dedicated": {
+      "provisioned": "Dedicated server set up",
+      "reinstalled": "Dedicated server rebuilt"
+    },
+    "hosting": {
+      "created": "Hosting account created",
+      "planChanged": "Hosting plan changed"
+    },
+    "wordpress": {
+      "installed": "WordPress site installed",
+      "stagingCreated": "Staging site created",
+      "cloned": "Site copied",
+      "pushed": "Copy pushed to production"
+    },
+    "domain": {
+      "registered": "Domain registered",
+      "renewed": "Domain renewed",
+      "transferred": "Domain transferred",
+      "redeemed": "Domain redeemed"
+    },
+    "backup": {
+      "taken": "Backup taken",
+      "filesRestored": "Files restored"
+    },
+    "dns": {
+      "zoneImported": "DNS records imported"
+    },
+    "order": {
+      "changed": "Order updated"
+    },
+    "invoice": {
+      "issued": "Invoice issued",
+      "paid": "Invoice paid"
+    },
+    "payment": {
+      "failed": "Payment did not go through"
+    },
+    "support": {
+      "opened": "Support ticket opened"
+    },
+    "kinds": {
+      "create_vps": "Create cloud server",
+      "destroy_vps": "Destroy cloud server",
+      "start": "Start",
+      "stop": "Stop",
+      "restart": "Restart",
+      "reinstall_vps": "Rebuild cloud server",
+      "reinstall_dedicated": "Rebuild dedicated server",
+      "resize": "Change plan",
+      "create_hosting_account": "Create hosting account",
+      "change_hosting_package": "Change hosting plan",
+      "install_wordpress": "Install WordPress",
+      "copy_wordpress_site": "Copy site",
+      "push_wordpress_to_production": "Push copy to production",
+      "provision_dedicated": "Set up dedicated server"
+    },
+    "feed": {
+      "title": "Activity",
+      "subtitle": "What has happened to this account, newest first — whoever on your team did it.",
+      "empty": "Nothing has happened on this account yet.",
+      "emptyFiltered": "Nothing in this part of the account yet.",
+      "newest": "Show newest",
+      "loadMore": "Show older",
+      "all": "Everything",
+      "actorSystem": "Lynomia",
+      "actorUnknown": "Not recorded",
+      "askSupport": "Ask support about this"
+    },
+    "categories": {
+      "cloud": "Cloud servers",
+      "hosting": "Hosting",
+      "domains": "Domains",
+      "billing": "Billing",
+      "support": "Support",
+      "backups": "Backups"
+    }
+  },
+  "attention": {
+    "title": "Needs your attention",
+    "body": "The account's own list, in the order the platform thinks matters.",
+    "none": "Nothing needs your attention.",
+    "invoice": {
+      "overdue": "An invoice is overdue",
+      "dueSoon": "An invoice is due soon"
+    },
+    "operation": {
+      "needsReview": "Work stopped and we are looking at it"
+    },
+    "domain": {
+      "uncertain": "A domain request has an uncertain outcome",
+      "lapsed": "A domain has lapsed and is in redemption",
+      "expiring": "A domain expires soon"
+    },
+    "backup": {
+      "needsReview": "A restore stopped and we are looking at it"
+    },
+    "support": {
+      "waitingForYou": "A support ticket is waiting for your reply"
+    },
+    "severity": {
+      "critical": "Urgent",
+      "warning": "Soon",
+      "info": "For information"
+    }
+  },
+  "dashboard": {
+    "title": "Your account",
+    "subtitle": "What needs doing, what you have, and what has just happened.",
+    "servicesTitle": "What you have",
+    "servicesTotal": "Services: {{count}}",
+    "servicesEmpty": "You have not bought anything yet.",
+    "servicesBrowse": "See the catalogue",
+    "billingTitle": "What you owe",
+    "billingNothing": "Nothing is owed.",
+    "billingInvoices": "Invoices: {{count}}",
+    "billingOpen": "Open invoices",
+    "renewalsTitle": "Renewing soon",
+    "renewalsNone": "Nothing renews in the next few weeks.",
+    "renewalsPriceAtRenewal": "Priced at renewal",
+    "recentTitle": "Recently added",
+    "activityTitle": "Just happened",
+    "activityAll": "See all activity",
+    "newAccountTitle": "Welcome to Lynomia",
+    "newAccountBody": "Nothing is running yet. Choose a server, a hosting plan or a domain name, and it will appear here.",
+    "unreadTitle": "Notifications"
   },
   "account": {
     "welcome": "Welcome, {{name}}",
@@ -229,7 +404,41 @@
     "timezoneHint": "An IANA name, such as Asia/Kuwait.",
     "phone": "Phone",
     "verifyEmailTitle": "Verify your email address",
-    "verifyEmailBody": "Ordering is available once the address on this account is verified. Check your inbox for the link we sent."
+    "verifyEmailBody": "Ordering is available once the address on this account is verified. Check your inbox for the link we sent.",
+    "countryCurrency": {
+      "title": "Country and currency",
+      "subtitle": "What this account is billed in. A change is a request: the platform checks what it would touch, and a person approves it.",
+      "current": "Billed in {{currency}}{{country}}",
+      "policy": "Nothing already issued is ever converted. Invoices, payments and orders keep the currency and the tax they were written with; only what is issued after the change is in the new currency.",
+      "request": "Request a change",
+      "country": "Country (two letters)",
+      "countryHint": "The ISO code of the country the account is registered in, such as KW or SA. Leave empty for none.",
+      "currency": "Currency",
+      "reason": "Why",
+      "reasonHint": "A sentence for the person who reviews it.",
+      "submit": "Send the request",
+      "requested": "Your request has been recorded.",
+      "open": "Current request",
+      "history": "Earlier requests",
+      "to": "To {{currency}}{{country}}",
+      "blockers": "What must change first",
+      "warnings": "What this means",
+      "recheck": "Check again",
+      "withdraw": "Withdraw",
+      "note": "Note from our team",
+      "scheduledFor": "Scheduled for {{date}}",
+      "appliedAt": "Applied {{date}}",
+      "needsReview": "This change was approved and then put on hold because something on the account changed. Our team is looking at it; nothing needs doing on your side.",
+      "awaiting": "Waiting for our team to approve it.",
+      "blocked": "The account has to clear the items below first. Once they are cleared, check again.",
+      "withdrawDialog": {
+        "title": "Withdraw this request?",
+        "body": "The request to change to {{currency}} is closed and nothing on the account changes. You can send a new request at any time.",
+        "confirmLabel": "Withdraw request"
+      }
+    },
+    "verifyEmailAction": "Confirm your email address",
+    "timezoneUnknown": "This browser does not know the zone {{zone}}, so dates are shown in the browser’s own zone until you pick another."
   },
   "security": {
     "subtitle": "Second factor, password, and where your account is signed in.",
@@ -259,7 +468,7 @@
     "passwordRevokesSessions": "Changing your password signs out every other device and revokes every API token.",
     "sessionsTitle": "Signed-in devices",
     "sessionsSubtitle": "Every browser session currently signed in to this account.",
-    "noSessions": "No active sessions.",
+    "noSessions": "No sessions recorded.",
     "revoke": "Sign out",
     "revokeOthers": "Sign out other devices",
     "thisDevice": "This device",
@@ -282,17 +491,45 @@
       "logged_out": "Signed out",
       "password_reset": "Password reset",
       "failed_password_confirmation": "Password guess in session"
+    },
+    "revokeSessionDialog": {
+      "title": "Sign out this device?",
+      "body": "The session on {{device}}, last seen from {{ip}}, ends now. Whoever is using it is signed out and has to sign in again. Your own session here is not affected.",
+      "confirmLabel": "Sign out that device"
+    },
+    "revokeOthersDialog": {
+      "title": "Sign out every other device?",
+      "body": "Every session except this one ends now. Anyone else signed in — including you on another device — has to sign in again.",
+      "confirmLabel": "Sign out other devices"
+    },
+    "enableTwoFactorHint": "Your password is required so that a stolen session cannot change the way you sign in.",
+    "enableContinue": "Continue",
+    "recoveryCodesSaved": "I have saved these codes",
+    "deviceOn": "{{browser}} on {{platform}}",
+    "unknownBrowser": "Unknown browser",
+    "unknownPlatform": "an unknown system",
+    "browsers": {
+      "edge": "Edge",
+      "opera": "Opera",
+      "samsung": "Samsung Internet",
+      "firefox": "Firefox",
+      "chrome": "Chrome",
+      "safari": "Safari"
+    },
+    "platforms": {
+      "iphone": "iPhone",
+      "ipad": "iPad",
+      "android": "Android",
+      "windows": "Windows",
+      "chromeos": "ChromeOS",
+      "macos": "macOS",
+      "linux": "Linux"
     }
   },
   "catalogue": {
     "subtitle": "What you can buy, priced in your account's currency.",
     "filterByKind": "Filter by product kind",
     "allKinds": "Everything",
-    "kinds": {
-      "vps": "Cloud VPS",
-      "dedicated": "Dedicated servers",
-      "shared_hosting": "Shared hosting"
-    },
     "viewPlans": "View plans",
     "empty": "Nothing is on sale in this category yet.",
     "noPriceInCurrency": "Not priced in your account's currency.",
@@ -303,7 +540,16 @@
     "placeOrder": "Place order",
     "priceIsServerSide": "The price is resolved on the server from the plan you chose. Nothing on this page can change it.",
     "planCount_one": "{{count}} plan available",
-    "planCount_other": "{{count}} plans available"
+    "planCount_other": "{{count}} plans available",
+    "setupFee": "One-off setup",
+    "discount": "Discount",
+    "discountWithCode": "Discount ({{code}})",
+    "tax": "Tax",
+    "taxNamed": "Tax ({{name}})",
+    "dueNow": "Due now",
+    "thenPerPeriod": "Then {{period}}",
+    "renewalNote": "The renewal figure excludes the one-off setup fee and any discount that applies to this purchase only.",
+    "afterPayment": "Placing the order issues an invoice. Your service is set up once the payment is confirmed."
   },
   "billingPeriod": {
     "hourly": "hourly",
@@ -335,14 +581,30 @@
     "status": "Status",
     "total": "Total",
     "placed": "Placed",
-    "empty": "No orders yet.",
+    "empty": "No orders yet. An order is made when you buy something, and keeps the record of what was bought and paid.",
     "detailTitle": "Order {{number}}",
     "items": "Items",
     "summary": "Summary",
     "subtotal": "Subtotal",
     "discount": "Discount",
     "tax": "Tax",
-    "cancel": "Cancel order"
+    "cancel": "Cancel order",
+    "cancelDialog": {
+      "title": "Cancel order {{number}}?",
+      "body": "The order and its unpaid invoice are cancelled and nothing is provisioned. Nothing has been charged. If you change your mind, place a new order.",
+      "confirmLabel": "Cancel this order",
+      "keep": "Keep order"
+    },
+    "whatHappensNext": "What happens next",
+    "chainInvoice": "Invoice:",
+    "chainInvoicePending": "Being issued",
+    "chainPayment": "Payment:",
+    "chainPaid": "Received",
+    "chainAwaitingPayment": "Not paid yet",
+    "chainService": "What you get:",
+    "chainServiceAfterPayment": "Set up once the payment is confirmed.",
+    "chainServicePreparing": "Being prepared",
+    "viewInvoice": "View the invoice"
   },
   "invoices": {
     "subtitle": "Issued invoices and what is still owed.",
@@ -359,7 +621,35 @@
     "creditApplied": "Applied to this invoice",
     "creditRemaining": "Still to pay",
     "noCreditToApply": "There is no credit in this invoice's currency to apply. Credit is never converted between currencies.",
-    "creditWillNotCoverAll": "Your credit does not cover the whole invoice. The rest stays payable by card."
+    "creditWillNotCoverAll": "Your credit does not cover the whole invoice. The rest stays payable by card.",
+    "view": "View",
+    "documentTitle": "Invoice",
+    "documentSubtitle": "What you bought, what it cost, and what has been paid.",
+    "documentFacts": "This invoice",
+    "addressedTo": "Addressed to",
+    "whatYouBought": "What you bought",
+    "noLines": "This invoice has no lines recorded.",
+    "noSnapshot": "No billing details were recorded on this invoice.",
+    "lineDescription": "Item",
+    "linePeriod": "Period",
+    "lineQuantity": "Quantity",
+    "lineUnit": "Unit price",
+    "lineTax": "Tax",
+    "lineTotal": "Total",
+    "subtotal": "Subtotal",
+    "discount": "Discount",
+    "tax": "Tax",
+    "amountPaid": "Paid",
+    "issuedAt": "Issued",
+    "paidAt": "Paid on",
+    "forOrder": "Order",
+    "viewOrder": "View the order",
+    "forSubscription": "Subscription",
+    "viewSubscription": "View subscriptions",
+    "print": "Print",
+    "backToInvoice": "Back to the invoice",
+    "taxId": "Tax number",
+    "viewNamed": "View invoice {{number}}"
   },
   "subscriptions": {
     "subtitle": "What renews, and when.",
@@ -368,7 +658,7 @@
     "renews": "Renews",
     "endsOn": "Ends {{date}}",
     "cancel": "Cancel",
-    "empty": "No subscriptions.",
+    "empty": "No subscriptions. Anything you buy that renews gets one, and this is where you stop it renewing.",
     "changePlan": "Change plan",
     "cancelTitle": "End this subscription?",
     "cancelWarning": "It will run until {{date}}, which you have already paid for, and will not renew after that.",
@@ -377,7 +667,11 @@
     "cancelConfirmLabel": "Type the subscription reference below to confirm",
     "confirmEnd": "End subscription",
     "endNowOption": "End it now instead of at {{date}}",
-    "endNowConfirm": "End it now"
+    "endNowConfirm": "End it now",
+    "what": "What it pays for",
+    "unnamedPlan": "Plan",
+    "noService": "Nothing running yet",
+    "serviceBeingCreated": "Being created"
   },
   "services": {
     "subtitle": "Everything running on your account.",
@@ -386,8 +680,10 @@
     "state": "State",
     "activated": "Since",
     "unnamed": "Unnamed service",
-    "empty": "Nothing is running yet.",
-    "dataUntil": "Data kept until"
+    "empty": "Nothing is running yet. Anything you buy — a server, a hosting plan, a domain — appears here.",
+    "dataUntil": "Data kept until",
+    "resource": "Resource",
+    "beingBuilt": "Being created"
   },
   "vps": {
     "subtitle": "Your virtual machines.",
@@ -410,7 +706,12 @@
       "advice": "Take a backup first if there is anything on this server you still need. The address, the specification and the hostname stay the same.",
       "confirmLabel": "Reinstall this server",
       "phraseLabel": "Type the hostname to confirm",
-      "started": "The rebuild has been queued. This page will show its progress."
+      "templateLabel": "Operating system",
+      "templateHint": "Only images this platform has prepared for this machine are listed.",
+      "sameImage": "Keep the current image",
+      "sshLabel": "Public SSH keys",
+      "sshHint": "One key per line. Public keys only — never paste a private key, here or anywhere else.",
+      "noSsh": "This image cannot be given a key on first boot. Set one up once the machine has started."
     },
     "reinstallState": {
       "requested": "Rebuild requested",
@@ -432,7 +733,24 @@
       "reactivating": "Coming back",
       "failed": "Build failed",
       "terminated": "Terminated"
-    }
+    },
+    "forceOff": {
+      "title": "Force off {{hostname}}?",
+      "body": "This pulls the plug without asking the operating system to close its files. Anything unsaved on the machine is lost, and a database that was writing may need repair. The machine stays yours and can be started again from this page. If the machine is responsive, use Shut down instead.",
+      "confirmLabel": "Force off"
+    },
+    "blocked": {
+      "service_not_active": "This service is not active, so its controls are off.",
+      "not_provisioned": "The hypervisor has not confirmed this machine yet, so nothing can be done to it.",
+      "operation_in_flight": "Another operation is running on this machine. Its controls come back when it finishes.",
+      "operation_needs_review": "An earlier operation did not finish and our team is looking at it. Controls stay off until it is resolved.",
+      "default": "Some actions are unavailable on this machine at the moment."
+    },
+    "os": "Operating system",
+    "primaryAddress": "Main address",
+    "noAddresses": "No addresses assigned to this machine yet.",
+    "rebuildBody": "The last rebuild of this machine.",
+    "rebuildRequested": "Requested"
   },
   "dedicated": {
     "subtitle": "Your physical machines.",
@@ -440,7 +758,7 @@
     "status": "Status",
     "power": "Power",
     "since": "Since",
-    "empty": "No dedicated servers.",
+    "empty": "No dedicated servers on this account. Dedicated machines are ordered from the catalogue and built by hand, so they take longer to arrive than a VPS.",
     "actions": {
       "on": "Power on",
       "off": "Force off",
@@ -470,7 +788,26 @@
       "provisioning_timeout": "The install did not report back and our team is looking at it",
       "indeterminate": "The rebuild is unconfirmed and our team is looking at it",
       "needs_review": "The rebuild stopped and our team is looking at it"
-    }
+    },
+    "forceOff": {
+      "title": "Force off server {{serial}}?",
+      "body": "This cuts the power at the chassis without a clean shutdown. Anything unsaved is lost and the disks may need checking on the next boot. The machine stays yours and can be powered on again from this page. If it is responsive, use Power cycle instead.",
+      "confirmLabel": "Force off"
+    },
+    "blocked": {
+      "server_not_in_service": "This machine is not in service right now, so its controls are off.",
+      "reinstall_in_flight": "The machine is being rebuilt. Nothing else can be done to it until the rebuild finishes.",
+      "operation_in_flight": "Another operation is running on this machine. A rebuild can be asked for when it finishes."
+    },
+    "serial": "Serial",
+    "manufacturer": "Manufacturer",
+    "model": "Model",
+    "hardwareProfile": "Hardware",
+    "sinceHint": "When this machine entered service on your account.",
+    "rebuildBody": "The last rebuild of this machine.",
+    "rebuildRequested": "Requested",
+    "rebuildDataDestroyed": "This rebuild has already erased the disks. Whatever was on them is gone, whether or not the installation finished.",
+    "rebuildNeedsAttention": "The platform did not hear how this rebuild ended. Do not request another — support can tell you where it stands."
   },
   "hosting": {
     "subtitle": "Your hosting accounts.",
@@ -478,8 +815,33 @@
     "status": "Status",
     "package": "Package",
     "openPanel": "Open panel",
-    "empty": "No hosting accounts.",
-    "diskQuota": "{{gib}} GiB disk"
+    "empty": "No hosting accounts. Buy a hosting plan and its panel details appear here.",
+    "diskQuota": "{{gib}} GiB disk",
+    "username": "Username",
+    "panelType": "Control panel",
+    "panelUnknownHint": "The platform does not name the panel until this account is on a node.",
+    "panel": {
+      "cpanel": "cPanel",
+      "directadmin": "DirectAdmin",
+      "generic": "hosting control panel"
+    },
+    "openNamedPanel": "Open {{panel}}",
+    "usage": "Usage",
+    "usageBody": "Disk and bandwidth against your allowance, from the platform's last reading of the panel. These figures are not live.",
+    "disk": "Disk",
+    "bandwidth": "Bandwidth",
+    "diskQuotaLabel": "Disk allowance",
+    "bandwidthQuotaLabel": "Bandwidth allowance",
+    "addonDomains": "Extra domains",
+    "databases": "Databases",
+    "mailboxes": "Mailboxes",
+    "unlimited": "Unmetered",
+    "measuredAt": "Measured {{when}}",
+    "neverMeasured": "The platform has not had a reading from the panel for this account yet.",
+    "usageStale": "this reading is old",
+    "notMeasured": "Not measured. The panel reported no figure, which is not the same as zero.",
+    "quotaUnknown": "The platform cannot say what the ceiling is for this account.",
+    "relatedBody": "Other things that sit on this account."
   },
   "ips": {
     "subtitle": "Addresses assigned to your services.",
@@ -489,7 +851,8 @@
     "setReverseDns": "Set reverse DNS",
     "hostname": "Hostname",
     "reverseDnsHint": "Published out of band. The change is queued, not immediate.",
-    "empty": "No addresses assigned."
+    "empty": "No addresses assigned. Every server comes with its own address, which appears here once the server is running.",
+    "version": "Version"
   },
   "wallet": {
     "subtitle": "Stored credit on your account.",
@@ -498,7 +861,21 @@
     "noMovement": "No credit has moved yet.",
     "none": "No wallet yet.",
     "howItFills": "Credit arrives when a payment exceeds what was owed, or when support adds it. You cannot top it up directly.",
-    "accountCurrency": "Your account currency."
+    "accountCurrency": "Your account currency.",
+    "ledger": "Credit history",
+    "ledgerBody": "Every movement of credit on this account, and the balance after it.",
+    "noEntries": "No credit has moved on this account yet.",
+    "entryWhen": "Date",
+    "entryKind": "Type",
+    "entryDescription": "Description",
+    "entryAmount": "Amount",
+    "entryBalanceAfter": "Balance after",
+    "entryInvoice": "Invoice",
+    "appliedToThisInvoice": "Credit applied to this invoice",
+    "direction": {
+      "credit": "added",
+      "debit": "spent"
+    }
   },
   "tokens": {
     "subtitle": "Credentials for the API, bound to this account.",
@@ -511,9 +888,28 @@
     "lastUsed": "Last used",
     "neverUsed": "Never used",
     "revoke": "Revoke",
-    "empty": "No tokens.",
+    "empty": "No tokens. Create one above if you need to reach the API from your own code or a build server.",
     "copyItNow": "Copy this token now",
-    "shownOnce": "This is the only time it is shown. It cannot be retrieved again."
+    "shownOnce": "This is the only time it is shown. It cannot be retrieved again.",
+    "revokeDialog": {
+      "title": "Revoke the token “{{name}}”?",
+      "body": "Anything using it stops being able to reach the API immediately. This cannot be undone; create a new token if you need access again.",
+      "confirmLabel": "Revoke token"
+    },
+    "expires": "Expires",
+    "expiresHint": "A token that outlives the integration it was made for is the one still working when a laptop is sold.",
+    "expiryDays_one": "In {{count}} day",
+    "expiryDays_other": "In {{count}} days",
+    "expiryNever": "Never",
+    "ipRanges": "Only from these addresses",
+    "ipRangesHint": "One address or CIDR block per line. Leave empty to allow any address. The platform refuses the token from anywhere else.",
+    "rateLimit": "Requests a minute",
+    "rateLimitHint": "Leave empty for the account default. A lower ceiling limits what a leaked token can do before you notice.",
+    "restrictions": "Restrictions",
+    "unrestricted": "None",
+    "fromAddresses_one": "{{count}} address",
+    "fromAddresses_other": "{{count}} addresses",
+    "perMinute": "{{count}}/min"
   },
   "admin": {
     "nav": {
@@ -535,7 +931,8 @@
       "plans": "Plans",
       "deployments": "Deployments",
       "overview": "Overview",
-      "sites": "Sites"
+      "sites": "Sites",
+      "accountChanges": "Account changes"
     },
     "customers": {
       "title": "Customers",
@@ -582,7 +979,9 @@
         "resize": "Resize machine",
         "restart": "Restart machine",
         "start": "Start machine",
-        "stop": "Stop machine"
+        "stop": "Stop machine",
+        "copy_wordpress_site": "WordPress copy",
+        "push_wordpress_to_production": "WordPress push to production"
       },
       "needsReviewTitle_one": "{{count}} job needs a human",
       "retry": "Run it again",
@@ -959,6 +1358,30 @@
         "blocked_network": "Blocked by network"
       }
     },
+    "preflight": {
+      "heading": "Infrastructure preflight",
+      "note": "What exactly prevents a provider, a product or the estate from being used. Runs fresh every time — nothing here is a stored result — and changes nothing anywhere.",
+      "mode": "Mode",
+      "run": "Run preflight",
+      "modes": {
+        "simulation": "Simulation",
+        "read_only_real": "Read real providers"
+      },
+      "modeHint": {
+        "simulation": "Reads this platform's own records and rehearses against controlled providers. Dials nothing real, and can never evidence real infrastructure.",
+        "read_only_real": "Sends real credentials to real endpoints and reads. Creates, changes and deletes nothing."
+      },
+      "ran": {
+        "simulation": "SIMULATION — {{checks}} checks at {{at}}. A controlled provider answering correctly is evidence about this software, and no evidence about any machine.",
+        "read_only_real": "READ_ONLY_REAL — {{checks}} checks at {{at}}. Reads only: nothing was created, changed or deleted."
+      },
+      "counts": "{{pass}} passed, {{blocked}} blocking, {{warning}} warnings, {{unknown}} not established",
+      "noRealVerification": "Real infrastructure verified: none. Nothing in this run reached a real provider in a way that could establish it.",
+      "referenceTopology": "These checks ran against the REFERENCE TOPOLOGY, which is a model of an estate rather than an estate. Nothing in it exists and nothing in it is reachable, so nothing here is evidence about real infrastructure.",
+      "realVerification": "Real infrastructure verified, for these reads only: {{checks}}. A read that succeeded has earned exactly that read — nothing about whether a machine will build.",
+      "nextHeading": "What to do next",
+      "next": "Next: {{action}}"
+    },
     "discovery": {
       "title": "Discovery",
       "subtitle": "What the platform has actually observed, and where nobody has looked.",
@@ -1177,15 +1600,43 @@
       "row": "Row {{row}}",
       "units": "{{units}}U · {{machines}} machines",
       "region": "Region",
-      "slug": "Slug",
-      "name": "Name",
+      "slug": "Logical ID",
+      "name": "Display name",
       "facility": "Facility",
       "datacenter": "Datacenter",
-      "rackName": "Rack name",
+      "rackName": "Rack code",
       "rowLabel": "Row",
       "unitsLabel": "Units",
       "powerNotes": "Power notes",
-      "networkNotes": "Network notes"
+      "networkNotes": "Network notes",
+      "slugHint": "Stable identifier. Orders, audit history and monitoring reference it; renaming the display name does not change it. Lower case, digits and dashes — for example ref-dc-alpha-1.",
+      "nameHint": "What people read on screens, in any language. Rename it freely: nothing references it.",
+      "rackCodeHint": "The code on the cabinet. Unique within this datacenter, and A1 and a1 are the same rack."
+    },
+    "accountChanges": {
+      "title": "Account changes",
+      "subtitle": "Requests to change what an account is billed in. Approval checks the facts again and refuses past a blocker.",
+      "account": "Account",
+      "change": "Change",
+      "state": "State",
+      "asked": "Asked",
+      "decide": "Decision",
+      "empty": "No requests.",
+      "filter": "State",
+      "allOpen": "All open",
+      "blockers": "Blockers",
+      "warnings": "Warnings",
+      "reason": "Customer's reason",
+      "approve": "Approve",
+      "reject": "Reject",
+      "approveTitle": "Approve the change for {{name}}",
+      "rejectTitle": "Reject the change for {{name}}",
+      "approveBody": "The account will be billed in {{currency}}{{country}} from the moment this is applied. The platform re-checks the account first and refuses if an invoice, order, subscription or wallet balance in the old currency has appeared since. Nothing already issued is converted.",
+      "rejectBody": "The account keeps its country and currency. The customer is told, with your note.",
+      "note": "Note",
+      "applyAt": "Apply at (optional)",
+      "applyAtHint": "Leave empty to apply now. Set a moment — the first of next month, say — to schedule it; the platform checks the account again then.",
+      "now": "now"
     }
   },
   "backups": {
@@ -1214,10 +1665,44 @@
     "deleteTitle": "Delete this backup?",
     "deleteWarning": "This removes this copy of {{hostname}}'s disks from the datastore. It cannot be undone, and it does not affect the server itself. If this is the only backup you have, you will have nothing to restore from.",
     "deleteConfirmLabel": "Type the backup reference below to confirm",
-    "deletionRequestedOn": "Deletion asked for {{date}}"
+    "deletionRequestedOn": "Deletion asked for {{date}}",
+    "files": "Files",
+    "filesUnsupported": "This backup's provider cannot open archives file by file. The whole server can still be restored.",
+    "browser": {
+      "title": "Files in the backup taken {{date}}",
+      "explainer": "Browse the backup, download a single file, or choose files and folders to put back on the server. A link (symlink) is shown and never followed.",
+      "up": "Up one level",
+      "name": "Name",
+      "kind": "Kind",
+      "size": "Size",
+      "kinds": {
+        "file": "File",
+        "directory": "Folder",
+        "symlink": "Link",
+        "other": "Other"
+      },
+      "select": "Select {{name}} to restore",
+      "download": "Download",
+      "downloadHint": "The link is single-use and lives for five minutes.",
+      "empty": "This folder is empty.",
+      "truncated": "Only the first thousand entries are shown. Open a folder to narrow the list.",
+      "close": "Close",
+      "selected": "{{count}} selected",
+      "restoreSelected": "Restore selected to the server",
+      "restoreTitle": "Put these files back on {{hostname}}?",
+      "restoreWarning": "Whatever {{hostname}} holds at these paths is replaced with the copy in the backup. Anything written to them since the backup was taken is lost. The rest of the server is untouched. This cannot be undone.",
+      "restoreConfirmLabel": "Type {{hostname}} to confirm",
+      "restore": "Restore files",
+      "restores": "File restores from this backup",
+      "noRestores": "No files have been restored from this backup.",
+      "restoreRow": "{{count}} path(s), asked for {{date}}",
+      "needsReview": "The provider did not confirm this restore. It may still be running, so no other restore can start into this server until our team has checked. Nothing needs doing on your side."
+    },
+    "forMachine": "Archives of {{hostname}}."
   },
   "confirm": {
-    "typeToConfirm": "Type {{phrase}} to confirm"
+    "typeToConfirm": "Type {{phrase}} to confirm",
+    "keep": "Keep it"
   },
   "notifications": {
     "subtitle": "Everything we have told you about your account.",
@@ -1248,6 +1733,42 @@
       "title": "What we email you",
       "subtitle": "The portal always keeps a record. You can choose what also reaches your inbox.",
       "always": "always sent"
+    }
+  },
+  "operations": {
+    "channel": "Updates",
+    "dismiss": "Dismiss",
+    "view": "View",
+    "requested": "{{action}} requested",
+    "succeeded": "{{action}} completed",
+    "failed": "{{action}} did not finish",
+    "needsReview": "{{action}} stopped and we are looking at it",
+    "indeterminate": "We could not confirm the result of {{action}}",
+    "cancelled": "{{action}} cancelled",
+    "slow": "{{action}} is taking longer than usual",
+    "slowBody": "We have stopped checking automatically. Open the page to see where it stands.",
+    "readFailed": "We could not check on this just now. The last thing we heard is shown.",
+    "actions": {
+      "reboot": "Reboot",
+      "start": "Start",
+      "stop": "Stop",
+      "shutdown": "Shutdown",
+      "rebuild": "Rebuild",
+      "build": "Setup",
+      "restore": "Restore",
+      "fileRestore": "File restore",
+      "backup": "Backup",
+      "copy": "Copy",
+      "publish": "Publish",
+      "on": "Power on",
+      "off": "Power off",
+      "cycle": "Power cycle"
+    },
+    "retryAdvice": {
+      "safe_to_retry": "You can try this again.",
+      "wait": "Nothing to do — we are still working on it.",
+      "support_required": "Please contact support before trying again.",
+      "not_retryable": "Nothing left to do."
     }
   },
   "console": {
@@ -1319,7 +1840,7 @@
     "makeOwner": "Make owner",
     "transferTitle": "Hand this account over?",
     "transferBody": "{{name}} becomes the owner and you become an administrator. Only the new owner can hand it back.",
-    "transferConfirmLabel": "Type the account id to confirm",
+    "transferConfirmLabel": "Type the account name — {{account}} — to confirm",
     "inviteTitle": "Invite somebody",
     "inviteSubtitle": "They receive a link that works once, only for the address you enter, and only for two weeks.",
     "sendInvitation": "Send invitation",
@@ -1348,6 +1869,54 @@
       "declined": "Declined",
       "revoked": "Withdrawn",
       "expired": "Expired"
+    },
+    "withdrawDialog": {
+      "title": "Withdraw the invitation to {{email}}?",
+      "body": "The link they were sent stops working immediately. Nothing else changes; you can invite them again later.",
+      "confirmLabel": "Withdraw invitation"
+    },
+    "capabilities": {
+      "view_services": "See services",
+      "manage_services": "Manage services",
+      "end_services": "End services",
+      "view_billing": "See billing",
+      "pay_invoices": "Pay invoices",
+      "manage_members": "Invite and manage people",
+      "manage_account": "Change account settings",
+      "manage_api_tokens": "Manage API tokens",
+      "ask_support": "Contact support"
+    },
+    "capabilityHints": {
+      "view_services": "See every server, site, domain and zone on the account, and their state.",
+      "manage_services": "Reboot and rebuild machines, edit DNS records, manage sites and take backups.",
+      "end_services": "Terminate a service the account is paying for.",
+      "view_billing": "Read invoices, payments, the wallet and what the account owes.",
+      "pay_invoices": "Pay an invoice, by card or from account credit.",
+      "manage_members": "Invite people to the account, change their role and remove them.",
+      "manage_account": "Change the account's own details, including the country and currency request.",
+      "manage_api_tokens": "Create and revoke API tokens that act for this account.",
+      "ask_support": "Open a support request and reply to it."
+    },
+    "permissionsTitle": "What each role can do",
+    "permissionsSubtitle": "The same list the platform checks before it allows anything. Read across a row to compare the five roles.",
+    "permissionsNote": "Every role can see the account and ask for help. Nothing on this table is a promise made by this page: it is computed from the permissions the API enforces.",
+    "capability": "What it can do",
+    "invitationResent": "The invitation to {{email}} was sent again.",
+    "removeAccessEnds": "Their access to this account ends immediately. They keep their own Lynomia login and anything in their other accounts.",
+    "removeTokensRemain": "Any API token they created for this account keeps working until it is revoked. Check the API tokens page.",
+    "transferWhatChanges": "They become the owner and you become an administrator. Only an owner can transfer ownership, so you cannot undo this yourself.",
+    "transferDone": "{{name}} now owns this account.",
+    "roleChange": {
+      "title": "Change {{name}}'s role",
+      "summary": "{{name}} moves from {{from}} to {{to}}.",
+      "gains": "They will be able to:",
+      "loses": "They will no longer be able to:",
+      "noChange": "This changes nothing about what they can do.",
+      "membershipWarning": "This role can invite and remove people, including you.",
+      "whenItApplies": "It takes effect on their next request. You can change it back at any time.",
+      "confirm": "Change the role",
+      "done": "{{name}} is now {{role}}.",
+      "unknownEffect": "We could not load what each role can do, so this list may be incomplete. The change itself will still be applied exactly as the server decides."
     }
   },
   "invitation": {
@@ -1401,7 +1970,11 @@
       "other": "Something else",
       "provisioning": "An order that has not arrived",
       "technical": "Something is broken"
-    }
+    },
+    "contextIntro": "About: {{what}}",
+    "contextResource": "Resource: {{identity}}",
+    "contextReference": "Reference: {{reference}}",
+    "contextNotice": "This form has been filled in from what you were looking at. Add anything else that would help, then send it."
   },
   "dns": {
     "subtitle": "Your domains, and what they point at.",
@@ -1429,7 +2002,81 @@
     "releaseExplainer": "Removes the zone and every record in it. Your registration is untouched — this only stops this platform answering for the domain.",
     "releaseWarning": "Every name under {{zone}} stops resolving: the website, the mail, and anything else set up under it. This cannot be undone, and there is no delay — it takes effect as soon as you confirm.",
     "releaseConfirmLabel": "Type {{zone}} to confirm",
-    "release": "Give up domain"
+    "release": "Give up domain",
+    "import": {
+      "title": "Import and export",
+      "explainer": "Bring records in from a BIND zone file, or take this zone out as one. Nothing is written until you have seen the plan and confirmed it.",
+      "file": "Zone file",
+      "fileHint": "A text file of up to 256 KB. Only A, AAAA, CNAME, MX, TXT and CAA records are read; the SOA and apex NS are set by the nameservers and are listed as ignored.",
+      "text": "Or paste the zone text",
+      "mode": "Mode",
+      "modeHint": {
+        "merge": "Adds and updates what the file names; records the file does not mention stay as they are.",
+        "replace": "Makes the zone match the file: records the file does not mention are removed."
+      },
+      "modes": {
+        "merge": "Merge into the zone",
+        "replace": "Replace the zone with the file"
+      },
+      "preview": "Preview changes",
+      "apply": "Apply this plan",
+      "applyTitle": "Apply the import to {{zone}}?",
+      "applyBody": "{{add}} to add, {{update}} to change, {{remove}} to remove. Every record goes through the same checks as one added by hand, and the plan is applied only if the zone has not changed since this preview.",
+      "applyConfirmLabel": "Type {{zone}} to confirm",
+      "applied": "Imported: {{added}} added, {{updated}} changed, {{removed}} removed, {{unchanged}} unchanged.",
+      "planTitle": "Plan",
+      "notApplicable": "Nothing will be applied while any line is refused. Fix the lines below and preview again.",
+      "empty": "The file holds nothing this zone does not already have.",
+      "counts": {
+        "add": "add",
+        "update": "change",
+        "remove": "remove",
+        "unchanged": "unchanged",
+        "refused": "refused",
+        "ignored": "ignored",
+        "kept": "kept as they are"
+      },
+      "kinds": {
+        "add": "Add",
+        "update": "Change",
+        "remove": "Remove",
+        "unchanged": "Unchanged",
+        "refused": "Refused",
+        "ignored": "Ignored"
+      },
+      "line": "Line",
+      "change": "Change",
+      "record": "Record",
+      "reason": "Reason",
+      "tooLarge": "That file is larger than 256 KB, which is more than a zone file is."
+    },
+    "export": {
+      "action": "Export zone file",
+      "ready": "{{count}} records, as a BIND zone file. Provider identifiers and this platform's own ids are not in it.",
+      "copy": "Copy",
+      "copied": "Copied.",
+      "download": "Download {{filename}}"
+    },
+    "removeRecord": {
+      "title": "Remove this record?",
+      "body": "{{record}} stops being served as soon as the change is published. Anything relying on it — a website, mail delivery, a certificate check — stops working until it is added back. You can add it back at any time.",
+      "confirmLabel": "Remove record"
+    },
+    "zones": "Your domains",
+    "zonesBody": "The domains this platform answers for.",
+    "recordCount": "Records",
+    "lastSynced": "Last published",
+    "lastSyncedHint": "When the platform last pushed this zone to the DNS provider.",
+    "openDomain": "Domain registration",
+    "relatedBody": "The registration behind this zone, and support.",
+    "transfer": {
+      "title": "Import and export"
+    },
+    "ttlHint": "In seconds. 1 means the provider decides.",
+    "editRecord": {
+      "title": "Change this record",
+      "body": "The name and the type cannot be changed — a record with a different name is a different record. To move it, remove this one and add the new one under {{zone}}."
+    }
   },
   "domains": {
     "authCodeHint": "Copy it now. We do not store it, and asking again gives you a new one.",
@@ -1496,7 +2143,67 @@
       "needsReview": "The registry did not confirm the recovery. Do not order it again — the penalty may already have been paid and the name restored. We are checking with the registry and will tell you where it stands.",
       "failed": "The registry refused to restore the name. You have been charged the penalty and are owed a refund; our team is arranging it. You may try again while the redemption window is open.",
       "recovered": "The name has been recovered."
-    }
+    },
+    "attention": "Needs attention",
+    "held": "Your domains",
+    "heldBody": "The names on your account.",
+    "registered": "Registered",
+    "term": "Term",
+    "renewal": "Renewal",
+    "renewalBody": "When this name lapses, and what keeps it.",
+    "autoRenewOn": "Auto-renew is on",
+    "autoRenewOff": "Auto-renew is off",
+    "autoRenewTurnOn": "Turn on",
+    "autoRenewTurnOff": "Turn off",
+    "autoRenewOnHint": "An invoice is raised before this name lapses. You can turn this off at any time.",
+    "autoRenewOffHint": "No invoice will be raised for the next term. This is not a cancellation: the name is yours until it expires, and you can renew it by hand or turn this back on.",
+    "renew": {
+      "action": "Renew now",
+      "title": "Renew {{domain}}?",
+      "body": "Renewing keeps this name for another term. The price below is the platform's own quote for it.",
+      "price": "Price",
+      "quoteExpires": "This price holds until {{when}}.",
+      "paymentExplainer": "An invoice is issued now. The registry is asked to extend the name once it is paid — a renewal fee is not refundable, so nothing is bought before your payment arrives.",
+      "confirm": "Renew this name",
+      "requested": "The renewal has been requested. It takes effect once the invoice is paid.",
+      "needsReview": "The registry did not confirm this renewal. Do not try again — we are checking what happened, and support can tell you where it stands.",
+      "openInvoice": "Open the invoice"
+    },
+    "contacts": "Registrant",
+    "contactsBody": "The person or organisation this name is registered to.",
+    "contactsSaved": "The registrant details have been sent to the registry.",
+    "contactsPrivacy": "These details go to the registry and are stored encrypted here. Nothing on this form is written to a log.",
+    "registrantOrganisation": "Organisation (optional)",
+    "registrantAddressTwo": "Address line 2 (optional)",
+    "registrantRegion": "Region (optional)",
+    "registrantPostalCode": "Postal code (optional)",
+    "nameserversBody": "Where this name points. The change is made at the registry.",
+    "nameserversSaved": "The nameservers have been sent to the registry.",
+    "lockedOn": "This name is locked against transfer",
+    "lockedOff": "This name is unlocked",
+    "transferOut": "Moving away",
+    "transferOutBody": "The lock and the transfer code, so you can leave whenever you want.",
+    "transferIn": {
+      "action": "Transfer a domain in",
+      "title": "Transfer a domain in",
+      "body": "Bring a name you hold elsewhere to this platform. You will need the transfer code from your current registrar, and the name has to be unlocked there.",
+      "name": "Domain name",
+      "code": "Transfer code",
+      "codeHint": "From your current registrar. It is sent once and never shown back.",
+      "submit": "Start the transfer",
+      "requested": "The transfer of {{domain}} has been requested.",
+      "needsReview": "The registry did not confirm this transfer. Do not try again — we are checking what happened.",
+      "price": "Price: {{price}}",
+      "openInvoice": "Open the invoice",
+      "waitExplainer": "A transfer takes several days: your current registrar and the registry both have to release the name. Nothing is finished until they do, and the name appears on this page when it arrives."
+    },
+    "openZone": "DNS records",
+    "claimZone": "Host DNS here",
+    "zoneBody": "This platform can answer for the name as well as register it.",
+    "relatedBody": "The zone, your invoices, and support.",
+    "termYears_one": "1 year",
+    "termYears_other": "{{years}} years",
+    "notManageable": "The platform cannot act on this name at the moment, so these controls are off. Support can tell you where it stands."
   },
   "wordpress": {
     "adminEmail": "WordPress email",
@@ -1525,7 +2232,52 @@
       "verified": "We loaded the site and it answered"
     },
     "subtitle": "Managed WordPress on shared hosting, with the name and the certificate handled.",
-    "verifiedExplainer": "A site is only marked live once we have loaded it ourselves and WordPress answered."
+    "verifiedExplainer": "A site is only marked live once we have loaded it ourselves and WordPress answered.",
+    "kinds": {
+      "production": "Production",
+      "staging": "Staging copy",
+      "clone": "Clone"
+    },
+    "copies": {
+      "staging": "Create a staging copy",
+      "stagingHint": "A copy of this site at staging.{{domain}}, on the same account, to try changes on. It is verified like any other site.",
+      "clone": "Clone to another domain",
+      "cloneDomain": "Domain for the clone",
+      "cloneSubmit": "Clone",
+      "unavailable": "{{reason}}",
+      "requested": "Asked for. The toolkit is copying the site; this page updates as it goes.",
+      "title": "Copies",
+      "body": "A staging copy, clones, and pushing a copy back over the live site."
+    },
+    "push": {
+      "action": "Push to production",
+      "title": "Push {{staging}} over {{production}}?",
+      "scope": "What to push",
+      "scopes": {
+        "files": "Files only",
+        "database": "Database only",
+        "both": "Files and database"
+      },
+      "confirmLabel": "Type {{production}} to confirm",
+      "confirm": "Push to production",
+      "needsReview": "The toolkit did not confirm this push. The live site may be partly updated. Please do not push again; our team is looking at it."
+    },
+    "operations": {
+      "title": "Copies and pushes",
+      "kinds": {
+        "create_staging": "Staging copy",
+        "clone": "Clone",
+        "push_to_production": "Push to production"
+      }
+    },
+    "version": "WordPress version",
+    "verifiedAt": "Checked live",
+    "progress": "Progress",
+    "progressBody": "Four things have to be true before a site is live. This is which of them are.",
+    "openAdmin": "Open WordPress",
+    "openHosting": "Hosting account",
+    "openDomain": "Domain",
+    "relatedBody": "The account this site runs on, and the name it answers to."
   },
   "controlCenter": {
     "guidance": {
@@ -1537,5 +2289,143 @@
       "dependency": "Make the provider this one depends on ready first.",
       "notImplemented": "The product's software is not written yet. No setting moves this; it waits for a build."
     }
+  },
+  "payments": {
+    "subtitle": "Every payment on this account, including the ones that did not go through.",
+    "empty": "No payments have been recorded yet.",
+    "when": "Date",
+    "notYetProcessed": "Not settled yet",
+    "kind": "Type",
+    "method": "Method",
+    "amount": "Amount",
+    "status": "Status",
+    "reason": "Reason",
+    "invoice": "Invoice",
+    "viewInvoice": "View the invoice",
+    "onThisInvoice": "Payments on this invoice",
+    "onThisInvoiceBody": "Attempts that failed are kept here, so a declined card is not a silence.",
+    "noneOnInvoice": "No payment has been attempted on this invoice yet.",
+    "redirecting": "Taking you to the payment page.",
+    "confirmHereBody": "Your provider will confirm this payment without leaving the portal.",
+    "amountToConfirm": "Amount:",
+    "confirmPayment": "Confirm the payment",
+    "confirmedWithProvider": "The provider has confirmed the payment. We are recording it now.",
+    "takenByProvider": "The provider says it has taken this payment. The invoice is marked paid once the provider confirms it to us.",
+    "declined": "The payment was refused.",
+    "awaitingProvider": "We are checking this payment with the provider. Do not pay again yet.",
+    "returnTitle": "Your payment",
+    "returnRecorded": "What we have recorded for this payment:",
+    "returnUnknown": "We cannot find that payment on this account.",
+    "returnIsNotProof": "Coming back from the payment page does not settle an invoice on its own. The invoice is marked paid when the provider confirms the payment to us.",
+    "fromCredit": "From account credit",
+    "fromOutside": "From a payment method"
+  },
+  "paymentKind": {
+    "charge": "Payment",
+    "refund": "Refund",
+    "chargeback": "Chargeback",
+    "adjustment": "Adjustment"
+  },
+  "paymentFailure": {
+    "card_declined": "The card was declined by the bank.",
+    "insufficient_funds": "There were not enough funds on the card.",
+    "expired_card": "The card has expired.",
+    "processing_error": "The provider could not process the card. Try again in a few minutes.",
+    "unknown": "The provider refused the payment without saying why."
+  },
+  "walletKind": {
+    "topup": "Top-up",
+    "refund": "Refund",
+    "payment": "Spent on an invoice",
+    "adjustment": "Adjustment",
+    "promotional": "Credit from us"
+  },
+  "verifyEmail": {
+    "title": "Confirm your email address",
+    "waiting": "Open the link we sent you to confirm your address. Ordering and billing stay closed until you do.",
+    "confirmed": "Your email address is confirmed. Everything on the account is open now.",
+    "alreadyConfirmed": "That address was already confirmed. Nothing more to do.",
+    "expired": "That link has expired. Ask for a new one below.",
+    "invalid": "That link is not valid for this address. Ask for a new one below.",
+    "sentTo": "We sent it to",
+    "resend": "Send the link again",
+    "resendIn": "Send again in {{seconds}}s",
+    "resent": "A new link is on its way.",
+    "checkSpam": "If it does not arrive, check your spam folder.",
+    "continue": "Continue to the portal",
+    "signIn": "Sign in"
+  },
+  "gateway": {
+    "title": "Test payment page",
+    "subtitle": "This stands in for a payment provider. No money moves.",
+    "authorisePayment": "Authorise this payment",
+    "notARealProvider": "This is a test gateway, not a real provider. It is refused in production.",
+    "amount": "Amount",
+    "reference": "Reference",
+    "approve": "Approve the payment",
+    "decline": "Decline the payment",
+    "settlementNote": "Approving here makes the provider tell the platform, server to server. The invoice is marked paid by that message and by nothing this page says."
+  },
+  "resource": {
+    "sections": "Sections",
+    "notAvailable": "Not available",
+    "dangerZone": "Danger zone",
+    "dangerZoneBody": "These actions change what is running or destroy what is on it. Each one asks you to confirm first.",
+    "open": "Open",
+    "overview": "Overview",
+    "related": "Related",
+    "networking": "Networking",
+    "networkingBody": "The addresses this machine answers on.",
+    "activity": "Activity",
+    "activityBody": "What the platform has done to this service, and how each attempt ended.",
+    "activityWhen": "When",
+    "activityWhat": "What happened",
+    "activityOutcome": "Outcome",
+    "noActivity": "There is no service record behind this, so there is no history to show.",
+    "noActivityYet": "Nothing has happened to this service since it was created.",
+    "billing": "Billing",
+    "billingBody": "What this costs, what renews it, and the order and invoice behind it.",
+    "noBillingRelation": "This is not linked to a service, so there is nothing to bill against.",
+    "noSubscription": "Nothing renews this: the platform has no subscription recorded against it."
+  },
+  "crash": {
+    "title": "Something went wrong while showing this page",
+    "body": "The page could not be drawn. This is a fault in the portal, not in your account.",
+    "unchanged": "Nothing was changed by this error. Anything you asked for before it either happened or did not, and your activity feed says which.",
+    "retry": "Try again",
+    "dashboard": "Go to dashboard",
+    "support": "Contact support"
+  },
+  "connection": {
+    "offlineTitle": "You are offline",
+    "offlineBody": "This device has no network. Nothing on this page has failed — it just cannot be updated until you are back online."
+  },
+  "session": {
+    "expiredTitle": "Your session has ended",
+    "expiredBody": "You have been signed out, so this page can no longer be updated. Sign in again to carry on from here.",
+    "expiredNotRepeated": "Nothing you had started has been repeated. If you were part-way through an action, please ask for it again after signing in.",
+    "expiredSignIn": "Sign in",
+    "expiredDismiss": "Keep reading",
+    "unknownTitle": "We could not confirm your sign-in",
+    "unknownBody": "The platform did not answer when we asked who you are. Your session has probably not ended — we simply could not check. Try again in a moment.",
+    "unknownRetry": "Try again",
+    "unknownSignIn": "Sign in again"
+  },
+  "vocabulary": {
+    "unknownProduct": "Another product",
+    "unknownValue": "Not recognised",
+    "unknownState": "An unrecognised state",
+    "unknownPeriod": "An unrecognised billing period",
+    "unknownPaymentKind": "An unrecognised kind of payment",
+    "unknownEvent": "Something happened on this account",
+    "unknownChange": "An unrecognised change",
+    "unknownEntry": "An unrecognised entry",
+    "unknownRefusal": "This change cannot be made right now",
+    "unknownWarning": "There is something to be aware of",
+    "unknownOutcome": "An unrecognised outcome",
+    "unknownCategory": "Other",
+    "unknownChannel": "Another channel",
+    "unknownAttribute": "Another detail",
+    "unknownBlocker": "This action is not available right now"
   }
 }

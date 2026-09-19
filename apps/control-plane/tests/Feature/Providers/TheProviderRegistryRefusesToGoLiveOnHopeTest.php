@@ -490,11 +490,29 @@ final class TheProviderRegistryRefusesToGoLiveOnHopeTest extends TestCase
 
         $byDriver = collect($response->json('data'))->keyBy('driver');
 
-        // The honest state of this build: adapters exist for these, and no
-        // connection tester does.
-        $this->assertFalse($byDriver['proxmox']['testable']);
-        $this->assertFalse($byDriver['cloudflare']['testable']);
+        /*
+         * This assertion used to read the other way round, and the comment
+         * beside it said so: "adapters exist for these, and no connection
+         * tester does." That was the honest state of the build until Phase
+         * 30B-SIM wrote one for every driver with a real adapter, each
+         * identifying its product from something only that product says
+         * before concluding anything about the credential.
+         *
+         * Two drivers are still untestable and it is not an omission. The
+         * relay has no endpoint to dial — it is a deployment setting reached
+         * over SMTP, and in some deployments it is the log driver. The .sy
+         * registry's technical contract is not available to this project, so
+         * its adapter is a placeholder whose every method refuses and there is
+         * no documented response shape to identify. The reasons are recorded
+         * in EveryRealDriverHasAnIdentityTesterTest, which fails if either
+         * excuse stops being true.
+         */
+        $this->assertTrue($byDriver['proxmox']['testable']);
+        $this->assertTrue($byDriver['cloudflare']['testable']);
         $this->assertTrue($byDriver['fake']['testable']);
+
+        $this->assertFalse($byDriver['smtp']['testable']);
+        $this->assertFalse($byDriver['sy_registry']['testable']);
 
         // And the requirements are data, so a registration form can ask for
         // the right things instead of the operator learning from a refusal.

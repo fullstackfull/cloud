@@ -46,6 +46,7 @@ final class RegistrationIsBoundedPerHostTest extends TestCase
                 'email' => "flood{$i}@example.com",
                 'password' => 'correct-horse-battery-9',
                 'password_confirmation' => 'correct-horse-battery-9',
+                'country' => 'KW',
                 'accepts_terms' => true,
             ])->status();
 
@@ -76,6 +77,7 @@ final class RegistrationIsBoundedPerHostTest extends TestCase
                 'email' => "flood{$i}@example.com",
                 'password' => 'correct-horse-battery-9',
                 'password_confirmation' => 'correct-horse-battery-9',
+                'country' => 'KW',
                 'accepts_terms' => true,
             ]);
         }
@@ -86,6 +88,7 @@ final class RegistrationIsBoundedPerHostTest extends TestCase
                 'email' => 'genuine@example.com',
                 'password' => 'correct-horse-battery-9',
                 'password_confirmation' => 'correct-horse-battery-9',
+                'country' => 'KW',
                 'accepts_terms' => true,
             ])->assertStatus(202);
     }

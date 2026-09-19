@@ -60,7 +60,7 @@ final class LoginController
 
         if ($user === null) {
             throw ValidationException::withMessages([
-                'challenge_token' => 'This sign-in challenge has expired. Please sign in again.',
+                'challenge_token' => __('validation.requests.auth.challenge_expired'),
             ]);
         }
 
@@ -72,7 +72,7 @@ final class LoginController
             $user->registerFailedLogin();
 
             throw ValidationException::withMessages([
-                'code' => 'That code is not valid.',
+                'code' => __('validation.requests.auth.code_invalid'),
             ]);
         }
 

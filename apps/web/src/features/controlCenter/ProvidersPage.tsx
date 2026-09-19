@@ -14,6 +14,7 @@ import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { CapabilityBadge } from '@/features/controlCenter/CapabilityBadge'
 import {
   ENVIRONMENTS,
@@ -138,7 +139,7 @@ export function ProvidersPage() {
         </div>
 
         {isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : error ? (
           <LoadFailure error={error} />
         ) : (

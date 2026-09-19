@@ -4,21 +4,29 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Providers;
 
+use Lynomia\Modules\Backups\Infrastructure\Providers\FakeBackupProvider;
 use Lynomia\Modules\Backups\Infrastructure\Providers\ProxmoxBackupProvider;
+use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Compute\Infrastructure\Providers\ProxmoxComputeProvider;
+use Lynomia\Modules\Dedicated\Infrastructure\Providers\FakeDedicatedProvider;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\IloDedicatedProvider;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\IpmiDedicatedProvider;
 use Lynomia\Modules\Dedicated\Infrastructure\Providers\RedfishDedicatedProvider;
 use Lynomia\Modules\Dns\Infrastructure\Providers\CloudflareDnsProvider;
+use Lynomia\Modules\Dns\Infrastructure\Providers\FakeDnsProvider;
+use Lynomia\Modules\Domains\Infrastructure\Providers\FakeDomainRegistrarProvider;
 use Lynomia\Modules\Domains\Infrastructure\Providers\SyRegistryProvider;
 use Lynomia\Modules\Ipam\Infrastructure\Providers\CloudflareReverseDnsProvider;
+use Lynomia\Modules\Ipam\Infrastructure\Providers\FakeReverseDnsProvider;
+use Lynomia\Modules\Notifications\Infrastructure\Providers\LaravelMailTransport;
+use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Payments\Infrastructure\Providers\StripePaymentProvider;
 use Lynomia\Modules\Providers\Domain\DTOs\CatalogueEntry;
 use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
-use Lynomia\Modules\Providers\Infrastructure\Testers\FakeConnectionTester;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\CpanelHostingProvider;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\DirectAdminHostingProvider;
+use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -54,11 +62,34 @@ final class TheCatalogueOnlyClaimsWhatExistsTest extends TestCase
         'cloudflare_rdns' => CloudflareReverseDnsProvider::class,
         'sy_registry' => SyRegistryProvider::class,
         'stripe' => StripePaymentProvider::class,
+        'smtp' => LaravelMailTransport::class,
         'ipmi' => IpmiDedicatedProvider::class,
         'redfish' => RedfishDedicatedProvider::class,
         'ilo' => IloDedicatedProvider::class,
-        'fake' => FakeConnectionTester::class,
-        'fake_bmc' => FakeConnectionTester::class,
+        /*
+         * The controlled drivers name the simulator that implements the
+         * family's contract, not the tester that answers their connection
+         * test.
+         *
+         * The earlier version pointed both controlled entries at
+         * FakeConnectionTester, and it was the most informative line in the
+         * file: the catalogue's idea of what stood behind a controlled driver
+         * was a connection tester, while eight stateful simulators sat behind
+         * the per-family factories with no catalogue entry at all. The map
+         * below is what the entries claim now — that the platform can carry
+         * out that category of work through a controlled driver — and
+         * FakeConnectionTester answers the identity test for every one of
+         * them.
+         */
+        'fake' => FakeDnsProvider::class,
+        'fake_bmc' => FakeDedicatedProvider::class,
+        'fake_compute' => FakeComputeProvider::class,
+        'fake_hosting' => FakeHostingProvider::class,
+        'fake_wordpress' => FakeHostingProvider::class,
+        'fake_backup' => FakeBackupProvider::class,
+        'fake_rdns' => FakeReverseDnsProvider::class,
+        'fake_registrar' => FakeDomainRegistrarProvider::class,
+        'fake_payment' => FakePaymentProvider::class,
     ];
 
     private ProviderCatalogue $catalogue;

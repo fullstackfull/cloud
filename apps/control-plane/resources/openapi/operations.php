@@ -40,10 +40,31 @@ return [
     'api.v1.register' => [
         'tag' => 'Authentication',
         'summary' => 'Create an account',
-        'description' => 'Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified.',
+        'description' => 'Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified. Answers 202 with a sentence and nothing identifying, whether or not an account was created: answering differently for an address that already has one would tell a caller which addresses are registered here. No session is issued — verification comes first. Refused with 503 `registration.unavailable` while the legal documents a customer would be accepting are not published, so no account is created against a policy nobody has written.',
         'auth' => false,
         'body' => ['name', 'email', 'password', 'password_confirmation'],
-        'response' => $one('User', 201),
+        'response' => $one('RegistrationAccepted', 202),
+        'errors' => [
+            503 => 'Registration is closed on this deployment. `registration.unavailable`, returned while the legal documents a customer would be accepting are not published. Nothing the caller sent is wrong, and the response names no document, configuration key or version.',
+        ],
+    ],
+    'api.v1.registration.options' => [
+        'tag' => 'Authentication',
+        'summary' => 'What a registration form may offer',
+        'description' => <<<'TEXT'
+        The countries this platform accepts, as ISO-3166-1 alpha-2 codes, the
+        currencies it bills in, as ISO-4217, and the currency recommended for
+        each country.
+
+        Read before an account exists, and it discloses nothing about anybody:
+        the lists are configuration. The same lists validate the registration,
+        so a client cannot submit a country or a currency it was never offered.
+
+        Country names are deliberately absent. A name is a translation, and
+        every client already has CLDR's.
+        TEXT,
+        'auth' => false,
+        'response' => $one('RegistrationOptions'),
     ],
     'api.v1.login' => [
         'tag' => 'Authentication',
@@ -221,6 +242,25 @@ return [
         'body' => ['lines', 'billing_period', 'coupon_code', 'notes'],
         'response' => $one('Order', 201),
     ],
+    'api.v1.orders.quote' => [
+        'tag' => 'Orders',
+        'summary' => 'Price a basket without buying it',
+        'description' => <<<'TEXT'
+        The itemised price of a basket: the plan price, the setup fee, the
+        coupon, the tax, the total, and what the same lines will cost when the
+        period comes round again.
+
+        It runs the same pricing path as placing the order — the same catalogue
+        lookups, the same readiness and stock checks, the same engine — so the
+        figures here are the figures the order will be written with. A contract
+        test prices the same basket both ways and compares every one of them.
+
+        It writes nothing: no order, no held stock, no coupon use, nothing
+        owed. There is therefore no idempotency key.
+        TEXT,
+        'body' => ['items', 'billing_period', 'coupon_code'],
+        'response' => $one('OrderQuote'),
+    ],
     'api.v1.orders.show' => ['tag' => 'Orders', 'summary' => 'One order', 'response' => $one('Order')],
     'api.v1.orders.cancel' => [
         'tag' => 'Orders',
@@ -266,6 +306,42 @@ return [
         'response' => $one('Subscription'),
     ],
     'api.v1.payments.index' => ['tag' => 'Billing', 'summary' => 'List payments', 'query' => ['status'], 'response' => $many('Payment')],
+
+    /* ---------------------------------------------------------------------
+     | The controlled gateway
+     |
+     | The fake provider's own payment page, for tests and development. It is
+     | refused whenever a real provider is configured and refused outright in
+     | production. It settles nothing: approving there makes the provider send
+     | the platform a signed webhook, and that webhook is what settles the
+     | invoice.
+     */
+
+    'api.v1.fake_gateway.show' => [
+        'tag' => 'Payments',
+        'summary' => 'The controlled gateway page for a pending payment',
+        'description' => 'Development and test only. The amount comes from the platform\'s own record of the payment, never from the URL.',
+        'response' => $one('ControlledGatewayPage'),
+    ],
+    'api.v1.fake_gateway.approve' => [
+        'tag' => 'Payments',
+        'summary' => 'Authorise a payment on the controlled gateway',
+        'description' => 'Development and test only. Records the decision on the provider side and sends the platform a signed webhook; the invoice is settled by that webhook.',
+        'response' => $one('ControlledGatewayDecision'),
+    ],
+    'api.v1.fake_gateway.decline' => [
+        'tag' => 'Payments',
+        'summary' => 'Decline a payment on the controlled gateway',
+        'description' => 'Development and test only. The invoice stays open and the failure is visible on it.',
+        'response' => $one('ControlledGatewayDecision'),
+    ],
+    'api.v1.fake_gateway.confirm' => [
+        'tag' => 'Payments',
+        'summary' => 'Confirm a payment with its client credential',
+        'description' => 'Development and test only. The credential is checked against the intent, so a client that does not hold it confirms nothing.',
+        'body' => ['client_secret'],
+        'response' => $one('ControlledGatewayDecision'),
+    ],
     'api.v1.payments.show' => ['tag' => 'Billing', 'summary' => 'One payment', 'response' => $one('Payment')],
     'api.v1.wallet.show' => [
         'tag' => 'Billing',
@@ -294,6 +370,12 @@ return [
 
     'api.v1.vps.index' => ['tag' => 'Cloud VPS', 'summary' => 'List machines', 'query' => ['power_state'], 'response' => $many('VirtualMachine')],
     'api.v1.vps.show' => ['tag' => 'Cloud VPS', 'summary' => 'One machine', 'response' => $one('VirtualMachine')],
+    'api.v1.vps.templates' => [
+        'tag' => 'Cloud VPS',
+        'summary' => 'Operating systems this machine can be rebuilt with',
+        'description' => 'Exactly the set the reinstall endpoint will accept for this machine: active, staged at a provider, and either fleet-wide or on the hardware this machine runs on. A client that offered anything else would be offering a rebuild the next request refuses. Not paginated — a cluster carries a handful of images.',
+        'response' => ['envelope' => 'list', 'schema' => 'InstallableTemplate'],
+    ],
     'api.v1.vps.power' => [
         'tag' => 'Cloud VPS',
         'summary' => 'Start, stop, reboot or shut down',
@@ -396,6 +478,40 @@ return [
         'response' => $one('HostingPanelSession', 201),
     ],
 
+    'api.v1.wordpress.sites.staging' => [
+        'tag' => 'WordPress',
+        'summary' => 'Make a staging copy',
+        'description' => 'Copies the site to `staging.<domain>` on the same account through the panel\'s toolkit, for the panels whose toolkit can (the site\'s `copies` block says; 409 `wordpress.panel_cannot_copy` otherwise). One staging copy per site. Answers 202 with the operation; the copy is a site row of kind `staging` that starts `installing` and is verified like any other. A toolkit that does not answer leaves both `indeterminate`, never retried.',
+        'response' => $one('WordPressSiteOperation', 202),
+    ],
+    'api.v1.wordpress.sites.clones' => [
+        'tag' => 'WordPress',
+        'summary' => 'Clone to another domain',
+        'description' => 'The same copy, to a domain the customer names. The result is a production site of kind `clone` in its own right; its name is the customer\'s to point, like any external one.',
+        'body' => ['domain'],
+        'response' => $one('WordPressSiteOperation', 202),
+    ],
+    'api.v1.wordpress.sites.push_impact' => [
+        'tag' => 'WordPress',
+        'summary' => 'What a push to production would overwrite',
+        'description' => 'For a staging copy: the production domain, the scope, when the copy was made, and the warnings in words — including that this platform holds no backup of a shared-hosting site. The same words the confirmation shows.',
+        'query' => ['scope'],
+        'response' => $one('WordPressPushImpact'),
+    ],
+    'api.v1.wordpress.sites.push' => [
+        'tag' => 'WordPress',
+        'summary' => 'Push a staging copy over production',
+        'description' => 'The one act on this surface that overwrites something the customer wrote. Only a staging copy can be pushed; `confirmation` must equal the production domain exactly; `scope` is `files`, `database` or `both` (default), and a database push loses every post, comment and order production received since the copy. Refused while any copy or push involving either site is running or indeterminate. Answers 202. A toolkit that does not answer leaves production `needs_review` and the operation `indeterminate`; the customer is told not to push again, and nothing retries.',
+        'body' => ['scope', 'confirmation'],
+        'response' => $one('WordPressSiteOperation', 202),
+    ],
+    'api.v1.wordpress.sites.operations' => [
+        'tag' => 'WordPress',
+        'summary' => 'Copies and pushes involving a site',
+        'description' => 'The last fifty, newest first, whether the site was the source or the target.',
+        'response' => $many('WordPressSiteOperation'),
+    ],
+
     /* ---------------------------------------------------------------------
      | IP addresses
      */
@@ -449,6 +565,30 @@ return [
 
     'api.admin.customers.index' => ['tag' => 'Operator', 'summary' => 'Search accounts', 'permission' => 'customer.view_any', 'query' => ['q', 'status'], 'response' => $many('AdminCustomer')],
     'api.admin.customers.show' => ['tag' => 'Operator', 'summary' => 'One account', 'permission' => 'customer.view', 'response' => $one('AdminCustomer')],
+    'api.admin.customers.country_currency_changes.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Requests to change an account\'s country or currency',
+        'description' => 'Open requests by default (needs_review first, then awaiting approval, then scheduled); `state` filters. Each carries the analysis as last run: counts and minor-unit amounts in the currency named beside them, the blockers in words, and the warnings.',
+        'permission' => 'customer.view_any',
+        'query' => ['state'],
+        'response' => $many('AdminCountryCurrencyChange'),
+    ],
+    'api.admin.customers.country_currency_changes.approve' => [
+        'tag' => 'Operator',
+        'summary' => 'Approve a country/currency change',
+        'description' => 'Runs the analysis again first and refuses (409 `account.country_currency_change.blocked`) if the account has grown a blocker since the customer asked — an open invoice, an order in flight, a subscription in the old currency, a wallet balance. Approved for now, the account changes in the same request; approved with `apply_at`, the change is `scheduled` and the sweep applies it then after checking again. Nothing already issued is converted.',
+        'permission' => 'customer.update',
+        'body' => ['note', 'apply_at'],
+        'response' => $one('AdminCountryCurrencyChange'),
+    ],
+    'api.admin.customers.country_currency_changes.reject' => [
+        'tag' => 'Operator',
+        'summary' => 'Reject a country/currency change',
+        'description' => 'With a note the customer is told. Also takes a scheduled change back before the sweep applies it.',
+        'permission' => 'customer.update',
+        'body' => ['note'],
+        'response' => $one('AdminCountryCurrencyChange'),
+    ],
     'api.admin.customers.status' => [
         'tag' => 'Operator',
         'summary' => 'Suspend or reinstate an account',
@@ -492,6 +632,36 @@ return [
         'body' => ['confirmation'],
         'response' => $one('Backup', 202),
     ],
+    /* ---------------------------------------------------------------------
+     | The account's country and currency
+     */
+
+    'api.v1.account.country_currency_changes.index' => [
+        'tag' => 'Account',
+        'summary' => 'Requests to change this account\'s country or currency',
+        'description' => 'The last twenty, newest first, each with its analysis. `meta.currencies` lists the currencies the catalogue prices anything in — the only ones an account can be billed in. Requires `customer.manage`.',
+        'response' => $many('CountryCurrencyChange'),
+    ],
+    'api.v1.account.country_currency_changes.store' => [
+        'tag' => 'Account',
+        'summary' => 'Ask for the country or currency to change',
+        'description' => 'Nothing on the account changes here. The request is analysed against the account as it is and recorded as `blocked` — with what must change first, in words — or `awaiting_approval` for an operator. A currency change is blocked while anything priced in the old currency is still live: an open invoice, an order between placement and provisioning, a domain operation with the registrar, an active or past-due subscription, a wallet balance; and while the catalogue prices nothing in the new currency. A country-only change is not blocked by those; it changes the tax on invoices issued from then on and is reported as such. Nothing already issued is ever converted. One open request per account (409).',
+        'body' => ['country', 'currency', 'reason'],
+        'response' => $one('CountryCurrencyChange', 201),
+    ],
+    'api.v1.account.country_currency_changes.reanalyse' => [
+        'tag' => 'Account',
+        'summary' => 'Check a request against the account again',
+        'description' => 'After paying the invoice or ending the subscription the blockers named: moves between `blocked` and `awaiting_approval` as the facts say.',
+        'response' => $one('CountryCurrencyChange'),
+    ],
+    'api.v1.account.country_currency_changes.withdraw' => [
+        'tag' => 'Account',
+        'summary' => 'Take a request back',
+        'description' => 'While it is open — including after an operator scheduled it, up to the moment it is applied.',
+        'response' => $one('CountryCurrencyChange'),
+    ],
+
     'api.v1.me.notification_preferences.index' => [
         'tag' => 'Account',
         'summary' => 'Which optional messages this person wants',
@@ -510,6 +680,31 @@ return [
         'summary' => 'What each plan would cost this subscription',
         'description' => 'Priced by the platform, through the same proration the confirmation performs. Plans that cannot be taken are listed with their reasons and without their prices — a smaller disk is refused outright, because shrinking one destroys data.',
         'response' => $many('PlanChangeQuote'),
+    ],
+    'api.v1.activity.index' => [
+        'tag' => 'Activity',
+        'summary' => 'What has happened on this account',
+        'description' => 'The account-wide history: builds, power actions, rebuilds, registrar operations, WordPress copies, backups, zone imports, orders, invoices and support requests, newest first. A read over the durable tables that already hold the truth rather than a second copy of them, so it cannot drift and needs no backfill. Cursor-paginated with no total: history grows at the newest end, so page numbers would show one row twice and hide another. Filtering by category chooses which sources are read rather than trimming a page. Separate from notifications, which are read/unread — marking one read does not erase history.',
+        'query' => ['category', 'cursor'],
+        'response' => $many('ActivityItem'),
+    ],
+    'api.v1.operations.show' => [
+        'tag' => 'Activity',
+        'summary' => 'What became of something you asked for',
+        'description' => 'A 202 means the request was accepted and nothing more. This turns the operation it returned back into a state, in the customer vocabulary, with the retry advice the server decides and a poll hint that is null once there is nothing left to wait for. Read-only: retrying is re-asking the product through its own idempotency key and guards, not a verb on an operation. Another account\'s operation id answers 404 rather than 403, because a refusal would confirm the id names real work.',
+        'response' => $one('CustomerOperation'),
+    ],
+    'api.v1.me.overview' => [
+        'tag' => 'Account',
+        'summary' => 'The dashboard, in one read',
+        'description' => 'What needs attention, what the account holds, what it owes grouped by currency, what renews next, how many notifications are unread, and what happened recently. One aggregate rather than a browser fanning out across four product endpoints and deciding between the results which matters.',
+        'response' => $one('AccountOverview'),
+    ],
+    'api.v1.notifications.unread_count' => [
+        'tag' => 'Notifications',
+        'summary' => 'How many notifications are unread',
+        'description' => 'The shell draws a badge on every page; asking the inbox for it would render a page of notifications to print one integer. Kept beside the inbox\'s own unread count rather than replacing it, so a screen that has just fetched the list needs no second request.',
+        'response' => $one('NotificationUnreadCount'),
     ],
     'api.v1.notifications.index' => [
         'tag' => 'Notifications',
@@ -548,8 +743,8 @@ return [
     'api.v1.backups.destroy' => [
         'tag' => 'Backups',
         'summary' => 'Delete a backup',
-        'description' => "Requires the backup's own id typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force.",
-        'body' => ['confirm_backup_id'],
+        'description' => "Requires the machine's hostname typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Which archive is destroyed is settled by the URL; the phrase is evidence that a person meant to destroy a copy of that machine's data, which the backup's own ULID never was. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force.",
+        'body' => ['confirmation'],
         'response' => $one('Backup'),
     ],
     'api.v1.backups.keep' => [
@@ -557,6 +752,47 @@ return [
         'summary' => 'Call off a deletion',
         'description' => 'Only while the request is still waiting for the sweep. Once the provider has been asked there is nothing to call off, and pretending otherwise would leave a row reading `succeeded` for an archive that is being removed.',
         'response' => $one('Backup'),
+    ],
+
+    /*
+     * Files out of a backup, for the providers that can open one. The
+     * backup's `files` block says whether this one can, and why not when it
+     * cannot; every route here answers 409 `backup.file_level_unsupported`
+     * for the others. Paths are the archive's own, rooted at `/`; nothing
+     * about where the archive lives is accepted or returned.
+     */
+    'api.v1.backups.files.index' => [
+        'tag' => 'Backups',
+        'summary' => 'List one directory of a backup',
+        'description' => 'Read straight from the provider, never cached. `path` defaults to `/`. A path with `..`, `.`, an empty segment, a backslash, a control character or over 4096 characters is refused (422 `backup.file_path_invalid`) before anything is asked. A symlink is listed and never followed: browsing into one is refused. At most 1000 entries; `truncated` says there were more. Requires `service.manage`: a backup\'s contents are the customer\'s data at rest.',
+        'query' => ['path'],
+        'response' => $one('BackupFileListing'),
+    ],
+    'api.v1.backups.files.downloads.store' => [
+        'tag' => 'Backups',
+        'summary' => 'Mint a short-lived link to one file',
+        'description' => 'The file is looked up in its directory first: a directory, a symlink, a device or a file over the download limit is refused here with the reason, not at the moment the browser follows the link. The link lives for five minutes, is spent on its first use, still requires the session and the account, and its token appears only in this response — the platform stores the hash.',
+        'body' => ['path'],
+        'response' => $one('BackupFileDownload', 201),
+    ],
+    'api.v1.backups.downloads.show' => [
+        'tag' => 'Backups',
+        'summary' => 'Follow a download link',
+        'description' => 'Streamed as `application/octet-stream` with Content-Disposition: attachment, nosniff and a sandboxing CSP, so a browser saves the file rather than rendering it. A link that is unknown, expired, already used or another account\'s is 404 `backup.download_unavailable` — one answer for all four. Audited as `backup.file.downloaded`.',
+        'response' => ['envelope' => 'none', 'status' => 200],
+    ],
+    'api.v1.backups.files.restore' => [
+        'tag' => 'Backups',
+        'summary' => 'Put named files back on the machine',
+        'description' => 'Replaces what the machine holds at those paths. Clears the same bar as a whole-machine restore — the hostname typed exactly as `confirmation`, a completed backup from this machine, an active service, nothing else restoring into the machine — and one more: every path is looked up in the archive and a symlink is refused by name (422 `backup.symlink_refused`). At most 50 paths; a directory counts as one and brings back everything under it; `/` is refused (that is a whole-machine restore). Answers 202 with the restore row; a provider that does not answer leaves it `needs_review`, never retried.',
+        'body' => ['paths', 'confirmation'],
+        'response' => $one('BackupFileRestore', 202),
+    ],
+    'api.v1.backups.files.restores' => [
+        'tag' => 'Backups',
+        'summary' => 'File restores from this backup',
+        'description' => 'The last fifty, newest first.',
+        'response' => $many('BackupFileRestore'),
     ],
 
     /* ---------------------------------------------------------------------
@@ -669,6 +905,19 @@ return [
         'body' => ['nameservers'],
         'response' => $one('Domain'),
     ],
+    'api.v1.domains.contacts.show' => [
+        'tag' => 'Domains',
+        'summary' => 'The registrant on record',
+        'description' => "The account's own registrant, read back so a correction does not have to be retyped from memory. Every field is personal data: this needs `service.manage`, not `service.view`, and publishes only the registrant role and only the fields the update accepts.",
+        'response' => $one('DomainContact'),
+    ],
+    'api.v1.domains.auto_renew.update' => [
+        'tag' => 'Domains',
+        'summary' => 'Turn auto-renew on or off',
+        'description' => 'Whether this platform raises the next invoice before the name lapses. It is not the registrar\'s own flag: renewal here is invoice-first, and a second renewal authority at the registrar would mean two systems that can each decide to renew. Turning it off does not cancel the name or shorten the term already paid for.',
+        'body' => ['auto_renew'],
+        'response' => $one('Domain'),
+    ],
     'api.v1.domains.contacts.update' => [
         'tag' => 'Domains',
         'summary' => 'Change the registrant',
@@ -695,6 +944,26 @@ return [
         'summary' => 'List the records in a zone',
         'description' => 'What this platform has published, which is not the same as what the zone serves. Records added through the provider\'s own console are not here; reconciliation reports them and never removes them.',
         'response' => ['envelope' => 'list', 'schema' => 'DnsRecord'],
+    ],
+    'api.v1.dns.zones.export' => [
+        'tag' => 'DNS',
+        'summary' => 'Export the zone as a BIND-compatible file',
+        'description' => 'The records this platform holds, as a file another provider can read: owners relative to the origin, TTLs where set, targets absolute, TXT quoted. No SOA, no apex NS, no provider identifiers, no credentials, no audit metadata; the current nameservers appear as a comment. A record the provider has not confirmed carries a comment saying so.',
+        'response' => $one('ZoneExport'),
+    ],
+    'api.v1.dns.zones.import.plan' => [
+        'tag' => 'DNS',
+        'summary' => 'Preview what a zone file would do',
+        'description' => 'Parses BIND-compatible text (comments, $ORIGIN, $TTL, parentheses, quoted strings, relative names; A, AAAA, CNAME, MX, TXT and CAA) and returns every line as ADD, UPDATE, REMOVE, UNCHANGED, REFUSED or IGNORED with the reason. Every rule a single record faces is applied to every line, plus CNAME-stands-alone on the zone as it would be and the zone ceiling on the final count. One refused line makes the whole plan not applicable; nothing is skipped. `merge` (default) leaves unmentioned records alone; `replace` lists each as REMOVE. Input over 256 KiB, 5000 lines, 4096 characters a line, not UTF-8 or carrying control characters is refused (422) before it is read. $INCLUDE and $GENERATE are refused lines.',
+        'body' => ['text', 'mode'],
+        'response' => $one('ZoneImportPlan'),
+    ],
+    'api.v1.dns.zones.import.apply' => [
+        'tag' => 'DNS',
+        'summary' => 'Apply a previewed zone import',
+        'description' => 'Recomputes the plan from the same text and applies it only if its fingerprint equals the one the preview returned (409 `dns.import.plan_changed` otherwise) and no line is refused (409 `dns.import.refused`). Removals, then updates, then additions, each through the same action a single record goes through, each with its own publish and its own state. Audited once with the counts.',
+        'body' => ['text', 'mode', 'fingerprint'],
+        'response' => $one('ZoneImportResult'),
     ],
     'api.v1.dns.records.store' => [
         'tag' => 'DNS',
@@ -841,6 +1110,12 @@ return [
      | account - the person accepting their first invitation belongs to none.
      */
 
+    'api.v1.team.roles' => [
+        'tag' => 'Team',
+        'summary' => 'What each role may do',
+        'description' => 'The five roles and the capability matrix behind them, derived from the same permission list the API refuses with - so a screen that explains a role and an endpoint that refuses it cannot disagree. Readable by any member: deciding whether to accept an invitation is exactly when this is asked. Each capability publishes the permission string as well as its own id, so the claim can be checked against a 403 rather than taken on trust. Static for the whole platform and costs no query.',
+        'response' => ['envelope' => 'list', 'schema' => 'TeamRole'],
+    ],
     'api.v1.team.members' => [
         'tag' => 'Team',
         'summary' => 'List the people in this account',
@@ -889,7 +1164,7 @@ return [
         'tag' => 'Team',
         'summary' => 'Hand this account to another member',
         'description' => "One act, both sides: the outgoing owner becomes an administrator and the incoming one becomes owner, in one transaction, so the account is never ownerless and never owned twice. Only the current owner may ask, the successor must already be an accepted member, and the account's own id must be typed back.",
-        'body' => ['member_id', 'confirm_account_id'],
+        'body' => ['member_id', 'confirm_account_name'],
         'response' => $one('TeamMember'),
     ],
     'api.v1.invitations.show' => [
@@ -1195,6 +1470,18 @@ return [
         'permission' => 'infrastructure.view',
         'response' => $one('InfrastructureOverview'),
     ],
+    'api.admin.infrastructure.preflight' => [
+        'tag' => 'Operator',
+        'summary' => 'What exactly prevents this from being used',
+        'description' => 'Runs the one preflight service the CLI also calls, in one of two modes and against one '
+            .'scope. SIMULATION reads the platform\'s own records and rehearses against controlled providers; '
+            .'READ_ONLY_REAL sends real credentials to real endpoints and reads. Neither mode writes anything, '
+            .'anywhere: no provisioning, no configuration change, no readiness update, and no state moved on the '
+            .'thing being diagnosed. READ_ONLY_REAL additionally requires provider.manage, because dialling a real '
+            .'provider is the same act as a connection test. Every run is fresh; there is no cached result.',
+        'permission' => 'infrastructure.view',
+        'response' => $one('PreflightReport'),
+    ],
     'api.admin.infrastructure.regions.index' => [
         'tag' => 'Operator',
         'summary' => 'Regions a datacenter can be registered in',
@@ -1228,6 +1515,55 @@ return [
         'permission' => 'infrastructure.manage',
         'body' => ['datacenter_id', 'name', 'row', 'units', 'power_notes', 'network_notes'],
         'response' => $one('Rack', 201),
+    ],
+    'api.admin.infrastructure.templates.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The images a cluster may install',
+        'description' => <<<'TEXT'
+        Withdrawn entries are included, because "why is this image not being
+        offered?" is answered by the row that says it was withdrawn. `active=1`
+        narrows it to the ones still offered.
+
+        `meta.installable` is the number that decides whether a VPS can be
+        built at all: an entry that is active and has a provider reference.
+        Placement resolves a plan's declared `template_slug` against exactly
+        that set, and a build that finds none is refused rather than started.
+        TEXT,
+        'permission' => 'infrastructure.view',
+        'query' => ['cluster', 'active'],
+        'response' => ['envelope' => 'list', 'schema' => 'VmTemplate'],
+    ],
+    'api.admin.infrastructure.templates.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record an installable image',
+        'description' => <<<'TEXT'
+        Recorded by an operator rather than discovered, because the hypervisor
+        knows which of its guests are templates and does not know which of them
+        this platform may sell, what to call them in two languages, or whether
+        the operating system needs a licence.
+
+        A second call for the same cluster and slug is a correction, not a
+        conflict — an image rebuilt under a new reference, or a version
+        upgraded in place — and answers 200 rather than 201. It also restores a
+        withdrawn entry, so deactivating one is never a one-way door.
+
+        `provider_reference` may be omitted while the image has not been staged
+        on the cluster. The entry then exists as a commercial intention and
+        placement refuses it, which is visible as `installable: false`.
+        TEXT,
+        'permission' => 'infrastructure.manage',
+        'body' => [
+            'cluster_id', 'slug', 'name', 'os_family', 'os_version', 'architecture',
+            'provider_reference', 'cloud_init', 'guest_agent', 'requires_licence', 'licence_note',
+        ],
+        'response' => $one('VmTemplate', 201),
+    ],
+    'api.admin.infrastructure.templates.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop offering an image',
+        'description' => 'Deactivated, never deleted: machines already built point at the row, and "which image is this server running?" is the first question asked when a rebuild goes wrong. Placement and the customer reinstall list both filter on the same flag, so one call removes it from both.',
+        'permission' => 'infrastructure.manage',
+        'response' => $one('VmTemplate'),
     ],
     'api.admin.infrastructure.profiles.index' => [
         'tag' => 'Operator',

@@ -235,19 +235,26 @@ final readonly class ProductReadinessEvaluator
      * The candidate closest to being useful, so the propagated blocker is the
      * most actionable one rather than the first row's.
      *
+     * Ranked by where each instance is in its onboarding, which is what
+     * "closest" means here. This used to rank on whether a blocker had been
+     * recorded, and an instance nobody had assessed carries none: a declared
+     * draft therefore outranked one assessed and blocked on a credential, and
+     * the product reported the draft's generic configuration blocker while
+     * the missing credential — the one thing somebody could go and fix — was
+     * never named on the screen. It took an estate with two instances in a
+     * category to show it.
+     *
+     * Ties keep the order they arrived in, so the same estate answers the
+     * same way twice.
+     *
      * @param  non-empty-list<ProviderFacts>  $candidates
      */
     private function nearest(array $candidates): ProviderFacts
     {
-        usort($candidates, static function (ProviderFacts $a, ProviderFacts $b): int {
-            $rank = static fn (ProviderFacts $p): int => match (true) {
-                $p->state === ProviderState::Disabled => 0,
-                $p->blocker !== null => 1,
-                default => 2,
-            };
-
-            return $rank($b) <=> $rank($a);
-        });
+        usort(
+            $candidates,
+            static fn (ProviderFacts $a, ProviderFacts $b): int => $b->state->onboardingPosition() <=> $a->state->onboardingPosition(),
+        );
 
         return $candidates[0];
     }

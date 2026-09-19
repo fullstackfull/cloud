@@ -39,9 +39,6 @@ final class WalletBalanceResource extends JsonResource
         $balance = $this->resource;
 
         return [
-            // Null until the customer has actually transacted in this
-            // currency. Reading a balance does not open a wallet.
-            'wallet_id' => $balance->walletId,
             'currency' => $balance->currency(),
             'balance' => $this->money($balance->balance),
             'updated_at' => $balance->updatedAt?->toIso8601String(),

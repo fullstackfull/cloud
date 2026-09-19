@@ -4,15 +4,16 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Queue;
 
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
@@ -23,6 +24,8 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
@@ -56,15 +59,41 @@ abstract class WorkerHarness extends TestCase
     /** Reserved for these suites, and emptied before every test in them. */
     protected const int REDIS_DATABASE = 15;
 
-    /**
-     * Rows written for real, newest last, deleted in reverse in the teardown.
-     *
-     * @var list<Model>
-     */
-    private array $committed = [];
-
     /** Where the fake hypervisor keeps its fleet for this test. */
     private string $fleetPath = '';
+
+    /**
+     * Every controlled simulator that has to be the same simulator in two
+     * processes, as `config key => environment variable`.
+     *
+     * Compute and the registrar were here first, one field each, because they
+     * were the only two families that could remember anything across a process
+     * boundary at all. The other five could not, which is why every proof in
+     * this directory used to be about compute or a domain name. One list
+     * rather than seven fields: a family added to
+     * {@see ControlledSimulationStore}
+     * and not added here is a family whose worker starts with an empty
+     * provider, and the test that noticed would fail somewhere far away from
+     * the reason.
+     *
+     * @var array<string, string>
+     */
+    private const array SIMULATION_STATE = [
+        'compute.fake.state_path' => 'COMPUTE_FAKE_STATE_PATH',
+        'dedicated.fake.state_path' => 'DEDICATED_FAKE_STATE_PATH',
+        'hosting.fake.state_path' => 'HOSTING_FAKE_STATE_PATH',
+        'backups.fake.state_path' => 'BACKUPS_FAKE_STATE_PATH',
+        'dns.fake.state_path' => 'DNS_FAKE_STATE_PATH',
+        'dns.fake_reverse.state_path' => 'DNS_FAKE_REVERSE_STATE_PATH',
+        'domains.fake.state_path' => 'DOMAINS_FAKE_STATE_PATH',
+    ];
+
+    /**
+     * The file each of those families is using for this test.
+     *
+     * @var array<string, string> config key => path
+     */
+    private array $simulationPaths = [];
 
     /**
      * The fleet file, for a subclass that starts a process of its own.
@@ -122,27 +151,177 @@ abstract class WorkerHarness extends TestCase
         // inline, which is the whole point.
         config()->set('queue.default', 'redis');
 
-        $this->fleetPath = sys_get_temp_dir().'/lynomia-fake-fleet-'.getmypid().'-'.uniqid().'.state';
-        config()->set('compute.fake.state_path', $this->fleetPath);
+        /*
+         * One directory per test, so that two tests running one after another
+         * cannot see each other's providers and a run that died without its
+         * teardown cannot seed the next one.
+         */
+        $root = sys_get_temp_dir().'/lynomia-simulation-'.getmypid().'-'.uniqid();
+
+        foreach (array_keys(self::SIMULATION_STATE) as $key) {
+            $path = $root.'/'.str_replace('.', '-', $key).'.state';
+
+            $this->simulationPaths[$key] = $path;
+
+            config()->set($key, $path);
+        }
+
+        $this->fleetPath = $this->simulationPaths['compute.fake.state_path'];
+    }
+
+    /**
+     * The four conditions under which emptying a whole schema is acceptable.
+     *
+     * `truncate <every table> cascade` is the most destructive statement in
+     * this repository, and it is run automatically after every test in two
+     * directories. What makes that safe is not that the code is careful; it is
+     * that it refuses to run anywhere but against a database whose only
+     * purpose is to be thrown away.
+     *
+     * All four must hold, and the reason each one is not enough alone:
+     *
+     *  - **The application environment is `testing`.** Necessary, and nowhere
+     *    near sufficient: `APP_ENV` is one environment variable, and a
+     *    developer running `APP_ENV=testing` against a populated database is
+     *    exactly the accident this guards.
+     *  - **The connection is the harness's own.** A test that changed the
+     *    default connection — which {@see outsideTheTransaction()} does, and
+     *    the concurrency tests do too — must not be able to point this at
+     *    whatever was left set.
+     *  - **The database is the configured test database.** `phpunit.xml` names
+     *    it, so this compares against the same source PHPUnit reads rather
+     *    than against a pattern this class invented.
+     *  - **The name says it is a test database.** The one that distrusts the
+     *    configuration rather than the connection: `.env.testing` is a file
+     *    people copy, and a copy that was never repointed satisfies all three
+     *    conditions above while naming a database full of real rows. The
+     *    browser suite already insists on this for its own database before it
+     *    seeds fixed fixtures.
+     *
+     * A refusal is a `RuntimeException` and not a skip. A harness that cannot
+     * establish where it is must fail loudly in the one place the cause is
+     * visible; a quiet skip would leave the leak this teardown exists to
+     * prevent and report nothing.
+     */
+    private function refuseToTruncateAnythingButATestDatabase(ConnectionInterface $connection): void
+    {
+        if (! app()->environment('testing')) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty a database outside the testing environment (it is "%s").',
+                (string) app()->environment(),
+            ));
+        }
+
+        if ($connection->getName() !== self::CONNECTION) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty anything but its own connection (it was handed "%s").',
+                (string) $connection->getName(),
+            ));
+        }
+
+        $target = (string) $connection->getDatabaseName();
+        $expected = (string) config('database.connections.pgsql.database');
+
+        if ($target === '' || $target !== $expected) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty "%s": the configured test database is "%s".',
+                $target,
+                $expected,
+            ));
+        }
+
+        /*
+         * And the name has to say what the database is for.
+         *
+         * A different question from the one above, which compares the
+         * connection against the test configuration: this one distrusts the
+         * test configuration itself. `.env.testing` is a file somebody copies,
+         * and a copy that was never repointed names a database full of real
+         * rows — at which point conditions one to three all hold and the
+         * schema is emptied anyway.
+         *
+         * The same idiom the browser suite already uses, which insists its own
+         * database is named for what it is before it seeds fixed fixtures into
+         * it.
+         */
+        if (! str_contains(strtolower($target), 'test')) {
+            throw new RuntimeException(sprintf(
+                'The worker harness refuses to empty "%s": a database it may empty has to be named as a test database.',
+                $target,
+            ));
+        }
+    }
+
+    /**
+     * Leaves the committed database as empty as an untouched one.
+     *
+     * The first version of this teardown remembered every model the test
+     * created and deleted them in reverse. That can only ever clean up what
+     * *this process* wrote, and the entire point of the harness is that a
+     * second process does the work: a worker running
+     * `ProvisionOrderedService` writes a provisioning job, a virtual machine,
+     * an assignment, an operation and an audit trail that no `created` event
+     * in this process ever announced. Bulk inserts have the same problem —
+     * `SeedSubnetAddresses` writes addresses with `insertOrIgnore`, which goes
+     * round Eloquent entirely.
+     *
+     * Those rows are not merely untidy. They are committed, so they outlive
+     * the test, and RefreshDatabase's transaction hides them from nobody: the
+     * next test in the run that asks a global question — `assertSame(0,
+     * ProvisioningJob::query()->count())`, or `->sole()` — sees this test's
+     * estate and fails for a reason that has nothing to do with what it is
+     * testing. That is how a golden path in this directory came to fail
+     * twenty-nine assertions in `tests/Feature/Vps`.
+     *
+     * So the harness does not try to remember. It owns the committed database
+     * for the length of one test and hands it back empty. `migrations` is the
+     * one table left alone, because emptying it would tell the next
+     * `migrate` that this schema does not exist.
+     */
+    private function emptyTheCommittedDatabase(): void
+    {
+        $connection = DB::connection(self::CONNECTION);
+
+        $this->refuseToTruncateAnythingButATestDatabase($connection);
+
+        /** @var list<object{tablename: string}> $rows */
+        $rows = $connection->select(
+            "select tablename from pg_tables where schemaname = current_schema() and tablename <> 'migrations'",
+        );
+
+        if ($rows === []) {
+            return;
+        }
+
+        /*
+         * Not wrapped in a try/catch. A teardown that cannot empty the
+         * database has to say so here, where the cause is still on screen —
+         * swallowing it would put the leak back and move the failure to
+         * whichever unrelated test asked the next global question.
+         */
+        $connection->statement(
+            'truncate '.implode(', ', array_map(
+                static fn (object $row): string => '"'.str_replace('"', '""', $row->tablename).'"',
+                $rows,
+            )).' cascade',
+        );
     }
 
     protected function tearDown(): void
     {
-        foreach (array_reverse($this->committed) as $model) {
-            try {
-                $model->newQueryWithoutScopes()->whereKey($model->getKey())->forceDelete();
-            } catch (\Throwable) {
-                // A row a cascade already took with its parent. The teardown's
-                // job is to leave the database clean, not to be right about
-                // the order it managed it in.
+        $this->emptyTheCommittedDatabase();
+
+        foreach ($this->simulationPaths as $path) {
+            if (is_file($path)) {
+                @unlink($path);
             }
         }
 
-        $this->committed = [];
-
-        if ($this->fleetPath !== '' && is_file($this->fleetPath)) {
-            @unlink($this->fleetPath);
+        if ($this->simulationPaths !== []) {
+            @rmdir(dirname((string) reset($this->simulationPaths)));
         }
+
+        $this->simulationPaths = [];
 
         try {
             Redis::connection()->flushdb();
@@ -165,8 +344,6 @@ abstract class WorkerHarness extends TestCase
     protected function committed(Model $model): Model
     {
         $model->setConnection(self::CONNECTION)->save();
-
-        $this->committed[] = $model;
 
         return $model;
     }
@@ -193,19 +370,9 @@ abstract class WorkerHarness extends TestCase
 
         DB::setDefaultConnection(self::CONNECTION);
 
-        Event::listen('eloquent.created: *', function (string $event, array $payload): void {
-            foreach ($payload as $model) {
-                if ($model instanceof Model) {
-                    $this->committed[] = $model;
-                }
-            }
-        });
-
         try {
             return $build();
         } finally {
-            Event::forget('eloquent.created: *');
-
             DB::setDefaultConnection($previous);
         }
     }
@@ -312,13 +479,78 @@ abstract class WorkerHarness extends TestCase
                  * absence of a mail server rather than the queue.
                  */
                 'MAIL_MAILER' => 'array',
-                // The same fleet, so the worker's hypervisor has heard of the
-                // machines this test created.
-                'COMPUTE_FAKE_STATE_PATH' => $this->fleetPath,
+                // The same providers, so the worker's hypervisor has heard of
+                // the machines this test created — and its panel of the
+                // accounts, its datastore of the archives, its zone of the
+                // records, and its registrar of the names.
+                ...$this->simulationEnvironment(),
             ],
             null,
             $timeoutSeconds,
         );
+    }
+
+    /**
+     * Runs an artisan command in its own process, with this test's database,
+     * queue and controlled providers.
+     *
+     * The same environment the worker gets, because a scheduled command is the
+     * other kind of process a workflow crosses: the poller that confirms what
+     * a worker built, the reconciler that compares the platform with a panel.
+     * A command run without it gets providers that have never heard of
+     * anything this test arranged.
+     */
+    protected function runArtisan(string $command, int $timeoutSeconds = 120): Process
+    {
+        $process = new Process(
+            [PHP_BINARY, 'artisan', $command, '--no-interaction'],
+            base_path(),
+            [
+                'APP_ENV' => 'testing',
+                'QUEUE_CONNECTION' => 'redis',
+                'REDIS_DB' => (string) self::REDIS_DATABASE,
+                'DB_DATABASE' => config('database.connections.pgsql.database'),
+                'DB_PASSWORD' => config('database.connections.pgsql.password'),
+                'MAIL_MAILER' => 'array',
+                ...$this->simulationEnvironment(),
+            ],
+            null,
+            $timeoutSeconds,
+        );
+
+        $process->run();
+
+        $this->assertTrue(
+            $process->isSuccessful(),
+            'artisan '.$command.' failed: '.$process->getErrorOutput().$process->getOutput(),
+        );
+
+        return $process;
+    }
+
+    /**
+     * The state paths, as environment variables for another process.
+     *
+     * @return array<string, string>
+     */
+    protected function simulationEnvironment(): array
+    {
+        $environment = [];
+
+        foreach (self::SIMULATION_STATE as $key => $variable) {
+            $environment[$variable] = $this->simulationPaths[$key] ?? '';
+        }
+
+        return $environment;
+    }
+
+    /**
+     * The file one family is using, for a test that wants to assert on it or
+     * hand it to a process of its own.
+     */
+    protected function simulationPath(string $configKey): string
+    {
+        return $this->simulationPaths[$configKey] ?? '';
     }
 
     /**
@@ -342,6 +574,11 @@ abstract class WorkerHarness extends TestCase
             'cluster_id' => $cluster->id,
             'node_id' => $node->id,
         ]));
+
+        // An installable image staged on the cluster. A create job with no
+        // image is refused permanently — a machine built from nothing boots to
+        // a firmware prompt — so the fixture carries one, as a purchase does.
+        $template = $this->committed(VmTemplate::factory()->make(['cluster_id' => $cluster->id]));
 
         $pool = $this->committed(IpPool::factory()->make(['is_active' => true, 'ip_version' => 4]));
 
@@ -386,6 +623,10 @@ abstract class WorkerHarness extends TestCase
                 'memory_mib' => 2048,
                 'disk_gib' => 20,
                 'hostname' => $hostname ?? 'worker-test-'.Str::lower(Str::random(6)),
+                'template_id' => (string) $template->getKey(),
+                'template_reference' => (string) $template->provider_reference,
+                'os_family' => $template->os_family->value,
+                'architecture' => $template->architecture->value,
             ],
         ]);
 

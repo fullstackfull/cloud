@@ -69,7 +69,7 @@ final class HostingController
 
         /** @var LengthAwarePaginator<int, HostingAccount> $accounts */
         $accounts = CustomerHostingAccounts::of($this->acting->get())
-            ->with('package')
+            ->with(['package.plan', 'node'])
             ->when($status !== null, fn ($query) => $query->where('status', $status->value))
             // The ULID tie-breaks two accounts created in the same
             // millisecond, so paging is stable and a row cannot appear on two
@@ -150,7 +150,7 @@ final class HostingController
     {
         /** @var HostingAccount $account */
         $account = CustomerHostingAccounts::of($this->acting->get())
-            ->with('package')
+            ->with(['package.plan', 'node'])
             ->whereKey($id)
             ->firstOrFail();
 

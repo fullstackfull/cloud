@@ -19,6 +19,7 @@ use Lynomia\Modules\Dedicated\Http\Resources\ReinstallRequestResource;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Dedicated\Infrastructure\Queries\LatestServerReinstalls;
+use Lynomia\Modules\Dedicated\Infrastructure\Queries\LiveServerWork;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 
 /**
@@ -91,12 +92,14 @@ final class DedicatedServerController
         $reinstalls = LatestServerReinstalls::forServers(
             $servers->getCollection()->map(static fn (DedicatedServer $server): string => (string) $server->getKey())->all(),
         );
+        $live = LiveServerWork::forServers($servers->getCollection()->all());
 
         return response()->json([
             'data' => $servers->getCollection()
                 ->map(static fn (DedicatedServer $server): DedicatedServerResource => new DedicatedServerResource(
                     $server,
                     $reinstalls[(string) $server->getKey()] ?? null,
+                    $live[(string) $server->getKey()] ?? null,
                 ))
                 ->all(),
             'meta' => [
@@ -133,6 +136,7 @@ final class DedicatedServerController
                 'service',
             ]),
             LatestServerReinstalls::forServers([$serverId])[$serverId] ?? null,
+            LiveServerWork::forServers([$found])[$serverId] ?? null,
         ))->response();
     }
 
@@ -153,9 +157,14 @@ final class DedicatedServerController
         $found = $this->serverForActingCustomer($server);
         $action = $request->action();
 
-        $operation = $this->changePower->execute($found, $action);
+        $operation = $this->changePower->execute(
+            $found,
+            $action,
+            clientKey: $request->idempotencyKey(),
+            requestedByUserId: (string) $request->user()?->getAuthIdentifier(),
+        );
 
-        return (new DedicatedServerResource($found, LatestServerReinstalls::forServers([(string) $found->getKey()])[(string) $found->getKey()] ?? null))
+        return (new DedicatedServerResource($found, LatestServerReinstalls::forServers([(string) $found->getKey()])[(string) $found->getKey()] ?? null, LiveServerWork::forServers([$found])[(string) $found->getKey()] ?? null))
             ->additional([
                 'meta' => [
                     'action' => $action->value,
@@ -206,6 +215,7 @@ final class DedicatedServerController
             confirmation: $request->confirmation(),
             idempotencyKey: $request->idempotencyKey(),
             profile: $profile,
+            requestedByUserId: $request->user()?->getKey(),
         );
 
         return (new ReinstallRequestResource($job))

@@ -102,7 +102,13 @@ final class CreateVpsHandlerTest extends TestCase
                 'memory_mib' => 4096,
                 'disk_gib' => 40,
                 'hostname' => 'web-01',
+                // The image the purchase resolved. Every create job carries
+                // one: a build with no image installs nothing, and the
+                // handler now refuses it permanently rather than handing a
+                // customer an empty disk.
+                'template_reference' => 'local:import/debian-13-genericcloud-amd64.qcow2',
                 'os_family' => 'debian',
+                'architecture' => 'x86_64',
                 'ssh_keys' => ['ssh-ed25519 AAAAC3NzaC1lZDI1NTE5 customer@example.com'],
             ],
         ], $overrides));

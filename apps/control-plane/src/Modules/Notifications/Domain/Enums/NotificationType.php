@@ -37,6 +37,17 @@ enum NotificationType: string
     case SuspensionWarning = 'billing.suspension_warning';
     case CancellationScheduled = 'billing.cancellation_scheduled';
 
+    /*
+     * The account's country or currency, decided. Applied says from when
+     * new invoices carry the new currency and tax and that old ones do not
+     * change; rejected carries the operator's note; needs-review says the
+     * change was approved and then held because something on the account
+     * changed, and asks nothing of the customer but patience.
+     */
+    case CountryCurrencyChangeApplied = 'billing.country_currency_change_applied';
+    case CountryCurrencyChangeRejected = 'billing.country_currency_change_rejected';
+    case CountryCurrencyChangeNeedsReview = 'billing.country_currency_change_needs_review';
+
     // ----------------------------------------------------------------- service
     case ServiceProvisioning = 'service.provisioning';
     case ServiceReady = 'service.ready';
@@ -76,6 +87,15 @@ enum NotificationType: string
     case RestoreCompleted = 'service.restore_completed';
     case RestoreFailed = 'service.restore_failed';
 
+    /*
+     * Files put back from a backup. Three outcomes, and the third is the
+     * one that must not be dressed as either of the others: a restore the
+     * provider never answered for may or may not have written the files.
+     */
+    case FileRestoreCompleted = 'service.file_restore_completed';
+    case FileRestoreFailed = 'service.file_restore_failed';
+    case FileRestoreNeedsReview = 'service.file_restore_needs_review';
+
     // ------------------------------------------------------------- operational
     /*
      * Domains.
@@ -92,6 +112,16 @@ enum NotificationType: string
     case DomainNeedsReview = 'service.domain_needs_review';
     case DomainRedeemed = 'service.domain_redeemed';
     case DomainRedemptionFailed = 'service.domain_redemption_failed';
+
+    /*
+     * A push of a staging copy over production. Completed says the live
+     * site is now the copy; failed says production is as it was; on hold
+     * says the toolkit never answered and production may be half-written,
+     * and asks the customer not to push again.
+     */
+    case WordPressPushCompleted = 'service.wordpress_push_completed';
+    case WordPressPushFailed = 'service.wordpress_push_failed';
+    case WordPressPushNeedsReview = 'service.wordpress_push_needs_review';
 
     case TicketOpened = 'service.ticket_opened';
     case TicketReplied = 'service.ticket_replied';
@@ -118,7 +148,10 @@ enum NotificationType: string
             self::RenewalFailed,
             self::GracePeriodStarted,
             self::SuspensionWarning,
-            self::CancellationScheduled => NotificationCategory::Billing,
+            self::CancellationScheduled,
+            self::CountryCurrencyChangeApplied,
+            self::CountryCurrencyChangeRejected,
+            self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
 
             self::IncidentAffectingService,
             self::MaintenanceScheduled => NotificationCategory::Operational,
@@ -145,6 +178,7 @@ enum NotificationType: string
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
             self::RenewalUpcoming, self::RenewalFailed,
             self::GracePeriodStarted, self::SuspensionWarning, self::CancellationScheduled,
+            self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,
             self::ServiceEnded, self::ServiceTerminated, self::DataRetentionEnding,
@@ -178,6 +212,10 @@ enum NotificationType: string
             self::ReinstallFailed,
             self::BackupFailed,
             self::RestoreFailed,
+            self::FileRestoreFailed,
+            self::FileRestoreNeedsReview,
+            self::WordPressPushFailed,
+            self::WordPressPushNeedsReview,
             self::DomainRedemptionFailed,
             self::IncidentAffectingService => true,
             default => false,

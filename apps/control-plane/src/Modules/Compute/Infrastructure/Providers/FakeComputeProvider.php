@@ -20,6 +20,7 @@ use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
 use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Services\FakeComputeProviderGuard;
+use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 
 /**
  * A hypervisor that builds nothing and reaches no network.
@@ -102,11 +103,13 @@ final class FakeComputeProvider implements ComputeProvider
     private int $taskDelaySeconds;
 
     /**
-     * A file the fleet is kept in, or null to keep it in memory.
+     * Where the fleet is kept when more than one process needs to see it, or
+     * null to keep it in memory.
      *
      * @see config('compute.fake.state_path')
+     * @see ControlledSimulationStore
      */
-    private ?string $statePath;
+    private readonly ?ControlledSimulationStore $store;
 
     public function __construct()
     {
@@ -121,9 +124,10 @@ final class FakeComputeProvider implements ComputeProvider
         // unreachable, quietly disabling the behaviour this exists to model.
         $this->taskDelaySeconds = max(0, (int) config('compute.fake.task_delay_seconds', 0));
 
-        $path = config('compute.fake.state_path');
-
-        $this->statePath = is_string($path) && $path !== '' ? $path : null;
+        $this->store = ControlledSimulationStore::fromConfig('compute.fake.state_path', [
+            RemoteVmState::class,
+            PowerState::class,
+        ]);
     }
 
     public function name(): string
@@ -164,7 +168,19 @@ final class FakeComputeProvider implements ComputeProvider
             memoryMib: $request->memoryMib,
             diskGib: $request->diskGib,
             uptimeSeconds: $request->startAfterCreate ? 0 : null,
-            raw: ['fake' => true, 'storage' => $request->storageName],
+            /*
+             * The image is recorded under the same key the reinstall uses, so
+             * a test can assert the disk came from the template that was asked
+             * for rather than that a call was made. Without it, "this provider
+             * can install from a staged image" was a capability nothing could
+             * observe — the request carried a template reference and the
+             * machine that came back had forgotten it.
+             */
+            raw: [
+                'fake' => true,
+                'storage' => $request->storageName,
+                'installed_template' => $request->templateReference,
+            ],
         );
 
         unset($this->destroyed[$this->tombstoneKey($request->nodeName, $providerId)]);
@@ -632,58 +648,41 @@ final class FakeComputeProvider implements ComputeProvider
      * set, the file is the truth and this instance's memory is a cache of it
      * that lives for exactly one call.
      */
+    /**
+     * The fleet as the last process left it, when there is a file to read from.
+     *
+     * Does nothing at all unless a state path is configured, which is the
+     * normal case: a fake that went to disk on every call in every test would
+     * be slower and would let one test see another's machines. When a path is
+     * set, the file is the truth and this instance's memory is a cache of it
+     * that lives for exactly one call.
+     */
     private function readSharedFleet(): void
     {
-        if ($this->statePath === null || ! is_file($this->statePath)) {
+        $state = $this->store?->read();
+
+        if ($state === null) {
             return;
         }
 
-        $contents = @file_get_contents($this->statePath);
+        /** @var array<string, array<string, RemoteVmState>> $machines */
+        $machines = $state['machines'] ?? [];
+        /** @var array<string, true> $destroyed */
+        $destroyed = $state['destroyed'] ?? [];
 
-        if ($contents === false || $contents === '') {
-            return;
-        }
-
-        /** @var array{machines?: array<string, array<string, RemoteVmState>>, destroyed?: array<string, true>}|false $state */
-        $state = @unserialize($contents, ['allowed_classes' => true]);
-
-        if (! is_array($state)) {
-            return;
-        }
-
-        $this->machines = $state['machines'] ?? [];
-        $this->destroyed = $state['destroyed'] ?? [];
+        $this->machines = $machines;
+        $this->destroyed = $destroyed;
     }
 
     /**
      * Publishes the fleet for other processes.
-     *
-     * Written to a neighbouring file and renamed, so a worker reading while
-     * this writes sees either the old fleet or the new one and never half of
-     * either.
      */
     private function writeSharedFleet(): void
     {
-        if ($this->statePath === null) {
-            return;
-        }
-
-        $directory = dirname($this->statePath);
-
-        if (! is_dir($directory)) {
-            @mkdir($directory, 0o755, recursive: true);
-        }
-
-        $temporary = $this->statePath.'.'.getmypid().'.tmp';
-
-        if (@file_put_contents($temporary, serialize([
+        $this->store?->write([
             'machines' => $this->machines,
             'destroyed' => $this->destroyed,
-        ])) === false) {
-            return;
-        }
-
-        @rename($temporary, $this->statePath);
+        ]);
     }
 
     private function noSuchMachine(string $nodeName, string $providerId, string $operation): ComputeProviderException

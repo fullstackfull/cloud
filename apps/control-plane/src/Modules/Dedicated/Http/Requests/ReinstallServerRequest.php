@@ -69,8 +69,8 @@ final class ReinstallServerRequest extends FormRequest
     public function messages(): array
     {
         return $this->idempotencyKeyMessages() + [
-            'confirm_serial.required' => 'Reinstalling erases every disk in this machine. Send confirm_serial with the server\'s serial number to confirm.',
-            'os_profile.exists' => 'That operating system is not available for installation.',
+            'confirm_serial.required' => __('validation.requests.dedicated.reinstall_confirmation_required'),
+            'os_profile.exists' => __('validation.requests.dedicated.os_profile_unavailable'),
         ];
     }
 

@@ -9,15 +9,20 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Session\TokenMismatchException;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 use Lynomia\Http\Middleware\AssignRequestId;
+use Lynomia\Http\Middleware\EnsureEmailIsVerified;
 use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Http\Middleware\SecurityHeaders;
+use Lynomia\Http\Middleware\SetRequestLocale;
 use Lynomia\Http\Responses\ApiError;
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
@@ -84,6 +89,7 @@ return Application::configure(basePath: dirname(__DIR__))
          */
         $middleware->prepend([
             AssignRequestId::class,
+            SetRequestLocale::class,
             SecurityHeaders::class,
         ]);
 
@@ -93,6 +99,14 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'permission' => PermissionMiddleware::class,
+
+            /*
+             * Ours, not the framework's. Laravel's version aborts with a bare
+             * 403, which is indistinguishable from a permission refusal by the
+             * time a client sees it; this one raises a coded exception so the
+             * portal can show the verification step instead of a dead end.
+             */
+            'verified' => EnsureEmailIsVerified::class,
             'role' => RoleMiddleware::class,
 
             // Resolves the one customer account a request acts for. Every
@@ -116,6 +130,28 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         /*
+         * The one exception that is answered with a page rather than a payload.
+         *
+         * A verification link that is expired or tampered with fails at the
+         * `signed` middleware, before any controller runs. For an API client
+         * that is a 403 and correct. For a person who clicked a link in their
+         * mail three days late it is a JSON blob with no way forward, on the
+         * single most important link the platform sends — so a browser is
+         * handed back to the portal, which offers them a new link.
+         *
+         * Only that one route, and only when the caller did not ask for JSON.
+         */
+        $exceptions->render(static function (InvalidSignatureException $e, Request $request): ?RedirectResponse {
+            if ($request->expectsJson() || ! $request->routeIs('api.v1.verification.verify')) {
+                return null;
+            }
+
+            return redirect()->to(
+                rtrim((string) config('app.frontend_url'), '/').'/verify-email?status=expired'
+            );
+        });
+
+        /*
          * One JSON error shape for the whole API.
          *
          * Machine-readable codes let the SPA and customer integrations branch
@@ -128,23 +164,30 @@ return Application::configure(basePath: dirname(__DIR__))
             }
 
             $error = match (true) {
+                /*
+                 * The code is the exception's; the sentence is the catalogue's,
+                 * in the language the request asked for. The exception's own
+                 * message is the engineer's and is only ever sent for a code
+                 * the customer catalogue has no entry for — which the parity
+                 * test keeps to the operator modules.
+                 */
                 $e instanceof DomainException => ApiError::make(
                     $e->errorCode(),
-                    $e->getMessage(),
+                    ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage()),
                     $e->httpStatus(),
                     $e->context(),
                 ),
 
                 $e instanceof ValidationException => ApiError::make(
                     'validation.failed',
-                    'The submitted data is invalid.',
+                    ErrorCatalogue::message('validation.failed', [], 'The submitted data is invalid.'),
                     422,
                     ['fields' => $e->errors()],
                 ),
 
                 $e instanceof AuthenticationException => ApiError::make(
                     'auth.unauthenticated',
-                    'Authentication is required.',
+                    ErrorCatalogue::message('auth.unauthenticated', [], 'Authentication is required.'),
                     401,
                 ),
 
@@ -171,13 +214,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof AccessDeniedHttpException,
                 $e instanceof HttpExceptionInterface && $e->getStatusCode() === 403 => ApiError::make(
                     'auth.forbidden',
-                    'You are not permitted to perform this action.',
+                    ErrorCatalogue::message('auth.forbidden', [], 'You are not permitted to perform this action.'),
                     403,
                 ),
 
                 $e instanceof TokenMismatchException => ApiError::make(
                     'auth.csrf_token_mismatch',
-                    'The CSRF token is missing or stale. Refresh and try again.',
+                    ErrorCatalogue::message('auth.csrf_token_mismatch', [], 'The CSRF token is missing or stale. Refresh and try again.'),
                     419,
                 ),
 
@@ -192,13 +235,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof ModelNotFoundException,
                 $e instanceof NotFoundHttpException => ApiError::make(
                     'resource.not_found',
-                    'The requested resource does not exist.',
+                    ErrorCatalogue::message('resource.not_found', [], 'The requested resource does not exist.'),
                     404,
                 ),
 
                 $e instanceof HttpExceptionInterface => ApiError::make(
                     'http.'.$e->getStatusCode(),
-                    $e->getMessage() ?: 'Request failed.',
+                    ErrorCatalogue::message('http.'.$e->getStatusCode(), [], $e->getMessage() ?: 'Request failed.'),
                     $e->getStatusCode(),
                 ),
 
@@ -215,7 +258,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'server.error',
                 app()->hasDebugModeEnabled()
                     ? $e->getMessage()
-                    : 'An unexpected error occurred. Quote the request id when contacting support.',
+                    : ErrorCatalogue::message('server.error', [], 'An unexpected error occurred. Quote the request id when contacting support.'),
                 500,
             )->toResponse($request);
         });

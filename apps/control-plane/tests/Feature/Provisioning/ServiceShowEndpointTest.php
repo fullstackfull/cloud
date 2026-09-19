@@ -174,8 +174,17 @@ final class ServiceShowEndpointTest extends ServiceApiTestCase
         // The whole key set, so that the working columns the scoped query hangs
         // on the model cannot arrive under a name this list did not predict.
         $this->assertSame([
-            'id', 'kind', 'label', 'state', 'is_usable', 'resources',
-            'plan_id', 'order_id', 'order_item_id', 'subscription_id',
+            // `identity` arrived in Wave 3: the name the customer knows this
+            // by, so a resource page can be titled with the hostname rather
+            // than with a catalogue label shared by every customer on the
+            // plan. A resource name, not an operational fact.
+            //
+            // `resource` arrived with it: the family and the id of the row
+            // that fulfils the service, because a service's own id is not the
+            // machine's and a client building a link from it would point at
+            // nothing. A handle and not a path — routes belong to the portal.
+            'id', 'kind', 'label', 'identity', 'resource', 'state', 'is_usable', 'resources',
+            'plan_id', 'order_id', 'subscription_id',
             'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
             'terminated_at', 'created_at',
         ], array_keys($document));

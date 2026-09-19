@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Lynomia\Modules\Backups\Domain\DTOs\RemoteBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
@@ -36,6 +37,18 @@ use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
  *    offered to a customer as their backup, and must certainly not be deleted
  *    by a sweep that does not know what it is.
  *
+ * And one thing a listing tells the platform that is not a disagreement at
+ * all: the verification verdict. `listBackups()` reports, per archive,
+ * whether the datastore has read it back — cleanly, unsuccessfully, or not
+ * yet. Proxmox Backup Server verifies on its own schedule and cannot be
+ * asked to start one, so for the production adapter this sweep is the only
+ * way the verdict ever reaches the platform. It is adopted onto the row's
+ * `verified` column and nowhere else: `BackupState::Verified` means this
+ * platform asked and a task it started reported OK, which is a different and
+ * stronger claim than reading somebody else's answer off a listing. A row
+ * whose archive PBS verified stays `Succeeded` — still available, still
+ * restorable — and carries `verified = true`.
+ *
  * Read-only towards the provider. Nothing here deletes anything.
  */
 final readonly class ReconcileBackupInventory
@@ -48,13 +61,14 @@ final readonly class ReconcileBackupInventory
     ) {}
 
     /**
-     * @return array{checked: int, drifts: int, settled: int}
+     * @return array{checked: int, drifts: int, settled: int, verdicts: int}
      */
     public function execute(): array
     {
         $checked = 0;
         $drifts = 0;
         $settled = 0;
+        $verdicts = 0;
 
         foreach ($this->machinesWithBackups() as $machine) {
             $cluster = $machine->cluster()->first();
@@ -93,7 +107,7 @@ final readonly class ReconcileBackupInventory
                     continue;
                 }
 
-                $present = array_map(static fn (object $archive): string => (string) $archive->archiveId, $listed);
+                $present = array_map(static fn (RemoteBackup $archive): string => $archive->archiveId, $listed);
                 $checked++;
 
                 foreach ($rows as $row) {
@@ -102,6 +116,10 @@ final readonly class ReconcileBackupInventory
                     }
 
                     $isPresent = in_array((string) $row->archive_id, $present, strict: true);
+
+                    if ($this->adoptVerdict($row, $this->listedArchive($listed, $row))) {
+                        $verdicts++;
+                    }
 
                     if ($this->settle($row, $isPresent)) {
                         $settled++;
@@ -118,7 +136,58 @@ final readonly class ReconcileBackupInventory
             }
         }
 
-        return ['checked' => $checked, 'drifts' => $drifts, 'settled' => $settled];
+        return ['checked' => $checked, 'drifts' => $drifts, 'settled' => $settled, 'verdicts' => $verdicts];
+    }
+
+    /**
+     * The archive this row points at, if the datastore listed it.
+     *
+     * @param  list<RemoteBackup>  $listed
+     */
+    private function listedArchive(array $listed, Backup $row): ?RemoteBackup
+    {
+        foreach ($listed as $archive) {
+            if ($archive->archiveId === (string) $row->archive_id) {
+                return $archive;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Take the datastore's verification verdict onto the row.
+     *
+     * Three values and three different meanings, and the third is why the
+     * column is nullable rather than false-by-default:
+     *
+     *  - **true** — read back cleanly. Recorded, with the time it was
+     *    observed, which is the first moment this platform knew;
+     *  - **false** — the datastore read it and it did not come back. Recorded
+     *    as false, which is what `backup_unverified` already alerts on. The
+     *    row is not failed and not deleted: a verification failure is a fact
+     *    about this archive, and deciding what to do about it — take another,
+     *    tell the customer, look at the datastore — is a person's call, not a
+     *    sweep's;
+     *  - **null** — nobody has checked yet. Nothing is recorded, because
+     *    writing false here would report an unchecked archive as a broken
+     *    one, which is the single most misleading thing this sweep could do.
+     *
+     * An unchanged verdict is not rewritten, so `verified_at` keeps meaning
+     * "when this was first known" across every later sweep.
+     */
+    private function adoptVerdict(Backup $row, ?RemoteBackup $archive): bool
+    {
+        if ($archive?->verified === null || $row->verified === $archive->verified) {
+            return false;
+        }
+
+        $row->forceFill([
+            'verified' => $archive->verified,
+            'verified_at' => now(),
+        ])->save();
+
+        return true;
     }
 
     /**

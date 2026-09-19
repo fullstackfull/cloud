@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Notifications\Infrastructure\Channels;
 
-use Illuminate\Support\Facades\Mail;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Notifications\Application\Actions\RenderNotification;
 use Lynomia\Modules\Notifications\Domain\Contracts\NotificationDeliveryChannel;
+use Lynomia\Modules\Notifications\Domain\Contracts\TransactionalEmailProvider;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
-use Lynomia\Modules\Notifications\Infrastructure\Mail\NotificationMail;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 
 /**
@@ -39,6 +38,9 @@ final readonly class EmailChannel implements NotificationDeliveryChannel
 {
     public function __construct(
         private RenderNotification $renderer,
+        // The transport is a provider like any other: named in the
+        // catalogue, replaceable, and the one place mail leaves through.
+        private TransactionalEmailProvider $transport,
     ) {}
 
     public function channel(): NotificationChannel
@@ -64,9 +66,7 @@ final readonly class EmailChannel implements NotificationDeliveryChannel
 
         $rendered = $this->renderer->execute($notification, $this->localeFor($notification));
 
-        Mail::to($address)->send(new NotificationMail($rendered, $notification->link));
-
-        return $address;
+        return $this->transport->send($address, $rendered, $notification->link);
     }
 
     private function addressFor(Notification $notification): ?string

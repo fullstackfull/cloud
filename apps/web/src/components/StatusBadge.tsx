@@ -1,100 +1,18 @@
-import { useTranslation } from 'react-i18next'
-
 import { Badge } from '@/components/Badge'
+import { safeLabel } from '@/lib/safeLabel'
+import { toneFor } from '@/lib/statusVocabulary'
 
 /**
- * Statuses arrive as the server's own vocabulary and are translated by key.
+ * Statuses arrive as the server's own vocabulary and are translated by key,
+ * toned by the shared vocabulary in `lib/statusVocabulary`.
  *
- * Unrecognised values render verbatim rather than as a blank or a guess: a
- * status the portal has not been taught is still something the customer needs
- * to be able to read back to support.
+ * An unrecognised value reads as "an unrecognised state" rather than as the
+ * value itself. It used to render `status.replace(/_/g, ' ')` — `needs_review`
+ * became "needs review", which looks enough like a label that nobody reports
+ * it, and on an Arabic page it is an English phrase in a badge. The parity
+ * test on the vocabulary makes that path unreachable for every status the API
+ * is known to publish; this is what a customer sees if one ever escapes.
  */
-const TONES: Record<string, 'success' | 'warning' | 'danger' | 'info' | 'neutral'> = {
-  active: 'success',
-  running: 'success',
-  paid: 'success',
-  succeeded: 'success',
-  completed: 'success',
-  on: 'success',
-
-  pending: 'info',
-  provisioning: 'info',
-  open: 'info',
-  pending_payment: 'info',
-  processing: 'info',
-
-  delete_requested: 'warning',
-  deleting: 'warning',
-
-  suspended: 'warning',
-  reactivating: 'info',
-  maintenance: 'warning',
-  past_due: 'warning',
-  quarantined: 'warning',
-  stopped: 'warning',
-  off: 'warning',
-
-  failed: 'danger',
-  cancelled: 'danger',
-  terminated: 'danger',
-  void: 'danger',
-  refused: 'danger',
-  revoked: 'danger',
-  // Credential references. Configured is not proven, so it is informational.
-  missing: 'danger',
-  configured: 'info',
-  untested: 'info',
-  valid: 'success',
-  invalid: 'danger',
-  rotation_due: 'warning',
-  // Licences.
-  expiring: 'warning',
-  not_required: 'neutral',
-  // Connections. Read-only is a success the operator must notice is partial.
-  not_tested: 'neutral',
-  testing: 'info',
-  connected: 'success',
-  connected_read_only: 'warning',
-  auth_failed: 'danger',
-  network_failed: 'danger',
-  tls_failed: 'danger',
-  licence_missing: 'danger',
-  permission_insufficient: 'danger',
-  provider_unavailable: 'danger',
-  // Providers and readiness. Ready is not enabled; only enabled is green.
-  ready: 'info',
-  enabled: 'success',
-  disabled: 'warning',
-  blocked: 'danger',
-  not_ready: 'neutral',
-  ready_for_discovery: 'info',
-  ready_for_configuration: 'info',
-  ready_for_test: 'info',
-  ready_for_production: 'success',
-  // Product readiness. Only a person's declaration is green.
-  ready_for_real_validation: 'info',
-  ready_to_sell: 'success',
-  // Deployments. Indeterminate is the loudest state on the screen.
-  preflight: 'info',
-  planning: 'info',
-  awaiting_approval: 'warning',
-  applying: 'info',
-  verifying: 'info',
-  indeterminate: 'danger',
-  // Machines.
-  registered: 'neutral',
-  discovered: 'info',
-  profiled: 'info',
-  managed: 'success',
-  retired: 'neutral',
-}
-
 export function StatusBadge({ status }: { status: string }) {
-  const { t } = useTranslation()
-
-  return (
-    <Badge tone={TONES[status] ?? 'neutral'}>
-      {t(`status.${status}`, { defaultValue: status.replace(/_/g, ' ') })}
-    </Badge>
-  )
+  return <Badge tone={toneFor(status)}>{safeLabel('status', status)}</Badge>
 }

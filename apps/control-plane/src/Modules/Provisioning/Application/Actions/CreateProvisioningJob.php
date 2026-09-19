@@ -44,6 +44,7 @@ final readonly class CreateProvisioningJob
             'service_id' => $request->serviceId,
             'order_id' => $request->orderId,
             'customer_id' => $request->customerId,
+            'requested_by_user_id' => $request->requestedByUserId,
             'idempotency_key' => $request->idempotencyKey,
             'kind' => $request->kind->value,
             'provider' => $request->provider,

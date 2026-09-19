@@ -30,10 +30,11 @@ final class ReconcileBackupInventory extends Command
         $result = $reconciler->execute();
 
         $this->info(sprintf(
-            'Inventory: %d datastore listings read, %d disagreements recorded, %d deletions confirmed.',
+            'Inventory: %d datastore listings read, %d disagreements recorded, %d deletions confirmed, %d verification verdicts adopted.',
             $result['checked'],
             $result['drifts'],
             $result['settled'],
+            $result['verdicts'],
         ));
 
         return self::SUCCESS;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Catalog\Http\Support;
 
 use Illuminate\Http\Request;
+use Lynomia\Http\Support\RequestLocale as SharedRequestLocale;
 
 /**
  * Which language a response should speak.
@@ -14,31 +15,21 @@ use Illuminate\Http\Request;
  * every translation would have to reimplement this negotiation, and would get
  * it subtly differently.
  *
- * Negotiation is limited to the locales the platform actually serves, so an
- * Accept-Language naming something exotic lands on the platform default rather
- * than on an empty string. Quality values and region subtags are handled by
- * Symfony's own matcher — "ar-KW,ar;q=0.9,en;q=0.5" resolves to "ar".
+ * Negotiation is the platform's, in Lynomia\Http\Support\RequestLocale: the
+ * catalogue was the first surface to speak the customer's language and is no
+ * longer the only one.
  */
 final class RequestLocale
 {
+    /**
+     * Delegates to the platform-wide negotiation, which the SetRequestLocale
+     * middleware has already applied to the application by the time a
+     * catalogue resource renders. Kept as a method so the resources that
+     * built this module keep reading the answer from one named place.
+     */
     public static function for(Request $request): string
     {
-        $fallback = (string) config('app.fallback_locale', 'en');
-
-        /** @var list<string> $supported */
-        $supported = array_values(array_filter((array) config('app.supported_locales', [])));
-
-        if ($supported === [] || ! $request->hasHeader('Accept-Language')) {
-            return $fallback;
-        }
-
-        // getPreferredLanguage returns the first candidate when nothing
-        // matches, so the fallback leads the list and an unservable
-        // Accept-Language degrades to it instead of to whichever locale
-        // happens to be configured first.
-        $candidates = array_values(array_unique([$fallback, ...$supported]));
-
-        return $request->getPreferredLanguage($candidates) ?? $fallback;
+        return SharedRequestLocale::for($request);
     }
 
     /**

@@ -94,6 +94,7 @@ final readonly class ReconcileBackup
                     $state->exitStatus ?? 'the provider reported the task as failed',
                 ),
                 'finished_at' => now(),
+                ...$this->failedVerificationAttributesFor($backup),
             ]);
 
             return $backup->refresh();
@@ -138,6 +139,29 @@ final readonly class ReconcileBackup
         return $backup->state === BackupState::Restoring
             ? BackupState::Succeeded
             : BackupState::Failed;
+    }
+
+    /**
+     * The third value of `verified`, written where it belongs.
+     *
+     * The column carries three answers and they are not interchangeable: null
+     * is "nobody has read this back", true is "it was read back", and false is
+     * "it could not be". A failed verification used to leave null, which
+     * collapsed the worst answer into the neutral one — an archive that was
+     * checked and found unreadable looked exactly like one nobody had got
+     * around to checking.
+     *
+     * Only a verification writes this. A failed backup or a failed restore
+     * says nothing about whether the stored archive is readable, so neither
+     * touches the column.
+     *
+     * @return array<string, mixed>
+     */
+    private function failedVerificationAttributesFor(Backup $backup): array
+    {
+        return $backup->state === BackupState::Verifying
+            ? ['verified' => false, 'verified_at' => null]
+            : [];
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Dns\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Lynomia\Http\Responses\CustomerFailureReason;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsRecord;
 
 /**
@@ -46,7 +47,7 @@ final class DnsRecordResource extends JsonResource
             'is_being_deleted' => $this->state->isBeingDeleted(),
             'needs_attention' => $this->state->needsAttention(),
 
-            'failure_reason' => $this->failure_reason,
+            'failure_reason' => CustomerFailureReason::describe($this->failure_reason, 'dns.record_operation_failed'),
             'last_published_at' => $this->last_published_at?->toIso8601String(),
             'created_at' => $this->created_at->toIso8601String(),
         ];

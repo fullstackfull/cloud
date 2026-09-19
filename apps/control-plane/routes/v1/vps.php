@@ -58,6 +58,17 @@ Route::prefix('vps')->as('vps.')->group(function (): void {
     Route::get('{vm}', [VpsController::class, 'show'])->name('show');
 
     /*
+     * The operating systems this machine may be rebuilt with.
+     *
+     * A read, so it sits on the group's own limiter: it changes nothing, and a
+     * screen opening the reinstall dialogue twice should not be spending the
+     * reinstall allowance. Declared before the action routes for the same
+     * reason `templates` is not a machine id — a literal segment must be
+     * matched before a parameter that would swallow it.
+     */
+    Route::get('{vm}/templates', [VpsController::class, 'templates'])->name('templates');
+
+    /*
      * A tighter limiter than the shared `throttle:api` ceiling the group
      * already applies. Power is safe to repeat with the same idempotency key,
      * but a flood of distinct machine ids — the shape of a stolen token being

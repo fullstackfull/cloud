@@ -14,6 +14,7 @@ use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\SharedHosting\Domain\Enums\SslStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteKind;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
 
 /**
@@ -34,6 +35,8 @@ use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
  * @property ?string $domain_id
  * @property WordPressDomainSource $domain_source
  * @property WordPressSiteState $state
+ * @property WordPressSiteKind $kind
+ * @property ?string $parent_site_id
  * @property bool $dns_ready
  * @property bool $installed
  * @property SslStatus $ssl_status
@@ -72,6 +75,7 @@ final class WordPressSite extends Model
      */
     protected $attributes = [
         'ssl_status' => 'unknown',
+        'kind' => 'production',
     ];
 
     /**
@@ -90,6 +94,7 @@ final class WordPressSite extends Model
         return [
             'domain_source' => WordPressDomainSource::class,
             'state' => WordPressSiteState::class,
+            'kind' => WordPressSiteKind::class,
             'ssl_status' => SslStatus::class,
             'dns_ready' => 'boolean',
             'installed' => 'boolean',
@@ -127,6 +132,16 @@ final class WordPressSite extends Model
     public function domainRecord(): BelongsTo
     {
         return $this->belongsTo(Domain::class, 'domain_id');
+    }
+
+    /**
+     * The production site a staging copy or a clone was made from.
+     *
+     * @return BelongsTo<WordPressSite, $this>
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_site_id');
     }
 
     /**

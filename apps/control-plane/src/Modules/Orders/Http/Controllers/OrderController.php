@@ -11,12 +11,16 @@ use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Actions\CancelOrder;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
+use Lynomia\Modules\Orders\Application\Services\OrderPricing;
 use Lynomia\Modules\Orders\Http\Requests\CancelOrderRequest;
 use Lynomia\Modules\Orders\Http\Requests\ListOrdersRequest;
 use Lynomia\Modules\Orders\Http\Requests\PlaceOrderRequest;
+use Lynomia\Modules\Orders\Http\Requests\QuoteOrderRequest;
+use Lynomia\Modules\Orders\Http\Resources\OrderQuoteResource;
 use Lynomia\Modules\Orders\Http\Resources\OrderResource;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Queries\CustomerOrders;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 use Lynomia\Modules\Shared\Domain\Exceptions\AccountPermissionRequiredException;
 
 /**
@@ -47,6 +51,8 @@ final class OrderController
         private readonly ActingCustomer $acting,
         private readonly PlaceOrder $placeOrder,
         private readonly CancelOrder $cancelOrder,
+        private readonly OrderPricing $pricing,
+        private readonly ServiceIdentities $identities,
     ) {}
 
     /**
@@ -117,14 +123,46 @@ final class OrderController
     /**
      * One order and its lines.
      */
+    /**
+     * Prices a basket without buying it.
+     *
+     * The screen a customer sees before they commit: the plan price, the setup
+     * fee, the coupon, the tax and the total, itemised, and what the same
+     * lines will cost when the period comes round again.
+     *
+     * It runs the same pricing path as store() — the same catalogue lookups,
+     * the same readiness and stock checks, the same engine — and writes
+     * nothing: no order, no held stock, no coupon use. That is why the reply
+     * says `creates_nothing`, and why there is no idempotency key: there is
+     * nothing here that could happen twice.
+     *
+     * `billing.view` and not `billing.pay`: reading a price is not spending.
+     */
+    public function quote(QuoteOrderRequest $request): JsonResponse
+    {
+        $this->authoriseWithinAccount($request, 'billing.view');
+
+        $basket = $request->toCheckoutRequest();
+
+        return (new OrderQuoteResource(
+            $this->pricing->execute($this->acting->get(), $basket),
+            $basket,
+        ))->response();
+    }
+
     public function show(Request $request, string $order): JsonResponse
     {
         $this->authoriseWithinAccount($request, 'billing.view');
 
         $found = CustomerOrders::of($this->acting->get())
-            ->with(['items', 'coupon'])
+            // The invoice and the services as well, so one screen can show the
+            // whole chain: what was ordered, what it was invoiced as, and what
+            // is now running because of it.
+            ->with(['items', 'coupon', 'invoice', 'services'])
             ->whereKey($order)
             ->firstOrFail();
+
+        $this->identities->attach($found->services);
 
         return (new OrderResource($found))->response();
     }

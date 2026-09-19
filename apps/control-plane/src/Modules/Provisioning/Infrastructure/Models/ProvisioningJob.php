@@ -32,6 +32,7 @@ use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
  *
  * @property string $id
  * @property ?string $service_id
+ * @property ?string $requested_by_user_id
  * @property string $idempotency_key
  * @property ProvisioningJobKind $kind
  * @property string $provider

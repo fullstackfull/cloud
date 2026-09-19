@@ -78,7 +78,40 @@ enum Product: string
     public function softwareState(): ProductSoftwareState
     {
         return match ($this) {
-            self::Vps, self::Dedicated, self::SharedHosting, self::WordPress, self::Domains, self::Dns, self::Backups => ProductSoftwareState::Complete,
+            self::Vps, self::Dedicated, self::SharedHosting, self::Dns, self::Backups => ProductSoftwareState::Complete,
+
+            /*
+             * WordPress and Domains were declared complete until the Gap 8
+             * truth-closure patch asked the question this enum is supposed to
+             * answer: is there a production-capable adapter for what the
+             * product requires?
+             *
+             * WordPress requires a `wordpress_installer` that can `install`
+             * and report `version`. `WordPressInstaller` is implemented by
+             * `FakeHostingProvider` and by nothing else; both real panel
+             * adapters implement `HostingProvider` only, and neither they nor
+             * their connection classes mention WordPress, wp-toolkit,
+             * Softaculous or Installatron anywhere. `InstallWordPressHandler`
+             * has always said so out loud — it refuses with
+             * `wordpress.panel_cannot_install` — so every WordPress order on a
+             * real panel already failed.
+             *
+             * Domains requires a registrar that can search, register, renew
+             * and transfer. Two drivers exist: the controlled fake, and
+             * `sy_registry`, which is a real class whose `supports()` answers
+             * false for every capability, whose `supportedTlds()` is empty and
+             * whose every operation throws — `BLOCKED_LICENCE` in its own
+             * words. A non-controlled class that can do nothing is not a
+             * production-capable adapter, and counting it as one is the exact
+             * false green {@see \Tests\Architecture\EveryCompleteProductHasARealAdapterTest}
+             * refuses: a check that asked only whether a non-controlled driver
+             * existed would read this class and call Domains ready.
+             *
+             * Both keep their software: models, contracts, orchestration,
+             * simulators and tests. What changed is the claim, not the code.
+             * Neither is deleted and neither is sellable.
+             */
+            self::WordPress, self::Domains,
             self::Cdn, self::ObjectStorage, self::GpuCompute, self::EmailHosting => ProductSoftwareState::Prepared,
             self::ManagedKubernetes => ProductSoftwareState::ReadinessOnly,
         };

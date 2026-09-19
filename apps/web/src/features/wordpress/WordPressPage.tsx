@@ -1,43 +1,32 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
+import { Badge } from '@/components/Badge'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { EmptyState } from '@/components/EmptyState'
 import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
+import { Loading } from '@/components/Loading'
 import { PageHeader } from '@/components/PageHeader'
+import { SelectField } from '@/components/SelectField'
 import { StatusBadge } from '@/components/StatusBadge'
 import { useOrderWordPressSite, useWordPressSites } from '@/lib/queries'
 import type { WordPressSite } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
+import { SiteAdvice, SiteSteps } from './SiteSteps'
+
 /**
- * WordPress sites, and what is actually true about each of them.
+ * The WordPress sites this account has: an index, since Wave 3.
  *
- * ---------------------------------------------------------------------------
- * Four steps, shown as four steps
- * ---------------------------------------------------------------------------
- *
- * A site is a hosting account, a name pointed at it, a certificate, and an
- * installation that answers. Each finishes minutes or days apart, and the
- * tempting design — one spinner labelled "setting up" — is the one that fills
- * the support queue: every customer waiting on a different step asks the same
- * question, and the screen has told none of them anything.
- *
- * So the steps are drawn individually, and the advice under them changes with
- * the state. Somebody waiting on their own registrar is told to go and change
- * their DNS. Somebody waiting on a certificate is told their site is up.
- *
- * ---------------------------------------------------------------------------
- * "Live" is not a synonym for "finished building"
- * ---------------------------------------------------------------------------
- *
- * The tick beside a site means this platform fetched it and WordPress
- * answered. It is deliberately not shown for a site the installer merely
- * reported success on — that claim is worth nothing to a customer whose site
- * serves a database error, and they are the ones who would find out.
+ * Each card still answers "where has this got to" — the four steps and the one
+ * sentence of advice, from the same components the site's own page uses — and
+ * now links to the site instead of carrying every capability inline. The
+ * copies, the push back and the operation history moved to the site's page,
+ * which is where somebody working on one site is.
  */
 export function WordPressPage() {
   const { t } = useTranslation()
@@ -62,7 +51,7 @@ export function WordPressPage() {
       </div>
 
       {isPending ? (
-        <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : rows.length === 0 ? (
         <EmptyState>{t('wordpress.none')}</EmptyState>
       ) : (
@@ -120,25 +109,21 @@ function OrderForm({ onDone }: { onDone: () => void }) {
           required
         />
 
-        <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-medium">{t('wordpress.domainSource')}</span>
-          <select
-            value={fields.domain_source}
-            onChange={set('domain_source')}
-            className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] px-3 text-sm"
-          >
-            {/*
-              * Four options because there are four, and each one changes what
-              * the customer will be waiting for. A default of "external" is
-              * the honest one: it promises the least.
-              */}
-            <option value="external">{t('wordpress.sources.external')}</option>
-            <option value="existing">{t('wordpress.sources.existing')}</option>
-            <option value="register">{t('wordpress.sources.register')}</option>
-            <option value="transfer">{t('wordpress.sources.transfer')}</option>
-          </select>
-          <span className="text-sm text-[var(--text-muted)]">{t('wordpress.domainSourceHint')}</span>
-        </label>
+        {/*
+          * Four options because there are four, and each one changes what the
+          * customer will be waiting for. A default of "external" is the honest
+          * one: it promises the least.
+          */}
+        <SelectField
+          label={t('wordpress.domainSource')}
+          hint={t('wordpress.domainSourceHint')}
+          value={fields.domain_source}
+          onChange={set('domain_source')}
+          options={['external', 'existing', 'register', 'transfer'].map((source) => ({
+            value: source,
+            label: t(`wordpress.sources.${source}`),
+          }))}
+        />
 
         <Field
           label={t('wordpress.adminUsername')}
@@ -181,70 +166,41 @@ function OrderForm({ onDone }: { onDone: () => void }) {
   )
 }
 
-/** One site, drawn as the four things that have to be true. */
+/** One site in the index: what it is, where it has got to, and a way in. */
 function SiteCard({ site }: { site: WordPressSite }) {
   const { t } = useTranslation()
 
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="technical text-sm font-medium" dir="ltr">
-          {site.domain}
-        </h2>
-        <StatusBadge status={site.state} />
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="technical text-sm font-medium" dir="ltr">
+            <Link to={`/wordpress/${site.id}`} className="hover:underline">
+              {site.domain}
+            </Link>
+          </h2>
+          {site.kind === 'production' ? null : (
+            <Badge tone={site.kind === 'staging' ? 'info' : 'neutral'}>
+              {t(`wordpress.kinds.${site.kind}`)}
+            </Badge>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <StatusBadge status={site.state} />
+          <Link to={`/wordpress/${site.id}`} className="text-sm underline">
+            {t('resource.open')}
+          </Link>
+        </div>
       </div>
 
-      <ul className="mt-3 flex flex-col gap-1.5 text-sm">
-        <Step done={site.dns_ready} label={t('wordpress.steps.dns')} />
-        <Step done={site.installed} label={t('wordpress.steps.installed')} />
-        <Step done={site.ssl_status === 'active'} label={t('wordpress.steps.certificate')} />
-        {/*
-          * The last step is the platform's own: it fetched the site and
-          * WordPress answered. The other three are reports from elsewhere and
-          * all three can be true over a site that does not work.
-          */}
-        <Step done={site.is_verified} label={t('wordpress.steps.verified')} />
-      </ul>
+      <div className="mt-3">
+        <SiteSteps site={site} />
+      </div>
 
-      {site.needs_attention ? (
-        <div className="mt-3">
-          <Alert tone="warning">
-            {site.failure_reason ?? t('wordpress.needsAttention')}
-          </Alert>
-        </div>
-      ) : site.state === 'awaiting_dns' ? (
-        <div className="mt-3">
-          {/*
-            * The single most useful sentence on this page. A customer waiting
-            * here is waiting on themselves, and a spinner would never tell
-            * them that.
-            */}
-          <Alert tone="info">{t('wordpress.awaitingDnsHint')}</Alert>
-        </div>
-      ) : site.state === 'awaiting_certificate' ? (
-        <div className="mt-3">
-          <Alert tone="info">{t('wordpress.awaitingCertificateHint')}</Alert>
-        </div>
-      ) : null}
-
-      {site.is_usable && site.admin_url !== null ? (
-        <p className="mt-3 text-sm">
-          <a className="technical underline" dir="ltr" href={site.admin_url} rel="noreferrer noopener" target="_blank">
-            {site.admin_url}
-          </a>
-        </p>
-      ) : null}
+      <div className="mt-3">
+        <SiteAdvice site={site} />
+      </div>
     </Card>
-  )
-}
-
-function Step({ done, label }: { done: boolean; label: string }) {
-  return (
-    <li className="flex items-center gap-2">
-      <span aria-hidden className={done ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--text-muted)]'}>
-        {done ? '●' : '○'}
-      </span>
-      <span className={done ? '' : 'text-[var(--text-muted)]'}>{label}</span>
-    </li>
   )
 }

@@ -106,11 +106,22 @@ final class InvoiceController
         $this->authoriseWithinAccount($request, 'billing.view');
 
         $found = CustomerInvoices::of($this->actingCustomer->get())
-            ->with('items')
+            /*
+             * The document, whole: its lines, the payments recorded against
+             * it — including the ones that failed — and any wallet credit
+             * that moved. A customer looking at an invoice is asking what they
+             * bought and what happened to their money, and answering half of
+             * that is what sends them to support.
+             */
+            ->with([
+                'items',
+                'transactions' => fn ($query) => $query->orderBy('created_at')->orderBy('id'),
+                'walletCredits' => fn ($query) => $query->orderBy('created_at')->orderBy('id'),
+            ])
             ->whereKey($invoice)
             ->firstOrFail();
 
-        return (new InvoiceResource($found))->response();
+        return InvoiceResource::document($found)->response();
     }
 
     /**
@@ -171,7 +182,9 @@ final class InvoiceController
             ),
         );
 
-        return (new InvoiceResource($settlement->invoice->fresh(['items'])))->response();
+        return InvoiceResource::document(
+            $settlement->invoice->fresh(['items', 'transactions', 'walletCredits'])
+        )->response();
     }
 
     /**

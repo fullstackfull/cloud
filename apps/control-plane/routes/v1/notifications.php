@@ -25,6 +25,14 @@ use Lynomia\Modules\Notifications\Http\Controllers\NotificationController;
 Route::prefix('notifications')->as('notifications.')->group(function (): void {
     Route::get('/', [NotificationController::class, 'index'])->name('index');
 
+    /*
+     * The shell's badge. On the read limiter rather than the mutation one: it
+     * is refreshed on focus and after every mark-read, which is observation.
+     */
+    Route::get('unread-count', [NotificationController::class, 'unreadCount'])
+        ->middleware('throttle:reads')
+        ->name('unread_count');
+
     Route::post('read-all', [NotificationController::class, 'markAllRead'])->name('read_all');
 
     /*

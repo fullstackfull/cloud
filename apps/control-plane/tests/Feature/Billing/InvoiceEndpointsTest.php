@@ -335,8 +335,6 @@ final class InvoiceEndpointsTest extends BillingApiTestCase
         foreach ([$show->json('data'), $index->json('data.0')] as $document) {
             // The account the caller is already acting for.
             $this->assertArrayNotHasKey('customer_id', $document);
-            // The frozen copy of the account's billing details, tax id and all.
-            $this->assertArrayNotHasKey('billing_snapshot', $document);
             // An operator's note, not the customer's.
             $this->assertArrayNotHasKey('notes', $document);
             // The generated column is exposed as money, never as a raw column.
@@ -344,10 +342,26 @@ final class InvoiceEndpointsTest extends BillingApiTestCase
             $this->assertArrayNotHasKey('total_minor', $document);
         }
 
-        // Not anywhere in the body either — including inside a line.
+        /*
+         * The billing snapshot is the customer's own billing details as they
+         * stood when the invoice was issued — the name and address that have
+         * to appear on the document, and the tax id they gave us. It belongs
+         * on the invoice they are reading and is deliberately absent from a
+         * list of twelve of them, which has no use for twelve addresses.
+         *
+         * What must not be in it is the platform's internal handle for the
+         * account.
+         */
+        $this->assertArrayHasKey('billing_snapshot', $show->json('data'));
+        $this->assertArrayNotHasKey('billing_snapshot', $index->json('data.0'));
+        $this->assertSame('Premier Care', $show->json('data.billing_snapshot.display_name'));
+        $this->assertSame('KW-TAX-4471', $show->json('data.billing_snapshot.tax_id'));
+        $this->assertArrayNotHasKey('customer_id', (array) $show->json('data.billing_snapshot'));
+
+        // The operator's note and the account's internal id are nowhere in the
+        // body, including inside a line.
         $body = $show->getContent();
         $this->assertIsString($body);
-        $this->assertStringNotContainsString('KW-TAX-4471', $body);
         $this->assertStringNotContainsString('chargeback LYN-99', $body);
         $this->assertStringNotContainsString($customer->id, $body);
     }

@@ -6,8 +6,14 @@ declare(strict_types=1);
  * catalog — customer surface.
  *
  * Included by routes/api_v1.php inside the group that has already applied
- * auth:sanctum, verified, throttle:api and customer. Do not re-declare those
- * here; do declare anything narrower that this module needs.
+ * auth:sanctum, throttle:api and customer. Do not re-declare those here; do
+ * declare anything narrower that this module needs.
+ *
+ * `verified` is deliberately NOT among them, and this is the only customer
+ * module that is exempt: a customer whose address is not proved yet may read
+ * prices, because reading a price moves no money. Everything that spends
+ * money — orders, invoices, payments, wallet — is registered in the group
+ * that does carry `verified`.
  */
 
 use Illuminate\Support\Facades\Route;

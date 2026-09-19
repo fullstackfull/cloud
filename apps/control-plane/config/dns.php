@@ -55,4 +55,31 @@ return [
 
     'reconcile_batch' => (int) env('DNS_RECONCILE_BATCH', 50),
 
+    /*
+     * Where the controlled DNS simulator keeps what it remembers, so that
+     * more than one process can see the same thing.
+     *
+     * Unset by default, and unset everywhere but the tests that need it: an
+     * in-memory simulator is the right one inside a single process, and a
+     * shared file would let one test's zones leak into the next test's.
+     * It exists because a workflow in this platform crosses a request, a queue
+     * and a worker, and a simulator that forgets at the process boundary can
+     * take part in a contract test but not in a workflow.
+     *
+     * @see \Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore
+     */
+    'fake' => [
+        'state_path' => env('DNS_FAKE_STATE_PATH'),
+    ],
+
+    /*
+     * And the reverse-DNS simulator's own file, separate from the forward one.
+     *
+     * Two files rather than one keyed map, because the two simulators are two
+     * classes in two modules with two contracts, and a single file would make
+     * a test that resets one reset the other.
+     */
+    'fake_reverse' => [
+        'state_path' => env('DNS_FAKE_REVERSE_STATE_PATH'),
+    ],
 ];

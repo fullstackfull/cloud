@@ -1,9 +1,24 @@
+# -----------------------------------------------------------------------------
+# REFERENCE TARGET LIST — describes no machine that exists.
+#
+# Every name here is a host from the example inventory in
+# infrastructure/ansible/inventories/production/hosts.yml, under `.example`,
+# which IANA reserves for documents. The real target list is operator-supplied
+# and lives with the private inventory: Prometheus re-reads a file_sd file
+# within seconds, so replacing this file is the whole deployment step.
+#
+# It is written in the reference namespace on purpose. A committed list of
+# plausible-looking internal hostnames is one copy-paste from being configured
+# as real, and this platform's own endpoint policy refuses `.internal` names
+# outright — so a list under that zone disagreed with the application that
+# reads it.
+# -----------------------------------------------------------------------------
 # Shared hosting nodes. A full disk here does not degrade the box, it breaks
 # every site and every mailbox on it simultaneously — which is why the hosting
 # disk threshold in the rules is lower than anywhere else on the platform.
 - targets:
-    - web-01.kw.lynomia.internal:9100
-    - web-02.kw.lynomia.internal:9100
+    - web-1.prod.example:9100
+    - web-2.prod.example:9100
   labels:
     role: hosting
     service: shared-hosting

@@ -14,6 +14,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -41,7 +42,8 @@ final class VpsReinstallEndpointTest extends VpsApiTestCase
             ->postJson('/api/v1/vps/'.$machine->id.'/reinstall', ['confirm_hostname' => 'web-01'])
             ->assertStatus(202)
             ->assertJsonPath('data.kind', ProvisioningJobKind::ReinstallVps->value)
-            ->assertJsonPath('data.status', ProvisioningJobStatus::Queued->value);
+            ->assertJsonPath('data.state', CustomerOperationState::Queued->value)
+            ->assertJsonPath('data.is_terminal', false);
 
         Queue::assertPushed(RunProvisioningJob::class, 1);
 

@@ -8,11 +8,14 @@ import { Card } from '@/components/Card'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
 import { formatMoney } from '@/lib/format'
+import { newIdempotencyKey } from '@/lib/api'
 import { useChangePlan, usePlanOptions } from '@/lib/queries'
 import type { PlanChangeQuote } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { safeLabel } from '@/lib/safeLabel'
 
 /**
  * Changing plan.
@@ -67,7 +70,7 @@ export function PlanChangePage() {
 
       {isPending ? (
         <Card>
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         </Card>
       ) : (
         <div className="grid gap-3">
@@ -94,14 +97,14 @@ export function PlanChangePage() {
 
                   {quote.refusals.map((reason) => (
                     <p key={reason} className="mt-1 text-sm text-[var(--danger-text)]">
-                      {t(`planChange.refusal.${reason}`, { defaultValue: reason })}
+                      {safeLabel('planChange.refusal', reason)}
                     </p>
                   ))}
 
                   {quote.is_available
                     ? quote.warnings.map((warning) => (
                         <p key={warning} className="mt-1 text-sm text-[var(--warning-text)]">
-                          {t(`planChange.warning.${warning}`, { defaultValue: warning })}
+                          {safeLabel('planChange.warning', warning)}
                         </p>
                       ))
                     : null}
@@ -147,7 +150,7 @@ export function PlanChangePage() {
               subscriptionId: id,
               plan_id: chosen.plan_id,
               price_id: chosen.price_id,
-              idempotency_key: crypto.randomUUID(),
+              idempotencyKey: newIdempotencyKey(),
             },
             { onSuccess: () => { setChosen(null); } },
           )

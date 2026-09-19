@@ -11,6 +11,7 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import {
   useApprovePlan,
   useAssignDesiredState,
@@ -51,7 +52,7 @@ export function PlansPage() {
         <div className="flex flex-wrap items-center gap-3">
           <label htmlFor="plan-machine" className="text-sm font-medium">{t('admin.plans.machine')}</label>
           {servers.isPending ? (
-            <span className="text-sm text-[var(--text-muted)]">{t('common.loading')}</span>
+            <Loading />
           ) : servers.error ? (
             <LoadFailure error={servers.error} />
           ) : (
@@ -108,7 +109,7 @@ function MachineChain({ server }: { server: Server }) {
       <Card>
         <h2 className="mb-2 text-base font-semibold">{t('admin.plans.desiredHeading')}</h2>
         {desired.isPending || profiles.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : desired.error ? (
           <LoadFailure error={desired.error} />
         ) : profiles.error ? (
@@ -141,7 +142,7 @@ function MachineChain({ server }: { server: Server }) {
         </div>
         {describe(compute.error) === null ? null : <Alert tone="error">{describe(compute.error)?.message}</Alert>}
         {plan.isPending ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : plan.error ? (
           <LoadFailure error={plan.error} />
         ) : current === null ? (

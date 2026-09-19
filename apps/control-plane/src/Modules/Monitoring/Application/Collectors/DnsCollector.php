@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Monitoring\Application\Collectors;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\ZoneImportOutcome;
 use Lynomia\Modules\Monitoring\Domain\Contracts\MetricsCollector;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\Metric;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\MetricSample;
@@ -55,7 +56,33 @@ final readonly class DnsCollector implements MetricsCollector
                 'Live records by type. Six values, from the enum: the platform publishes no others.',
                 $this->byType(),
             ),
+            Metric::gauge(
+                'lynomia_dns_zone_imports_total',
+                'Attempts to apply a zone file, by outcome. A rising `refused` is customers hitting a rule the preview should have explained; a rising `plan_changed` is previews going stale.',
+                $this->imports(),
+            ),
         ];
+    }
+
+    /**
+     * @return list<MetricSample>
+     */
+    private function imports(): array
+    {
+        /** @var array<string, int> $counts */
+        $counts = DB::table('dns_zone_imports')
+            ->selectRaw('outcome, count(*) as total')
+            ->groupBy('outcome')
+            ->pluck('total', 'outcome')
+            ->all();
+
+        $samples = [];
+
+        foreach (ZoneImportOutcome::cases() as $outcome) {
+            $samples[] = MetricSample::of(['outcome' => $outcome->value], (float) ($counts[$outcome->value] ?? 0));
+        }
+
+        return $samples;
     }
 
     /**

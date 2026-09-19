@@ -74,7 +74,7 @@ final class NotificationPreferenceController
 
         if ($category === null || $channel === null) {
             throw ValidationException::withMessages([
-                'category' => 'Unknown notification category or channel.',
+                'category' => __('validation.requests.notifications.unknown_category_or_channel'),
             ]);
         }
 

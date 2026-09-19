@@ -124,11 +124,25 @@ final class ServiceIndexEndpointTest extends ServiceApiTestCase
     {
         [$customer, $user] = $this->accountWithOwner();
 
-        // The job needs a person; the server it rebooted is still running, and
-        // saying otherwise would be a lie in the direction that costs support
-        // a ticket.
+        /*
+         * The job needs a person; the server it rebooted is still running, and
+         * saying otherwise would be a lie in the direction that costs support
+         * a ticket.
+         *
+         * The kind is named here and used not to be. The factory's default is
+         * `create_vps`, so this fixture was a stuck *delivery* rather than the
+         * stuck reboot the test is about — and Gap 8's policy reads those two
+         * differently on purpose: a delivery in doubt eclipses `active`,
+         * because what the customer owns may not exist, and an operational job
+         * does not. Naming the kind is what makes this test assert the thing
+         * its name claims. Both halves of the policy are in
+         * `ThePartialCreatePolicyTest`.
+         */
         $service = $this->serviceFor($customer, ['status' => ServiceStatus::Active, 'activated_at' => now()]);
-        $this->jobFor($service, ['status' => ProvisioningJobStatus::NeedsReview]);
+        $this->jobFor($service, [
+            'kind' => ProvisioningJobKind::Restart,
+            'status' => ProvisioningJobStatus::NeedsReview,
+        ]);
 
         $this->actingAs($user)
             ->getJson('/api/v1/services')
@@ -236,8 +250,19 @@ final class ServiceIndexEndpointTest extends ServiceApiTestCase
         // `parent::toArray()` would publish every one of them under a name no
         // blocklist above could have predicted.
         $this->assertSame([
-            'id', 'kind', 'label', 'state', 'is_usable', 'resources',
-            'plan_id', 'order_id', 'order_item_id', 'subscription_id',
+            // `identity` arrived in Wave 3: the hostname, primary domain or
+            // serial the customer knows the thing by, so an index of services
+            // can tell two servers on one plan apart. It is a resource name
+            // and not an operational fact — it is what the customer types
+            // into their own SSH client — and it is resolved in one query per
+            // kind for the whole page rather than one per row.
+            //
+            // `resource` arrived with it: the family and the id of the row
+            // that fulfils the service, because a service's own id is not the
+            // machine's and a client building a link from it would point at
+            // nothing. A handle and not a path — routes belong to the portal.
+            'id', 'kind', 'label', 'identity', 'resource', 'state', 'is_usable', 'resources',
+            'plan_id', 'order_id', 'subscription_id',
             'activated_at', 'suspended_at', 'retention_ends_at', 'ended_reason',
             'terminated_at', 'created_at',
         ], array_keys($service));

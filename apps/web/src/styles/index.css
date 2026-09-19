@@ -27,35 +27,176 @@
   --surface: oklch(0.99 0.002 250);
   --surface-raised: oklch(1 0 0);
   --surface-sunken: oklch(0.96 0.004 250);
+  /*
+   * The ground an input or a card sits on. Referenced by thirty-odd
+   * components since the first screens were written and, until Wave 0,
+   * defined nowhere — so every one of them rendered transparent and took
+   * whatever was behind it. The same value as the page in light, a shade
+   * above it in dark, so a field stays a field on a raised card.
+   */
+  --surface-base: oklch(1 0 0);
   --border-subtle: oklch(0.90 0.006 250);
   --border-strong: oklch(0.80 0.010 250);
+  /* The plain border, between the two above. Same history as --surface-base. */
+  --border: oklch(0.86 0.008 250);
   --text-primary: oklch(0.22 0.01 250);
   --text-secondary: oklch(0.48 0.012 250);
-  --text-muted: oklch(0.62 0.010 250);
+  /*
+   * Darkened in Wave 5 from 0.62, which failed WCAG AA for normal text.
+   *
+   * At 0.62 this token measured 3.54:1 on the page, 3.64:1 on a raised card
+   * and 3.24:1 on a sunken panel, against a 4.5:1 requirement — and it is the
+   * most-used colour in the portal, on 237 elements: every hint under a field,
+   * every "—" standing in for an absent value, every secondary line in a
+   * table. axe found it on the sidebar's group headings, which is where it
+   * could resolve a background with certainty; the token was failing
+   * everywhere it was used.
+   *
+   * 0.540 is the lightest value that clears 4.5:1 against all three light
+   * surfaces, the worst of them being the sunken panel at 4.50:1. It stays
+   * lighter than --text-secondary, so the three-step hierarchy the design
+   * depends on survives.
+   */
+  --text-muted: oklch(0.540 0.010 250);
 
-  --status-running: oklch(0.65 0.15 150);
-  --status-stopped: oklch(0.62 0.02 250);
-  --status-provisioning: oklch(0.72 0.14 85);
-  --status-failed: oklch(0.58 0.19 25);
-  --status-suspended: oklch(0.65 0.16 55);
+  /*
+   * Text that carries a warning or a danger without a badge around it: the
+   * "existing data may be permanently lost" line in a reinstall dialogue,
+   * the resize caveat on a plan change. Both were referenced from the
+   * start and undefined, which left the most important sentence in the
+   * portal in the same colour as the one above it.
+   */
+  --danger-text: oklch(0.50 0.19 25);
+  --warning-text: oklch(0.55 0.15 70);
+
+  /*
+   * The edge of a danger zone: enough red to separate the destructive
+   * section from the page, not enough to read as an error that has already
+   * happened. Defined in every theme block, because a colour that exists in
+   * one of them renders as nothing in the other two.
+   */
+  --danger-border: oklch(0.82 0.09 25);
+
+  /*
+   * A destructive control's own surface. The token system had a danger text
+   * colour and a danger border and no danger *fill*, so every solid red
+   * button reached for `bg-red-600` — a fourth red, from outside the system,
+   * that no other danger surface matched.
+   */
+  --danger-surface: oklch(0.55 0.20 25);
+  --danger-surface-strong: oklch(0.48 0.20 25);
+
+  /* Interactive emphasis outside a button: an unread dot, an inline link. */
+  --accent: var(--color-brand-600);
+
+  /*
+   * Semantic tones: the four things a strip of colour on this product can
+   * mean. One family per meaning, three slots each — the tint behind it, the
+   * edge around it, and text that is readable on that tint.
+   *
+   * Alert, Badge and Toast each carried their own copy of this, written as raw
+   * palette classes (`bg-red-500/10 text-red-800 dark:text-red-200`). Thirty-
+   * seven of them. They did not move when the tokens moved, the red in a badge
+   * was not the red in the alert beside it, and none of them were the
+   * --danger-text the field errors use. Three components meaning the same four
+   * things should say so once.
+   *
+   * Distinct from --danger-text and --warning-text, which colour a *sentence*
+   * with no tint behind it — the "existing data may be permanently lost" line
+   * in a dialogue. Text on a page needs more contrast than text on a tint.
+   */
+  --tone-danger-surface: oklch(0.62 0.19 25 / 0.10);
+  --tone-danger-border: oklch(0.62 0.19 25 / 0.30);
+  --tone-danger-text: oklch(0.42 0.16 25);
+
+  --tone-warning-surface: oklch(0.75 0.15 75 / 0.12);
+  /*
+   * 0.30, matching danger, info and success. It was 0.35 — the light theme's
+   * only tone border that did not match the other three, which made a warning
+   * alert's edge stronger than an error's on the same screen. Found by
+   * comparing the two themes token by token: every other theme-dependent
+   * token changes between light and dark, and this one did not, because its
+   * light value had been written at the dark value.
+   */
+  --tone-warning-border: oklch(0.75 0.15 75 / 0.30);
+  --tone-warning-text: oklch(0.45 0.12 70);
+
+  --tone-info-surface: oklch(0.62 0.16 250 / 0.10);
+  --tone-info-border: oklch(0.62 0.16 250 / 0.30);
+  --tone-info-text: oklch(0.42 0.14 250);
+
+  --tone-success-surface: oklch(0.68 0.15 155 / 0.10);
+  --tone-success-border: oklch(0.68 0.15 155 / 0.30);
+  --tone-success-text: oklch(0.40 0.12 155);
 }
 
+/*
+ * The dark theme.
+ *
+ * ## What exists, stated precisely
+ *
+ * A dark-theme path is **present and reachable in the shipped product**: the
+ * block below activates for any customer whose operating system asks for dark,
+ * and the `[data-theme='dark']` block after it activates for an explicit
+ * choice. Every theme-dependent token is defined in all three states, and a
+ * test asserts it.
+ *
+ * What does **not** exist is an in-product control. Nothing in the portal
+ * writes `data-theme`, so a customer reaches the dark theme through their
+ * system setting and by no other route.
+ *
+ * ## What Wave 5 did and did not do
+ *
+ * Wave 5 did not add dark mode; dark mode was already here and remains out of
+ * scope per §51. What Wave 5 did was repair this path's semantic-token
+ * consistency: it added the twelve `--tone-*` tokens to all three blocks, and
+ * it fixed `--danger-surface` and `--danger-surface-strong`, which had been
+ * defined in `:root` and in the media query but not in the stamp — so a
+ * customer who had chosen dark explicitly read every destructive button in the
+ * light theme's red.
+ *
+ * The honest sentence for a report is therefore "a pre-existing dark-theme
+ * path was found and its token consistency repaired", not "dark mode is
+ * implemented" and not "dark mode is not implemented". Both of those are
+ * wrong, in opposite directions.
+ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --surface: oklch(0.17 0.008 250);
     --surface-raised: oklch(0.21 0.010 250);
     --surface-sunken: oklch(0.14 0.008 250);
+    --surface-base: oklch(0.19 0.009 250);
     --border-subtle: oklch(0.28 0.012 250);
     --border-strong: oklch(0.38 0.014 250);
+    --border: oklch(0.33 0.013 250);
     --text-primary: oklch(0.95 0.004 250);
     --text-secondary: oklch(0.74 0.010 250);
-    --text-muted: oklch(0.58 0.010 250);
+    /* Lightened from 0.58, which measured 4.14:1 on a raised card. 0.605
+     * clears 4.5:1 on all three dark surfaces, the worst being 4.58:1. */
+    --text-muted: oklch(0.605 0.010 250);
 
-    --status-running: oklch(0.72 0.15 150);
-    --status-stopped: oklch(0.60 0.02 250);
-    --status-provisioning: oklch(0.78 0.14 85);
-    --status-failed: oklch(0.66 0.19 25);
-    --status-suspended: oklch(0.72 0.16 55);
+    --danger-text: oklch(0.75 0.16 25);
+    --warning-text: oklch(0.80 0.14 75);
+    --danger-border: oklch(0.40 0.12 25);
+    --danger-surface: oklch(0.52 0.19 25);
+    --danger-surface-strong: oklch(0.46 0.19 25);
+    --accent: var(--color-brand-400);
+
+    --tone-danger-surface: oklch(0.62 0.19 25 / 0.15);
+    --tone-danger-border: oklch(0.62 0.19 25 / 0.35);
+    --tone-danger-text: oklch(0.85 0.10 25);
+
+    --tone-warning-surface: oklch(0.75 0.15 75 / 0.15);
+    --tone-warning-border: oklch(0.75 0.15 75 / 0.35);
+    --tone-warning-text: oklch(0.88 0.09 80);
+
+    --tone-info-surface: oklch(0.62 0.16 250 / 0.15);
+    --tone-info-border: oklch(0.62 0.16 250 / 0.35);
+    --tone-info-text: oklch(0.86 0.08 250);
+
+    --tone-success-surface: oklch(0.68 0.15 155 / 0.15);
+    --tone-success-border: oklch(0.68 0.15 155 / 0.35);
+    --tone-success-text: oklch(0.86 0.10 155);
   }
 }
 
@@ -63,17 +204,37 @@
   --surface: oklch(0.17 0.008 250);
   --surface-raised: oklch(0.21 0.010 250);
   --surface-sunken: oklch(0.14 0.008 250);
+  --surface-base: oklch(0.19 0.009 250);
   --border-subtle: oklch(0.28 0.012 250);
   --border-strong: oklch(0.38 0.014 250);
+  --border: oklch(0.33 0.013 250);
   --text-primary: oklch(0.95 0.004 250);
   --text-secondary: oklch(0.74 0.010 250);
-  --text-muted: oklch(0.58 0.010 250);
+  /* Same correction as the media query above: 4.58:1 at worst, was 4.14:1. */
+  --text-muted: oklch(0.605 0.010 250);
 
-  --status-running: oklch(0.72 0.15 150);
-  --status-stopped: oklch(0.60 0.02 250);
-  --status-provisioning: oklch(0.78 0.14 85);
-  --status-failed: oklch(0.66 0.19 25);
-  --status-suspended: oklch(0.72 0.16 55);
+  --danger-text: oklch(0.75 0.16 25);
+  --warning-text: oklch(0.80 0.14 75);
+  --danger-border: oklch(0.40 0.12 25);
+  --danger-surface: oklch(0.52 0.19 25);
+  --danger-surface-strong: oklch(0.46 0.19 25);
+  --accent: var(--color-brand-400);
+
+  --tone-danger-surface: oklch(0.62 0.19 25 / 0.15);
+  --tone-danger-border: oklch(0.62 0.19 25 / 0.35);
+  --tone-danger-text: oklch(0.85 0.10 25);
+
+  --tone-warning-surface: oklch(0.75 0.15 75 / 0.15);
+  --tone-warning-border: oklch(0.75 0.15 75 / 0.35);
+  --tone-warning-text: oklch(0.88 0.09 80);
+
+  --tone-info-surface: oklch(0.62 0.16 250 / 0.15);
+  --tone-info-border: oklch(0.62 0.16 250 / 0.35);
+  --tone-info-text: oklch(0.86 0.08 250);
+
+  --tone-success-surface: oklch(0.68 0.15 155 / 0.15);
+  --tone-success-border: oklch(0.68 0.15 155 / 0.35);
+  --tone-success-text: oklch(0.86 0.10 155);
 }
 
 html {
@@ -103,12 +264,69 @@ body {
   font-feature-settings: 'tnum';
 }
 
+/*
+ * A text link that is also something a finger has to hit.
+ *
+ * W5.6 set a 24px floor for touch targets and swept every screen for it. The
+ * sweep measured each screen as soon as its heading appeared, which on the
+ * dashboard is before its data arrives — so it measured a loading screen and
+ * found nothing, on the screen with the most of these. Measured once settled,
+ * the dashboard had twenty-two targets under the floor, the invoice list three
+ * and the DNS screen two: all inline text links inside rows and cards, where
+ * `text-sm` gives a 20px line box and `text-xs` a 16px one, and a bare link is
+ * exactly as tall as its text.
+ *
+ * Padding out and margin back, rather than a min-height.
+ *
+ * A min-height needs a block-ish display to apply at all, and several of these
+ * links are `truncate` (which needs a block box to put an ellipsis in) or
+ * `inline-block` inside a flow of text. Changing their display to make a
+ * min-height work would rearrange layouts W5.8 measured at five widths.
+ *
+ * Vertical padding grows the border box — which is what a finger hits and what
+ * getBoundingClientRect reports — without touching the line box, so the text
+ * does not move. The negative margin cancels the growth for any of these that
+ * is inline-block, and is simply ignored on the inline ones, where vertical
+ * margins do nothing. Either way nothing around the link shifts.
+ */
+.tap-link {
+  padding-block: 4px;
+  margin-block: -4px;
+}
+
+
 /* Technical identifiers — IP addresses, hostnames, ULIDs — are always LTR even
    inside Arabic prose, or the octets render in the wrong order. */
 .technical {
   direction: ltr;
   unicode-bidi: isolate;
   font-family: var(--font-mono);
+
+  /*
+   * And they wrap rather than push.
+   *
+   * A technical value is one unbreakable word as far as the layout is
+   * concerned: a 48-character API token, an IPv6 address, a ULID, a long
+   * domain, an email address. There is no space in any of them, so the
+   * default `normal` leaves the box no legal place to break and the value
+   * simply extends past whatever holds it. The class is used at 155 places
+   * and 143 of them said nothing about wrapping, which made this one line the
+   * difference between a value that folds and a value that breaks the page
+   * shell.
+   *
+   * `anywhere` rather than `break-word`, and the difference is the whole
+   * point: both break a long word that would otherwise overflow, but only
+   * `anywhere` also lowers the box's min-content width, which is what lets a
+   * flex item, a grid track or a table cell actually shrink around it.
+   * `break-word` would leave the flex item refusing to go below the width of
+   * the token and the page scrolling exactly as before.
+   *
+   * Where a value should break mid-word greedily rather than only on
+   * overflow — a filesystem path in the backup browser, a DNS record's
+   * content — the call site still says `break-all`, which is a stronger rule
+   * than this one and stays deliberate.
+   */
+  overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {

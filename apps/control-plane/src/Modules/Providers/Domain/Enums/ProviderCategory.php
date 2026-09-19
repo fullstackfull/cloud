@@ -78,9 +78,43 @@ enum ProviderCategory: string
     {
         return match ($this) {
             self::Compute => ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'gpu_passthrough'],
-            self::Backup => ['create', 'restore', 'delete', 'verify', 'retention', 'file_browse', 'file_restore'],
+            /*
+             * `verify` and `verification_verdict` are two different questions
+             * and only the second one is the product's promise.
+             *
+             * `verify` is "can this platform ask the provider to read an
+             * archive back now?". Proxmox Backup Server cannot be asked: a
+             * verification runs on the backup server on its own schedule and
+             * the hypervisor API exposes no endpoint that starts one, so
+             * ProxmoxBackupProvider::supportsVerification() answers false and
+             * startVerification() refuses.
+             *
+             * `verification_verdict` is "can this platform find out whether an
+             * archive was read back, and what the answer was?". That it can:
+             * listBackups() carries a three-valued verdict per archive — read
+             * back cleanly, failed, not yet checked — and reconciliation
+             * adopts it. What a customer is owed is the verdict, not the
+             * button, and a provider that verifies on its own schedule and
+             * reports the result honours that in full.
+             */
+            self::Backup => ['create', 'restore', 'delete', 'verify', 'verification_verdict', 'retention', 'file_browse', 'file_restore'],
             self::Hosting => ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
-            self::WordPressInstaller => ['install', 'uninstall', 'version', 'ssl', 'staging', 'clone', 'push_to_production'],
+            /*
+             * Five, and `uninstall` and `ssl` are deliberately not among them.
+             *
+             * Both used to be declared here and required of the WordPress
+             * product, and no contract in this repository modelled either — so
+             * a product the readiness engine calls software-complete asked for
+             * capabilities nothing could ever answer. Gap 8 found the
+             * requirement was the wrong half: removal is
+             * `HostingProvider::terminate`, and an account's SSL state is
+             * observed by the platform's own site probe and reported through
+             * `AccountUsage`. Neither is the installer's to answer, so neither
+             * is asked of it — `EveryDeclaredCapabilityHasAConsumerTest`
+             * insists a capability with no consumer leaves the category rather
+             * than sitting here unanswered.
+             */
+            self::WordPressInstaller => ['install', 'version', 'staging', 'clone', 'push_to_production'],
             self::Dns => ['create_zone', 'delete_zone', 'records', 'reconcile'],
             self::ReverseDns => ['set_ptr', 'clear_ptr'],
             self::Registrar => ['search', 'availability', 'register', 'renew', 'transfer', 'nameservers', 'contacts', 'lock', 'auth_code', 'redemption', 'premium', 'held_names'],

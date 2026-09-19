@@ -320,7 +320,7 @@ final class StartInvoicePaymentEndpointTest extends PaymentsApiTestCase
             ->assertJsonPath('data.failure_code', 'card_declined')
             // Nothing for the browser to do, and no bearer credential handed
             // out for a payment that cannot proceed.
-            ->assertJsonPath('data.next_action.type', 'none')
+            ->assertJsonPath('data.next_action.type', 'failed')
             ->assertJsonPath('data.next_action.client_secret', null);
 
         $this->assertSame(PaymentAttemptStatus::Failed, PaymentAttempt::query()->sole()->status);

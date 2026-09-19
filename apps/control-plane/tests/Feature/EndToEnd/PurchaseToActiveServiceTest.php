@@ -129,7 +129,15 @@ final class PurchaseToActiveServiceTest extends TestCase
         );
 
         $this->assertIsString($verificationUrl);
-        $this->get($this->apiPathOf($verificationUrl))->assertOk();
+
+        /*
+         * Followed the way a customer follows it: a browser, asking for HTML.
+         * The endpoint verifies the address and hands the browser back to the
+         * portal, which is what a person clicking a link in their mail needs —
+         * a JSON body would leave them looking at the platform's internals.
+         */
+        $this->get($this->apiPathOf($verificationUrl))
+            ->assertRedirect(rtrim((string) config('app.frontend_url'), '/').'/verify-email?status=verified');
 
         $this->assertTrue($user->fresh()->hasVerifiedEmail());
 

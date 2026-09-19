@@ -76,7 +76,7 @@ final class SetReverseDnsRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'hostname.required' => 'Name the hostname this address should resolve back to.',
+            'hostname.required' => __('validation.requests.ipam.hostname_required'),
         ];
     }
 

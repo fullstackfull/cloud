@@ -63,12 +63,36 @@ final readonly class ProductRequirements
                 new Requirement(ProviderCategory::Hosting, ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage']),
             ],
             Product::WordPress => [
-                // Staging, cloning and push-to-production are optional on the
-                // installer: the product works without them and the screen
-                // offers them only where the provider reports them. They are
-                // consumed by the WordPress environment flow, and a provider
-                // that lacks them is not a blocker on selling WordPress.
-                new Requirement(ProviderCategory::WordPressInstaller, ['install', 'uninstall', 'version', 'ssl'], optional: ['staging', 'clone', 'push_to_production']),
+                /*
+                 * Two rows and not four, and the two that went are the point.
+                 *
+                 * `uninstall` and `ssl` were required of the installer and no
+                 * contract in this repository models either — which made a
+                 * product the engine declares software-complete depend on
+                 * capabilities nothing could ever answer. Gap 8 checked which
+                 * half was wrong, and it was the requirement:
+                 *
+                 *  - A WordPress installation is removed by terminating the
+                 *    hosting account that holds it. That is
+                 *    `HostingProvider::terminate`, which shared hosting
+                 *    already requires and which this product already depends
+                 *    on; there is no standalone removal in the product and
+                 *    none is advertised.
+                 *  - An account's SSL state is not read from the installer at
+                 *    all. `VerifyWordPressSites` observes it by probing the
+                 *    site — `AwaitingCertificate` until the padlock answers —
+                 *    and the hosting contract reports it through
+                 *    `AccountUsage`, which the `usage` row already requires.
+                 *
+                 * Both are still declared unsupported by the controlled
+                 * driver, with those reasons, because the category can still
+                 * mean them. No product asks for them.
+                 *
+                 * Staging, cloning and push-to-production stay optional: the
+                 * product works without them and the screen offers them only
+                 * where the provider reports them.
+                 */
+                new Requirement(ProviderCategory::WordPressInstaller, ['install', 'version'], optional: ['staging', 'clone', 'push_to_production']),
             ],
             Product::Domains => [
                 // Redemption is optional the same way: a registrar without it
@@ -80,7 +104,31 @@ final readonly class ProductRequirements
                 new Requirement(ProviderCategory::Dns, ['create_zone', 'delete_zone', 'records', 'reconcile']),
             ],
             Product::Backups => [
-                new Requirement(ProviderCategory::Backup, ['create', 'restore', 'delete', 'verify', 'retention'], optional: ['file_browse', 'file_restore']),
+                /*
+                 * `verify` moved from required to optional, and that is a
+                 * correction rather than a relaxation.
+                 *
+                 * Requiring it said the product needs a provider this platform
+                 * can ask to verify on demand. No production-capable adapter
+                 * can be: PBS verifies on its own schedule and exposes no
+                 * endpoint to start one, so the only driver that answered
+                 * `verify` was the simulator. A required capability that only
+                 * a controlled driver can satisfy is how a product comes to be
+                 * called complete on the strength of its own fake.
+                 *
+                 * What the product actually owes a customer is the verdict: an
+                 * archive is either known to have been read back, known to
+                 * have failed, or not yet checked, and the platform must be
+                 * able to say which. That is `verification_verdict`, it is
+                 * required, and the real adapter has it — listBackups() reads
+                 * the verdict PBS recorded and ReconcileBackupInventory adopts
+                 * it onto the row.
+                 *
+                 * So a provider that can be asked directly is a convenience
+                 * the platform uses where it exists, and the guarantee stands
+                 * without it.
+                 */
+                new Requirement(ProviderCategory::Backup, ['create', 'restore', 'delete', 'retention', 'verification_verdict'], optional: ['verify', 'file_browse', 'file_restore']),
             ],
 
             Product::Cdn => [

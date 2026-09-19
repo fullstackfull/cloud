@@ -101,6 +101,11 @@ test.describe('Arabic layout', () => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
 
     await page.goto('/dedicated')
+    await page.getByRole('link', { name: fixtures.dedicatedSerial }).click()
+    await page
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
+      .click()
     await page.getByRole('button', { name: /إعادة التثبيت/ }).first().click()
 
     const dedicated = page.getByRole('dialog')
@@ -111,13 +116,15 @@ test.describe('Arabic layout', () => {
 
     await page.goto('/vps')
 
-    // The machine by name: the seeder also creates a suspended one, whose
-    // every control is correctly disabled, and `.first()` would find it.
+    // The machine by name, and the operable one: the seeder also creates a
+    // suspended machine and one whose last rebuild nobody can settle, and
+    // since Wave 0 every control on both is correctly disabled.
+    await page.getByRole('link', { name: fixtures.operableHostname }).click()
     await page
-      .getByRole('row')
-      .filter({ hasText: fixtures.vpsHostname })
-      .getByRole('button', { name: /إعادة التثبيت/ })
+      .getByRole('navigation', { name: 'الأقسام' })
+      .getByRole('link', { name: 'منطقة الخطر' })
       .click()
+    await page.getByRole('button', { name: /إعادة التثبيت/ }).click()
 
     const vps = page.getByRole('dialog')
     await expect(vps).toBeVisible()
@@ -128,10 +135,15 @@ test.describe('Arabic layout', () => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
     await page.goto('/wallet')
 
-    // 12.750 KWD, seeded. Eastern Arabic numerals are correct Arabic and wrong
-    // here: the platform's invoices, the bank's statements and the payment
-    // provider's receipts all print 12.750, and a customer comparing them
-    // should not have to transliterate.
-    await expect(page.getByText(/12\.750/)).toBeVisible()
+    /*
+     * 12.750 KWD, seeded. Eastern Arabic numerals are correct Arabic and wrong
+     * here: the platform's invoices, the bank's statements and the payment
+     * provider's receipts all print 12.750, and a customer comparing them
+     * should not have to transliterate.
+     *
+     * Scoped to the balance card, because the credit history below it carries
+     * the balance after each movement and the top row's is the same figure.
+     */
+    await expect(page.getByRole('listitem').getByText(/12\.750/)).toBeVisible()
   })
 })

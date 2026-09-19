@@ -9,6 +9,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Http\Concerns\SerialisesMoney;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * What a customer may see of their own invoice.
@@ -37,6 +39,23 @@ use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 final class InvoiceResource extends JsonResource
 {
     use SerialisesMoney;
+
+    /**
+     * Whether this is being serialised as a document rather than as a row in
+     * a list. A document carries the billing snapshot; a row does not.
+     */
+    public function __construct(Invoice $resource, private readonly bool $showsDocument = false)
+    {
+        parent::__construct($resource);
+    }
+
+    /**
+     * The document is a document: one invoice, one screen, one printable page.
+     */
+    public static function document(Invoice $invoice): self
+    {
+        return new self($invoice, showsDocument: true);
+    }
 
     /**
      * @return array<string, mixed>
@@ -78,11 +97,77 @@ final class InvoiceResource extends JsonResource
                     ->all(),
             ),
 
+            /*
+             * The billing profile as it was when the invoice was issued.
+             *
+             * Not the customer's current profile, and this is the whole point:
+             * an issued invoice is a document about a moment. Rendering it
+             * against today's address would rewrite history every time
+             * somebody moved office, and would make a printed invoice
+             * disagree with the one the customer printed last month.
+             *
+             * Published only where a document is being shown — the detail
+             * screen and the printable view — because a list of twelve
+             * invoices has no use for twelve copies of an address.
+             */
+            'billing_snapshot' => $this->when(
+                $this->showsDocument,
+                fn (): array => $this->documentSnapshot(),
+            ),
+
+            /*
+             * How this invoice was paid, or failed to be.
+             *
+             * Two separate lists, because wallet credit and a card charge are
+             * two different things and an invoice settled from both must show
+             * both. Neither list is arithmetic the browser does: the amounts
+             * are the server's, and amount_paid above is the invoice's own
+             * record rather than a sum of these rows.
+             */
+            'payments' => $this->whenLoaded(
+                'transactions',
+                fn (): array => $this->transactions
+                    ->map(fn (Transaction $payment): InvoicePaymentResource => new InvoicePaymentResource($payment))
+                    ->values()
+                    ->all(),
+            ),
+
+            'wallet_credits' => $this->whenLoaded(
+                'walletCredits',
+                fn (): array => $this->walletCredits
+                    ->map(fn (WalletTransaction $entry): InvoiceWalletCreditResource => new InvoiceWalletCreditResource($entry))
+                    ->values()
+                    ->all(),
+            ),
+
             'issued_at' => $this->issued_at?->toIso8601String(),
             'due_at' => $this->due_at?->toIso8601String(),
             'paid_at' => $this->paid_at?->toIso8601String(),
             'voided_at' => $this->voided_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * The snapshot, with nothing added and nothing filled in.
+     *
+     * An invoice issued before a field existed simply does not carry it, and
+     * the screen omits the line rather than showing an empty one. What must
+     * never happen here is a fallback to the customer's current profile: that
+     * would silently mutate an issued document, which is the one thing an
+     * invoice may not do.
+     *
+     * @return array<string, mixed>
+     */
+    private function documentSnapshot(): array
+    {
+        /** @var array<string, mixed> $snapshot */
+        $snapshot = $this->resource->billing_snapshot;
+
+        // The customer id is in the snapshot for internal traceability and
+        // adds nothing to a document the customer is reading.
+        unset($snapshot['customer_id']);
+
+        return $snapshot;
     }
 }

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Providers\Application\Actions;
 
 use Carbon\CarbonImmutable;
-use Illuminate\Contracts\Foundation\Application;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
@@ -13,20 +12,14 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Infrastructure\Domain\Enums\InfrastructureAction;
 use Lynomia\Modules\Infrastructure\Domain\Services\SafetyGate;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
-use Lynomia\Modules\Providers\Domain\Contracts\SecretResolver;
+use Lynomia\Modules\Providers\Application\Services\ProbeProvider;
 use Lynomia\Modules\Providers\Domain\DTOs\ConnectionResult;
 use Lynomia\Modules\Providers\Domain\DTOs\ServerDiscovery;
 use Lynomia\Modules\Providers\Domain\DTOs\TestTarget;
 use Lynomia\Modules\Providers\Domain\Enums\CredentialState;
-use Lynomia\Modules\Providers\Domain\Exceptions\NoBmcProvider;
-use Lynomia\Modules\Providers\Domain\Services\ProviderCatalogue;
-use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 use Lynomia\Modules\Providers\Infrastructure\Models\ConnectionTest as ConnectionTestRecord;
-use Lynomia\Modules\Providers\Infrastructure\Models\CredentialReference;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderCapability;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
-use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
-use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
 
 /**
  * Find out whether we can reach something, and write down what was found.
@@ -44,21 +37,36 @@ use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
  * Where the secret is, and for how long
  * ---------------------------------------------------------------------------
  *
- * Resolved here, at the last possible moment, into a TestTarget that redacts
- * itself in a var_dump and is never persisted. The provider row, the audit
- * entry and the connection_tests row all record what happened; none of them can
- * record what was sent, because none of them is ever given it.
+ * Resolved by {@see ProbeProvider}, at the last possible moment, into a
+ * TestTarget that redacts itself in a var_dump and is never persisted. The
+ * provider row, the audit entry and the connection_tests row all record what
+ * happened; none of them can record what was sent, because none of them is
+ * ever given it.
+ *
+ * ---------------------------------------------------------------------------
+ * What is left here, now that the probe is its own service
+ * ---------------------------------------------------------------------------
+ *
+ * The recording half. Finding out whether something answers is
+ * {@see ProbeProvider}'s job and changes nothing; this action writes down what
+ * was found, and the writing is what makes it an action: the provider row's
+ * state and timestamps, every capability row, the credential's state, a
+ * connection_tests record, and an audit entry.
+ *
+ * The split exists because Phase 30B-SIM needed a preflight that observes
+ * without moving the platform's own state — a diagnosis that marked a
+ * credential Invalid while explaining why a product cannot be sold would have
+ * changed the answer it was asked about. Everything security-critical about
+ * reaching a provider moved into the probe, so there is one copy of the
+ * endpoint policy call, the credential rule and the controlled-driver guard
+ * rather than two that drift.
  */
 final readonly class TestConnection
 {
     public function __construct(
-        private ConnectionTesterFactory $testers,
-        private SecretResolver $secrets,
+        private ProbeProvider $probe,
         private SafetyGate $gate,
         private RecordActAtomically $record,
-        private ProviderCatalogue $catalogue,
-        private EndpointPolicy $endpoints,
-        private Application $app,
     ) {}
 
     /**
@@ -77,8 +85,8 @@ final readonly class TestConnection
     {
         $this->gate->assert($server->name, $server->safety_class, $server->allow_reimage, InfrastructureAction::Read);
 
-        $target = $this->targetFor($server);
-        $result = $this->run($target->driver, $target);
+        $target = $this->probe->targetForServer($server);
+        $result = $this->probe->testerFor($target->driver, $target->environment)->test($target);
 
         return $this->recordServerTest($server, $target->driver, $result);
     }
@@ -96,8 +104,8 @@ final readonly class TestConnection
     {
         $this->gate->assert($server->name, $server->safety_class, $server->allow_reimage, InfrastructureAction::Read);
 
-        $target = $this->targetFor($server);
-        $tester = $this->testers->for($target->driver);
+        $target = $this->probe->targetForServer($server);
+        $tester = $this->probe->testerFor($target->driver, $target->environment);
         $result = $tester->test($target);
 
         $test = $this->recordServerTest($server, $target->driver, $result);
@@ -105,35 +113,6 @@ final readonly class TestConnection
         $facts = $result->state->usable() ? $tester->discover($target) : [];
 
         return new ServerDiscovery($test, $facts);
-    }
-
-    /**
-     * @throws NoBmcProvider
-     */
-    private function targetFor(ManagedServer $server): TestTarget
-    {
-        $bmc = $server->bmc();
-
-        if ($bmc === null) {
-            throw NoBmcProvider::forServer($server->name);
-        }
-
-        $address = $server->bmc_address ?? $server->management_address;
-
-        // Checked again here, not only at registration: a row can arrive by
-        // a seeder or an import, and the socket is what has to be guarded.
-        if ($address !== null) {
-            $this->endpoints->assertMachineAddress($address, $this->app->environment('production'));
-        }
-
-        return new TestTarget(
-            driver: $bmc->driver,
-            environment: $server->environment,
-            endpoint: $address,
-            secret: $this->secretFor($server->credential, $server->environment),
-            probeCapabilities: [],
-            identity: $server->name,
-        );
     }
 
     private function recordServerTest(ManagedServer $server, string $driver, ConnectionResult $result): ConnectionTestRecord
@@ -174,25 +153,7 @@ final readonly class TestConnection
      */
     public function forProvider(ProviderInstance $provider, ?User $operator = null): ConnectionTestRecord
     {
-        if ($provider->endpoint !== null && trim($provider->endpoint) !== '') {
-            $this->endpoints->assertProviderEndpoint(
-                $provider->endpoint,
-                controlledDriver: in_array($provider->driver, $this->catalogue->controlledDrivers(), true),
-                onOurHardware: $provider->category->needsServer(),
-                production: $this->app->environment('production'),
-            );
-        }
-
-        $secret = $this->secretFor($provider->credential, $provider->environment);
-
-        $result = $this->run($provider->driver, new TestTarget(
-            driver: $provider->driver,
-            environment: $provider->environment,
-            endpoint: $provider->endpoint,
-            secret: $secret,
-            probeCapabilities: $provider->category->capabilities(),
-            identity: $provider->name,
-        ));
+        $result = $this->probe->probe($provider);
 
         return $this->record->execute(
             act: function () use ($provider, $result): ConnectionTestRecord {
@@ -238,39 +199,6 @@ final readonly class TestConnection
                 ],
             ),
         );
-    }
-
-    private function run(string $driver, TestTarget $target): ConnectionResult
-    {
-        return $this->testers->for($driver)->test($target);
-    }
-
-    /**
-     * The secret behind a reference, if it may be used here at all.
-     *
-     * The environment check comes first and is deliberately a refusal to
-     * resolve rather than a refusal to use: a staging token that happens to
-     * work against production never enters memory, so nothing downstream has
-     * the opportunity to send it by mistake.
-     */
-    private function secretFor(?CredentialReference $credential, DeploymentEnvironment $environment): ?string
-    {
-        /*
-         * mayBeTried, not mayServe.
-         *
-         * A credential only reaches Valid by being tested, so demanding a
-         * valid one here would mean no newly configured credential could ever
-         * be tested — every one would sit at Configured for ever while the
-         * control centre reported an estate it had never contacted.
-         *
-         * The environment half of the rule is identical either way: a staging
-         * token is not tried against production, not even to see what happens.
-         */
-        if ($credential === null || ! $credential->mayBeTried($environment)) {
-            return null;
-        }
-
-        return $this->secrets->resolve($credential->backend, $credential->backend_reference);
     }
 
     private function recordCapabilities(ProviderInstance $provider, ConnectionResult $result): void

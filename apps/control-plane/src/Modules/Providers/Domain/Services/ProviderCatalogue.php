@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Providers\Domain\Services;
 
 use Lynomia\Modules\Providers\Domain\DTOs\CatalogueEntry;
+use Lynomia\Modules\Providers\Domain\Enums\ControlledDriver;
 use Lynomia\Modules\Providers\Domain\Enums\ProviderCategory;
 use Lynomia\Modules\Providers\Infrastructure\ConnectionTesterFactory;
 
@@ -54,6 +55,14 @@ final readonly class ProviderCatalogue
                 // demanding a licence row here would block a legitimate setup.
                 needsLicence: false,
                 summary: 'Proxmox VE cluster: virtual machines, snapshots and consoles.',
+                /*
+                 * Everything the compute category asks except GPU passthrough,
+                 * which ComputeProvider does not model at all: CreateVmRequest
+                 * carries no device, ResizeVmRequest cannot add one, and no
+                 * adapter reads one. Templates are here because the adapter
+                 * installs from one — `import-from=` on the disk it builds.
+                 */
+                capabilities: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling'],
             ),
             new CatalogueEntry(
                 driver: 'proxmox_backup',
@@ -62,6 +71,19 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Proxmox Backup Server: scheduled archives and restores.',
+                /*
+                 * `verify` is absent and that is a statement about Proxmox
+                 * rather than about this adapter: a PBS verification runs on
+                 * the backup server on its own schedule and the hypervisor API
+                 * has no endpoint that starts one, which is why
+                 * supportsVerification() answers false. The verdict is here,
+                 * because listBackups() reports it per archive and the
+                 * inventory sweep adopts it.
+                 *
+                 * `file_browse` and `file_restore` are absent because this
+                 * adapter does not implement FileLevelBackupProvider.
+                 */
+                capabilities: ['create', 'restore', 'delete', 'retention', 'verification_verdict'],
             ),
             new CatalogueEntry(
                 driver: 'cpanel',
@@ -72,6 +94,7 @@ final readonly class ProviderCatalogue
                 // is the case the licence centre exists for.
                 needsLicence: true,
                 summary: 'cPanel/WHM shared hosting node.',
+                capabilities: ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
             ),
             new CatalogueEntry(
                 driver: 'directadmin',
@@ -80,6 +103,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: true,
                 summary: 'DirectAdmin shared hosting node.',
+                capabilities: ['create_account', 'suspend', 'unsuspend', 'terminate', 'sso', 'change_package', 'usage'],
             ),
             new CatalogueEntry(
                 driver: 'cloudflare',
@@ -89,6 +113,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Cloudflare authoritative DNS.',
+                capabilities: ['create_zone', 'delete_zone', 'records', 'reconcile'],
             ),
             new CatalogueEntry(
                 driver: 'cloudflare_rdns',
@@ -97,6 +122,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Reverse DNS through Cloudflare.',
+                capabilities: ['set_ptr', 'clear_ptr'],
             ),
             new CatalogueEntry(
                 driver: 'sy_registry',
@@ -105,6 +131,24 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'The .sy registry, reached directly rather than through a reseller.',
+                /*
+                 * Nothing, and the empty list is the entry's whole point.
+                 *
+                 * SyRegistryProvider is a real class implementing the whole
+                 * registrar contract. Its supports() answers false for every
+                 * capability, its supportedTlds() is empty, and every
+                 * operation throws RegistrarNotAvailableException — the .sy
+                 * registry publishes no reseller API and Lynomia holds no
+                 * accreditation, so there is nothing for the adapter to call.
+                 *
+                 * It stays catalogued because the platform genuinely has the
+                 * adapter and the day a contract exists it is where the work
+                 * goes. Declaring nothing is what stops it being counted as
+                 * the production-capable registrar the Domains product would
+                 * need, which is exactly the false green a driver-exists check
+                 * would have produced.
+                 */
+                capabilities: [],
             ),
             new CatalogueEntry(
                 driver: 'stripe',
@@ -113,6 +157,23 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Stripe card payments and refunds.',
+                capabilities: ['charge', 'refund', 'webhook', 'currencies'],
+            ),
+            new CatalogueEntry(
+                driver: 'smtp',
+                category: ProviderCategory::Email,
+                // The relay is a deployment setting (MAIL_HOST), not an
+                // address the Control Center dials — the endpoint policy
+                // speaks HTTPS to providers and a relay speaks SMTP. The row
+                // exists so readiness has something to point at. No
+                // connection tester exists and none can be written honestly
+                // against a mailer that may be `log`, so the driver is
+                // untestable and a row for it stays blocked on credentials.
+                needsEndpoint: false,
+                needsCredential: true,
+                needsLicence: false,
+                summary: 'Transactional mail through the deployment\'s own mail transport. Untestable from here.',
+                capabilities: ['send'],
             ),
             new CatalogueEntry(
                 driver: 'ipmi',
@@ -121,6 +182,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'IPMI baseboard management: power and boot control.',
+                capabilities: ['inventory', 'power_state', 'power_control', 'boot_override', 'firmware'],
             ),
             new CatalogueEntry(
                 driver: 'redfish',
@@ -129,6 +191,7 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'Redfish baseboard management: power, boot and inventory.',
+                capabilities: ['inventory', 'power_state', 'power_control', 'boot_override', 'firmware'],
             ),
             new CatalogueEntry(
                 driver: 'ilo',
@@ -137,43 +200,33 @@ final readonly class ProviderCatalogue
                 needsCredential: true,
                 needsLicence: false,
                 summary: 'HPE iLO baseboard management.',
+                // Inherits every operation from the Redfish adapter, which it
+                // extends to paper over iLO's deviations from the spec.
+                capabilities: ['inventory', 'power_state', 'power_control', 'boot_override', 'firmware'],
             ),
-            /*
-             * The fake is catalogued on purpose.
-             *
-             * It is the only driver with a connection tester, so leaving it out
-             * would mean no environment could exercise a complete provider
-             * lifecycle — and a lifecycle that only runs in tests is one whose
-             * screens nobody has ever seen work. RegisterProvider refuses it in
-             * production, and the tester refuses to be constructed there.
-             */
-            new CatalogueEntry(
-                driver: 'fake',
-                // Catalogued as DNS rather than compute, which decides one
-                // thing: a DNS provider is somebody else's servers, so
-                // rehearsing the lifecycle does not also require a classified
-                // machine of ours. The on-machine path has its own coverage
-                // through the readiness rules, and making every rehearsal need
-                // a rack would mean the rehearsal stopped being run.
-                category: ProviderCategory::Dns,
-                needsEndpoint: true,
-                needsCredential: true,
-                needsLicence: false,
-                summary: 'A controlled provider for rehearsing the onboarding path. Never available in production.',
-            ),
-            new CatalogueEntry(
-                driver: 'fake_bmc',
-                // The machine half of the rehearsal: a BMC that answers a
-                // connection test and a discovery for a machine that does not
-                // exist. Bound to a managed server like any BMC, gated by that
-                // server's classification like any BMC.
-                category: ProviderCategory::Bmc,
-                needsEndpoint: true,
-                needsCredential: true,
-                needsLicence: false,
-                summary: 'A controlled BMC for rehearsing machine onboarding and discovery. Never available in production.',
-            ),
+            ...$this->controlled(),
         ];
+    }
+
+    /**
+     * Every driver that exists for rehearsal, built from the enum that
+     * declares them.
+     *
+     * Written this way rather than as nine more literals because the list and
+     * the refusal have to be the same list. The fake is catalogued on purpose
+     * — without it no environment could exercise a complete provider
+     * lifecycle, and a lifecycle that only runs in tests is one whose screens
+     * nobody has ever seen work — and registration refuses every one of them in
+     * production, as does each simulator's own constructor.
+     *
+     * @return list<CatalogueEntry>
+     */
+    private function controlled(): array
+    {
+        return array_map(
+            static fn (ControlledDriver $driver): CatalogueEntry => CatalogueEntry::controlled($driver),
+            ControlledDriver::cases(),
+        );
     }
 
     public function find(string $driver): ?CatalogueEntry
@@ -190,14 +243,21 @@ final readonly class ProviderCatalogue
     /**
      * Drivers that must never be registered in production.
      *
-     * Named here rather than inferred from the word "fake" in a string, so that
-     * a second controlled driver added later is refused by having been thought
-     * about, not by having been named carefully.
+     * Derived from the entries rather than listed beside them. The earlier
+     * version returned a literal `['fake', 'fake_bmc']`, which could not
+     * disagree with the catalogue — a test caught that — but which also could
+     * not grow when a simulator did. It stayed at two while eight stateful
+     * simulators sat behind the per-family factories, unknown to the provider
+     * registry, and the reference estate could not rehearse three of the five
+     * dependencies it declares.
      *
      * @return list<string>
      */
     public function controlledDrivers(): array
     {
-        return ['fake', 'fake_bmc'];
+        return array_values(array_map(
+            static fn (CatalogueEntry $entry): string => $entry->driver,
+            array_filter($this->entries(), static fn (CatalogueEntry $entry): bool => $entry->controlled),
+        ));
     }
 }

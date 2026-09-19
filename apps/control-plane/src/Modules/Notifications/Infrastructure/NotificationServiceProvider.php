@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Notifications\Infrastructure;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Notifications\Domain\Contracts\TransactionalEmailProvider;
 use Lynomia\Modules\Notifications\Infrastructure\Channels\EmailChannel;
 use Lynomia\Modules\Notifications\Infrastructure\Channels\InAppChannel;
+use Lynomia\Modules\Notifications\Infrastructure\Providers\LaravelMailTransport;
 use Lynomia\Modules\Notifications\Infrastructure\Registries\NotificationChannelRegistry;
 
 /**
@@ -26,6 +28,8 @@ final class NotificationServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->bind(TransactionalEmailProvider::class, LaravelMailTransport::class);
+
         $this->app->singleton(NotificationChannelRegistry::class, function ($app): NotificationChannelRegistry {
             $registry = new NotificationChannelRegistry;
 

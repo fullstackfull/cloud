@@ -181,6 +181,7 @@ final class VpsNetworkAttachmentTest extends TestCase
                 'memory_mib' => 4096,
                 'disk_gib' => 40,
                 'hostname' => 'web-01',
+                'template_reference' => 'local:import/debian-13-genericcloud-amd64.qcow2',
             ],
         ]);
     }

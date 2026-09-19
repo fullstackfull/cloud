@@ -24,6 +24,7 @@ use Lynomia\Modules\Identity\Http\Requests\InviteMemberRequest;
 use Lynomia\Modules\Identity\Http\Requests\TransferOwnershipRequest;
 use Lynomia\Modules\Identity\Http\Resources\TeamInvitationResource;
 use Lynomia\Modules\Identity\Http\Resources\TeamMemberResource;
+use Lynomia\Modules\Identity\Http\Resources\TeamRoleResource;
 use Lynomia\Modules\Identity\Infrastructure\Mail\InvitationMailer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
@@ -66,6 +67,28 @@ final class TeamController
     protected function acting(): ActingCustomer
     {
         return $this->actingCustomer;
+    }
+
+    /**
+     * What each role can do, from the authorization the server enforces.
+     *
+     * Readable by any member, and deliberately so: a person deciding whether
+     * to accept an invitation, or wondering why a button is missing, is asking
+     * this question. Nothing here is account data — it is the same five roles
+     * for every customer on the platform — so there is nothing to scope and
+     * no permission to check beyond belonging to an account.
+     *
+     * No query runs. The matrix is the enum, and a dashboard that asked the
+     * database what a role means would be inventing a second answer.
+     */
+    public function roles(Request $request): JsonResponse
+    {
+        return response()->json([
+            'data' => TeamRoleResource::collection(CustomerRole::cases()),
+            'meta' => [
+                'assignable_roles' => CustomerRole::assignableValues(),
+            ],
+        ]);
     }
 
     /**
@@ -234,7 +257,7 @@ final class TeamController
 
         $customer = $this->actingCustomer->get();
 
-        if (! hash_equals((string) $customer->getKey(), $request->confirmation())) {
+        if (! hash_equals(trim($customer->display_name), $request->confirmation())) {
             throw MembershipRefusedException::becauseTheTransferWasNotConfirmed();
         }
 

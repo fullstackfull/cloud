@@ -47,6 +47,8 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?bool $verified
  * @property ?CarbonImmutable $verified_at
  * @property ?string $verification_task_id
+ * @property ?CarbonImmutable $verification_requested_at
+ * @property int $verification_attempts
  * @property ?string $restore_task_id
  * @property ?int $retention_days
  * @property ?CarbonImmutable $expires_at
@@ -85,10 +87,14 @@ class Backup extends Model
      * later. Declared here, every creation path starts in the same state,
      * including the ones written after this comment.
      *
-     * @var array<string, string>
+     * @var array<string, mixed>
      */
     protected $attributes = [
         'state' => 'requested',
+        // The verification sweep reads this straight after a row is created,
+        // and a null here would compare as less than the attempt limit by
+        // accident rather than by meaning.
+        'verification_attempts' => 0,
     ];
 
     /**
@@ -105,6 +111,8 @@ class Backup extends Model
             'retention_days' => 'integer',
             'poll_count' => 'integer',
             'verified_at' => 'immutable_datetime',
+            'verification_requested_at' => 'immutable_datetime',
+            'verification_attempts' => 'integer',
             'expires_at' => 'immutable_datetime',
             'protected_until' => 'immutable_datetime',
             'deletion_requested_at' => 'immutable_datetime',
@@ -191,6 +199,39 @@ class Backup extends Model
     public function requestedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'requested_by_user_id');
+    }
+
+    /**
+     * Stored archives nobody has read back yet, least recently asked about
+     * first.
+     *
+     * Four conditions, and each one excludes a row that would otherwise be
+     * asked about for ever:
+     *
+     *  - `succeeded`, because an archive that is still being written, already
+     *    being verified, or being restored is not one to start a verification
+     *    against. This is also what makes the sweep idempotent: the row leaves
+     *    the scope the moment it is asked.
+     *  - an `archive_id`, because that is what a verification names. A
+     *    successful task whose archive the provider never reported is a
+     *    reconciliation problem, not a verification one.
+     *  - `verified` still null, so an archive that has already been read back
+     *    is not read again. Re-verification is a cadence nobody has decided.
+     *  - fewer attempts than the limit, so a datastore that refuses is asked a
+     *    few times rather than every five minutes for the life of the archive.
+     *
+     * @param  Builder<Backup>  $query
+     * @return Builder<Backup>
+     */
+    public function scopeAwaitingVerification(Builder $query, int $attemptLimit): Builder
+    {
+        return $query
+            ->where('state', BackupState::Succeeded->value)
+            ->whereNotNull('archive_id')
+            ->whereNull('verified')
+            ->where('verification_attempts', '<', $attemptLimit)
+            ->orderByRaw('verification_requested_at nulls first')
+            ->orderBy('created_at');
     }
 
     /**

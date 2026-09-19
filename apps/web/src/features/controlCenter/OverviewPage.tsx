@@ -5,6 +5,7 @@ import { Badge } from '@/components/Badge'
 import { Card } from '@/components/Card'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useInfrastructureOverview, type InfrastructureOverview } from '@/lib/controlCenterQueries'
 
 /**
@@ -20,7 +21,7 @@ export function OverviewPage() {
       <PageHeader title={t('admin.overview.title')} description={t('admin.overview.subtitle')} />
 
       {overview.isPending ? (
-        <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+        <Loading />
       ) : overview.error ? (
         <LoadFailure error={overview.error} />
       ) : (

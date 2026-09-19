@@ -5,6 +5,7 @@ import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { PageHeader } from '@/components/PageHeader'
+import { Loading } from '@/components/Loading'
 import { useAcceptInvitation, useDeclineInvitation, useInvitationOffer } from '@/lib/queries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
@@ -52,7 +53,7 @@ export function InvitationPage() {
         </div>
       ) : null}
 
-      {isPending ? <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p> : null}
+      {isPending ? <Loading /> : null}
 
       {offer !== null ? (
         <Card title={offer.account ?? t('invitation.anAccount')}>

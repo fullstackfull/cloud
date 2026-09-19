@@ -48,6 +48,8 @@ it, and where nothing does, the row says so.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Register and verify an email | `/register` | `POST /register`, `GET /email/verify/{id}/{hash}` | `RegisterCustomer` | `notifications` (the mail) | `DeliverNotification` | SMTP | `auth.e2e.ts` | `RUNTIME_VERIFIED` | No — mail is not sent from here |
 | Sign in, including a second factor | `/sign-in` | `POST /login`, `POST /login/two-factor` | `AttemptLogin` | sync | — | — | `auth.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Ask for the account's country or currency to change, see what it would touch, check again, withdraw | `/` | `GET|POST /account/country-currency-changes`, `POST …/{id}/reanalyse`, `POST …/{id}/withdraw` | `RequestCountryCurrencyChange`, `AnalyseCountryCurrencyChange`, `ReanalyseCountryCurrencyChange`, `WithdrawCountryCurrencyChange` | sync | — | — | `account-changes.e2e.ts` | `RUNTIME_VERIFIED` | n/a — nothing already issued is ever converted |
+| Have the change decided by a person and applied, now or at a scheduled moment | `/admin/account-changes` | `GET /admin/customers/country-currency-changes`, `POST …/{id}/approve|reject` | `DecideCountryCurrencyChange`, `ApplyCountryCurrencyChange`; `customers:apply-country-currency-changes` every 5 min | scheduler | — | — | `account-changes.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Sign out | any page | `POST /logout` | — | sync | — | — | `auth.e2e.ts`, `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Reset a forgotten password | `/forgot-password` | `POST /password/forgot`, `POST /password/reset` | Laravel's password broker | `notifications` | `DeliverNotification` | SMTP | — | `TESTED` | No |
 | Change password, edit profile | `/profile` | `PUT /me/password`, `PATCH /me` | — | sync | — | — | `account.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
@@ -118,6 +120,9 @@ it, and where nothing does, the row says so.
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | See backups and their state | `/backups` | `GET /vps/{vm}/backups` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Browse a backup folder by folder, with symlinks shown and never followed | `/backups` | `GET /vps/{vm}/backups/{backup}/files?path=` | `BrowseBackupFiles`; `BackupPath` refuses traversal | sync | — | `FileLevelBackupProvider::listFiles` | `backup-files.e2e.ts` | `RUNTIME_VERIFIED` (fake) | `BLOCKED_HARDWARE` — the Proxmox provider does not implement the interface; PBS file-restore was never called |
+| Download one file through a short-lived single-use link | `/backups` | `POST …/files/downloads`, `GET /backups/downloads/{token}` | `IssueBackupFileDownload`, `ServeBackupFileDownload` | sync | — | `readFile` | `backup-files.e2e.ts` | `RUNTIME_VERIFIED` (fake) | same |
+| Put named files back on the server, with the hostname typed | `/backups` | `POST …/files/restore`, `GET …/file-restores` | `RestoreBackupFiles`; `ReconcileFileRestores` on `backups:reconcile` | scheduler | — | `startFileRestore`, `taskState` | `backup-files.e2e.ts` | `RUNTIME_VERIFIED` (fake) | same; `needs_review` on a timeout, never retried |
 | Take a backup | `/backups` | `POST /vps/{vm}/backups` | `RequestServiceBackup` | sync + `ReconcileRunningBackups` | — | `startBackup` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no Proxmox Backup Server |
 | Restore over the machine | `/backups` | `POST /vps/{vm}/backups/{backup}/restore` | `RestoreServiceBackup` | sync | — | `startRestore` | `portal.e2e.ts` (three specs, including Escape) | `TESTED` | No |
 | Be refused a restore from a backup nobody can vouch for | `/backups` | as above | `RestoreServiceBackup` | — | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
@@ -180,6 +185,8 @@ asks the registrar only when the money has arrived.
 
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Make a staging copy, or clone to another domain | `/wordpress` | `POST /wordpress/sites/{id}/staging`, `POST …/clones` | `CopyWordPressSite` | `copy_wordpress_site` | `CopyWordPressSiteHandler` | `WordPressStagingProvider::copyWordPress` | `wordpress-copies.e2e.ts` | `RUNTIME_VERIFIED` (fake) | `NOT_IMPLEMENTED` for cPanel and DirectAdmin — no toolkit endpoint has been called |
+| See what a push would overwrite, then push the copy over production with the domain typed | `/wordpress` | `GET …/push/impact`, `POST …/push`, `GET …/operations` | `PushWordPressToProduction` | `push_wordpress_to_production` | `PushWordPressToProductionHandler` | `pushWordPressToProduction` | `wordpress-copies.e2e.ts` | `RUNTIME_VERIFIED` (fake) | same; production `needs_review` on a timeout, never retried; the platform holds no backup of a shared-hosting site and says so |
 | Order a site, with any of the four domain options | `/wordpress` | `POST /wordpress/sites` | `OrderWordPressSite` → `PlaceOrder` | sync | — | — | `wordpress.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Have the hosting account built when it is paid for | — | — | `ProvisionOrderedService` | `create_hosting_account` | `CreateHostingAccountHandler` | `createAccount` | — | `TESTED` | `BLOCKED_LICENSE` |
 | Have WordPress installed into it | — | — | `InstallWordPressOnceTheAccountExists` | `install_wordpress` | `InstallWordPressHandler` | `installWordPress` | — | `TESTED` | `NOT_IMPLEMENTED` for cPanel and DirectAdmin — see below |
@@ -193,6 +200,7 @@ asks the registrar only when the money has arrived.
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | See assigned addresses | `/ips` | `GET /ips`, `GET /ips/{assignment}` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
+| Preview a BIND zone file as a diff, apply exactly the previewed plan, export the zone | `/dns` | `POST /dns/zones/{id}/import/plan`, `POST …/import`, `GET …/export` | `PlanZoneImport`, `ApplyZoneImport` (through `AddRecord`/`ChangeRecord`/`RemoveRecord`), `ExportZone`; `ZoneFileParser` with bounds | sync | — | the zone's DNS provider, one record at a time | `dns-import.e2e.ts` | `RUNTIME_VERIFIED` (fake) | as DNS |
 | Set reverse DNS | `/ips` | `PUT /ips/{assignment}/rdns` | `SetReverseDns` | `PublishReverseDnsRecord` | — | `DnsProvider::publish` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no Cloudflare token |
 | Have a released address quarantined before reuse | — | — | `IpAllocator::releaseAssignment` | `destroy_vps` | `DestroyVpsHandler` | — | — | `TESTED` | n/a |
 | Have a released address come back into circulation | — | — | `ReleaseQuarantinedAddresses` | scheduler | — | — | — | `TESTED` | n/a |
@@ -246,8 +254,12 @@ that no screen shows is a service quietly not working.
 Stated plainly, because a matrix of mostly-green rows is easy to skim past.
 Every entry on the previous edition of this list — team membership, spending
 wallet credit, support tickets, deleting a backup, forward DNS, ending their
-own service — is now a row above. What replaces them is shorter, and none of
-it is an oversight:
+own service — is now a row above; so, since the Phase 30B-P scope addendum,
+are four entries this list carried for one edition too long (recovering a
+name from redemption, moving a zone in or out as a file, restoring one file
+from a backup, and asking for a country or currency change), each of which is
+built, tested in a browser and documented in `docs/phase-30b-p-scope-addendum.md`.
+What remains is shorter, and none of it is an oversight:
 
 1. **Buy a `.sy` name.** The seat exists, every capability answers false, and
    the search reports the namespace as not sold. What is missing is a registry
@@ -255,27 +267,25 @@ it is an oversight:
    an invented EPP client would produce tests that pass and a first real
    registration that fails, with every design decision downstream of it made
    from fiction.
-2. **Recover a name from redemption.** The state exists, the price column
-   exists, and the catalogue refuses to quote one unless an operator has been
-   told the registry's penalty. Every registry requires a manual step for
-   this, and none of them is built.
+2. **Recover a name whose registry penalty nobody has recorded.** The
+   redemption lifecycle is built (ADD.2), and the card quotes the exact
+   penalty and orders the recovery once it is paid — but only for a
+   namespace whose penalty and windows an operator has entered. For the rest
+   the portal says so and will not quote a guess.
 3. **Have WordPress installed on a real cPanel or DirectAdmin node.** The
    installer is an optional interface on the panel boundary, and neither real
    adapter implements it. Writing one means guessing at WP Toolkit's or
    Softaculous's API for the version each node runs. The fake implements it
    fully, so the product chain is proven; the two real panels will refuse to
    take a WordPress order until the toolkit clients exist.
-4. **Move a zone's records in or out as a file.** No zone-file import or
-   export: records are added one at a time. A customer with fifty records
-   migrating in will feel it.
-5. **Restore one file from a backup.** A restore is the whole machine; there
-   is no file-level browse.
-6. **Undo a deletion once the sweep has run.** The hour between asking and
+4. **Undo a deletion once the sweep has run.** The hour between asking and
    acting is the only window, and it is on purpose — after it, the archive is
    gone at the provider and no row in this platform brings it back.
-7. **Change their own account's currency or country.** Both are set at
-   registration and pinned to the ledger; changing either is an operator act
-   through support, because it would reprice open subscriptions.
+5. **Change their own account's currency or country without a person
+   approving it.** The request workflow is built (ADD.5): the customer asks
+   from the dashboard, the platform lists what the change would touch, and an
+   operator approves. What a customer cannot do is flip either setting
+   themselves, and that is by design — it would reprice open subscriptions.
 
 ## What no test in this repository proves
 

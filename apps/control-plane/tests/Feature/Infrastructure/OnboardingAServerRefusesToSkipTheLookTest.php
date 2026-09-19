@@ -264,13 +264,25 @@ final class OnboardingAServerRefusesToSkipTheLookTest extends TestCase
     #[Test]
     public function a_credential_from_another_environment_is_never_even_resolved(): void
     {
+        /*
+         * A staging machine with a production credential, rather than the
+         * other way round.
+         *
+         * The property under test is that a credential from the wrong
+         * environment is never resolved, and DeploymentEnvironment::satisfies
+         * is an exact match, so the refusal is symmetric: either direction
+         * proves it. This direction is used because the fake tester now
+         * refuses to answer for a production row at all — a separate control,
+         * added so a production row cannot be told it is connected by a fake
+         * from anywhere — and a production machine here would be stopped by
+         * that guard before reaching the one this test is about.
+         */
         $server = ManagedServer::factory()
             ->withBmc()
             ->classified(SafetyClass::DiscoveryOnly)
-            ->inProduction()
             ->create([
                 'credential_reference_id' => CredentialReference::factory()
-                    ->forEnvironment(DeploymentEnvironment::Staging)
+                    ->forEnvironment(DeploymentEnvironment::Production)
                     ->create()
                     ->getKey(),
             ]);

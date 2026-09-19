@@ -65,6 +65,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Verification attempts
+    |--------------------------------------------------------------------------
+    |
+    | How many times the platform will ask a datastore to read an archive back
+    | before leaving that archive for a person.
+    |
+    | Three, because the failures worth retrying are transient — a datastore
+    | mid-garbage-collection, a node that was rebooting — and a datastore that
+    | has refused three times is refusing for a reason no further attempt will
+    | change. Without a limit the sweep would ask a broken provider every five
+    | minutes for the life of every archive it holds.
+    |
+    */
+    'verification_attempts' => (int) env('BACKUP_VERIFICATION_ATTEMPTS', 3),
+
+    /*
+    |--------------------------------------------------------------------------
     | Retention
     |--------------------------------------------------------------------------
     |
@@ -91,4 +108,42 @@ return [
 
     'deletion_grace_hours' => (int) env('BACKUP_DELETION_GRACE_HOURS', 1),
 
+    /*
+    |--------------------------------------------------------------------------
+    | File-level access
+    |--------------------------------------------------------------------------
+    |
+    | A download link lives for `file_download_ttl_seconds` and is used once:
+    | long enough for the browser that asked for it to follow it, and not
+    | long enough to be worth forwarding. `file_download_max_bytes` bounds
+    | what one link streams; anything larger is restored to the machine,
+    | where it belongs, rather than pulled through the control plane.
+    |
+    | `file_restore_max_paths` bounds one restore request. A directory counts
+    | as one path and brings back everything under it.
+    |
+    */
+
+    'file_download_ttl_seconds' => (int) env('BACKUP_FILE_DOWNLOAD_TTL_SECONDS', 300),
+
+    'file_download_max_bytes' => (int) env('BACKUP_FILE_DOWNLOAD_MAX_BYTES', 64 * 1024 * 1024),
+
+    'file_restore_max_paths' => (int) env('BACKUP_FILE_RESTORE_MAX_PATHS', 50),
+
+    /*
+     * Where the controlled backup simulator keeps what it remembers, so that
+     * more than one process can see the same thing.
+     *
+     * Unset by default, and unset everywhere but the tests that need it: an
+     * in-memory simulator is the right one inside a single process, and a
+     * shared file would let one test's archives leak into the next test's.
+     * It exists because a workflow in this platform crosses a request, a queue
+     * and a worker, and a simulator that forgets at the process boundary can
+     * take part in a contract test but not in a workflow.
+     *
+     * @see \Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore
+     */
+    'fake' => [
+        'state_path' => env('BACKUPS_FAKE_STATE_PATH'),
+    ],
 ];

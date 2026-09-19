@@ -58,12 +58,13 @@ use Lynomia\Modules\Dedicated\Http\Controllers\DedicatedServerController;
  * cannot collide with another's, and a repeat returns the job the first
  * request created.
  *
- * POST /dedicated/{server}/power deliberately does NOT take one. An
- * idempotency key is a promise that a repeat is free, and the platform has
- * nowhere to keep that promise for a request sent straight to a controller; a
- * header that was required and then ignored would be worse than none, because
- * a client would retry believing it was protected. See PowerActionRequest for
- * why the three verbs are safe to repeat without it.
+ * POST /dedicated/{server}/power now requires one too, and used not to. The
+ * old reasoning — the platform has nowhere to keep the promise for a request
+ * sent straight to a controller — described a missing table rather than a
+ * property of the endpoint, and two `cycle` requests therefore reached the
+ * chassis twice. `dedicated_power_operations` is that table: the key is
+ * claimed there before the controller is called, so a repeat returns the first
+ * request's answer instead of sending a second reset. See PowerActionRequest.
  */
 
 Route::prefix('dedicated')->as('dedicated.')->group(function (): void {

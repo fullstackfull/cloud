@@ -7,10 +7,12 @@ namespace Lynomia\Modules\Monitoring\Application\Collectors;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
+use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Monitoring\Domain\Contracts\MetricsCollector;
 use Lynomia\Modules\Monitoring\Domain\ValueObjects\Metric;
@@ -18,6 +20,8 @@ use Lynomia\Modules\Monitoring\Domain\ValueObjects\MetricSample;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
 use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 
@@ -65,10 +69,13 @@ final readonly class ProductCollector implements MetricsCollector
             $this->ticketAge(),
             $this->backupDeletion(),
             $this->backupRetention(),
+            $this->fileRestores(),
+            $this->countryCurrencyChanges(),
             $this->domains(),
             $this->domainOperations(),
             $this->domainRedemptions(),
             $this->wordPressSites(),
+            $this->wordPressCopies(),
             $this->termination(),
             $this->drift(),
             $this->providerTasks(),
@@ -246,6 +253,56 @@ final readonly class ProductCollector implements MetricsCollector
         return Metric::gauge(
             'lynomia_backup_deletion_total',
             'Backups in each stage of removal. A `deleting` count that does not fall is a datastore that accepts deletes and keeps the archive.',
+            $samples,
+        );
+    }
+
+    /**
+     * File-level restores by state. `needs_review` is a restore the provider
+     * never answered for: the files may or may not have been written, the
+     * platform will not try again, and a person settles it.
+     */
+    private function fileRestores(): Metric
+    {
+        $counts = DB::table('backup_file_restores')
+            ->selectRaw('state, count(*) as total')
+            ->groupBy('state')
+            ->pluck('total', 'state');
+
+        $samples = [];
+
+        foreach (FileRestoreState::cases() as $state) {
+            $samples[] = MetricSample::of(['state' => $state->value], (float) ($counts[$state->value] ?? 0));
+        }
+
+        return Metric::gauge(
+            'lynomia_backup_file_restores_total',
+            'File-level restores by state. `needs_review` is one the provider did not confirm; it is never retried and waits for a person.',
+            $samples,
+        );
+    }
+
+    /**
+     * Requests to change an account's country or currency, by state.
+     * `needs_review` is one that was approved and then found a blocker at
+     * the moment of applying; nothing was written and a person decides.
+     */
+    private function countryCurrencyChanges(): Metric
+    {
+        $counts = DB::table('customer_country_currency_changes')
+            ->selectRaw('state, count(*) as total')
+            ->groupBy('state')
+            ->pluck('total', 'state');
+
+        $samples = [];
+
+        foreach (CountryCurrencyChangeState::cases() as $state) {
+            $samples[] = MetricSample::of(['state' => $state->value], (float) ($counts[$state->value] ?? 0));
+        }
+
+        return Metric::gauge(
+            'lynomia_country_currency_changes_total',
+            'Account country/currency change requests by state. `needs_review` was approved and then held at the last check; `blocked` is waiting on the customer.',
             $samples,
         );
     }
@@ -429,6 +486,37 @@ final readonly class ProductCollector implements MetricsCollector
                 MetricSample::of(['disposition' => 'waiting_on_dns'], (float) $row->waiting_on_dns),
                 MetricSample::of(['disposition' => 'stuck'], (float) $row->stuck),
             ],
+        );
+    }
+
+    /**
+     * Copies and pushes of WordPress sites, by kind and state. An
+     * `indeterminate` push is the one worth an alert: production may be
+     * half-overwritten and nobody has confirmed either way.
+     */
+    private function wordPressCopies(): Metric
+    {
+        $counts = DB::table('wordpress_site_operations')
+            ->selectRaw('kind, state, count(*) as total')
+            ->groupBy('kind', 'state')
+            ->get()
+            ->keyBy(static fn (object $row): string => $row->kind.'|'.$row->state);
+
+        $samples = [];
+
+        foreach (WordPressOperationKind::cases() as $kind) {
+            foreach (WordPressOperationState::cases() as $state) {
+                $samples[] = MetricSample::of(
+                    ['kind' => $kind->value, 'state' => $state->value],
+                    (float) ($counts[$kind->value.'|'.$state->value]->total ?? 0),
+                );
+            }
+        }
+
+        return Metric::gauge(
+            'lynomia_wordpress_site_operations_total',
+            'Copies and pushes of WordPress sites by kind and state. An indeterminate push_to_production is a live site that may be half-overwritten; it is never retried.',
+            $samples,
         );
     }
 

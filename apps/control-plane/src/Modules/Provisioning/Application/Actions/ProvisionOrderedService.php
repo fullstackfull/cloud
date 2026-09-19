@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Provisioning\Application\Actions;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
@@ -228,12 +230,80 @@ final readonly class ProvisionOrderedService
             return null;
         }
 
+        $template = $this->templateFor($cluster, $constraints['template_slug'] ?? null);
+
+        if ($template === null) {
+            $this->cannotPlace(
+                $service,
+                'the plan names no installable OS image, and the cluster offers no single one',
+            );
+
+            return null;
+        }
+
         return array_merge($resources, [
             'cluster_id' => $cluster,
             'ip_pool_id' => $pool,
             'storage_class' => $constraints['storage_class'] ?? 'nvme',
             'hostname' => $this->hostnameFor($service),
+            /*
+             * Resolved here, at the purchase, and carried as three durable
+             * values rather than re-derived in the worker.
+             *
+             * The id is the audit trail: which catalogue row this machine was
+             * promised. The reference is what the hypervisor is given. The
+             * family and the architecture are what the platform reasons with —
+             * the scheduler refuses a node of the wrong architecture, and the
+             * guest agent and cloud-init behaviour differ by family.
+             *
+             * Re-querying the estate in the worker would be a different
+             * decision made later: an operator who stages a second image
+             * between payment and build would change what a paid-for order
+             * delivers, and a retry could deliver a different OS than the
+             * first attempt.
+             */
+            'template_id' => (string) $template->getKey(),
+            'template_reference' => (string) $template->provider_reference,
+            'os_family' => $template->os_family->value,
+            'architecture' => $template->architecture->value,
         ]);
+    }
+
+    /**
+     * The image this plan is sold with, on this cluster.
+     *
+     * Two sources, in the order the rest of this method uses for every other
+     * placement decision: what the plan says, then the estate's own answer
+     * when the plan says nothing and there is exactly one answer to give.
+     *
+     * The purchase screens offer no OS choice — a customer picks an image when
+     * they reinstall, not when they buy — so the plan is where the decision
+     * belongs, and `placement_constraints` is where a plan already keeps its
+     * cluster, its pool and its storage class.
+     *
+     * "Exactly one" is the same rule as {@see soleId()} and for the same
+     * reason: with two staged images the platform has no basis for choosing,
+     * and taking the first would install an operating system by row order.
+     */
+    private function templateFor(string $clusterId, mixed $declaredSlug): ?VmTemplate
+    {
+        $query = fn (): Builder => VmTemplate::query()
+            ->installable()
+            ->where(fn (Builder $scope) => $scope
+                ->whereNull('cluster_id')
+                ->orWhere('cluster_id', $clusterId));
+
+        if (is_string($declaredSlug) && $declaredSlug !== '') {
+            /** @var VmTemplate|null $named */
+            $named = $query()->where('slug', $declaredSlug)->first();
+
+            return $named;
+        }
+
+        /** @var list<VmTemplate> $candidates */
+        $candidates = $query()->limit(2)->get()->all();
+
+        return count($candidates) === 1 ? $candidates[0] : null;
     }
 
     /**

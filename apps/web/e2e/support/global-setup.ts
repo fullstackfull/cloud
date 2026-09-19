@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
+
+import {
+  FAKE_COMPUTE_STATE_PATH,
+  FAKE_PAYMENTS_STATE_PATH,
+  FAKE_REGISTRAR_STATE_PATH,
+  MAIL_OUTBOX_PATH,
+} from '../../playwright.config'
 
 /*
  * A clean database before the suite, and the same one every time.
@@ -24,11 +32,43 @@ export default function globalSetup(): void {
 
   const controlPlane = path.resolve(import.meta.dirname, '../../../control-plane')
 
+  /*
+   * The fake hypervisor's fleet file, shared with the API process. Removed
+   * first so a run starts with the fleet the seeder writes and nothing a
+   * previous run left behind.
+   */
+  const fleet = process.env.COMPUTE_FAKE_STATE_PATH ?? FAKE_COMPUTE_STATE_PATH
+  rmSync(fleet, { force: true })
+
+  /*
+   * And the registrar's portfolio, for the same reason: a name a previous run
+   * transferred away or renewed must not decide what this run finds.
+   */
+  const registrar = process.env.DOMAINS_FAKE_STATE_PATH ?? FAKE_REGISTRAR_STATE_PATH
+  rmSync(registrar, { force: true })
+
+  /*
+   * Last run's mail and last run's payment decisions, gone.
+   *
+   * Both are files the suite reads: a leftover verification link from the
+   * previous run would be followed instead of this run's, and a leftover
+   * approval would make a fresh payment look already authorised. Deleting
+   * them here rather than in a spec keeps one run independent of the last.
+   */
+  rmSync(process.env.MAIL_OUTBOX_PATH ?? MAIL_OUTBOX_PATH, { force: true })
+  rmSync(process.env.PAYMENTS_FAKE_STATE_PATH ?? FAKE_PAYMENTS_STATE_PATH, { force: true })
+
   const artisan = (args: string[]): void => {
     execFileSync('php', ['artisan', ...args], {
       cwd: controlPlane,
       stdio: 'inherit',
-      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: database },
+      env: {
+        ...process.env,
+        APP_ENV: 'local',
+        DB_DATABASE: database,
+        COMPUTE_FAKE_STATE_PATH: fleet,
+        DOMAINS_FAKE_STATE_PATH: registrar,
+      },
     })
   }
 

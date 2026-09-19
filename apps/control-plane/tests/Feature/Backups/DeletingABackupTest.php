@@ -38,7 +38,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         $backup = $this->availableBackup($customer, $machine);
 
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertOk()
             ->assertJsonPath('data.state', BackupState::DeleteRequested->value)
             ->assertJsonPath('data.is_being_deleted', true)
@@ -66,7 +66,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         $backup = $this->availableBackup($customer, $machine);
 
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertOk();
 
         $this->actingAs($user)
@@ -87,14 +87,14 @@ final class DeletingABackupTest extends VpsApiTestCase
     }
 
     #[Test]
-    public function the_wrong_reference_deletes_nothing(): void
+    public function the_wrong_phrase_deletes_nothing(): void
     {
         [$customer, $user] = $this->accountWithOwner();
         $machine = $this->machineFor($customer);
         $backup = $this->availableBackup($customer, $machine);
 
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => 'not-the-reference'])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => 'not-the-hostname'])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'backup.deletion_not_confirmed');
 
@@ -113,7 +113,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         // Deleting it mid-restore leaves a machine half-written from a source
         // that no longer exists.
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'backup.restore_in_progress');
     }
@@ -132,7 +132,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         ]);
 
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'backup.still_in_flight');
     }
@@ -144,7 +144,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         $machine = $this->machineFor($customer);
         $backup = $this->availableBackup($customer, $machine);
 
-        $payload = ['confirm_backup_id' => (string) $backup->getKey()];
+        $payload = ['confirmation' => $machine->hostname];
 
         $this->actingAs($user)->deleteJson($this->url($machine, $backup), $payload)->assertOk();
         $this->actingAs($user)->deleteJson($this->url($machine, $backup), $payload)
@@ -169,7 +169,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         // are its evidence must not be able to destroy that evidence from a
         // web page.
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertStatus(403)
             ->assertJsonPath('error.code', 'backup.deletion_not_permitted');
 
@@ -185,7 +185,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         $backup->forceFill(['protected_until' => now()->addDays(20)])->save();
 
         $this->actingAs($user)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'backup.protected');
     }
@@ -202,7 +202,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         $this->assertFalse(CustomerRole::Technical->can('service.destroy'));
 
         $this->actingAs($engineer)
-            ->deleteJson($this->url($machine, $backup), ['confirm_backup_id' => (string) $backup->getKey()])
+            ->deleteJson($this->url($machine, $backup), ['confirmation' => $machine->hostname])
             ->assertStatus(403);
 
         $this->assertSame(BackupState::Succeeded, $backup->refresh()->state);
@@ -219,7 +219,7 @@ final class DeletingABackupTest extends VpsApiTestCase
         $theirBackup = $this->availableBackup($theirs, $theirMachine);
 
         $this->actingAs($me)
-            ->deleteJson($this->url($myMachine, $theirBackup), ['confirm_backup_id' => (string) $theirBackup->getKey()])
+            ->deleteJson($this->url($myMachine, $theirBackup), ['confirmation' => $myMachine->hostname])
             ->assertNotFound();
 
         $this->assertSame(BackupState::Succeeded, $theirBackup->refresh()->state);

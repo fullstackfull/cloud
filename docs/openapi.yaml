@@ -64,6 +64,7 @@ tags:
     description: "Credentials for integrations. Shown once at creation; the platform stores a hash."
   - name: "Account"
     description: "The signed-in person: their profile, their password, their second factor and the devices they are signed in on."
+  - name: "Activity"
   - name: "Authentication"
     description: "Signing in and out, verifying an address, resetting a password. Rate-limited harder than anything else here."
   - name: "Backups"
@@ -86,6 +87,7 @@ tags:
     description: "The NOC surface. Same guard as the customer API — what separates them is that every route here names the permission it needs."
   - name: "Orders"
     description: "Placing and cancelling orders. Nothing is provisioned until a payment has been verified server-side."
+  - name: "Payments"
   - name: "Services"
     description: "What the account owns, whatever kind it is, and what the platform has done to it."
   - name: "Shared hosting"
@@ -576,6 +578,219 @@ paths:
                 "$ref": "#/components/schemas/Error"
         403:
           description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/customers/country-currency-changes":
+    get:
+      operationId: "api_admin_customers_country_currency_changes_index"
+      tags:
+        - "Operator"
+      summary: "Requests to change an account's country or currency"
+      description: |-
+        Open requests by default (needs_review first, then awaiting approval, then scheduled); `state` filters. Each carries the analysis as last run: counts and minor-unit amounts in the currency named beside them, the blockers in words, and the warnings.
+
+        Requires the `customer.view_any` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "state"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminCountryCurrencyChangePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/customers/country-currency-changes/{change}/approve":
+    post:
+      operationId: "api_admin_customers_country_currency_changes_approve"
+      tags:
+        - "Operator"
+      summary: "Approve a country/currency change"
+      description: |-
+        Runs the analysis again first and refuses (409 `account.country_currency_change.blocked`) if the account has grown a blocker since the customer asked — an open invoice, an order in flight, a subscription in the old currency, a wallet balance. Approved for now, the account changes in the same request; approved with `apply_at`, the change is `scheduled` and the sweep applies it then after checking again. Nothing already issued is converted.
+
+        Requires the `customer.update` permission.
+      parameters:
+        - name: "change"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                note:
+                  description: "See the endpoint description; validated server-side."
+                apply_at:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminCountryCurrencyChangeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/customers/country-currency-changes/{change}/reject":
+    post:
+      operationId: "api_admin_customers_country_currency_changes_reject"
+      tags:
+        - "Operator"
+      summary: "Reject a country/currency change"
+      description: |-
+        With a note the customer is told. Also takes a scheduled change back before the sweep applies it.
+
+        Requires the `customer.update` permission.
+      parameters:
+        - name: "change"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                note:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminCountryCurrencyChangeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -2188,6 +2403,61 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/preflight":
+    post:
+      operationId: "api_admin_infrastructure_preflight"
+      tags:
+        - "Operator"
+      summary: "What exactly prevents this from being used"
+      description: |-
+        Runs the one preflight service the CLI also calls, in one of two modes and against one scope. SIMULATION reads the platform's own records and rehearses against controlled providers; READ_ONLY_REAL sends real credentials to real endpoints and reads. Neither mode writes anything, anywhere: no provisioning, no configuration change, no readiness update, and no state moved on the thing being diagnosed. READ_ONLY_REAL additionally requires provider.manage, because dialling a real provider is the same act as a connection test. Every run is fresh; there is no cached result.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/PreflightReportResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/profiles":
     get:
       operationId: "api_admin_infrastructure_profiles_index"
@@ -3711,6 +3981,244 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/DeploymentPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/templates":
+    get:
+      operationId: "api_admin_infrastructure_templates_index"
+      tags:
+        - "Operator"
+      summary: "The images a cluster may install"
+      description: |-
+        Withdrawn entries are included, because "why is this image not being
+        offered?" is answered by the row that says it was withdrawn. `active=1`
+        narrows it to the ones still offered.
+
+        `meta.installable` is the number that decides whether a VPS can be
+        built at all: an entry that is active and has a provider reference.
+        Placement resolves a plan's declared `template_slug` against exactly
+        that set, and a build that finds none is refused rather than started.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - name: "cluster"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "active"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/VmTemplate"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_templates_store"
+      tags:
+        - "Operator"
+      summary: "Record an installable image"
+      description: |-
+        Recorded by an operator rather than discovered, because the hypervisor
+        knows which of its guests are templates and does not know which of them
+        this platform may sell, what to call them in two languages, or whether
+        the operating system needs a licence.
+
+        A second call for the same cluster and slug is a correction, not a
+        conflict — an image rebuilt under a new reference, or a version
+        upgraded in place — and answers 200 rather than 201. It also restores a
+        withdrawn entry, so deactivating one is never a one-way door.
+
+        `provider_reference` may be omitted while the image has not been staged
+        on the cluster. The entry then exists as a commercial intention and
+        placement refuses it, which is visible as `installable: false`.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                cluster_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                os_family:
+                  description: "See the endpoint description; validated server-side."
+                os_version:
+                  description: "See the endpoint description; validated server-side."
+                architecture:
+                  description: "See the endpoint description; validated server-side."
+                provider_reference:
+                  description: "See the endpoint description; validated server-side."
+                cloud_init:
+                  description: "See the endpoint description; validated server-side."
+                guest_agent:
+                  description: "See the endpoint description; validated server-side."
+                requires_licence:
+                  description: "See the endpoint description; validated server-side."
+                licence_note:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/VmTemplateResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/templates/{template}":
+    delete:
+      operationId: "api_admin_infrastructure_templates_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop offering an image"
+      description: |-
+        Deactivated, never deleted: machines already built point at the row, and "which image is this server running?" is the first question asked when a rebuild goes wrong. Placement and the customer reinstall list both filter on the same flag, so one call removes it from both.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "template"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/VmTemplateResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -6804,6 +7312,358 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/account/country-currency-changes":
+    get:
+      operationId: "api_v1_account_country_currency_changes_index"
+      tags:
+        - "Account"
+      summary: "Requests to change this account's country or currency"
+      description: "The last twenty, newest first, each with its analysis. `meta.currencies` lists the currencies the catalogue prices anything in — the only ones an account can be billed in. Requires `customer.manage`."
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CountryCurrencyChangePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_v1_account_country_currency_changes_store"
+      tags:
+        - "Account"
+      summary: "Ask for the country or currency to change"
+      description: "Nothing on the account changes here. The request is analysed against the account as it is and recorded as `blocked` — with what must change first, in words — or `awaiting_approval` for an operator. A currency change is blocked while anything priced in the old currency is still live: an open invoice, an order between placement and provisioning, a domain operation with the registrar, an active or past-due subscription, a wallet balance; and while the catalogue prices nothing in the new currency. A country-only change is not blocked by those; it changes the tax on invoices issued from then on and is reported as such. Nothing already issued is ever converted. One open request per account (409)."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                country:
+                  description: "See the endpoint description; validated server-side."
+                currency:
+                  description: "See the endpoint description; validated server-side."
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CountryCurrencyChangeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/account/country-currency-changes/{change}/reanalyse":
+    post:
+      operationId: "api_v1_account_country_currency_changes_reanalyse"
+      tags:
+        - "Account"
+      summary: "Check a request against the account again"
+      description: "After paying the invoice or ending the subscription the blockers named: moves between `blocked` and `awaiting_approval` as the facts say."
+      parameters:
+        - name: "change"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CountryCurrencyChangeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/account/country-currency-changes/{change}/withdraw":
+    post:
+      operationId: "api_v1_account_country_currency_changes_withdraw"
+      tags:
+        - "Account"
+      summary: "Take a request back"
+      description: "While it is open — including after an operator scheduled it, up to the moment it is applied."
+      parameters:
+        - name: "change"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CountryCurrencyChangeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/activity":
+    get:
+      operationId: "api_v1_activity_index"
+      tags:
+        - "Activity"
+      summary: "What has happened on this account"
+      description: "The account-wide history: builds, power actions, rebuilds, registrar operations, WordPress copies, backups, zone imports, orders, invoices and support requests, newest first. A read over the durable tables that already hold the truth rather than a second copy of them, so it cannot drift and needs no backfill. Cursor-paginated with no total: history grows at the newest end, so page numbers would show one row twice and hide another. Filtering by category chooses which sources are read rather than trimming a page. Separate from notifications, which are read/unread — marking one read does not erase history."
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "category"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "cursor"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ActivityItemPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/backups/downloads/{token}":
+    get:
+      operationId: "api_v1_backups_downloads_show"
+      tags:
+        - "Backups"
+      summary: "Follow a download link"
+      description: "Streamed as `application/octet-stream` with Content-Disposition: attachment, nosniff and a sandboxing CSP, so a browser saves the file rather than rendering it. A link that is unknown, expired, already used or another account's is 404 `backup.download_unavailable` — one answer for all four. Audited as `backup.file.downloaded`."
+      parameters:
+        - name: "token"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "No content."
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/catalog/plans/{plan}":
     get:
       operationId: "api_v1_catalog_plans_show"
@@ -7458,6 +8318,212 @@ paths:
                 "$ref": "#/components/schemas/Error"
         403:
           description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/export":
+    get:
+      operationId: "api_v1_dns_zones_export"
+      tags:
+        - "DNS"
+      summary: "Export the zone as a BIND-compatible file"
+      description: "The records this platform holds, as a file another provider can read: owners relative to the origin, TTLs where set, targets absolute, TXT quoted. No SOA, no apex NS, no provider identifiers, no credentials, no audit metadata; the current nameservers appear as a comment. A record the provider has not confirmed carries a comment saying so."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ZoneExportResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/import":
+    post:
+      operationId: "api_v1_dns_zones_import_apply"
+      tags:
+        - "DNS"
+      summary: "Apply a previewed zone import"
+      description: "Recomputes the plan from the same text and applies it only if its fingerprint equals the one the preview returned (409 `dns.import.plan_changed` otherwise) and no line is refused (409 `dns.import.refused`). Removals, then updates, then additions, each through the same action a single record goes through, each with its own publish and its own state. Audited once with the counts."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                text:
+                  description: "See the endpoint description; validated server-side."
+                mode:
+                  description: "See the endpoint description; validated server-side."
+                fingerprint:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ZoneImportResultResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/dns/zones/{zone}/import/plan":
+    post:
+      operationId: "api_v1_dns_zones_import_plan"
+      tags:
+        - "DNS"
+      summary: "Preview what a zone file would do"
+      description: "Parses BIND-compatible text (comments, $ORIGIN, $TTL, parentheses, quoted strings, relative names; A, AAAA, CNAME, MX, TXT and CAA) and returns every line as ADD, UPDATE, REMOVE, UNCHANGED, REFUSED or IGNORED with the reason. Every rule a single record faces is applied to every line, plus CNAME-stands-alone on the zone as it would be and the zone ceiling on the final count. One refused line makes the whole plan not applicable; nothing is skipped. `merge` (default) leaves unmentioned records alone; `replace` lists each as REMOVE. Input over 256 KiB, 5000 lines, 4096 characters a line, not UTF-8 or carrying control characters is refused (422) before it is read. $INCLUDE and $GENERATE are refused lines."
+      parameters:
+        - name: "zone"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                text:
+                  description: "See the endpoint description; validated server-side."
+                mode:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ZoneImportPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -8209,7 +9275,134 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/domains/{domain}/auto-renew":
+    put:
+      operationId: "api_v1_domains_auto_renew_update"
+      tags:
+        - "Domains"
+      summary: "Turn auto-renew on or off"
+      description: "Whether this platform raises the next invoice before the name lapses. It is not the registrar's own flag: renewal here is invoice-first, and a second renewal authority at the registrar would mean two systems that can each decide to renew. Turning it off does not cancel the name or shorten the term already paid for."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                auto_renew:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/domains/{domain}/contacts":
+    get:
+      operationId: "api_v1_domains_contacts_show"
+      tags:
+        - "Domains"
+      summary: "The registrant on record"
+      description: "The account's own registrant, read back so a correction does not have to be retyped from memory. Every field is personal data: this needs `service.manage`, not `service.view`, and publishes only the registrant role and only the fields the update accepts."
+      parameters:
+        - name: "domain"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/DomainContactResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
     put:
       operationId: "api_v1_domains_contacts_update"
       tags:
@@ -8643,6 +9836,248 @@ paths:
               "$ref": "#/components/headers/RequestId"
             X-RateLimit-Remaining:
               "$ref": "#/components/headers/RateLimitRemaining"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}":
+    get:
+      operationId: "api_v1_fake_gateway_show"
+      tags:
+        - "Payments"
+      summary: "The controlled gateway page for a pending payment"
+      description: "Development and test only. The amount comes from the platform's own record of the payment, never from the URL."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayPageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}/approve":
+    post:
+      operationId: "api_v1_fake_gateway_approve"
+      tags:
+        - "Payments"
+      summary: "Authorise a payment on the controlled gateway"
+      description: "Development and test only. Records the decision on the provider side and sends the platform a signed webhook; the invoice is settled by that webhook."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayDecisionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}/confirm":
+    post:
+      operationId: "api_v1_fake_gateway_confirm"
+      tags:
+        - "Payments"
+      summary: "Confirm a payment with its client credential"
+      description: "Development and test only. The credential is checked against the intent, so a client that does not hold it confirms nothing."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                client_secret:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayDecisionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/fake-gateway/payments/{reference}/decline":
+    post:
+      operationId: "api_v1_fake_gateway_decline"
+      tags:
+        - "Payments"
+      summary: "Decline a payment on the controlled gateway"
+      description: "Development and test only. The invoice stays open and the failure is visible on it."
+      parameters:
+        - name: "reference"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ControlledGatewayDecisionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
         404:
           description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
           content:
@@ -10181,6 +11616,57 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/me/overview":
+    get:
+      operationId: "api_v1_me_overview"
+      tags:
+        - "Account"
+      summary: "The dashboard, in one read"
+      description: "What needs attention, what the account holds, what it owes grouped by currency, what renews next, how many notifications are unread, and what happened recently. One aggregate rather than a browser fanning out across four product endpoints and deciding between the results which matters."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AccountOverviewResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/me/password":
     put:
       operationId: "api_v1_me_password"
@@ -10782,6 +12268,57 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/notifications/unread-count":
+    get:
+      operationId: "api_v1_notifications_unread_count"
+      tags:
+        - "Notifications"
+      summary: "How many notifications are unread"
+      description: "The shell draws a badge on every page; asking the inbox for it would render a page of notifications to print one integer. Kept beside the inbox's own unread count rather than replacing it, so a screen that has just fetched the list needs no second request."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/NotificationUnreadCountResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/notifications/{notification}/read":
     post:
       operationId: "api_v1_notifications_read"
@@ -10807,6 +12344,62 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/NotificationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/operations/{operation}":
+    get:
+      operationId: "api_v1_operations_show"
+      tags:
+        - "Activity"
+      summary: "What became of something you asked for"
+      description: "A 202 means the request was accepted and nothing more. This turns the operation it returned back into a state, in the customer vocabulary, with the retry advice the server decides and a poll hint that is null once there is nothing left to wait for. Read-only: retrying is re-asking the product through its own idempotency key and guards, not a verb on an operation. Another account's operation id answers 404 rather than 403, because a refusal would confirm the id names real work."
+      parameters:
+        - name: "operation"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CustomerOperationResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -10938,6 +12531,88 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/OrderResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/orders/quote":
+    post:
+      operationId: "api_v1_orders_quote"
+      tags:
+        - "Orders"
+      summary: "Price a basket without buying it"
+      description: |-
+        The itemised price of a basket: the plan price, the setup fee, the
+        coupon, the tax, the total, and what the same lines will cost when the
+        period comes round again.
+
+        It runs the same pricing path as placing the order — the same catalogue
+        lookups, the same readiness and stock checks, the same engine — so the
+        figures here are the figures the order will be written with. A contract
+        test prices the same basket both ways and compares every one of them.
+
+        It writes nothing: no order, no held stock, no coupon use, nothing
+        owed. There is therefore no idempotency key.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                items:
+                  description: "See the endpoint description; validated server-side."
+                billing_period:
+                  description: "See the endpoint description; validated server-side."
+                coupon_code:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OrderQuoteResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -11304,7 +12979,7 @@ paths:
       tags:
         - "Authentication"
       summary: "Create an account"
-      description: "Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified."
+      description: "Creates a user, their first billing account, and sends a verification email. Nothing that spends money works until the address is verified. Answers 202 with a sentence and nothing identifying, whether or not an account was created: answering differently for an address that already has one would tell a caller which addresses are registered here. No session is issued — verification comes first. Refused with 503 `registration.unavailable` while the legal documents a customer would be accepting are not published, so no account is created against a policy nobody has written."
       requestBody:
         required: true
         content:
@@ -11322,12 +12997,12 @@ paths:
                   description: "See the endpoint description; validated server-side."
       security: []
       responses:
-        201:
+        202:
           description: "The resource."
           content:
             "application/json":
               schema:
-                "$ref": "#/components/schemas/UserResponse"
+                "$ref": "#/components/schemas/RegistrationAcceptedResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -11339,6 +13014,57 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        503:
+          description: "Registration is closed on this deployment. `registration.unavailable`, returned while the legal documents a customer would be accepting are not published. Nothing the caller sent is wrong, and the response names no document, configuration key or version."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/registration/options":
+    get:
+      operationId: "api_v1_registration_options"
+      tags:
+        - "Authentication"
+      summary: "What a registration form may offer"
+      description: |-
+        The countries this platform accepts, as ISO-3166-1 alpha-2 codes, the
+        currencies it bills in, as ISO-4217, and the currency recommended for
+        each country.
+
+        Read before an account exists, and it discloses nothing about anybody:
+        the lists are configuration. The same lists validate the registration,
+        so a client cannot submit a country or a currency it was never offered.
+
+        Country names are deliberately absent. A name is a translation, and
+        every client already has CLDR's.
+      security: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/RegistrationOptionsResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
         404:
           description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
           content:
@@ -12642,6 +14368,64 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/team/roles":
+    get:
+      operationId: "api_v1_team_roles"
+      tags:
+        - "Team"
+      summary: "What each role may do"
+      description: "The five roles and the capability matrix behind them, derived from the same permission list the API refuses with - so a screen that explains a role and an endpoint that refuses it cannot disagree. Readable by any member: deciding whether to accept an invitation is exactly when this is asked. Each capability publishes the permission string as well as its own id, so the claim can be checked against a 403 rather than taken on trust. Static for the whole platform and costs no query."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TeamRole"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/team/transfer-ownership":
     post:
       operationId: "api_v1_team_transfer_ownership"
@@ -12661,7 +14445,7 @@ paths:
               properties:
                 member_id:
                   description: "See the endpoint description; validated server-side."
-                confirm_account_id:
+                confirm_account_name:
                   description: "See the endpoint description; validated server-side."
       security:
         - sessionCookie: []
@@ -12977,7 +14761,7 @@ paths:
       tags:
         - "Backups"
       summary: "Delete a backup"
-      description: "Requires the backup's own id typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force."
+      description: "Requires the machine's hostname typed back, and `service.destroy` rather than `service.manage` — a technical contact who may rebuild a machine may not destroy the thing that would let it be rebuilt afterwards. Which archive is destroyed is settled by the URL; the phrase is evidence that a person meant to destroy a copy of that machine's data, which the backup's own ULID never was. Records a decision and calls no provider: the retention sweep acts on it after a grace period, so the response says `delete_requested`, never `deleted`. Refused while a restore is running, while the backup is still being written, when the plan sells retention as a guarantee, and while a termination hold is in force."
       parameters:
         - name: "vm"
           in: "path"
@@ -12997,7 +14781,7 @@ paths:
             schema:
               type: "object"
               properties:
-                confirm_backup_id:
+                confirmation:
                   description: "See the endpoint description; validated server-side."
       security:
         - sessionCookie: []
@@ -13087,6 +14871,291 @@ paths:
                 "$ref": "#/components/schemas/Error"
         403:
           description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/file-restores":
+    get:
+      operationId: "api_v1_backups_files_restores"
+      tags:
+        - "Backups"
+      summary: "File restores from this backup"
+      description: "The last fifty, newest first."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileRestorePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/files":
+    get:
+      operationId: "api_v1_backups_files_index"
+      tags:
+        - "Backups"
+      summary: "List one directory of a backup"
+      description: "Read straight from the provider, never cached. `path` defaults to `/`. A path with `..`, `.`, an empty segment, a backslash, a control character or over 4096 characters is refused (422 `backup.file_path_invalid`) before anything is asked. A symlink is listed and never followed: browsing into one is refused. At most 1000 entries; `truncated` says there were more. Requires `service.manage`: a backup's contents are the customer's data at rest."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "path"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileListingResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/files/downloads":
+    post:
+      operationId: "api_v1_backups_files_downloads_store"
+      tags:
+        - "Backups"
+      summary: "Mint a short-lived link to one file"
+      description: "The file is looked up in its directory first: a directory, a symlink, a device or a file over the download limit is refused here with the reason, not at the moment the browser follows the link. The link lives for five minutes, is spent on its first use, still requires the session and the account, and its token appears only in this response — the platform stores the hash."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                path:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileDownloadResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/backups/{backup}/files/restore":
+    post:
+      operationId: "api_v1_backups_files_restore"
+      tags:
+        - "Backups"
+      summary: "Put named files back on the machine"
+      description: "Replaces what the machine holds at those paths. Clears the same bar as a whole-machine restore — the hostname typed exactly as `confirmation`, a completed backup from this machine, an active service, nothing else restoring into the machine — and one more: every path is looked up in the archive and a symlink is refused by name (422 `backup.symlink_refused`). At most 50 paths; a directory counts as one and brings back everything under it; `/` is refused (that is a whole-machine restore). Answers 202 with the restore row; a provider that does not answer leaves it `needs_review`, never retried."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "backup"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                paths:
+                  description: "See the endpoint description; validated server-side."
+                confirmation:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/BackupFileRestoreResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -13456,6 +15525,69 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/vps/{vm}/templates":
+    get:
+      operationId: "api_v1_vps_templates"
+      tags:
+        - "Cloud VPS"
+      summary: "Operating systems this machine can be rebuilt with"
+      description: "Exactly the set the reinstall endpoint will accept for this machine: active, staged at a provider, and either fleet-wide or on the hardware this machine runs on. A client that offered anything else would be offering a rebuild the next request refuses. Not paginated — a cluster carries a handful of images."
+      parameters:
+        - name: "vm"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/InstallableTemplate"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/v1/wallet":
     get:
       operationId: "api_v1_wallet_show"
@@ -13753,6 +15885,328 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/v1/wordpress/sites/{site}/clones":
+    post:
+      operationId: "api_v1_wordpress_sites_clones"
+      tags:
+        - "WordPress"
+      summary: "Clone to another domain"
+      description: "The same copy, to a domain the customer names. The result is a production site of kind `clone` in its own right; its name is the customer's to point, like any external one."
+      parameters:
+        - name: "site"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                domain:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/WordPressSiteOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/wordpress/sites/{site}/operations":
+    get:
+      operationId: "api_v1_wordpress_sites_operations"
+      tags:
+        - "WordPress"
+      summary: "Copies and pushes involving a site"
+      description: "The last fifty, newest first, whether the site was the source or the target."
+      parameters:
+        - name: "site"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/WordPressSiteOperationPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/wordpress/sites/{site}/push":
+    post:
+      operationId: "api_v1_wordpress_sites_push"
+      tags:
+        - "WordPress"
+      summary: "Push a staging copy over production"
+      description: "The one act on this surface that overwrites something the customer wrote. Only a staging copy can be pushed; `confirmation` must equal the production domain exactly; `scope` is `files`, `database` or `both` (default), and a database push loses every post, comment and order production received since the copy. Refused while any copy or push involving either site is running or indeterminate. Answers 202. A toolkit that does not answer leaves production `needs_review` and the operation `indeterminate`; the customer is told not to push again, and nothing retries."
+      parameters:
+        - name: "site"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                scope:
+                  description: "See the endpoint description; validated server-side."
+                confirmation:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/WordPressSiteOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/wordpress/sites/{site}/push/impact":
+    get:
+      operationId: "api_v1_wordpress_sites_push_impact"
+      tags:
+        - "WordPress"
+      summary: "What a push to production would overwrite"
+      description: "For a staging copy: the production domain, the scope, when the copy was made, and the warnings in words — including that this platform holds no backup of a shared-hosting site. The same words the confirmation shows."
+      parameters:
+        - name: "site"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "scope"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/WordPressPushImpactResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/v1/wordpress/sites/{site}/staging":
+    post:
+      operationId: "api_v1_wordpress_sites_staging"
+      tags:
+        - "WordPress"
+      summary: "Make a staging copy"
+      description: "Copies the site to `staging.<domain>` on the same account through the panel's toolkit, for the panels whose toolkit can (the site's `copies` block says; 409 `wordpress.panel_cannot_copy` otherwise). One staging copy per site. Answers 202 with the operation; the copy is a site row of kind `staging` that starts `installing` and is verified like any other. A toolkit that does not answer leaves both `indeterminate`, never retried."
+      parameters:
+        - name: "site"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        202:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/WordPressSiteOperationResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/webhooks/{provider}":
     post:
       operationId: "webhooks_receive"
@@ -13906,6 +16360,100 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AcceptedInvitation"
+    AccountOverview:
+      type: "object"
+      additionalProperties: true
+      description: "The dashboard in one read: attention items in server-decided priority order, a service summary, money owed grouped by currency, upcoming renewals, the unread count, and recent services and activity. Money is never summed across currencies — an account billed in two has two amounts owing, and a single total would be arithmetic nobody can perform."
+      properties:
+        attention:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+          description: "Ordered by severity, then how long it has been true, then a stable id. Ordered by the server so an Arabic dashboard and an English one agree, and capped so a first page cannot become a billing history."
+        services:
+          type: "object"
+          additionalProperties: true
+        billing:
+          type: "object"
+          additionalProperties: true
+          description: "{due: [{invoices, amount}]} — one entry per currency, and no total."
+        renewals:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+          description: "Amount is null where the platform has no authoritative one: a domain's renewal price comes from the catalogue at renewal time, and printing one here would be quoting a guess."
+        unread_notifications:
+          type: "integer"
+        recent:
+          type: "object"
+          additionalProperties: true
+          description: "A few services, and the newest activity rows — from the same account feed as /activity, so the dashboard has no history logic of its own."
+    AccountOverviewResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AccountOverview"
+    ActivityItem:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          type: "string"
+          description: "source:rowId — unique across the sources the feed unions, and the cursor's tie-breaker. Opaque to clients."
+        occurred_at:
+          "$ref": "#/components/schemas/Timestamp"
+        category:
+          type: "string"
+          enum:
+            - "cloud"
+            - "hosting"
+            - "domains"
+            - "billing"
+            - "support"
+            - "backups"
+          description: "The part of the account this belongs to. The only values ?category= accepts, and the filter chooses which sources are read rather than trimming a page."
+        message_code:
+          type: "string"
+          description: "A translation key, not a sentence: the server says what happened and the client says it in the reader's language."
+        state:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
+        actor:
+          type: "object"
+          additionalProperties: true
+          description: "{type, display_name}. `type` is customer_user, system or unknown. A name appears only for customer_user; unknown is the honest answer where the source records no requester, and is never guessed."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "{kind, id, identity} for rows about something the portal has a page for, else null. A handle rather than a path, so the client owns the routing map."
+        reference:
+          type:
+            - "string"
+            - "null"
+          description: "Something the customer can quote to support — an invoice number, a ticket reference. Never an internal id chosen for uniqueness alone."
+    ActivityItemPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ActivityItem"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
     AdminAdoptedJob:
       type: "object"
       additionalProperties: false
@@ -13927,6 +16475,75 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminAdoptedJob"
+    AdminCountryCurrencyChange:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        customer_id:
+          "$ref": "#/components/schemas/Ulid"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "requested, blocked, awaiting_approval, scheduled, applied, needs_review, rejected or withdrawn."
+        is_open:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        from_country:
+          type:
+            - "string"
+            - "null"
+        to_country:
+          type:
+            - "string"
+            - "null"
+        from_currency:
+          type: "string"
+        to_currency:
+          type: "string"
+        reason:
+          type: "string"
+        impact:
+          "$ref": "#/components/schemas/CountryCurrencyImpact"
+        decision_note:
+          type:
+            - "string"
+            - "null"
+        analysed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        decided_at:
+          "$ref": "#/components/schemas/Timestamp"
+        scheduled_for:
+          "$ref": "#/components/schemas/Timestamp"
+        applied_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        customer:
+          type: "object"
+          additionalProperties: true
+    AdminCountryCurrencyChangePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminCountryCurrencyChange"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    AdminCountryCurrencyChangeResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminCountryCurrencyChange"
     AdminCustomer:
       type: "object"
       additionalProperties: false
@@ -14450,7 +17067,8 @@ components:
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
-        name:
+        provider_name:
+          description: "The hypervisor's own name for this node. The platform's identity for it is `id`."
           type:
             - "string"
             - "null"
@@ -14889,7 +17507,9 @@ components:
           items:
             type: "string"
         allowed_ip_ranges:
-          type: "array"
+          type:
+            - "array"
+            - "null"
           items:
             type: "string"
         rate_limit_per_minute:
@@ -15046,6 +17666,143 @@ components:
           type:
             - "string"
             - "null"
+        files:
+          "$ref": "#/components/schemas/BackupFileSupport"
+    BackupFileDownload:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        path:
+          type: "string"
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+        url:
+          type: "string"
+          description: "Relative to the API origin. Carries the single-use token; shown once."
+    BackupFileDownloadResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/BackupFileDownload"
+    BackupFileEntry:
+      type: "object"
+      additionalProperties: false
+      properties:
+        path:
+          type: "string"
+          description: "Absolute inside the archive."
+        name:
+          type: "string"
+        kind:
+          type: "string"
+          enum:
+            - "file"
+            - "directory"
+            - "symlink"
+            - "other"
+        size_bytes:
+          type:
+            - "integer"
+            - "null"
+        modified_at:
+          "$ref": "#/components/schemas/Timestamp"
+        downloadable:
+          type: "boolean"
+        browsable:
+          type: "boolean"
+        restorable:
+          type: "boolean"
+          description: "False for a symlink, always: links are never followed out of a backup."
+    BackupFileListing:
+      type: "object"
+      additionalProperties: false
+      properties:
+        path:
+          type: "string"
+        parent:
+          type:
+            - "string"
+            - "null"
+        truncated:
+          type: "boolean"
+        entries:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/BackupFileEntry"
+    BackupFileListingResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/BackupFileListing"
+    BackupFileRestore:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        backup_id:
+          "$ref": "#/components/schemas/Ulid"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "requested, running, succeeded, failed or needs_review. `needs_review` is a restore the provider did not confirm: the files may or may not have been written, and it is never retried."
+        is_in_flight:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        paths:
+          type: "array"
+          items:
+            type: "string"
+        path_count:
+          type: "integer"
+        started_at:
+          "$ref": "#/components/schemas/Timestamp"
+        finished_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+    BackupFileRestorePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/BackupFileRestore"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    BackupFileRestoreResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/BackupFileRestore"
+    BackupFileSupport:
+      type: "object"
+      additionalProperties: false
+      description: "Whether this backup can be opened file by file, and if not, why not — the same reason the file routes refuse with."
+      properties:
+        supported:
+          type: "boolean"
+        reason:
+          type:
+            - "string"
+            - "null"
     BackupPage:
       type: "object"
       required:
@@ -15181,6 +17938,130 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ConsoleSession"
+    ControlledGatewayDecision:
+      type: "object"
+      additionalProperties: false
+      properties:
+        payment:
+          "$ref": "#/components/schemas/Payment"
+        webhook_status:
+          type:
+            - "string"
+            - "null"
+        webhook_was_duplicate:
+          type: "boolean"
+    ControlledGatewayDecisionResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ControlledGatewayDecision"
+    ControlledGatewayPage:
+      type: "object"
+      additionalProperties: false
+      properties:
+        payment:
+          "$ref": "#/components/schemas/Payment"
+        provider:
+          type:
+            - "string"
+            - "null"
+        reference:
+          type:
+            - "string"
+            - "null"
+    ControlledGatewayPageResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ControlledGatewayPage"
+    CountryCurrencyChange:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        customer_id:
+          "$ref": "#/components/schemas/Ulid"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "requested, blocked, awaiting_approval, scheduled, applied, needs_review, rejected or withdrawn."
+        is_open:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        from_country:
+          type:
+            - "string"
+            - "null"
+        to_country:
+          type:
+            - "string"
+            - "null"
+        from_currency:
+          type: "string"
+        to_currency:
+          type: "string"
+        reason:
+          type: "string"
+        impact:
+          "$ref": "#/components/schemas/CountryCurrencyImpact"
+        decision_note:
+          type:
+            - "string"
+            - "null"
+        analysed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        decided_at:
+          "$ref": "#/components/schemas/Timestamp"
+        scheduled_for:
+          "$ref": "#/components/schemas/Timestamp"
+        applied_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    CountryCurrencyChangePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/CountryCurrencyChange"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    CountryCurrencyChangeResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/CountryCurrencyChange"
+    CountryCurrencyImpact:
+      type: "object"
+      additionalProperties: false
+      description: "What the change would touch, as last analysed. Amounts are minor units in the currency named beside them; nothing is converted."
+      properties:
+        facts:
+          type: "object"
+          additionalProperties: true
+        blockers:
+          type: "array"
+          items:
+            type: "string"
+          description: "What must change before this can be applied, in words. Empty when the request may be approved."
+        warnings:
+          type: "array"
+          items:
+            type: "string"
+          description: "What will be true afterwards; not a reason to refuse."
     Credential:
       type: "object"
       additionalProperties: false
@@ -15303,6 +18184,73 @@ components:
           type:
             - "string"
             - "null"
+    CustomerOperation:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type:
+            - "string"
+            - "null"
+        action:
+          type:
+            - "string"
+            - "null"
+          description: "The customer's own verb where there is one — `restart`, not the kind. `stop` and `shutdown` are one kind, and reporting the kind would tell a customer the plug was pulled on a graceful shutdown."
+        state:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
+          type: "boolean"
+          description: "The client polls while this is false and stops when it is true."
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+          description: "The customer's bounded version of why, never the provider's sentence."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "What to watch once this finishes, so the client does not infer it."
+        requested_at:
+          "$ref": "#/components/schemas/Timestamp"
+          description: "When the customer asked. A client measures \"this is taking longer than usual\" from here rather than from when its own tab opened, so a reload does not restart the clock on work that has been stuck for an hour."
+        started_at:
+          "$ref": "#/components/schemas/Timestamp"
+        updated_at:
+          "$ref": "#/components/schemas/Timestamp"
+        finished_at:
+          "$ref": "#/components/schemas/Timestamp"
+        poll_after_ms:
+          type:
+            - "integer"
+            - "null"
+          description: "When to read again, or null once there is nothing left to wait for. A client that schedules only from this field cannot poll a finished operation."
+    CustomerOperationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/CustomerOperation"
+    CustomerOperationState:
+      type: "string"
+      enum:
+        - "queued"
+        - "processing"
+        - "succeeded"
+        - "failed"
+        - "needs_review"
+        - "indeterminate"
+        - "cancelled"
+      description: "The seven words a customer is told about asynchronous work. needs_review is not failed: it stopped and a person at Lynomia must look. indeterminate is neither failed nor succeeded: the platform asked something outside itself and never heard back, so the result is genuinely unknown. Neither is ever collapsed into failed. Provider execution states are not published."
     Datacenter:
       type: "object"
       additionalProperties: false
@@ -15354,11 +18302,6 @@ components:
           type:
             - "string"
             - "null"
-        hardware_profile:
-          type:
-            - "object"
-            - "null"
-          additionalProperties: true
         status:
           type:
             - "string"
@@ -15369,6 +18312,22 @@ components:
             - "null"
         is_powered_on:
           type: "boolean"
+        actions:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "power"
+            - "reinstall"
+            - "blocked_reason"
+          properties:
+            power:
+              type: "boolean"
+            reinstall:
+              type: "boolean"
+            blocked_reason:
+              type:
+                - "string"
+                - "null"
         service_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
@@ -15718,7 +18677,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "The provider's own words, with anything credential-shaped removed before it was stored."
+          description: "Whether the last operation failed, said in the language the request asked for. The provider's own words stay with support."
         record_count:
           type:
             - "integer"
@@ -15814,6 +18773,52 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/DomainAuthorisationCode"
+    DomainContact:
+      type: "object"
+      additionalProperties: false
+      description: "The registrant this platform gave the registry. Personal data: a real name, a home address and a telephone number, encrypted at rest, published only to the account that owns the name and only under `service.manage`. The registrar's own handle for the contact stays behind."
+      properties:
+        role:
+          type: "string"
+          description: "Always `registrant`: the only role the update accepts and therefore the only one a customer can act on."
+        name:
+          type: "string"
+        organisation:
+          type:
+            - "string"
+            - "null"
+        email:
+          type: "string"
+        phone:
+          type: "string"
+        address_line_one:
+          type: "string"
+        address_line_two:
+          type:
+            - "string"
+            - "null"
+        city:
+          type: "string"
+        region:
+          type:
+            - "string"
+            - "null"
+        postal_code:
+          type:
+            - "string"
+            - "null"
+        country:
+          type: "string"
+          description: "ISO 3166-1 alpha-2."
+        updated_at:
+          "$ref": "#/components/schemas/Timestamp"
+    DomainContactResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/DomainContact"
     DomainOperation:
       type: "object"
       additionalProperties: false
@@ -15859,11 +18864,6 @@ components:
         needs_attention:
           type: "boolean"
           description: "True when a person has to decide. An operation in this state must not be retried by the client: the money may already have moved."
-        failure_message:
-          type:
-            - "string"
-            - "null"
-          description: "The registrar's own words, with anything credential-shaped removed before it was stored."
         completed_at:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
@@ -16105,6 +19105,16 @@ components:
           type:
             - "string"
             - "null"
+        plan_name:
+          type:
+            - "string"
+            - "null"
+          description: "The catalogue plan the customer is billed for, in the language of the request. The slug beside it is the platform's join key and is not a product name."
+        panel_type:
+          type:
+            - "string"
+            - "null"
+          description: "`cpanel` or `directadmin`: which panel the customer signs into. Null where the platform will not name it — no node assigned yet, or a controlled fake — and a client then says \"hosting control panel\", which is true in every case. Nothing else about the node is published."
         disk_quota_mib:
           type:
             - "integer"
@@ -16292,6 +19302,27 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/InfrastructureOverview"
+    InstallableTemplate:
+      type: "object"
+      additionalProperties: false
+      description: "An operating system this machine may be rebuilt with. The cluster it is staged on, the hypervisor's handle for it and its supply-chain checksum are the platform's business and stay behind."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type: "string"
+          description: "In the language of the request."
+        os_family:
+          type: "string"
+        os_version:
+          type: "string"
+        architecture:
+          type: "string"
+        supports_ssh_keys:
+          type: "boolean"
+          description: "Whether the image can be configured on first boot. Without it the platform cannot install a key, so a form that collected one would be collecting something it intends to drop."
+        requires_licence:
+          type: "boolean"
     InvitationOffer:
       type: "object"
       additionalProperties: false
@@ -16381,6 +19412,19 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
+        billing_snapshot:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        payments:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/InvoicePayment"
+        wallet_credits:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/InvoiceWalletCredit"
     InvoiceItem:
       type: "object"
       additionalProperties: false
@@ -16435,6 +19479,35 @@ components:
             "$ref": "#/components/schemas/Invoice"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    InvoicePayment:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        from_account_credit:
+          type: "boolean"
+          description: "True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it."
+        kind:
+          type:
+            - "string"
+            - "null"
+        status:
+          type:
+            - "string"
+            - "null"
+        is_settled:
+          type: "boolean"
+        amount:
+          "$ref": "#/components/schemas/Money"
+        failure_code:
+          type:
+            - "string"
+            - "null"
+        processed_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
     InvoiceResponse:
       type: "object"
       required:
@@ -16442,6 +19515,28 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Invoice"
+    InvoiceWalletCredit:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type:
+            - "string"
+            - "null"
+        amount:
+          "$ref": "#/components/schemas/Money"
+        direction:
+          type: "string"
+        balance_after:
+          "$ref": "#/components/schemas/Money"
+        description:
+          type:
+            - "string"
+            - "null"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
     IpAssignment:
       type: "object"
       additionalProperties: false
@@ -16509,6 +19604,46 @@ components:
       additionalProperties: false
       description: "The only response that ever carries a token value. The platform stores a hash and cannot show it again."
       properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type:
+            - "string"
+            - "null"
+        status:
+          type:
+            - "string"
+            - "null"
+        abilities:
+          type: "array"
+          items:
+            type: "string"
+        allowed_ip_ranges:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: "string"
+        rate_limit_per_minute:
+          type:
+            - "integer"
+            - "null"
+        last_used_at:
+          "$ref": "#/components/schemas/Timestamp"
+        last_used_ip:
+          type:
+            - "string"
+            - "null"
+        expires_at:
+          "$ref": "#/components/schemas/Timestamp"
+        revoked_at:
+          "$ref": "#/components/schemas/Timestamp"
+        revoked_reason:
+          type:
+            - "string"
+            - "null"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
         token:
           type: "string"
     IssuedApiTokenResponse:
@@ -16752,7 +19887,17 @@ components:
           type:
             - "string"
             - "null"
-          description: "A portal path, not a URL, so it stays correct when the host changes."
+          description: "A portal path, not a URL, so it stays correct when the host changes. A collection path: the resource below is the precise destination where there is one."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "What this notification is about, as `{kind, id}` — resolved from the notification's stored subject, never inferred from its text. `kind` is a customer-facing family (`vps`, `dedicated`, `hosting`, `wordpress`, `invoice`), and the client owns the route it maps to. Null where the subject has no page of its own."
+        kind:
+          type:
+            - "string"
+            - "null"
         read_at:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
@@ -16801,6 +19946,19 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Notification"
+    NotificationUnreadCount:
+      type: "object"
+      additionalProperties: false
+      properties:
+        unread:
+          type: "integer"
+    NotificationUnreadCountResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/NotificationUnreadCount"
     NotificationsMarkedRead:
       type: "object"
       additionalProperties: false
@@ -16893,6 +20051,18 @@ components:
       type: "object"
       additionalProperties: false
       properties:
+        invoice_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        invoice_number:
+          type:
+            - "string"
+            - "null"
+        services:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OrderService"
         id:
           "$ref": "#/components/schemas/Ulid"
         number:
@@ -17006,6 +20176,75 @@ components:
             "$ref": "#/components/schemas/Order"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    OrderQuote:
+      type: "object"
+      additionalProperties: false
+      properties:
+        currency:
+          type:
+            - "string"
+            - "null"
+        billing_period:
+          type:
+            - "string"
+            - "null"
+        lines:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        description:
+          type:
+            - "string"
+            - "null"
+        plan_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        quantity:
+          type: "integer"
+        unit_recurring:
+          "$ref": "#/components/schemas/Money"
+        unit_setup:
+          "$ref": "#/components/schemas/Money"
+        gross:
+          "$ref": "#/components/schemas/Money"
+        setup:
+          "$ref": "#/components/schemas/Money"
+        subtotal:
+          "$ref": "#/components/schemas/Money"
+        discount:
+          "$ref": "#/components/schemas/Money"
+        tax:
+          "$ref": "#/components/schemas/Money"
+        total:
+          "$ref": "#/components/schemas/Money"
+        tax_rate:
+          type:
+            - "string"
+            - "null"
+        tax_name:
+          type:
+            - "string"
+            - "null"
+        coupon_code:
+          type:
+            - "string"
+            - "null"
+        renewal:
+          type: "object"
+          additionalProperties: true
+        includes_setup:
+          type: "boolean"
+        includes_coupon:
+          type: "boolean"
+    OrderQuoteResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/OrderQuote"
     OrderResponse:
       type: "object"
       required:
@@ -17013,6 +20252,32 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Order"
+    OrderService:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type:
+            - "string"
+            - "null"
+        identity:
+          type:
+            - "string"
+            - "null"
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The row that fulfils this service, as `{kind, id}` — the same handle the service and notification documents carry, because a service id is not the id of the machine or account behind it."
+        state:
+          type:
+            - "string"
+            - "null"
+        is_usable:
+          type: "boolean"
     PaginationMeta:
       type: "object"
       description: |-
@@ -17063,17 +20328,12 @@ components:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
-        provider:
-          type:
-            - "string"
-            - "null"
+        from_account_credit:
+          type: "boolean"
+          description: "True when the account paid itself out of its own credit rather than money arriving from outside. It replaces the gateway driver name that used to be published here: the name identified a driver, not anything the payer did, and the portal rendered the slug whenever its translation namespace did not cover it."
         is_settled:
           type: "boolean"
         failure_code:
-          type:
-            - "string"
-            - "null"
-        failure_message:
           type:
             - "string"
             - "null"
@@ -17251,6 +20511,152 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/Plan"
+    PreflightCheck:
+      type: "object"
+      additionalProperties: false
+      description: "One thing a preflight asked, and what it found."
+      properties:
+        id:
+          type: "string"
+          description: "Stable and machine-readable, so automation can match on it across wording changes."
+        category:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "pass"
+            - "fail"
+            - "blocked"
+            - "warning"
+            - "not_applicable"
+            - "not_tested"
+        target:
+          type: "string"
+        summary:
+          type: "string"
+        evidence_class:
+          type: "string"
+          enum:
+            - "configuration"
+            - "simulation"
+            - "real_read"
+            - "none"
+          description: "Where the answer came from, which decides what it may be used to claim. Only real_read can support a real-infrastructure claim."
+        blocker_reason:
+          type:
+            - "string"
+            - "null"
+        next_action:
+          type:
+            - "string"
+            - "null"
+          description: "The thing to go and do. Never \"fix configuration\"."
+        duration_ms:
+          type: "integer"
+        verified:
+          type:
+            - "string"
+            - "null"
+    PreflightReport:
+      type: "object"
+      additionalProperties: false
+      description: "What a preflight run established, and what prevents the thing it was asked about from being used. Carries no secret, no credential reference variable, no raw provider response and no stack trace: every summary is a sentence written by the check that produced it."
+      properties:
+        mode:
+          type: "string"
+          enum:
+            - "simulation"
+            - "read_only_real"
+        mode_label:
+          type: "string"
+          description: "SIMULATION or READ_ONLY_REAL, for display. A simulation result that does not say so is one somebody quotes as proof."
+        reference_topology:
+          type: "boolean"
+          description: "True when the run looked at rows out of the reference topology, which is a model of an estate rather than an estate. Carried separately from the mode: the mode says how the checks ran, this says what they ran against."
+        topology_label:
+          type: "string"
+          description: "REFERENCE TOPOLOGY or CONFIGURED INFRASTRUCTURE, for display beside the mode."
+        scope:
+          type: "string"
+          enum:
+            - "estate"
+            - "site"
+            - "provider"
+            - "product"
+            - "machine"
+        target:
+          type:
+            - "string"
+            - "null"
+        started_at:
+          type: "string"
+          format: "date-time"
+        finished_at:
+          type: "string"
+          format: "date-time"
+        duration_ms:
+          type: "integer"
+        overall_status:
+          type: "string"
+          enum:
+            - "pass"
+            - "fail"
+            - "blocked"
+            - "warning"
+            - "not_applicable"
+            - "not_tested"
+        passed:
+          type: "boolean"
+          description: "False if any check is failing or blocked. One blocker makes the whole report blocking; there is no average."
+        counts:
+          type: "object"
+          additionalProperties:
+            type: "integer"
+          description: "total, pass, fail, blocked, warning, not_applicable and not_tested."
+        checks:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/PreflightCheck"
+        blockers:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/PreflightCheck"
+        warnings:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/PreflightCheck"
+        blocker_reasons:
+          type: "array"
+          items:
+            type: "string"
+            enum:
+              - "blocked_credentials"
+              - "blocked_hardware"
+              - "blocked_network"
+              - "blocked_licence"
+              - "blocked_configuration"
+              - "blocked_dependency"
+              - "not_implemented"
+        verification_levels:
+          type: "array"
+          items:
+            type: "string"
+        real_verification_claims:
+          type: "array"
+          items:
+            type: "string"
+          description: "The individual check ids a real provider answered, by id. Always empty in simulation mode. There is no field saying the estate is verified, because no such fact exists: a read that succeeded has earned exactly that read."
+        next_actions:
+          type: "array"
+          items:
+            type: "string"
+    PreflightReportResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/PreflightReport"
     Product:
       type: "object"
       additionalProperties: false
@@ -17737,11 +21143,13 @@ components:
             - "string"
             - "null"
         state:
-          type:
-            - "string"
-            - "null"
-        is_settled:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
           type: "boolean"
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
         failure_reason:
           type:
             - "string"
@@ -17767,6 +21175,7 @@ components:
     ProvisioningOperation:
       type: "object"
       additionalProperties: false
+      description: "The receipt a 202 returns for a VPS power action or rebuild. It reports the same state, in the same vocabulary, as GET /operations/{operation} — which is what a client polls afterwards, and where the poll hint lives."
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
@@ -17782,15 +21191,16 @@ components:
           type:
             - "string"
             - "null"
-        status:
-          type:
-            - "string"
-            - "null"
-        is_settled:
+          description: "The customer's own verb where there is one — `restart`, not the kind."
+        state:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
           type: "boolean"
         needs_attention:
           type: "boolean"
-        created_at:
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
+        requested_at:
           "$ref": "#/components/schemas/Timestamp"
         finished_at:
           "$ref": "#/components/schemas/Timestamp"
@@ -17884,6 +21294,63 @@ components:
           type: "string"
         name:
           type: "string"
+    RegistrationAccepted:
+      type: "object"
+      additionalProperties: false
+      properties:
+        message:
+          type: "string"
+    RegistrationAcceptedResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/RegistrationAccepted"
+    RegistrationOptions:
+      type: "object"
+      additionalProperties: false
+      properties:
+        countries:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
+        currencies:
+          type: "array"
+          items:
+            type: "string"
+        fallback_currency:
+          type: "string"
+        legal:
+          type: "object"
+          additionalProperties: false
+          properties:
+            registration_permitted:
+              type: "boolean"
+            documents:
+              type: "array"
+              items:
+                type: "object"
+                additionalProperties: false
+                properties:
+                  type:
+                    type: "string"
+                    enum:
+                      - "terms"
+                      - "aup"
+                  url:
+                    type: "string"
+                    format: "uri"
+                  version:
+                    type: "string"
+    RegistrationOptionsResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/RegistrationOptions"
     ReinstallRequest:
       type: "object"
       additionalProperties: false
@@ -17891,11 +21358,13 @@ components:
         id:
           "$ref": "#/components/schemas/Ulid"
         state:
-          type:
-            - "string"
-            - "null"
-        is_settled:
+          "$ref": "#/components/schemas/CustomerOperationState"
+        is_terminal:
           type: "boolean"
+        needs_attention:
+          type: "boolean"
+        retry_advice:
+          "$ref": "#/components/schemas/RetryAdvice"
         requested_at:
           "$ref": "#/components/schemas/Timestamp"
         started_at:
@@ -17909,6 +21378,14 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/ReinstallRequest"
+    RetryAdvice:
+      type: "string"
+      enum:
+        - "safe_to_retry"
+        - "wait"
+        - "support_required"
+        - "not_retryable"
+      description: "Whether the customer may ask again. Clients draw a retry control from safe_to_retry and from nothing else — which is what stops one appearing beside an operation whose result nobody knows."
     ReverseDnsRecord:
       type: "object"
       additionalProperties: false
@@ -18172,6 +21649,17 @@ components:
           type:
             - "string"
             - "null"
+        identity:
+          type:
+            - "string"
+            - "null"
+          description: "The name the customer knows this by — a hostname, a primary domain, a serial. The label beside it comes from the catalogue and is the same string for everyone who bought the plan. Null while the service is still being created."
+        resource:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The row that fulfils this service, as `{kind, id}`. A service's own id is not the machine's, the hosting account's or the chassis's, so the id a link needs is published rather than guessed. `kind` is a customer-facing family (`vps`, `dedicated`, `hosting`, `wordpress`) and the client owns the route it maps to. Null until something has been created."
         state:
           type:
             - "string"
@@ -18188,10 +21676,6 @@ components:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
         order_id:
-          oneOf:
-            - "$ref": "#/components/schemas/Ulid"
-            - type: "null"
-        order_item_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
@@ -18360,11 +21844,9 @@ components:
           type:
             - "string"
             - "null"
+        is_awaiting_provider:
+          type: "boolean"
         failure_code:
-          type:
-            - "string"
-            - "null"
-        failure_message:
           type:
             - "string"
             - "null"
@@ -18403,6 +21885,21 @@ components:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
             - type: "null"
+        plan:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        product:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+        services:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
         current_period_start:
           type:
             - "string"
@@ -18522,6 +22019,34 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/TeamMember"
+    TeamRole:
+      type: "object"
+      additionalProperties: false
+      description: "One team role and what the server will actually let it do. The capability list is computed from the role's own permission list - the one `AuthorisesWithinAccount` reads before every write - and an architecture test asserts that the published set and the enforced set are equal in both directions. Two permissions the role model declares are deliberately absent because nothing enforces them: closing the account, which is a support conversation at launch, and managing payment methods, of which the platform stores none."
+      properties:
+        id:
+          type: "string"
+          description: "owner, administrator, billing, technical or member."
+        is_owner:
+          type: "boolean"
+        assignable:
+          type: "boolean"
+          description: "Whether a member may be given this role. False for owner: an account has one owner and ownership moves by transfer, which names both sides in one act."
+        capabilities:
+          type: "array"
+          description: "The whole matrix, not only what this role holds: \"can this role see billing?\" has two useful answers, and a list of only the yeses makes the reader compare five lists to find the no."
+          items:
+            type: "object"
+            additionalProperties: false
+            properties:
+              id:
+                type: "string"
+                description: "The customer-facing capability id the portal translates."
+              permission:
+                type: "string"
+                description: "The canonical permission the API checks, published so the claim is verifiable."
+              granted:
+                type: "boolean"
     Ticket:
       type: "object"
       additionalProperties: false
@@ -18549,11 +22074,6 @@ components:
           type:
             - "string"
             - "null"
-        assigned_to:
-          type:
-            - "string"
-            - "null"
-          description: "A name, not a user id."
         opened_by:
           type:
             - "string"
@@ -18753,6 +22273,22 @@ components:
             additionalProperties: true
         is_operable:
           type: "boolean"
+        actions:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "power"
+            - "reinstall"
+            - "blocked_reason"
+          properties:
+            power:
+              type: "boolean"
+            reinstall:
+              type: "boolean"
+            blocked_reason:
+              type:
+                - "string"
+                - "null"
         reinstall:
           type:
             - "object"
@@ -18799,14 +22335,65 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/VirtualMachine"
+    VmTemplate:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        cluster_id:
+          type:
+            - "string"
+            - "null"
+        cluster:
+          type:
+            - "string"
+            - "null"
+        slug:
+          type: "string"
+        name:
+          type: "object"
+          additionalProperties:
+            type: "string"
+        os_family:
+          type: "string"
+          description: "debian, ubuntu, rocky, alma, windows or other."
+        os_version:
+          type: "string"
+        architecture:
+          type: "string"
+          description: "x86_64 or aarch64."
+        provider_reference:
+          type:
+            - "string"
+            - "null"
+          description: "How the hypervisor names the image, exactly as it spells it. Null until the image is staged on the cluster."
+        cloud_init:
+          type: "boolean"
+        guest_agent:
+          type: "boolean"
+        requires_licence:
+          type: "boolean"
+        licence_note:
+          type:
+            - "string"
+            - "null"
+        is_active:
+          type: "boolean"
+        installable:
+          type: "boolean"
+          description: "Active and staged, which is what placement requires. Computed, not stored."
+    VmTemplateResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/VmTemplate"
     WalletBalance:
       type: "object"
       additionalProperties: false
       properties:
-        wallet_id:
-          oneOf:
-            - "$ref": "#/components/schemas/Ulid"
-            - type: "null"
         currency:
           type:
             - "string"
@@ -18842,10 +22429,6 @@ components:
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
-        wallet_id:
-          oneOf:
-            - "$ref": "#/components/schemas/Ulid"
-            - type: "null"
         kind:
           type:
             - "string"
@@ -18884,6 +22467,49 @@ components:
             "$ref": "#/components/schemas/WalletTransaction"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    WordPressCopySupport:
+      type: "object"
+      additionalProperties: false
+      description: "What this site's panel toolkit can do with it right now, and the reason when nothing."
+      properties:
+        staging:
+          type: "boolean"
+        clone:
+          type: "boolean"
+        push_to_production:
+          type: "boolean"
+        reason:
+          type:
+            - "string"
+            - "null"
+    WordPressPushImpact:
+      type: "object"
+      additionalProperties: false
+      properties:
+        staging_domain:
+          type: "string"
+        production_domain:
+          type: "string"
+        scope:
+          type: "string"
+        copy_made_at:
+          "$ref": "#/components/schemas/Timestamp"
+        production_verified_at:
+          "$ref": "#/components/schemas/Timestamp"
+        platform_backup:
+          type: "null"
+          description: "Always null: this platform holds no backup of a shared-hosting site, and says so rather than implying one."
+        warnings:
+          type: "array"
+          items:
+            type: "string"
+    WordPressPushImpactResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/WordPressPushImpact"
     WordPressSite:
       type: "object"
       additionalProperties: false
@@ -18948,7 +22574,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "The panel's own words, with anything credential-shaped removed before it was stored."
+          description: "Whether the last operation failed, said in the language the request asked for. The panel's own words stay with support."
         hosting_account_id:
           oneOf:
             - "$ref": "#/components/schemas/Ulid"
@@ -18957,6 +22583,88 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         created_at:
           "$ref": "#/components/schemas/Timestamp"
+        kind:
+          type: "string"
+          enum:
+            - "production"
+            - "staging"
+            - "clone"
+          description: "A staging copy belongs to its parent and is the only kind that can be pushed back; a clone is a production site that started as a copy."
+        parent_site_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        copies:
+          "$ref": "#/components/schemas/WordPressCopySupport"
+    WordPressSiteOperation:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        site_id:
+          "$ref": "#/components/schemas/Ulid"
+        target_site_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        kind:
+          type: "string"
+          enum:
+            - "create_staging"
+            - "clone"
+            - "push_to_production"
+        state:
+          type:
+            - "string"
+            - "null"
+          description: "requested, running, succeeded, failed or indeterminate. `indeterminate` is a toolkit that did not answer; for a push, production may be half-overwritten, and it is never retried."
+        is_in_flight:
+          type: "boolean"
+        needs_attention:
+          type: "boolean"
+        scope:
+          type:
+            - "string"
+            - "null"
+          enum:
+            - "files"
+            - "database"
+            - "both"
+            - null
+        impact:
+          oneOf:
+            - "$ref": "#/components/schemas/WordPressPushImpact"
+            - type: "null"
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+        started_at:
+          "$ref": "#/components/schemas/Timestamp"
+        finished_at:
+          "$ref": "#/components/schemas/Timestamp"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    WordPressSiteOperationPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/WordPressSiteOperation"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    WordPressSiteOperationResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/WordPressSiteOperation"
     WordPressSiteResponse:
       type: "object"
       required:
@@ -18964,3 +22672,125 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/WordPressSite"
+    ZoneExport:
+      type: "object"
+      additionalProperties: false
+      properties:
+        filename:
+          type: "string"
+        content:
+          type: "string"
+          description: "BIND-compatible zone text."
+        record_count:
+          type: "integer"
+    ZoneExportResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ZoneExport"
+    ZoneImportEntry:
+      type: "object"
+      additionalProperties: false
+      properties:
+        kind:
+          type: "string"
+          enum:
+            - "add"
+            - "update"
+            - "remove"
+            - "unchanged"
+            - "refused"
+            - "ignored"
+        line:
+          type:
+            - "integer"
+            - "null"
+          description: "The line of the file, where the entry came from one."
+        type:
+          type:
+            - "string"
+            - "null"
+        name:
+          type:
+            - "string"
+            - "null"
+        content:
+          type:
+            - "string"
+            - "null"
+          description: "The value, or for a refused or ignored line the line's text."
+        ttl:
+          type:
+            - "integer"
+            - "null"
+        priority:
+          type:
+            - "integer"
+            - "null"
+        existing_id:
+          oneOf:
+            - "$ref": "#/components/schemas/Ulid"
+            - type: "null"
+        reason:
+          type:
+            - "string"
+            - "null"
+    ZoneImportPlan:
+      type: "object"
+      additionalProperties: false
+      properties:
+        zone_id:
+          "$ref": "#/components/schemas/Ulid"
+        zone:
+          type: "string"
+        mode:
+          type: "string"
+          enum:
+            - "merge"
+            - "replace"
+        applicable:
+          type: "boolean"
+          description: "False while any entry is refused."
+        fingerprint:
+          type: "string"
+          description: "sha256 over the changes and the zone's current records; send it back to apply."
+        counts:
+          type: "object"
+          additionalProperties:
+            type: "integer"
+        entries:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ZoneImportEntry"
+    ZoneImportPlanResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ZoneImportPlan"
+    ZoneImportResult:
+      type: "object"
+      additionalProperties: false
+      properties:
+        zone_id:
+          "$ref": "#/components/schemas/Ulid"
+        mode:
+          type: "string"
+        added:
+          type: "integer"
+        updated:
+          type: "integer"
+        removed:
+          type: "integer"
+        unchanged:
+          type: "integer"
+    ZoneImportResultResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/ZoneImportResult"

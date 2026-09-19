@@ -58,6 +58,36 @@ final class RateLimitServiceProvider extends ServiceProvider
             return Limit::perMinute($perMinute)->by('user:'.$user->id);
         });
 
+        /*
+         * Status reads a customer makes while waiting.
+         *
+         * Wave 4 gave the portal three endpoints it refreshes rather than
+         * submits to: an operation's status, the account overview and the
+         * activity feed. Left on the mutation limiter they would answer 429 to
+         * a customer who is doing nothing but watching a reboot they already
+         * asked for once — the limiter would be punishing observation, and the
+         * screen would report a refresh failure for a machine that is fine.
+         *
+         * Roomier than `provisioning` and deliberately still bounded. The
+         * ceiling is sized from what one open portal can actually generate:
+         * the client observes one operation at a time, with a floor of a few
+         * seconds between reads and no polling of hidden tabs, so a legitimate
+         * session sits far below this. What it stops is a client that has lost
+         * its backoff and is reading in a loop.
+         *
+         * Keyed per user, not per IP: an office behind one address is many
+         * customers, and one of them watching a rebuild must not spend the
+         * others' budget.
+         */
+        RateLimiter::for('reads', function (Request $request): Limit {
+            $user = $request->user();
+            $limit = (int) config('security.rate_limits.reads.attempts', 300);
+
+            return $user instanceof User
+                ? Limit::perMinute($limit)->by('reads:'.$user->id)
+                : Limit::perMinute(30)->by($request->ip() ?? 'unknown');
+        });
+
         RateLimiter::for('provisioning', function (Request $request): Limit {
             $user = $request->user();
             $limit = (int) config('security.rate_limits.provisioning.attempts', 20);
@@ -73,6 +103,31 @@ final class RateLimitServiceProvider extends ServiceProvider
          * a reconciliation cycle. Signature verification, not rate limiting, is
          * the security control here.
          */
+        /*
+         * Preflight, bounded by how expensive the answer is to produce.
+         *
+         * A simulation run touches this platform's own database and its
+         * controlled providers, so it is cheap and an operator iterating on a
+         * configuration should not be fought. A read-only-real run sends
+         * requests to somebody else's API for every provider in scope, and an
+         * operator clicking a button twenty times would become a burst at a
+         * hypervisor that has customers on it. The limit protects the
+         * providers, not this platform — which is why it is keyed on the
+         * caller and the mode rather than on the route.
+         */
+        RateLimiter::for('preflight', function (Request $request): Limit {
+            $user = $request->user();
+            $real = $request->input('mode') === 'read_only_real';
+
+            $limit = $real
+                ? (int) config('security.rate_limits.preflight.real_attempts', 6)
+                : (int) config('security.rate_limits.preflight.simulation_attempts', 60);
+
+            return $user instanceof User
+                ? Limit::perMinute($limit)->by(sprintf('preflight:%s:%s', $real ? 'real' : 'sim', $user->id))
+                : Limit::perMinute(3)->by($request->ip() ?? 'unknown');
+        });
+
         RateLimiter::for('webhooks', static fn (Request $request): Limit => Limit::perMinute(300)
             ->by($request->ip() ?? 'unknown'));
 

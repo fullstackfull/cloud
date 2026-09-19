@@ -9,6 +9,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\Provisioning\Application\Queries\CustomerServices;
 use Lynomia\Modules\Provisioning\Domain\Enums\CustomerServiceState;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 
 /**
  * What a customer may see of a service they bought.
@@ -58,6 +59,29 @@ final class ServiceResource extends JsonResource
             'kind' => $this->kind,
             'label' => $this->label,
 
+            /*
+             * The name the customer uses for the thing that was created: the
+             * hostname, the primary domain, the serial.
+             *
+             * The label above comes from the catalogue and is the same string
+             * for everyone who bought that plan, which is why the services
+             * index could not tell two servers apart. Resolved through
+             * ServiceIdentities, in one query per kind for a whole page, and
+             * null while the service is still being created — "being created"
+             * is true and useful; a fabricated hostname is not.
+             */
+            'identity' => ServiceIdentities::identityOf($this->resource),
+
+            /*
+             * The thing that fulfils this service: its family and its own id.
+             *
+             * Published as a handle rather than as a path, because routes
+             * belong to the portal and not to the API — the same contract the
+             * notification inbox uses, so one map in the client turns either
+             * into a destination. Null while nothing has been created yet.
+             */
+            'resource' => ServiceIdentities::handleOf($this->resource),
+
             'state' => $this->customerState()->value,
             // Asked of the enum that decides, so a client's "can I use this?"
             // cannot drift away from what the platform would actually allow.
@@ -71,7 +95,6 @@ final class ServiceResource extends JsonResource
             // catalogue; none is another tenant's.
             'plan_id' => $this->plan_id,
             'order_id' => $this->order_id,
-            'order_item_id' => $this->order_item_id,
             'subscription_id' => $this->subscription_id,
 
             'activated_at' => $this->activated_at?->toIso8601String(),
@@ -108,10 +131,12 @@ final class ServiceResource extends JsonResource
     private function customerState(): CustomerServiceState
     {
         $pending = $this->resource->getAttribute(CustomerServices::REVIEWS_PENDING);
+        $delivery = $this->resource->getAttribute(CustomerServices::DELIVERY_REVIEWS_PENDING);
 
         return CustomerServiceState::for(
             $this->resource->status,
             is_numeric($pending) && (int) $pending > 0,
+            is_numeric($delivery) && (int) $delivery > 0,
         );
     }
 }

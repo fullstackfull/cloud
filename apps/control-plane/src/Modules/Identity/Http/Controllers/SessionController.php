@@ -10,6 +10,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Lynomia\Http\Responses\ApiError;
+use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
 final class SessionController
@@ -54,9 +56,11 @@ final class SessionController
             ->first(static fn (object $row): bool => hash_equals(hash('sha256', (string) $row->id), $session));
 
         if ($target === null) {
-            return response()->json([
-                'error' => ['code' => 'resource.not_found', 'message' => 'The requested resource does not exist.'],
-            ], 404);
+            return ApiError::make(
+                'resource.not_found',
+                ErrorCatalogue::message('resource.not_found', [], 'The requested resource does not exist.'),
+                404,
+            )->toResponse($request);
         }
 
         DB::table('sessions')->where('id', $target->id)->delete();

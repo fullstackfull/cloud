@@ -1,40 +1,66 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api } from '@/lib/api'
+import { nextListPollDelay } from '@/lib/watchOperation'
 import type {
+  AcceptedOperation,
+  AcceptedReinstall,
+  AccountOverview,
+  ActivityCategory,
+  ActivityPage,
   ApiToken,
   AppNotification,
   Backup,
+  BackupFileDownload,
+  BackupFileListing,
+  BackupFileRestore,
+  CountryCurrencyChange,
   DedicatedServer,
   DnsRecord as DnsRecordRow,
   DnsZone,
   Domain,
+  DomainContact,
   DomainOperation,
   DomainQuote,
   DomainSearchResult,
   Envelope,
   HostingAccount,
+  HostingUsage,
+  HostingUsageMeta,
+  InstallableTemplate,
   InvitationOffer,
   Invoice,
   IpAssignment,
+  IssuedApiToken,
   NotificationPreference,
   Order,
+  OrderQuote,
   Paginated,
   Payment,
-  Plan,
   PlanChangeQuote,
   Product,
+  RegistrationOptions,
   Service,
+  ServiceEvent,
+  StartedPayment,
   Subscription,
   TeamInvitation,
   TeamMember,
+  ZoneExport,
+  ZoneImportMode,
+  ZoneImportPlan,
+  ZoneImportResult,
   TeamRole,
+  TeamRoleCapabilities,
   Ticket,
   TicketPriority,
   VirtualMachine,
   WalletBalances,
   WalletCreditQuote,
+  WalletTransaction,
+  WordPressPushImpact,
   WordPressSite,
+  WordPressSiteOperation,
 } from '@/lib/types'
 
 /**
@@ -86,24 +112,35 @@ export function useProduct(slugOrId: string) {
   })
 }
 
-export function usePlan(id: string) {
-  return useQuery({
-    queryKey: ['catalog', 'plan', id],
-    queryFn: async () => {
-      const response = await api.get<Envelope<Plan>>(`/catalog/plans/${encodeURIComponent(id)}`)
-      return response.data
-    },
-    staleTime: 60_000,
-  })
-}
+/*
+ * There is no usePlan.
+ *
+ * The API has a plan endpoint and no screen needs it: a product document
+ * carries its plans, which is how the catalogue and the product page read
+ * them, so a hook for one plan on its own was a hook nobody called. Wave 3
+ * deleted it rather than leave it as a capability the portal appears to have
+ * — see one-mutation-path and the capability gate, which now hold every hook
+ * in this file to being called by something.
+ */
 
 /* ----------------------------------------------------------------- orders */
 
 export interface CheckoutPayload {
-  lines: Array<{ plan_id: string; quantity: number }>
+  /**
+   * `items`, as the API names them. The hook sent `lines` until Wave 0 and
+   * every checkout was answered "the items field is required" — a refusal
+   * the idempotency-key defect (AR-1) hid behind its own 422 until that was
+   * fixed. Two contract mismatches, one button.
+   */
+  items: Array<{ plan_id: string; quantity: number }>
   billing_period: string
   coupon_code?: string
-  idempotency_key: string
+  /**
+   * Sent as the `Idempotency-Key` header and never in the body. The server
+   * reads it from the header alone, so one key held across retries of the
+   * same basket is what makes a double-click one order.
+   */
+  idempotencyKey: string
 }
 
 export function useOrders(pageNumber = 1) {
@@ -113,11 +150,30 @@ export function useOrders(pageNumber = 1) {
   })
 }
 
-export function useOrder(id: string) {
+export function useOrder(id: string | null) {
   return useQuery({
     queryKey: ['orders', 'detail', id],
+    enabled: id !== null && id !== '',
     queryFn: async () => {
-      const response = await api.get<Envelope<Order>>(`/orders/${encodeURIComponent(id)}`)
+      const response = await api.get<Envelope<Order>>(
+        `/orders/${encodeURIComponent(id ?? '')}`,
+      )
+      return response.data
+    },
+  })
+}
+
+/**
+ * What the basket in front of the customer costs, from the server.
+ *
+ * A mutation rather than a query because it is a POST with a body, and because
+ * it is asked again whenever the selection changes; it creates nothing, so
+ * there is no idempotency key and nothing to invalidate.
+ */
+export function useOrderQuote() {
+  return useMutation({
+    mutationFn: async (payload: Omit<CheckoutPayload, 'idempotencyKey'>): Promise<OrderQuote> => {
+      const response = await api.post<Envelope<OrderQuote>>('/orders/quote', payload)
       return response.data
     },
   })
@@ -127,8 +183,8 @@ export function usePlaceOrder() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (payload: CheckoutPayload): Promise<Order> => {
-      const response = await api.post<Envelope<Order>>('/orders', payload)
+    mutationFn: async ({ idempotencyKey, ...payload }: CheckoutPayload): Promise<Order> => {
+      const response = await api.post<Envelope<Order>>('/orders', payload, { idempotencyKey })
       return response.data
     },
     onSuccess: () => {
@@ -176,6 +232,26 @@ export function useSubscriptions(pageNumber = 1) {
   })
 }
 
+/**
+ * One subscription: what it costs, when it renews, what it pays for.
+ *
+ * The resource pages read it to show a machine's or a site's commercial half
+ * without recomputing any of it — the money is the server's, as Wave 2 left
+ * it.
+ */
+export function useSubscription(id: string | null) {
+  return useQuery({
+    queryKey: ['subscriptions', 'detail', id],
+    enabled: id !== null && id !== '',
+    queryFn: async () => {
+      const response = await api.get<Envelope<Subscription>>(
+        `/subscriptions/${encodeURIComponent(id ?? '')}`,
+      )
+      return response.data
+    },
+  })
+}
+
 export interface CancellationRequest {
   id: string
   /**
@@ -207,12 +283,21 @@ export function useCancelSubscription() {
 
 /* --------------------------------------------------------------- payments */
 
-export interface StartedPayment {
-  payment_id: string
-  provider: string
-  /** Where the browser must go next, when the provider needs a redirect. */
-  redirect_url?: string | null
-  client_secret?: string | null
+export function usePayment(id: string | null) {
+  return useQuery({
+    queryKey: ['payments', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<Payment>>(`/payments/${encodeURIComponent(id ?? '')}`)
+      return response.data
+    },
+    enabled: id !== null && id !== '',
+    /*
+     * Read fresh, never from cache: this is the hook a customer returning from
+     * a provider's page lands on, and the only honest answer to "did my
+     * payment work" is the platform's current record of it.
+     */
+    staleTime: 0,
+  })
 }
 
 export function usePayments(pageNumber = 1) {
@@ -254,17 +339,39 @@ export function useServices(pageNumber = 1, kind?: string) {
   })
 }
 
-export function useService(id: string) {
+export function useService(id: string | null) {
   return useQuery({
     queryKey: ['services', 'detail', id],
+    enabled: id !== null && id !== '',
     queryFn: async () => {
-      const response = await api.get<Envelope<Service>>(`/services/${encodeURIComponent(id)}`)
+      const response = await api.get<Envelope<Service>>(
+        `/services/${encodeURIComponent(id ?? '')}`,
+      )
       return response.data
     },
   })
 }
 
 /* -------------------------------------------------------------------- vps */
+
+/**
+ * What has happened to one service, in the platform's customer vocabulary.
+ *
+ * The endpoint has existed since the provisioning engine was built and had no
+ * caller: the audit found no activity view anywhere in the portal. This is
+ * per-resource only. An account-wide feed is a different thing with a
+ * different endpoint, and neither exists yet.
+ */
+export function useServiceEvents(serviceId: string | null) {
+  return useQuery({
+    queryKey: ['services', 'events', serviceId],
+    enabled: serviceId !== null && serviceId !== '',
+    queryFn: () =>
+      api.get<Paginated<ServiceEvent>>(
+        `/services/${encodeURIComponent(serviceId ?? '')}/events${page({ page: 1 })}`,
+      ),
+  })
+}
 
 export function useVirtualMachines(pageNumber = 1) {
   return useQuery({
@@ -283,18 +390,56 @@ export function useVirtualMachine(id: string) {
   })
 }
 
+/**
+ * The operating systems this machine may be rebuilt with.
+ *
+ * Asked of the machine rather than of a catalogue: the set depends on what is
+ * staged where this machine runs, and the reinstall endpoint applies exactly
+ * the same rule to whatever id is submitted. Fetched only when the dialogue
+ * that needs it is open, because a list page has no use for it.
+ */
+export function useVpsTemplates(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['vps', 'templates', id],
+    enabled: enabled && id !== '',
+    queryFn: async () => {
+      const response = await api.get<{ data: InstallableTemplate[] }>(
+        `/vps/${encodeURIComponent(id)}/templates`,
+      )
+      return response.data
+    },
+    // Images change when the platform stages one, which is not during a
+    // customer's visit.
+    staleTime: 5 * 60 * 1000,
+  })
+}
+
 export interface PowerRequest {
   id: string
   action: string
-  idempotency_key: string
+  /** One per press; sent as the `Idempotency-Key` header. */
+  idempotencyKey: string
 }
 
 export function useVpsPower() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, action, idempotency_key }: PowerRequest) =>
-      api.post<unknown>(`/vps/${encodeURIComponent(id)}/power`, { action, idempotency_key }),
+    /*
+     * The receipt is returned rather than discarded. A 202 names the operation
+     * the platform has accepted, and the screen hands that name to the
+     * observation layer — which is the whole of AR-12: before this the id came
+     * back and nothing in the portal could do anything with it.
+     */
+    mutationFn: async ({ id, action, idempotencyKey }: PowerRequest) => {
+      const response = await api.post<Envelope<AcceptedOperation>>(
+        `/vps/${encodeURIComponent(id)}/power`,
+        { action },
+        { idempotencyKey },
+      )
+
+      return response.data
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -304,7 +449,21 @@ export function useVpsPower() {
 export interface ReinstallRequest {
   id: string
   confirm_hostname: string
-  idempotency_key: string
+  /**
+   * The image to build from. Omitted means the same one again, which is what
+   * the endpoint has always done and what a customer who just wants a clean
+   * machine expects.
+   */
+  template_id?: string
+  /**
+   * Public keys to install on first boot. Public keys only — a private key
+   * has no business travelling anywhere, and the platform has no field for
+   * one. Sent only for an image that can be configured on first boot; without
+   * that the platform cannot install them and would be collecting something
+   * it intends to drop.
+   */
+  ssh_keys?: string[]
+  idempotencyKey: string
 }
 
 /**
@@ -319,11 +478,27 @@ export function useVpsReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_hostname, idempotency_key }: ReinstallRequest) =>
-      api.post<unknown>(`/vps/${encodeURIComponent(id)}/reinstall`, {
-        confirm_hostname,
-        idempotency_key,
-      }),
+    mutationFn: async ({
+      id,
+      confirm_hostname,
+      template_id,
+      ssh_keys,
+      idempotencyKey,
+    }: ReinstallRequest) => {
+      const response = await api.post<Envelope<AcceptedOperation>>(
+        `/vps/${encodeURIComponent(id)}/reinstall`,
+        {
+          confirm_hostname,
+          // Absent rather than null: the endpoint treats an omitted template
+          // as "the same image again", and an empty key list as no keys.
+          ...(template_id === undefined ? {} : { template_id }),
+          ...(ssh_keys === undefined || ssh_keys.length === 0 ? {} : { ssh_keys }),
+        },
+        { idempotencyKey },
+      )
+
+      return response.data
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['vps'] })
     },
@@ -376,15 +551,15 @@ export interface PlanChangeSubmission {
   subscriptionId: string
   plan_id: string
   price_id: string
-  idempotency_key: string
+  idempotencyKey: string
 }
 
 export function useChangePlan() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ subscriptionId, ...body }: PlanChangeSubmission) =>
-      api.post<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}/plan`, body),
+    mutationFn: ({ subscriptionId, idempotencyKey, ...body }: PlanChangeSubmission) =>
+      api.post<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}/plan`, body, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
       // The machine's shape changes too, once the hypervisor agrees.
@@ -431,6 +606,33 @@ export function useMarkAllNotificationsRead() {
   })
 }
 
+/**
+ * How many unread notifications, and nothing else.
+ *
+ * AS-11. The badge is drawn on every page, and the only way to know the number
+ * used to be to fetch a page of the inbox and read its meta — which downloads
+ * twenty-five notifications to render a digit, on every navigation. This is
+ * one integer from one endpoint.
+ *
+ * Keyed under `notifications`, so marking one read invalidates the count along
+ * with the list and the badge cannot sit at 3 after the customer has just
+ * cleared it.
+ */
+export function useUnreadNotificationCount() {
+  return useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: async () => {
+      const response = await api.get<Envelope<{ unread: number }>>('/notifications/unread-count')
+
+      return response.data.unread
+    },
+
+    // A minute is short enough that the badge is not stale for long and long
+    // enough that moving between eight screens is not eight requests.
+    staleTime: 60_000,
+  })
+}
+
 export function useNotificationPreferences() {
   return useQuery({
     queryKey: ['notification-preferences'],
@@ -467,6 +669,18 @@ export function useBackups(vmId: string | null, pageNumber = 1) {
       api.get<Paginated<Backup>>(
         `/vps/${encodeURIComponent(vmId ?? '')}/backups${page({ page: pageNumber })}`,
       ),
+
+    /*
+     * Polled while any row is still being worked on, through the same rule the
+     * operation watcher uses. A backup takes minutes and a restore longer; a
+     * screen that only updated on reload is a screen a customer reloads, or
+     * opens a ticket about.
+     */
+    refetchInterval: (query) =>
+      nextListPollDelay(
+        (query.state.data?.data ?? []).filter((backup) => backup.is_in_flight).length,
+        query.state.dataUpdateCount,
+      ),
   })
 }
 
@@ -478,6 +692,67 @@ export function useCreateBackup() {
       api.post<unknown>(`/vps/${encodeURIComponent(vmId)}/backups`, {}),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backups'] })
+    },
+  })
+}
+
+/**
+ * One directory of one backup, read from the provider each time it is
+ * asked for. Keyed on the backup and the path: a listing must never be
+ * shown under another archive's name.
+ */
+export function useBackupFiles(vmId: string | null, backupId: string | null, path: string) {
+  return useQuery({
+    queryKey: ['backups', 'files', vmId, backupId, path],
+    enabled: vmId !== null && backupId !== null,
+    queryFn: () =>
+      api.get<Envelope<BackupFileListing>>(
+        `/vps/${encodeURIComponent(vmId ?? '')}/backups/${encodeURIComponent(backupId ?? '')}/files?path=${encodeURIComponent(path)}`,
+      ),
+  })
+}
+
+export function useBackupFileRestores(vmId: string | null, backupId: string | null) {
+  return useQuery({
+    queryKey: ['backups', 'file-restores', vmId, backupId],
+    enabled: vmId !== null && backupId !== null,
+    queryFn: () =>
+      api.get<{ data: BackupFileRestore[] }>(
+        `/vps/${encodeURIComponent(vmId ?? '')}/backups/${encodeURIComponent(backupId ?? '')}/file-restores`,
+      ),
+
+    // A file restore is minutes of work on somebody's live disk. Same rule.
+    refetchInterval: (query) =>
+      nextListPollDelay(
+        (query.state.data?.data ?? []).filter((restore) => restore.is_in_flight).length,
+        query.state.dataUpdateCount,
+      ),
+  })
+}
+
+export function useIssueBackupFileDownload() {
+  return useMutation({
+    mutationFn: (payload: { vmId: string; backupId: string; path: string }) =>
+      api.post<Envelope<BackupFileDownload>>(
+        `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}/files/downloads`,
+        { path: payload.path },
+      ),
+  })
+}
+
+export function useRestoreBackupFiles() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The typed hostname is forwarded, never filled in: the server compares it
+     * and is what decides. */
+    mutationFn: (payload: { vmId: string; backupId: string; paths: string[]; confirmation: string }) =>
+      api.post<Envelope<BackupFileRestore>>(
+        `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}/files/restore`,
+        { paths: payload.paths, confirmation: payload.confirmation },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['backups', 'file-restores'] })
     },
   })
 }
@@ -516,12 +791,24 @@ export function useDedicatedServers(pageNumber = 1) {
   })
 }
 
+export function useDedicatedServer(id: string) {
+  return useQuery({
+    queryKey: ['dedicated', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<DedicatedServer>>(
+        `/dedicated/${encodeURIComponent(id)}`,
+      )
+      return response.data
+    },
+  })
+}
+
 export function useDedicatedPower() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, action, idempotency_key }: PowerRequest) =>
-      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/power`, { action, idempotency_key }),
+    mutationFn: ({ id, action, idempotencyKey }: PowerRequest) =>
+      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/power`, { action }, { idempotencyKey }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dedicated'] })
     },
@@ -531,7 +818,7 @@ export function useDedicatedPower() {
 export interface DedicatedReinstallRequest {
   id: string
   confirm_serial: string
-  idempotency_key: string
+  idempotencyKey: string
 }
 
 /**
@@ -545,11 +832,20 @@ export function useDedicatedReinstall() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ id, confirm_serial, idempotency_key }: DedicatedReinstallRequest) =>
-      api.post<unknown>(`/dedicated/${encodeURIComponent(id)}/reinstall`, {
-        confirm_serial,
-        idempotency_key,
-      }),
+    mutationFn: async ({ id, confirm_serial, idempotencyKey }: DedicatedReinstallRequest) => {
+      /*
+       * A shorter receipt than the VPS one — no service, no verb — and the
+       * same three fields the observation layer needs: what to watch, what it
+       * says now, and whether there is anything left to wait for.
+       */
+      const response = await api.post<Envelope<AcceptedReinstall>>(
+        `/dedicated/${encodeURIComponent(id)}/reinstall`,
+        { confirm_serial },
+        { idempotencyKey },
+      )
+
+      return response.data
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dedicated'] })
     },
@@ -562,6 +858,43 @@ export function useHostingAccounts(pageNumber = 1) {
   return useQuery({
     queryKey: ['hosting', pageNumber],
     queryFn: () => api.get<Paginated<HostingAccount>>(`/hosting${page({ page: pageNumber })}`),
+  })
+}
+
+/**
+ * One hosting account.
+ *
+ * Accepts null so that a caller which may not have an account to ask about —
+ * a WordPress site whose account is still being built — can call the hook
+ * unconditionally and get nothing rather than a request for `/hosting/`.
+ */
+export function useHostingAccount(id: string | null) {
+  return useQuery({
+    queryKey: ['hosting', 'detail', id],
+    enabled: id !== null && id !== '',
+    queryFn: async () => {
+      const response = await api.get<Envelope<HostingAccount>>(
+        `/hosting/${encodeURIComponent(id ?? '')}`,
+      )
+      return response.data
+    },
+  })
+}
+
+/**
+ * Disk and bandwidth against quota, as of the platform's last sync.
+ *
+ * The envelope carries the freshness contract in `meta`, and it is read as
+ * well as the figures: a usage bar without "as of" is a claim about now that
+ * the platform cannot make.
+ */
+export function useHostingUsage(id: string) {
+  return useQuery({
+    queryKey: ['hosting', 'usage', id],
+    queryFn: () =>
+      api.get<{ data: HostingUsage; meta: HostingUsageMeta }>(
+        `/hosting/${encodeURIComponent(id)}/usage`,
+      ),
   })
 }
 
@@ -584,6 +917,23 @@ export function useWallet() {
     // The whole envelope, not `.data`: the account currency in `meta` is what
     // tells the screen which of several balances is the customer's own.
     queryFn: () => api.get<WalletBalances>('/wallet'),
+  })
+}
+
+/**
+ * The wallet ledger, which is where a balance comes from.
+ *
+ * The portal never reconstructs a balance by adding these rows up: the balance
+ * is published by the API, and this list is the history behind it. Two
+ * different sums that disagree is exactly how a customer stops trusting both.
+ */
+export function useWalletTransactions(pageNumber = 1, currency?: string) {
+  return useQuery({
+    queryKey: ['wallet', 'transactions', pageNumber, currency ?? 'all'],
+    queryFn: () =>
+      api.get<Paginated<WalletTransaction>>(
+        `/wallet/transactions${page({ page: pageNumber, currency })}`,
+      ),
   })
 }
 
@@ -631,7 +981,7 @@ export function useDeleteBackup() {
     mutationFn: (payload: { vmId: string; backupId: string; confirmation: string }) =>
       api.delete<Envelope<Backup>>(
         `/vps/${encodeURIComponent(payload.vmId)}/backups/${encodeURIComponent(payload.backupId)}`,
-        { confirm_backup_id: payload.confirmation },
+        { confirmation: payload.confirmation },
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['backups'] })
@@ -787,7 +1137,7 @@ export function usePayFromWalletCredit() {
         {},
         // The header, not the body: the server reads it from there and from
         // nowhere else, so a body field of the same name cannot win.
-        { headers: { 'Idempotency-Key': payload.idempotencyKey } },
+        { idempotencyKey: payload.idempotencyKey },
       ),
     onSuccess: () => {
       // Both moved: the invoice is paid or partly paid, and the balance that
@@ -813,6 +1163,21 @@ export function useTeamMembers() {
   return useQuery({
     queryKey: ['team', 'members'],
     queryFn: () => api.get<{ data: TeamMember[]; meta: { total: number; limit: number; assignable_roles: TeamRole[] } }>('/team/members'),
+  })
+}
+
+/**
+ * What each role may do, from the authorization the server enforces.
+ *
+ * The same five roles for every account on the platform, computed from an
+ * enum, costing no query — so it is cached for the session rather than
+ * refetched with the member list it sits beside.
+ */
+export function useTeamRoles() {
+  return useQuery({
+    queryKey: ['team', 'roles'],
+    queryFn: () => api.get<{ data: TeamRoleCapabilities[]; meta: { assignable_roles: TeamRole[] } }>('/team/roles'),
+    staleTime: Infinity,
   })
 }
 
@@ -866,7 +1231,7 @@ export function useRemoveMember() {
 }
 
 export function useTransferOwnership() {
-  return useTeamMutation((payload: { member_id: string; confirm_account_id: string }) =>
+  return useTeamMutation((payload: { member_id: string; confirm_account_name: string }) =>
     api.post<Envelope<TeamMember>>('/team/transfer-ownership', payload),
   )
 }
@@ -917,11 +1282,35 @@ export function useCreateApiToken() {
     mutationFn: async (payload: {
       name: string
       current_password: string
-    }): Promise<{ token: ApiToken; plain_text_token: string }> => {
-      const response = await api.post<Envelope<{ token: ApiToken; plain_text_token: string }>>(
-        '/me/api-tokens',
-        payload,
-      )
+      /**
+       * The three restrictions the server actually enforces, each omitted
+       * rather than sent null when the customer left it alone.
+       *
+       * `abilities` is deliberately absent and must stay absent: nothing in
+       * the platform checks a token's abilities, so a scope field here would
+       * be a restriction that reads as one and enforces nothing. The request
+       * refuses the field for the same reason.
+       */
+      expires_at?: string
+      allowed_ip_ranges?: string[]
+      rate_limit_per_minute?: number
+      /*
+       * The response is the token's own fields with one extra: `token`, the
+       * `id|plaintext` value that goes in the Authorization header. It is the
+       * only time the platform will ever send it.
+       *
+       * This was typed as `{ token: ApiToken; plain_text_token: string }`,
+       * which was wrong twice — there is no `plain_text_token` key, and
+       * `token` is the secret string rather than an object. The screen read
+       * the key that does not exist, so `undefined` was handed to a paragraph
+       * that renders it, and a customer who created a token was shown an
+       * empty box under the words "this is the only time it is shown".
+       * Nothing threw and nothing warned, because a hand-written response
+       * type that does not match the server typechecks perfectly.
+       */
+    }): Promise<IssuedApiToken> => {
+      const response = await api.post<Envelope<IssuedApiToken>>('/me/api-tokens', payload)
+
       return response.data
     },
     onSuccess: () => {
@@ -959,11 +1348,30 @@ export function useWordPressSites() {
      * steps that finish minutes apart, and a customer watching a screen that
      * only updates on reload is a customer who refreshes it, or opens a
      * ticket.
+     *
+     * This was the portal's only polling interval before Wave 4, with its own
+     * hard-coded fifteen seconds and no backoff. It now asks the same rule as
+     * everything else, so there is one answer to "how often, and when do we
+     * stop" rather than one per screen.
      */
     refetchInterval: (query) =>
-      (query.state.data?.data ?? []).some((site) => !site.is_verified && !site.needs_attention)
-        ? 15_000
-        : false,
+      nextListPollDelay(
+        (query.state.data?.data ?? []).filter((site) => !site.is_verified && !site.needs_attention)
+          .length,
+        query.state.dataUpdateCount,
+      ),
+  })
+}
+
+export function useWordPressSite(id: string) {
+  return useQuery({
+    queryKey: ['wordpress', 'detail', id],
+    queryFn: async () => {
+      const response = await api.get<Envelope<WordPressSite>>(
+        `/wordpress/sites/${encodeURIComponent(id)}`,
+      )
+      return response.data
+    },
   })
 }
 
@@ -1027,6 +1435,116 @@ export function useOrderDomain() {
       void queryClient.invalidateQueries({ queryKey: ['domains'] })
       // The order issues an invoice, and the customer is about to be asked to
       // pay it. A stale billing list here is a customer who cannot find it.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+    },
+  })
+}
+
+/**
+ * One name, by its own name or by its id.
+ *
+ * The portal's address for a domain is the domain — `/domains/example.com` —
+ * and the API resolves either form inside the acting account, so a deep link
+ * works on a cold load with no list behind it.
+ */
+export function useDomain(identity: string) {
+  return useQuery({
+    queryKey: ['domains', 'detail', identity],
+    queryFn: async () => {
+      const response = await api.get<Envelope<Domain>>(
+        `/domains/${encodeURIComponent(identity)}`,
+      )
+      return response.data
+    },
+  })
+}
+
+/**
+ * The registrant on record.
+ *
+ * Its own request rather than a field on the domain: it is personal data
+ * behind a stricter permission, and a list of names has no business carrying
+ * a home address for each one.
+ */
+export function useDomainContacts(identity: string, enabled = true) {
+  return useQuery({
+    queryKey: ['domains', 'contacts', identity],
+    enabled: enabled && identity !== '',
+    queryFn: async () => {
+      const response = await api.get<Envelope<DomainContact>>(
+        `/domains/${encodeURIComponent(identity)}/contacts`,
+      )
+      return response.data
+    },
+    // Not cached across a visit: it is read to fill a form, and a stale copy
+    // would silently re-submit what the customer just corrected.
+    staleTime: 0,
+  })
+}
+
+export interface RegistrantPayload {
+  name: string
+  organisation?: string | null
+  email: string
+  phone: string
+  address_line_one: string
+  address_line_two?: string | null
+  city: string
+  region?: string | null
+  postal_code?: string | null
+  country: string
+}
+
+export function useUpdateDomainContacts(identity: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (registrant: RegistrantPayload) =>
+      api.put<Envelope<Domain>>(`/domains/${encodeURIComponent(identity)}/contacts`, {
+        registrant,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+  })
+}
+
+/**
+ * Whether the platform raises the next invoice before this name lapses.
+ *
+ * A setting, so no idempotency key and no typed confirmation — it is
+ * reversible in one click. What it is not is a cancellation, and the screen
+ * says so beside the switch.
+ */
+export function useSetDomainAutoRenew(identity: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (autoRenew: boolean) =>
+      api.put<Envelope<Domain>>(`/domains/${encodeURIComponent(identity)}/auto-renew`, {
+        auto_renew: autoRenew,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
+    },
+  })
+}
+
+/**
+ * Bringing a name in from another registrar.
+ *
+ * Not nested under a domain, because the platform does not hold it yet. The
+ * quote is taken first — the transfer costs a term — and the authorisation
+ * code travels once and is never rendered back.
+ */
+export function useTransferDomainIn() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { quote_id: string; authorisation_code: string }) =>
+      api.post<Envelope<DomainOperation>>('/domains/transfers', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['domains'] })
       void queryClient.invalidateQueries({ queryKey: ['invoices'] })
     },
   })
@@ -1129,6 +1647,21 @@ export function useDnsRecords(zoneId: string | null) {
   })
 }
 
+/**
+ * One zone, by its name or its id — the same two forms a domain accepts.
+ */
+export function useDnsZone(identity: string) {
+  return useQuery({
+    queryKey: ['dns', 'zones', 'detail', identity],
+    queryFn: async () => {
+      const response = await api.get<Envelope<DnsZone>>(
+        `/dns/zones/${encodeURIComponent(identity)}`,
+      )
+      return response.data
+    },
+  })
+}
+
 export function useClaimDnsZone() {
   const queryClient = useQueryClient()
 
@@ -1183,6 +1716,43 @@ export function useAddDnsRecord() {
   })
 }
 
+/**
+ * Change a record in place.
+ *
+ * The canonical PATCH, not a remove-and-add: the portal used to offer no edit
+ * at all, and simulating one by deleting the record first would take the name
+ * off the internet for as long as the second request took — and would leave
+ * the zone with nothing at all if that request failed.
+ */
+export function useUpdateDnsRecord() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({
+      zoneId,
+      recordId,
+      changes,
+    }: {
+      zoneId: string
+      recordId: string
+      /*
+       * What a record says, never what it is. The endpoint accepts neither
+       * the name nor the type: a record with a different name is a different
+       * record, and editing one into another would leave the provider holding
+       * the old value under an identifier the platform had quietly reassigned.
+       */
+      changes: Partial<Pick<NewDnsRecord, 'content' | 'ttl' | 'priority' | 'data'>>
+    }) =>
+      api.patch<Envelope<DnsRecordRow>>(
+        `/dns/zones/${encodeURIComponent(zoneId)}/records/${encodeURIComponent(recordId)}`,
+        changes,
+      ),
+    onSuccess: (_result, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['dns', 'records', variables.zoneId] })
+    },
+  })
+}
+
 export function useRemoveDnsRecord() {
   const queryClient = useQueryClient()
 
@@ -1194,5 +1764,303 @@ export function useRemoveDnsRecord() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['dns'] })
     },
+  })
+}
+
+/**
+ * A zone file read against the zone: what would change, line by line, and
+ * nothing written. Not cached — the plan is computed against the zone as it
+ * is at that moment, and a stale one is exactly what the fingerprint refuses.
+ */
+export function usePlanZoneImport() {
+  return useMutation({
+    mutationFn: (payload: { zoneId: string; text: string; mode: ZoneImportMode }) =>
+      api.post<Envelope<ZoneImportPlan>>(
+        `/dns/zones/${encodeURIComponent(payload.zoneId)}/import/plan`,
+        { text: payload.text, mode: payload.mode },
+      ),
+  })
+}
+
+export function useApplyZoneImport() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The same text and mode the preview was given, plus its fingerprint: the
+     * server recomputes the plan and applies it only if it is the one that was
+     * shown. */
+    mutationFn: (payload: { zoneId: string; text: string; mode: ZoneImportMode; fingerprint: string }) =>
+      api.post<Envelope<ZoneImportResult>>(`/dns/zones/${encodeURIComponent(payload.zoneId)}/import`, {
+        text: payload.text,
+        mode: payload.mode,
+        fingerprint: payload.fingerprint,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['dns'] })
+    },
+  })
+}
+
+export function useExportZone() {
+  return useMutation({
+    mutationFn: (zoneId: string) =>
+      api.get<Envelope<ZoneExport>>(`/dns/zones/${encodeURIComponent(zoneId)}/export`),
+  })
+}
+
+/* ------------------------------------------------- the account's currency */
+
+/**
+ * Requests to change what the account is billed in, with the currencies the
+ * catalogue prices anything in — the only ones an account can be moved to.
+ */
+export function useCountryCurrencyChanges() {
+  return useQuery({
+    queryKey: ['account', 'country-currency-changes'],
+    queryFn: () =>
+      api.get<{ data: CountryCurrencyChange[]; meta: { currencies: string[] } }>('/account/country-currency-changes'),
+  })
+}
+
+export function useRequestCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { country: string | null; currency: string; reason: string }) =>
+      api.post<Envelope<CountryCurrencyChange>>('/account/country-currency-changes', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account'] })
+      void queryClient.invalidateQueries({ queryKey: ['auth'] })
+    },
+  })
+}
+
+export function useReanalyseCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<Envelope<CountryCurrencyChange>>(`/account/country-currency-changes/${encodeURIComponent(id)}/reanalyse`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account'] })
+    },
+  })
+}
+
+export function useWithdrawCountryCurrencyChange() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<Envelope<CountryCurrencyChange>>(`/account/country-currency-changes/${encodeURIComponent(id)}/withdraw`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account'] })
+    },
+  })
+}
+
+/* ----------------------------------------------- WordPress copies and pushes */
+
+export function useWordPressSiteOperations(siteId: string) {
+  return useQuery({
+    queryKey: ['wordpress', 'operations', siteId],
+    queryFn: () =>
+      api.get<{ data: WordPressSiteOperation[] }>(`/wordpress/sites/${encodeURIComponent(siteId)}/operations`),
+  })
+}
+
+export function useCreateWordPressStaging() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (siteId: string) =>
+      api.post<Envelope<WordPressSiteOperation>>(`/wordpress/sites/${encodeURIComponent(siteId)}/staging`, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+    },
+  })
+}
+
+export function useCloneWordPressSite() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: { siteId: string; domain: string }) =>
+      api.post<Envelope<WordPressSiteOperation>>(`/wordpress/sites/${encodeURIComponent(payload.siteId)}/clones`, {
+        domain: payload.domain,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+    },
+  })
+}
+
+/** Fetched on demand, when the customer opens the push confirmation: the words it shows. */
+export function useWordPressPushImpact() {
+  return useMutation({
+    mutationFn: (payload: { siteId: string; scope: string }) =>
+      api.get<Envelope<WordPressPushImpact>>(
+        `/wordpress/sites/${encodeURIComponent(payload.siteId)}/push/impact?scope=${encodeURIComponent(payload.scope)}`,
+      ),
+  })
+}
+
+export function usePushWordPressToProduction() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    /* The typed domain travels as typed: the server compares it and decides. */
+    mutationFn: (payload: { siteId: string; scope: string; confirmation: string }) =>
+      api.post<Envelope<WordPressSiteOperation>>(`/wordpress/sites/${encodeURIComponent(payload.siteId)}/push`, {
+        scope: payload.scope,
+        confirmation: payload.confirmation,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['wordpress'] })
+    },
+  })
+}
+
+/* --------------------------------------------------- registration options */
+
+/**
+ * The countries and currencies registration may offer.
+ *
+ * Read from the server, never assembled here: a country-to-currency table in
+ * this bundle would drift from the platform's the first time a currency was
+ * enabled or withdrawn, and the customer would find out at checkout.
+ */
+export function useRegistrationOptions() {
+  return useQuery({
+    queryKey: ['registration', 'options'],
+    queryFn: async () => {
+      const response = await api.get<Envelope<RegistrationOptions>>('/registration/options')
+      return response.data
+    },
+    // Configuration, not anybody's data: worth holding for the length of a
+    // sign-up rather than re-fetching per keystroke.
+    staleTime: 10 * 60 * 1000,
+  })
+}
+
+/* ------------------------------------------------- email verification */
+
+export function useResendVerificationEmail() {
+  return useMutation({
+    mutationFn: () => api.post<unknown>('/email/verify/resend'),
+  })
+}
+
+/* ------------------------------------------------- the controlled gateway */
+
+/**
+ * The fake provider's own payment page.
+ *
+ * These hooks exist so a test and a developer can walk the redirect flow
+ * end to end in a browser. The endpoints behind them are refused whenever a
+ * real payment provider is configured and refused outright in production, and
+ * they settle nothing themselves: approving sends the platform a signed
+ * webhook, and the invoice is settled by that.
+ */
+export interface ControlledGatewayPage {
+  payment: Payment
+  provider: string
+  reference: string
+}
+
+export function useControlledGatewayPayment(reference: string | null) {
+  return useQuery({
+    queryKey: ['fake-gateway', reference],
+    queryFn: async () => {
+      const response = await api.get<Envelope<ControlledGatewayPage>>(
+        `/fake-gateway/payments/${encodeURIComponent(reference ?? '')}`,
+      )
+      return response.data
+    },
+    enabled: reference !== null && reference !== '',
+    staleTime: 0,
+    retry: false,
+  })
+}
+
+export function useControlledGatewayDecision() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      reference,
+      decision,
+      clientSecret,
+    }: {
+      reference: string
+      decision: 'approve' | 'decline' | 'confirm'
+      clientSecret?: string
+    }): Promise<Payment> => {
+      const response = await api.post<Envelope<{ payment: Payment }>>(
+        `/fake-gateway/payments/${encodeURIComponent(reference)}/${decision}`,
+        decision === 'confirm' ? { client_secret: clientSecret } : undefined,
+      )
+
+      return response.data.payment
+    },
+    onSuccess: () => {
+      // The invoice may now be settled — by the webhook, not by this response.
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      void queryClient.invalidateQueries({ queryKey: ['payments'] })
+      void queryClient.invalidateQueries({ queryKey: ['wallet'] })
+    },
+  })
+}
+
+/* ------------------------------------------------------- what is happening
+ |
+ | AR-6 and AR-13: the dashboard and the account-wide feed. Both are single
+ | server reads by design — the browser does not assemble a dashboard from nine
+ | list endpoints, and it does not assemble a history from each resource's own
+ | events.
+ */
+
+/**
+ * The first page of the portal, in one request.
+ *
+ * One call rather than four, because the priority order between an unpaid
+ * invoice, an expiring domain and a rebuild that stopped is a product
+ * decision, and a decision made in the browser is a decision every client has
+ * to make again.
+ */
+export function useAccountOverview() {
+  return useQuery({
+    queryKey: ['overview'],
+    queryFn: async () => {
+      const response = await api.get<Envelope<AccountOverview>>('/me/overview')
+
+      return response.data
+    },
+  })
+}
+
+/**
+ * One page of the account's activity.
+ *
+ * Cursor-paginated rather than numbered, because the feed is a union over ten
+ * tables ordered by time: page 4 of a list that gains rows while you read it
+ * is not a stable address, and an offset into it costs the server the whole
+ * history to skip.
+ *
+ * The filter is a server parameter, never a client-side trim. `?category=`
+ * chooses which sources are read, so asking about support reads one table
+ * instead of ten — and a filtered page holds a full page of matching rows
+ * rather than whatever survived filtering the unfiltered one.
+ */
+export function useActivity(category: ActivityCategory | null, cursor: string | null) {
+  return useQuery({
+    queryKey: ['activity', category ?? 'all', cursor ?? 'first'],
+    queryFn: () =>
+      api.get<ActivityPage>(
+        `/activity${page({
+          ...(category === null ? {} : { category }),
+          ...(cursor === null ? {} : { cursor }),
+        })}`,
+      ),
   })
 }

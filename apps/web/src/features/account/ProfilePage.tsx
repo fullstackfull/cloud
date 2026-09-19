@@ -1,17 +1,84 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
 import { Card } from '@/components/Card'
 import { Field } from '@/components/Field'
+import { SelectField } from '@/components/SelectField'
 import { PageHeader } from '@/components/PageHeader'
 import { useCurrentUser } from '@/features/auth/useAuth'
 import { NotificationPreferencesSection } from '@/features/notifications/NotificationPreferencesSection'
 import { SUPPORTED_LOCALES, changeLocale, isSupportedLocale } from '@/i18n'
+import { canFormatIn, timeZones } from '@/lib/timezones'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
 import { useUpdateProfile } from './useProfile'
+
+/*
+ * W5.3. Every field the portal shows about a person or their account,
+ * classified against what the server actually accepts.
+ *
+ * Written here rather than only in the wave report because a report drifts
+ * and a file next to the form does not, and because the interesting half of
+ * the classification is about what this form deliberately does *not* offer.
+ * Each line was read off a route and a validator, not off this screen.
+ *
+ * ## The person (`GET`/`PATCH /api/v1/me`)
+ *
+ * EDITABLE — the four keys `ProfileController::update` validates, and the
+ * four controls below:
+ *   name, locale, timezone, phone (nullable: an empty field is a null)
+ *
+ * SUPPORT_ONLY:
+ *   email             Not in the validator, by an explicit comment on the
+ *                     server: changing an address needs re-verification
+ *                     through an audited flow, and no such flow is exposed to
+ *                     a customer — so the change is support's, which is what
+ *                     the hint under the field says. Rendered read-only and
+ *                     disabled rather than omitted: an address that is not on
+ *                     the page reads as one the platform does not have, and
+ *                     it is where every invoice and every notice goes.
+ *
+ * READ_ONLY:
+ *   id, permissions, last_login_at, created_at
+ *
+ * WORKFLOW_CONTROLLED — real customer-facing changes, each with its own
+ * endpoints and its own screen, none of them a field on this form:
+ *   password          `PUT me/password`, requiring the current one
+ *   two_factor_enabled  enable → confirm → disable, on the security page
+ *   email_verified    a signed link, or `POST email/verify/resend`
+ *   notification preferences  `PUT me/notification-preferences`, the section
+ *                     at the foot of this page: switches that each *are* the
+ *                     submit, which is why they are switches and not
+ *                     checkboxes in a form
+ *
+ * ## The account (`customers[]` on the same document)
+ *
+ * WORKFLOW_CONTROLLED:
+ *   country, currency  `account/country-currency-changes`. A request, not a
+ *                     setting: the platform analyses what the change would
+ *                     touch, an operator decides, and it applies only once
+ *                     nothing still priced in the old currency is live.
+ *                     `CountryCurrencySection`, on the dashboard, renders
+ *                     that workflow — request, re-check, withdraw — and
+ *                     offers no direct write. Turning either into an ordinary input would be
+ *                     repricing a live catalogue from a form.
+ *
+ * SUPPORT_ONLY:
+ *   display_name, legal_name  set once by registration; the names that go on
+ *                     an invoice. No customer or admin endpoint writes them.
+ *   status            an operator's, through `PUT admin customers/{id}/status`
+ *   type              set by registration; nothing changes it afterwards
+ *
+ * DERIVED (never stored, so never writable):
+ *   can_purchase      computed from verification and account status
+ *
+ * The server refuses each of these by allow-list rather than trusting the
+ * portal to omit them; that refusal is asserted from the outside in
+ * `CustomerWritesResistOverpostingTest`, and the absence of a control for
+ * them is asserted in `which-fields-a-customer-can-change.test.tsx`.
+ */
 
 const LOCALE_LABELS: Record<string, string> = { en: 'English', ar: 'العربية' }
 
@@ -37,6 +104,14 @@ export function ProfilePage() {
     setTimezone(user.timezone)
     setPhone(user.phone ?? '')
   }, [user])
+
+  /*
+   * Recomputed only when the stored zone changes: `supportedValuesOf` returns
+   * several hundred strings and there is no reason to build that array on
+   * every keystroke in the name field.
+   */
+  const zones = useMemo(() => timeZones(timezone), [timezone])
+  const usable = timezone === '' || canFormatIn(timezone)
 
   const displayed = describeError(update.error)
   const fieldErrors = displayed?.fields ?? null
@@ -99,34 +174,46 @@ export function ProfilePage() {
               hint={t('account.emailImmutable')}
             />
 
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="profile-locale"
-                className="text-sm font-medium text-[var(--text-primary)]"
-              >
-                {t('common.language')}
-              </label>
-              <select
-                id="profile-locale"
-                value={locale}
-                onChange={(event) => { setLocale(event.target.value); }}
-                className="h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 text-sm text-[var(--text-primary)]"
-              >
-                {SUPPORTED_LOCALES.map((code) => (
-                  <option key={code} value={code} lang={code}>
-                    {LOCALE_LABELS[code] ?? code}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SelectField
+              label={t('common.language')}
+              value={locale}
+              onChange={(event) => { setLocale(event.target.value); }}
+            >
+              {/*
+                Children rather than `options`, because each option carries its
+                own `lang`: "العربية" inside an English page has to be marked
+                as Arabic or a screen reader pronounces it with English rules.
+              */}
+              {SUPPORTED_LOCALES.map((code) => (
+                <option key={code} value={code} lang={code}>
+                  {LOCALE_LABELS[code] ?? code}
+                </option>
+              ))}
+            </SelectField>
 
-            <Field
+            {/*
+              Chosen, not typed. The customer used to have to know that the
+              string is `Asia/Kuwait` and not "Kuwait", "GMT+3" or "Arabia
+              Standard Time"; three of those four were refused by a validator
+              that could not explain itself.
+
+              The list is the browser's own IANA database — the same one that
+              formats every date the customer then reads — so a zone picked
+              here is by construction a zone the formatter can use.
+            */}
+            <SelectField
               label={t('account.timezone')}
+              hint={
+                usable
+                  ? t('account.timezoneHint')
+                  : t('account.timezoneUnknown', { zone: timezone })
+              }
+              dir="ltr"
+              className="technical"
               value={timezone}
               onChange={(event) => { setTimezone(event.target.value); }}
-              dir="ltr"
-              hint={t('account.timezoneHint')}
               error={fieldErrors?.['timezone']?.[0]}
+              options={zones.map((zone) => ({ value: zone, label: zone }))}
             />
 
             <Field

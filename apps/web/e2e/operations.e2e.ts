@@ -169,9 +169,23 @@ test.describe('a customer whose service is not active', () => {
     const suspended = page.getByRole('row').filter({ hasText: fixtures.suspendedHostname })
 
     await expect(suspended.getByText(/^suspended$/i)).toBeVisible()
-    // Every control on the row is shut, on the same fact the API refuses on.
-    await expect(suspended.getByRole('button', { name: /^reinstall$/i })).toBeDisabled()
-    await expect(suspended.getByRole('button', { name: /^start$/i })).toBeDisabled()
+    // The one control the index keeps is shut, on the same fact the API
+    // refuses on.
+    await expect(suspended.getByRole('button', { name: /^reboot$/i })).toBeDisabled()
+
+    // And on the machine's own page, where the rest of them live.
+    await page.getByRole('link', { name: fixtures.suspendedHostname }).click()
+
+    for (const name of [/^start$/i, /^shut down$/i, /^force off$/i, /^reboot$/i]) {
+      await expect(page.getByRole('button', { name })).toBeDisabled()
+    }
+
+    await page
+      .getByRole('navigation', { name: /sections/i })
+      .getByRole('link', { name: /^danger zone$/i })
+      .click()
+
+    await expect(page.getByRole('button', { name: /^reinstall$/i })).toBeDisabled()
   })
 
   test('a service coming back says so instead of pretending to be active', async ({ page }) => {
@@ -185,6 +199,6 @@ test.describe('a customer whose service is not active', () => {
     const reactivating = page.getByRole('row').filter({ hasText: fixtures.reactivatingHostname })
 
     await expect(reactivating.getByText(/coming back/i)).toBeVisible()
-    await expect(reactivating.getByRole('button', { name: /^reinstall$/i })).toBeDisabled()
+    await expect(reactivating.getByRole('button', { name: /^reboot$/i })).toBeDisabled()
   })
 })

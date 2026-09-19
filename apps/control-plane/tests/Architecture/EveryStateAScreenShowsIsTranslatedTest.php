@@ -6,8 +6,12 @@ namespace Tests\Architecture;
 
 use BackedEnum;
 use JsonException;
+use Lynomia\Modules\Activity\Domain\Enums\ActivityCategory;
+use Lynomia\Modules\Activity\Domain\Enums\AttentionSeverity;
 use Lynomia\Modules\ApiKeys\Domain\Enums\ApiTokenStatus;
+use Lynomia\Modules\Backups\Domain\Enums\BackupFileKind;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
@@ -19,11 +23,18 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedReinstallState;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Domain\Enums\PowerState as ChassisPowerState;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\ZoneChangeKind;
+use Lynomia\Modules\Dns\Domain\Enums\ZoneImportMode;
 use Lynomia\Modules\Domains\Domain\Enums\DomainAvailability;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationKind;
 use Lynomia\Modules\Domains\Domain\Enums\DomainOperationState;
 use Lynomia\Modules\Domains\Domain\Enums\DomainState;
+use Lynomia\Modules\Domains\Domain\Enums\RedemptionSupport;
+use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerCapability;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerStatus;
+use Lynomia\Modules\Identity\Domain\Enums\InvitationStatus;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentKind;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentState;
 use Lynomia\Modules\Infrastructure\Domain\Enums\GpuAllocationState;
@@ -31,6 +42,7 @@ use Lynomia\Modules\Infrastructure\Domain\Enums\GpuPassthroughMode;
 use Lynomia\Modules\Infrastructure\Domain\Enums\PlanRisk;
 use Lynomia\Modules\Infrastructure\Domain\Enums\SafetyClass;
 use Lynomia\Modules\Infrastructure\Domain\Enums\ServerState;
+use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckStatus;
 use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationCategory;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationChannel;
@@ -52,9 +64,17 @@ use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
+use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
 use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
+use Lynomia\Modules\Shared\Domain\Enums\RetryAdvice;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressPushScope;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteKind;
+use Lynomia\Modules\Support\Domain\Enums\TicketPriority;
 use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -99,8 +119,16 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
      */
     private const array RENDERED = [
         'status' => [
+            // Every preflight finding renders its status through StatusBadge,
+            // which is one flat namespace — so a status with no label would
+            // render `not_applicable` in snake case on an Arabic screen and
+            // look enough like a label that nobody reports it.
+            CheckStatus::class,
             // StatusBadge, on the customer's screens.
             BackupState::class,
+            FileRestoreState::class,
+            CountryCurrencyChangeState::class,
+            WordPressOperationState::class,
             DnsState::class,
             HostingAccountStatus::class,
             InvoiceStatus::class,
@@ -120,6 +148,16 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             TransactionStatus::class,
             ReinstallState::class,
             DedicatedReinstallState::class,
+
+            /*
+             * The one vocabulary for asynchronous work, which every screen
+             * that shows a reboot, a rebuild, a build or a feed row renders
+             * through the same badge. `indeterminate` and `needs_review` are
+             * the two the wave exists for, and both must read as themselves in
+             * both languages: a missing Arabic string here would render
+             * "needs_review" to the customer it matters most to.
+             */
+            CustomerOperationState::class,
 
             /*
              * Domains render three enums through the same badge: what the
@@ -155,6 +193,11 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.controlCenter.blockers' => [BlockerReason::class],
         'admin.providers.categories' => [ProviderCategory::class],
         'admin.providers.capabilityStates' => [CapabilityState::class],
+        'dns.import.kinds' => [ZoneChangeKind::class],
+        'wordpress.kinds' => [WordPressSiteKind::class],
+        'wordpress.operations.kinds' => [WordPressOperationKind::class],
+        'wordpress.push.scopes' => [WordPressPushScope::class],
+        'dns.import.modes' => [ZoneImportMode::class],
         'admin.readiness.products' => [Product::class],
         'admin.readiness.software' => [ProductSoftwareState::class],
         'admin.readiness.answerValues' => [ReadinessAnswer::class],
@@ -177,8 +220,52 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         'admin.drift.kinds' => [DriftKind::class],
         'admin.drift.severities' => [DriftSeverity::class],
         'admin.drift.statuses' => [DriftStatus::class],
+        /*
+         * What the customer may do next, rendered as a sentence beside the
+         * state rather than as a badge. `support_required` is the one that
+         * must never fall back to English: it is the answer on an operation
+         * whose result nobody knows.
+         */
+        'operations.retryAdvice' => [RetryAdvice::class],
+
+        /*
+         * Who on a team may do what. Both halves reach the customer: the role
+         * names label the rows of the permission matrix and the dropdown that
+         * assigns one, and the capability names label its columns. A missing
+         * string here is a permission table with a blank heading, which is
+         * worse than no table — the reader fills the blank in themselves.
+         */
+        'team.roles' => [CustomerRole::class],
+        'team.capabilities' => [CustomerCapability::class],
+        'team.capabilityHints' => [CustomerCapability::class],
         'admin.provisioning.kinds' => [ProvisioningJobKind::class],
         'admin.provisioning.failureClass' => [FailureClass::class],
+
+        /*
+         * W5.7. Nine more namespaces that were already rendering enum values
+         * on customer screens and were outside this gate.
+         *
+         * Every one of them is a `t()` call with the server's value
+         * interpolated into the key and no fallback, so a case added to any
+         * of these enums would have reached a customer as a dotted key path
+         * — the defect this file exists for, in nine places nobody had
+         * listed. They are here rather than routed through `safeLabel`
+         * because the value *is* bounded: what was missing was the build
+         * failure that keeps the catalogue in step with the boundary.
+         *
+         * `team.roles` is already above; `team.roleHints` renders the same
+         * enum in a second namespace, and a role with a name but no hint is
+         * a dropdown option that explains nothing.
+         */
+        'attention.severity' => [AttentionSeverity::class],
+        'support.priorities' => [TicketPriority::class],
+        'team.statuses' => [InvitationStatus::class],
+        'team.roleHints' => [CustomerRole::class],
+        'notifications.categoryHint' => [NotificationCategory::class],
+        'wordpress.sources' => [WordPressDomainSource::class],
+        'backups.browser.kinds' => [BackupFileKind::class],
+        'activity.categories' => [ActivityCategory::class],
+        'domains.redemption.unavailable' => [RedemptionSupport::class],
     ];
 
     /**
@@ -195,6 +282,17 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             'sms' => 'Declared and not implemented; the preferences endpoint offers only implemented channels.',
             'whatsapp' => 'Declared and not implemented.',
             'push' => 'Declared and not implemented.',
+        ],
+        'domains.redemption.unavailable' => [
+            /*
+             * The panel reaches this namespace only in the branch where
+             * redemption is *not* offered, and a supported namespace that
+             * lands there has a price the catalogue did not carry — which is
+             * a configuration gap rather than an unsupported namespace, and
+             * is the sentence the panel asks for instead. So "supported"
+             * cannot be a reason redemption is unavailable.
+             */
+            'supported' => 'RedemptionPanel renders this namespace only when redemption is unavailable, and maps a supported TLD with no price to blocked_configuration.',
         ],
     ];
 

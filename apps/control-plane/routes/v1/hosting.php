@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\SharedHosting\Http\Controllers\HostingController;
 use Lynomia\Modules\SharedHosting\Http\Controllers\WordPressController;
+use Lynomia\Modules\SharedHosting\Http\Controllers\WordPressCopyController;
 
 /*
  * hosting — customer surface.
@@ -95,4 +96,33 @@ Route::prefix('wordpress')->as('wordpress.')->group(function (): void {
     Route::get('sites/{site}', [WordPressController::class, 'show'])
         ->whereUlid('site')
         ->name('sites.show');
+
+    /*
+     * Copies and the push back, for the panels whose toolkit can. The site
+     * row's `copies` block says which, and the routes refuse with the same
+     * reason for the others. The push is throttled hardest: each one
+     * overwrites a live site.
+     */
+    Route::post('sites/{site}/staging', [WordPressCopyController::class, 'staging'])
+        ->whereUlid('site')
+        ->middleware('throttle:5,1,wordpress-copy:')
+        ->name('sites.staging');
+
+    Route::post('sites/{site}/clones', [WordPressCopyController::class, 'clone'])
+        ->whereUlid('site')
+        ->middleware('throttle:5,1,wordpress-copy:')
+        ->name('sites.clones');
+
+    Route::get('sites/{site}/push/impact', [WordPressCopyController::class, 'pushImpact'])
+        ->whereUlid('site')
+        ->name('sites.push_impact');
+
+    Route::post('sites/{site}/push', [WordPressCopyController::class, 'push'])
+        ->whereUlid('site')
+        ->middleware('throttle:3,1,wordpress-push:')
+        ->name('sites.push');
+
+    Route::get('sites/{site}/operations', [WordPressCopyController::class, 'operations'])
+        ->whereUlid('site')
+        ->name('sites.operations');
 });

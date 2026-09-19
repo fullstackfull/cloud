@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Catalog\Domain\Services\CataloguePriceVisibility;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
+use Lynomia\Modules\ProductReadiness\Application\Services\ProductSellability;
 
 /**
  * One plan, addressed by slug or id, priced in the customer's currency.
@@ -21,14 +22,17 @@ final readonly class FindPurchasablePlan
 {
     public function __construct(
         private CataloguePriceVisibility $prices,
+        private ProductSellability $sellability,
     ) {}
 
     public function execute(string $identifier, string $currency): Plan
     {
+        $sellable = $this->sellability->sellableCatalogueKinds();
+
         /** @var Plan $plan */
         $plan = Plan::query()
             ->purchasable()
-            ->whereHas('product', self::onlyPurchasableProducts(...))
+            ->whereIn('product_id', self::purchasableProductIds($sellable))
             ->where(static fn (Builder $query): Builder => $query
                 ->where('slug', $identifier)
                 ->orWhere('id', $identifier))
@@ -39,11 +43,19 @@ final readonly class FindPurchasablePlan
     }
 
     /**
-     * @param  Builder<Product>  $query
+     * The products a plan may hang off: on sale, and of a kind the readiness
+     * engine currently permits selling — the same gate the product listing
+     * applies, so a plan inherits its product's sellability as it inherits
+     * its visibility.
+     *
+     * @param  list<string>|null  $sellable
      * @return Builder<Product>
      */
-    private static function onlyPurchasableProducts(Builder $query): Builder
+    private static function purchasableProductIds(?array $sellable): Builder
     {
-        return $query->purchasable();
+        return Product::query()
+            ->purchasable()
+            ->when($sellable !== null, static fn (Builder $query): Builder => $query->whereIn('kind', $sellable ?? []))
+            ->select('id');
     }
 }

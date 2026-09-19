@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Monitoring\Infrastructure;
 
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Monitoring\Application\Collectors\BackupCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\CapacityCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ConsoleCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ControlCenterCollector;
@@ -55,6 +56,7 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(DnsCollector::class),
                 $app->make(ProductCollector::class),
                 $app->make(ControlCenterCollector::class),
+                $app->make(BackupCollector::class),
             );
         });
     }

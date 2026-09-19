@@ -234,7 +234,10 @@ final class TheNewSweepsRunOutsideThisProcessTest extends WorkerHarness
                 'DB_DATABASE' => config('database.connections.pgsql.database'),
                 'DB_PASSWORD' => config('database.connections.pgsql.password'),
                 'MAIL_MAILER' => 'array',
-                'COMPUTE_FAKE_STATE_PATH' => $this->fleetPath(),
+                // Every controlled family, not only the hypervisor: a sweep
+                // that reconciles hosting or DNS in its own process needs the
+                // same provider this test arranged.
+                ...$this->simulationEnvironment(),
             ],
             null,
             120,

@@ -18,6 +18,7 @@ use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -95,6 +96,26 @@ class Subscription extends Model
     public function plan(): BelongsTo
     {
         return $this->belongsTo(Plan::class);
+    }
+
+    /**
+     * @return HasMany<Invoice, $this>
+     */
+    /**
+     * The services this subscription pays for.
+     *
+     * A subscription is a billing agreement and a service is a running thing;
+     * the link is `services.subscription_id`. It is a HasMany because one
+     * agreement can cover more than one line, and the customer surface names
+     * every one of them: two subscriptions at the same price on the same day
+     * are indistinguishable without it, which is precisely the defect this
+     * relation was added to close.
+     *
+     * @return HasMany<Service, $this>
+     */
+    public function services(): HasMany
+    {
+        return $this->hasMany(Service::class);
     }
 
     /**

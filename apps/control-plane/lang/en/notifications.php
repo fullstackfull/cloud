@@ -43,6 +43,18 @@ return [
             'title' => 'Order :number received',
             'body' => 'We have your order and will start work as soon as it is paid.',
         ],
+        'country_currency_change_applied' => [
+            'title' => 'Your account is now billed in :currency',
+            'body' => 'From now on, new invoices for this account are issued in :currency with the tax for :country. Invoices, payments and orders already recorded are unchanged.',
+        ],
+        'country_currency_change_rejected' => [
+            'title' => 'Your country/currency change was not approved',
+            'body' => 'The request to move this account to :currency / :country was declined: :note. Nothing on the account has changed.',
+        ],
+        'country_currency_change_needs_review' => [
+            'title' => 'Your country/currency change is on hold',
+            'body' => 'The approved change to :currency / :country could not be applied because something on the account changed since it was approved. Our team is looking at it; nothing needs doing on your side.',
+        ],
         'invoice_issued' => [
             'title' => 'Invoice :number for :amount',
             'body' => 'Invoice :number has been issued for :amount and is due on :due_date.',
@@ -161,6 +173,18 @@ return [
             'title' => 'Restore of :service did not complete',
             'body' => 'The restore of :service did not finish. Our team has been alerted.',
         ],
+        'file_restore_completed' => [
+            'title' => 'Files restored to :service',
+            'body' => ':count path(s) from the backup have been put back on :service. Whatever was at those paths before has been replaced.',
+        ],
+        'file_restore_failed' => [
+            'title' => 'Files could not be restored to :service',
+            'body' => 'The restore of :count path(s) to :service did not complete. The backup itself is unaffected, and the machine is as it was.',
+        ],
+        'file_restore_needs_review' => [
+            'title' => 'We are checking a file restore on :service',
+            'body' => 'The provider did not confirm the restore of :count path(s) to :service, so we are checking what actually happened. Please do not start another restore — the first may still be writing.',
+        ],
         'domain_registered' => [
             'title' => ':domain is yours',
             'body' => ':domain is registered until :date. It will renew automatically unless you turn that off.',
@@ -184,6 +208,18 @@ return [
         'domain_redemption_failed' => [
             'title' => 'We could not recover :domain',
             'body' => 'The registry refused to restore :domain. You have been charged the redemption penalty and are owed a refund; our team is arranging it. The registry will release the name when its redemption window closes.',
+        ],
+        'wordpress_push_completed' => [
+            'title' => ':domain is now the staging copy',
+            'body' => 'The staging copy was pushed over :domain (:scope). Whatever the live site held at those parts before has been replaced.',
+        ],
+        'wordpress_push_failed' => [
+            'title' => 'The push to :domain did not complete',
+            'body' => 'The toolkit refused to push the staging copy over :domain. The live site is as it was.',
+        ],
+        'wordpress_push_needs_review' => [
+            'title' => 'We are checking a push to :domain',
+            'body' => 'The toolkit did not confirm the push of the staging copy over :domain. The live site may be partly updated. Please do not push again — our team is looking at it.',
         ],
         'ticket_opened' => [
             'title' => 'We have your request :reference',

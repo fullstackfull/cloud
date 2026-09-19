@@ -25,6 +25,19 @@ enum AuditAction: string
     // Taking a service away, and giving it back.
     case CustomerSuspended = 'customer.suspended';
     case CustomerUnsuspended = 'customer.unsuspended';
+
+    /*
+     * The account's country or currency. Requested by the customer, decided
+     * by an operator, applied by the platform after checking the facts one
+     * last time — and `blocked` is the last check finding an invoice or an
+     * order that was not there at approval, so nothing was applied.
+     */
+    case CountryCurrencyChangeRequested = 'account.country_currency_change.requested';
+    case CountryCurrencyChangeWithdrawn = 'account.country_currency_change.withdrawn';
+    case CountryCurrencyChangeApproved = 'account.country_currency_change.approved';
+    case CountryCurrencyChangeRejected = 'account.country_currency_change.rejected';
+    case CountryCurrencyChangeApplied = 'account.country_currency_change.applied';
+    case CountryCurrencyChangeBlocked = 'account.country_currency_change.blocked';
     case HostingAccountUnsuspended = 'hosting_account.unsuspended';
     case HostingAccountTerminated = 'hosting_account.terminated';
 
@@ -50,6 +63,14 @@ enum AuditAction: string
 
     // Data that cannot be recovered once it is gone.
     case BackupRestored = 'backup.restored';
+
+    /*
+     * Files out of a backup: named paths put back over the machine, and one
+     * file handed to a browser. The second is a read and is audited anyway,
+     * because the thing read is the customer's data leaving the datastore.
+     */
+    case BackupFilesRestored = 'backup.files.restored';
+    case BackupFileDownloaded = 'backup.file.downloaded';
 
     // Operator intervention in the provisioning and reconciliation engines,
     // where the operator is asserting something about the outside world that
@@ -152,6 +173,8 @@ enum AuditAction: string
     case DnsRecordCreated = 'dns.record.created';
     case DnsRecordUpdated = 'dns.record.updated';
     case DnsRecordDeleted = 'dns.record.deleted';
+    case DnsZoneImported = 'dns.zone.imported';
+    case DnsZoneExported = 'dns.zone.exported';
 
     /*
      * Domains.
@@ -168,6 +191,14 @@ enum AuditAction: string
     case DomainTransferOrdered = 'domain.transfer.ordered';
     case DomainNameserversChanged = 'domain.nameservers.changed';
     case DomainContactsChanged = 'domain.contacts.changed';
+
+    /*
+     * Auto-renew decides whether this platform prepares another term before a
+     * name lapses. Recorded because "nobody turned it off" and "somebody
+     * turned it off in March" are the two answers to a lost-domain complaint,
+     * and only one of them can be established from a column's current value.
+     */
+    case DomainAutoRenewChanged = 'domain.auto_renew.changed';
     case DomainLocked = 'domain.locked';
 
     /*
@@ -189,6 +220,15 @@ enum AuditAction: string
      */
     case WordPressSiteOrdered = 'wordpress.site.ordered';
 
+    /*
+     * Copies and pushes. The push is the one that overwrites something a
+     * customer wrote, and its row carries what was overwritten and what the
+     * platform held no backup of.
+     */
+    case WordPressStagingRequested = 'wordpress.staging.requested';
+    case WordPressCloneRequested = 'wordpress.clone.requested';
+    case WordPressPushRequested = 'wordpress.push.requested';
+
     // ---------------------------------------------------------------------
     // Infrastructure: the machines, and what an operator may do to them
     // ---------------------------------------------------------------------
@@ -209,6 +249,8 @@ enum AuditAction: string
     case DatacenterRegistered = 'infrastructure.datacenter.registered';
     case RackRegistered = 'infrastructure.rack.registered';
     case GpuDeviceRegistered = 'infrastructure.gpu.registered';
+    case VmTemplateRecorded = 'infrastructure.template.recorded';
+    case VmTemplateWithdrawn = 'infrastructure.template.withdrawn';
     case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
     case DesiredStateCleared = 'infrastructure.desired_state.cleared';
     case PlanComputed = 'infrastructure.plan.computed';
@@ -218,6 +260,12 @@ enum AuditAction: string
     case DeploymentFinished = 'infrastructure.deployment.finished';
     case DeploymentResolved = 'infrastructure.deployment.resolved';
     case DeploymentCancelled = 'infrastructure.deployment.cancelled';
+
+    /**
+     * A preflight was run. It changed nothing, and that is why it is worth
+     * recording: the run is the only trace it leaves.
+     */
+    case InfrastructurePreflightRun = 'infrastructure.preflight.run';
 
     case ConnectionTested = 'providers.connection.tested';
     case ProviderRegistered = 'providers.provider.registered';

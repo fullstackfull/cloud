@@ -43,12 +43,93 @@ final class PaymentConfirmationIsServerSideOnlyTest extends PaymentsApiTestCase
             }
         }
 
-        $this->assertSame([], $suspicious, "A client-callable payment confirmation exists:\n  ".implode("\n  ", $suspicious));
+        /*
+         * The controlled gateway is the provider's side of the boundary, not
+         * the client's, and it is not exempted here — it is held to a stricter
+         * rule instead, in the two tests below: it must be refused whenever a
+         * real payment provider is configured, and refused in production
+         * whatever is configured. What it does when it is available is emit a
+         * genuinely signed webhook, which settles the invoice through the same
+         * verification a real provider's callback goes through; it cannot mark
+         * anything paid itself.
+         *
+         * Anything else matching the pattern is the defect this test exists to
+         * catch: an endpoint through which a browser's claim becomes money.
+         */
+        $controlled = 'api/v1/fake-gateway/payments/{reference}/confirm';
+        $unexpected = array_values(array_filter(
+            $suspicious,
+            static fn (string $route): bool => ! str_ends_with($route, $controlled),
+        ));
+
+        $this->assertSame([], $unexpected, "A client-callable payment confirmation exists:\n  ".implode("\n  ", $unexpected));
 
         // And the three that should exist, do.
         $this->assertTrue(Route::has('api.v1.invoices.payments.store'));
         $this->assertTrue(Route::has('api.v1.payments.index'));
         $this->assertTrue(Route::has('api.v1.payments.show'));
+    }
+
+    #[Test]
+    public function the_controlled_gateway_is_refused_when_a_real_provider_is_configured(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $invoice = $this->openInvoice($customer);
+
+        $started = $this->actingAs($user)
+            ->postJson("/api/v1/invoices/{$invoice->id}/payments")
+            ->assertCreated();
+
+        $reference = (string) $started->json('data.reference');
+
+        // The environment now takes real payments. Nothing in the platform may
+        // approve one of them on a customer's word.
+        config(['billing.providers.payment' => 'stripe']);
+
+        foreach (['approve', 'decline'] as $decision) {
+            $this->actingAs($user)
+                ->postJson("/api/v1/fake-gateway/payments/{$reference}/{$decision}")
+                ->assertNotFound()
+                ->assertJsonPath('error.code', 'payment.controlled_gateway_unavailable');
+        }
+
+        $this->actingAs($user)
+            ->postJson("/api/v1/fake-gateway/payments/{$reference}/confirm", [
+                'client_secret' => str_repeat('a', 32),
+            ])
+            ->assertNotFound();
+
+        $this->assertSame(
+            InvoiceStatus::Open,
+            $invoice->fresh()->status,
+            'A refused controlled-gateway call must leave the invoice exactly as it was.',
+        );
+    }
+
+    #[Test]
+    public function a_client_credential_that_does_not_belong_to_the_payment_confirms_nothing(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $invoice = $this->openInvoice($customer);
+
+        $started = $this->actingAs($user)
+            ->postJson("/api/v1/invoices/{$invoice->id}/payments")
+            ->assertCreated();
+
+        $reference = (string) $started->json('data.reference');
+
+        $this->actingAs($user)
+            ->postJson("/api/v1/fake-gateway/payments/{$reference}/confirm", [
+                'client_secret' => $reference.'_secret_deadbeefdeadbeef',
+            ])
+            ->assertNotFound()
+            ->assertJsonPath('error.code', 'payment.controlled_gateway_unavailable');
+
+        $this->assertSame(InvoiceStatus::Open, $invoice->fresh()->status);
+        $this->assertSame(
+            TransactionStatus::Pending,
+            Transaction::query()->where('provider_reference', $reference)->sole()->status,
+        );
     }
 
     #[Test]

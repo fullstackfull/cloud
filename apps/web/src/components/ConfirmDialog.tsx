@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/Button'
+import { useModalDialog } from '@/lib/useModalDialog'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -24,6 +25,22 @@ interface ConfirmDialogProps {
   evidenceLabel?: string
   evidenceHint?: string
   confirmLabel: string
+  /**
+   * How the confirm button is drawn.
+   *
+   * Defaults to danger, because most confirmations in this portal guard
+   * something a customer cannot undo. Changing a colleague's role is not one
+   * of those: it takes effect on their next request and is reversed by
+   * changing it back, and painting it the same red as "destroy this machine"
+   * teaches a customer that the red means nothing.
+   */
+  tone?: 'danger' | 'primary'
+  /**
+   * What the way out is called. Defaults to "Cancel", which is wrong on
+   * exactly one kind of dialog — the one that confirms a cancellation, where
+   * two buttons reading "Cancel" are a coin toss. Those pass "Keep order".
+   */
+  cancelLabel?: string
   loading?: boolean
   /**
    * Whether confirming would do anything yet.
@@ -67,6 +84,8 @@ export function ConfirmDialog({
   evidenceLabel,
   evidenceHint,
   confirmLabel,
+  tone = 'danger',
+  cancelLabel,
   loading = false,
   ready = true,
   error,
@@ -75,23 +94,13 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const { t } = useTranslation()
   const ref = useRef<HTMLDialogElement>(null)
+
+  // Opens, closes, and hands focus back to the control that opened it.
+  useModalDialog(ref, open, onCancel)
+
   const [typed, setTyped] = useState('')
   const [evidence, setEvidence] = useState('')
   const inputId = useId()
-
-  useEffect(() => {
-    const dialog = ref.current
-
-    if (dialog === null) return
-
-    if (open && ! dialog.open) {
-      // showModal, not show: the difference is the focus trap and the inert
-      // background, which is the entire reason for using the element.
-      dialog.showModal()
-    } else if (! open && dialog.open) {
-      dialog.close()
-    }
-  }, [open])
 
   useEffect(() => {
     // Cleared on every open, so a phrase typed for one machine can never be
@@ -112,10 +121,6 @@ export function ConfirmDialog({
     <dialog
       ref={ref}
       aria-labelledby={`${inputId}-title`}
-      onCancel={(event) => {
-        event.preventDefault()
-        onCancel()
-      }}
       className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-0 text-[var(--text-primary)] backdrop:bg-black/50"
     >
       <form
@@ -171,14 +176,14 @@ export function ConfirmDialog({
         )}
 
         {error === undefined || error === null ? null : (
-          <p role="alert" className="text-sm text-red-500">
+          <p role="alert" className="text-sm text-[var(--danger-text)]">
             {error}
           </p>
         )}
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" onClick={onCancel} disabled={loading}>
-            {t('common.cancel')}
+            {cancelLabel ?? t('common.cancel')}
           </Button>
           {/*
             * type="button" with an explicit handler rather than a submit
@@ -191,7 +196,7 @@ export function ConfirmDialog({
             */}
           <Button
             type="button"
-            variant="danger"
+            variant={tone}
             disabled={! satisfied}
             loading={loading}
             onClick={() => { if (satisfied && ! loading) onConfirm(typed, evidence.trim()); }}

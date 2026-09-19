@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Backups\Infrastructure\Providers;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Lynomia\Modules\Backups\Domain\Contracts\BackupProvider;
+use Lynomia\Modules\Backups\Domain\Contracts\FileLevelBackupProvider;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupOperation;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupRequest;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupTaskState;
@@ -45,6 +46,21 @@ use Throwable;
  * per archive, in the storage listing — so the platform can tell a customer
  * whether their backup verified, and cannot offer them a button to verify it
  * now. Offering the button anyway would be the more comfortable lie.
+ *
+ * ---------------------------------------------------------------------------
+ * File-level restore
+ * ---------------------------------------------------------------------------
+ *
+ * Not implemented, deliberately: this class does not implement
+ * {@see FileLevelBackupProvider}.
+ * PVE documents a `file-restore` API backed by `proxmox-file-restore` on the
+ * hypervisor, and this platform has never called it against a real backup
+ * server. Which versions expose it, what it answers for a symlink, how it
+ * streams a large file, what a timeout means — none of that has been seen.
+ * Writing it from the documentation would be inventing PBS behaviour, and
+ * the customer's files are the wrong place to find out. So every surface
+ * says "not with this provider" for a Proxmox-backed backup, and the whole
+ * machine can still be restored.
  */
 final class ProxmoxBackupProvider implements BackupProvider
 {

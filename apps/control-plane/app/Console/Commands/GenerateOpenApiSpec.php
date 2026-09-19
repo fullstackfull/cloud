@@ -525,6 +525,22 @@ final class GenerateOpenApiSpec extends Command
             'content' => self::json('Error'),
         ];
 
+        /*
+         * Refusals that belong to one endpoint rather than to every endpoint.
+         *
+         * The statuses above are the ones the framework and the middleware
+         * produce everywhere, and listing a 503 among them would claim every
+         * endpoint can be closed. An operation that has its own refusal
+         * declares it, with the code a client branches on in the sentence —
+         * which is the same place the other descriptions put it.
+         */
+        /** @var array<int|string, string> $extra */
+        $extra = $operation['errors'] ?? [];
+
+        foreach ($extra as $status => $description) {
+            $responses[(string) $status] = self::errorResponse($description);
+        }
+
         return $responses;
     }
 

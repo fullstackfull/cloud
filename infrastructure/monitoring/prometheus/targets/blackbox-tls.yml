@@ -1,9 +1,24 @@
+# -----------------------------------------------------------------------------
+# REFERENCE TARGET LIST — describes no machine that exists.
+#
+# Every name here is a host from the example inventory in
+# infrastructure/ansible/inventories/production/hosts.yml, under `.example`,
+# which IANA reserves for documents. The real target list is operator-supplied
+# and lives with the private inventory: Prometheus re-reads a file_sd file
+# within seconds, so replacing this file is the whole deployment step.
+#
+# It is written in the reference namespace on purpose. A committed list of
+# plausible-looking internal hostnames is one copy-paste from being configured
+# as real, and this platform's own endpoint policy refuses `.internal` names
+# outright — so a list under that zone disagreed with the application that
+# reads it.
+# -----------------------------------------------------------------------------
 # Certificate expiry. Every name that terminates TLS for a customer, including
 # the ones nobody thinks about until they expire on a Saturday.
 - targets:
-    - portal.lynomia.com:443
-    - api.lynomia.com:443
-    - admin.lynomia.com:443
-    - webmail.lynomia.com:443
+    - portal.prod.example:443
+    - api.prod.example:443
+    - admin.prod.example:443
+    - webmail.prod.example:443
   labels:
     service: tls

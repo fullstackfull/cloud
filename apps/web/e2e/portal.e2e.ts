@@ -25,8 +25,27 @@ test.beforeEach(async ({ page }) => {
  * asserting about one of those the moment such a fixture was added, which is
  * exactly what happened when they were.
  */
-function machineRow(page: Page): Locator {
-  return page.getByRole('row').filter({ hasText: fixtures.vpsHostname })
+function machineRow(page: Page, hostname: string = fixtures.vpsHostname): Locator {
+  return page.getByRole('row').filter({ hasText: hostname })
+}
+
+/**
+ * Opens one machine's own page, the way a customer does: from the index, by
+ * name.
+ *
+ * Since Wave 3 the machine has an address of its own and the destructive
+ * controls live on it rather than in a table row, so the specs that drive
+ * them come through here.
+ */
+async function openMachine(page: Page, hostname: string = fixtures.vpsHostname): Promise<void> {
+  await page.goto('/vps')
+  await page.getByRole('link', { name: hostname }).click()
+  await expect(page.getByRole('heading', { level: 1, name: hostname })).toBeVisible()
+}
+
+/** Moves to one section of a resource page. The sections are links, not tabs. */
+async function openSection(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name }).click()
 }
 
 /**
@@ -79,15 +98,30 @@ test('the wallet shows a balance with its currency', async ({ page }) => {
   await page.goto('/wallet')
 
   await expect(page.getByText(/KWD/).first()).toBeVisible()
-  // 12.750 KWD, seeded. Fils and all: a balance rendered to two decimals
-  // would be wrong for this currency.
-  await expect(page.getByText(/12\.750/)).toBeVisible()
+  /*
+   * 12.750 KWD, seeded. Fils and all: a balance rendered to two decimals
+   * would be wrong for this currency.
+   *
+   * Read off the balance card rather than off the page. Since Wave 2 the
+   * screen also shows the history behind the balance, and one of its columns
+   * is the balance after each movement — so the same figure legitimately
+   * appears twice and a page-wide match resolves to both.
+   */
+  await expect(page.getByRole('listitem').getByText(/12\.750/)).toBeVisible()
 })
 
-test('the services list shows the seeded VPS', async ({ page }) => {
+test('the services list shows the seeded VPS and opens it', async ({ page }) => {
   await page.goto('/services')
 
-  await expect(page.getByText(new RegExp(fixtures.vpsHostname, 'i'))).toBeVisible()
+  /*
+   * The row names the machine and links to it. Since Wave 3 the plan label
+   * sits under the identity rather than instead of it — two servers on one
+   * plan used to be two identical rows — so the identity is asserted as the
+   * link it is.
+   */
+  const machine = page.getByRole('link', { name: fixtures.vpsHostname, exact: true })
+  await expect(machine).toBeVisible()
+  await expect(machine).toHaveAttribute('href', /^\/vps\/[^/]+$/)
 })
 
 test('the subscriptions screen tells a renewal apart from a cancellation', async ({ page }) => {
@@ -118,7 +152,10 @@ test('the notification inbox shows what the platform has told this account', asy
    */
   await page.goto('/notifications')
 
-  await expect(page.getByText(/1 unread/i)).toBeVisible()
+  // Scoped to the page. Since Wave 4 the navigation carries the same
+  // count in the badge inside the notifications link, so an unscoped
+  // match finds three of them.
+  await expect(page.locator('main').getByText(/1 unread/i)).toBeVisible()
 
   /*
    * Title and body, both rendered by the API in the reader's language with the
@@ -148,13 +185,24 @@ test('a customer cannot switch off billing email, and is told so', async ({ page
    * immovable categories out would leave a customer wondering whether they had
    * been switched off silently; the honest answer is that we will always tell
    * them their card was declined.
+   *
+   * A switch rather than a checkbox since Wave 5, and the distinction is
+   * behavioural rather than visual: a checkbox is part of a form and does
+   * nothing until a submit, while flicking a switch *is* the submit. These
+   * preferences save themselves, so they are switches — and a screen reader is
+   * told "on"/"off" rather than "ticked", which is what the setting means.
    */
   await page.goto('/profile')
 
   const billing = page.locator('li').filter({ hasText: /^Billing/ })
 
   await expect(billing.getByText(/always sent/i).first()).toBeVisible()
-  await expect(billing.getByRole('checkbox').first()).toBeDisabled()
+
+  const control = billing.getByRole('switch').first()
+  await expect(control).toBeDisabled()
+
+  // On, and saying so: a disabled control with no state is not an answer.
+  await expect(control).toHaveAttribute('aria-checked', 'true')
 })
 
 test('the VPS list shows the machine and its address', async ({ page }) => {
@@ -249,8 +297,8 @@ test('escape closes the restore dialog without restoring', async ({ page }) => {
   await expect(page.getByText(/restoring/i)).toHaveCount(0)
 })
 
-test('the VPS list offers the two ways of stopping a machine as separate controls', async ({ page }) => {
-  await page.goto('/vps')
+test("the machine's page offers the two ways of stopping it as separate controls", async ({ page }) => {
+  await openMachine(page, fixtures.operableHostname)
 
   // "Shut down" asks the guest to close its files; "Force off" pulls the plug.
   // One button for both is how a customer loses a database, so the screen has
@@ -273,9 +321,15 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
    * name, and a nearly-right name has to stay refused — the comparison is a
    * proof that somebody read the screen, not a lookup.
    */
-  await page.goto('/vps')
+  // On the machine whose controls are on. The seeded e2e-web-01 carries a
+  // rebuild nobody can settle, and since Wave 0 its Reinstall is disabled
+  // rather than offered and refused — asserted in its own spec below.
+  await openMachine(page, fixtures.operableHostname)
 
-  await machineRow(page).getByRole('button', { name: /^reinstall$/i }).click()
+  // In the danger zone, which is where a control that erases a disk belongs:
+  // not next to Reboot, where a thumb reaches it by accident.
+  await openSection(page, /^danger zone$/i)
+  await page.getByRole('button', { name: /^reinstall$/i }).click()
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
@@ -287,17 +341,39 @@ test('the reinstall dialogue says the disk will be replaced and needs the hostna
   const confirm = dialog.getByRole('button', { name: /reinstall this server/i })
   await expect(confirm).toBeDisabled()
 
-  await dialog.getByRole('textbox').fill(fixtures.vpsHostname.toUpperCase())
+  await dialog.getByRole('textbox').fill(fixtures.operableHostname.toUpperCase())
   await expect(confirm).toBeDisabled()
 
-  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await dialog.getByRole('textbox').fill(fixtures.operableHostname)
   await expect(confirm).toBeEnabled()
 })
 
-test('escape closes the reinstall dialogue without rebuilding anything', async ({ page }) => {
-  await page.goto('/vps')
+test('a machine whose last rebuild nobody can settle has its controls off, with the reason', async ({ page }) => {
+  await openMachine(page)
 
-  await machineRow(page).getByRole('button', { name: /^reinstall$/i }).click()
+  // Every power control, not just one: the API refuses a reboot on this
+  // machine for the same reason, and a screen that offered one would be
+  // offering a 409.
+  for (const name of [/^reboot$/i, /^force off$/i, /^shut down$/i, /^start$/i]) {
+    await expect(page.getByRole('button', { name })).toBeDisabled()
+  }
+  await expect(page.getByText(/our team is looking at it\. controls stay off/i).first()).toBeVisible()
+
+  // And the rebuild, in its own section.
+  await openSection(page, /^danger zone$/i)
+  await expect(page.getByRole('button', { name: /^reinstall$/i })).toBeDisabled()
+
+  // The machine next to it is untouched.
+  await openMachine(page, fixtures.operableHostname)
+  await openSection(page, /^danger zone$/i)
+  await expect(page.getByRole('button', { name: /^reinstall$/i })).toBeEnabled()
+})
+
+test('escape closes the reinstall dialogue without rebuilding anything', async ({ page }) => {
+  await openMachine(page, fixtures.operableHostname)
+  await openSection(page, /^danger zone$/i)
+
+  await page.getByRole('button', { name: /^reinstall$/i }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
 
   await page.keyboard.press('Escape')
@@ -316,7 +392,10 @@ test('the dedicated rebuild dialogue warns about the operating system and needs 
    * physical machine.
    */
   await page.goto('/dedicated')
+  await page.getByRole('link', { name: fixtures.dedicatedSerial }).click()
+  await expect(page.getByRole('heading', { level: 1, name: fixtures.dedicatedSerial })).toBeVisible()
 
+  await openSection(page, /^danger zone$/i)
   await page.getByRole('button', { name: /^reinstall$/i }).first().click()
 
   const dialog = page.getByRole('dialog')
@@ -333,7 +412,7 @@ test('the dedicated rebuild dialogue warns about the operating system and needs 
 
   // The hostname of the customer's *other* machine is not this machine's
   // serial, and a confirmation that accepted it would be no confirmation.
-  await dialog.getByRole('textbox').fill(fixtures.vpsHostname)
+  await dialog.getByRole('textbox').fill(fixtures.operableHostname)
   await expect(confirm).toBeDisabled()
 
   await dialog.getByRole('textbox').fill(fixtures.dedicatedSerial)
@@ -353,9 +432,9 @@ test('the console page asks for a permit and says honestly when consoles are una
    * harness, and pretending otherwise here would be the kind of claim this
    * phase exists to remove.
    */
-  await page.goto('/vps')
+  await openMachine(page)
 
-  await machineRow(page).getByRole('link', { name: /^console$/i }).click()
+  await page.getByRole('link', { name: /^console$/i }).click()
 
   await expect(page.getByRole('heading', { name: /console/i })).toBeVisible()
 

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { signIn, users } from './support/helpers'
 
@@ -15,6 +15,18 @@ import { signIn, users } from './support/helpers'
  * and a customer told "failed" orders a second one on top of a registration
  * that may have succeeded.
  */
+
+/** Opens one name's own page, from the index, by the name itself. */
+async function openName(page: Page, name: string): Promise<void> {
+  await page.goto('/domains')
+  await page.getByRole('link', { name }).first().click()
+  await expect(page.getByRole('heading', { level: 1, name })).toBeVisible()
+}
+
+/** Moves to one section of the name's page. The sections are links, not tabs. */
+async function section(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole('navigation', { name: /sections/i }).getByRole('link', { name }).click()
+}
 
 const HELD = 'e2e-held.test'
 const UNSURE = 'e2e-unsure.test'
@@ -84,37 +96,46 @@ test.describe('in English', () => {
   })
 
   test('a name the platform holds shows its delegation and the way out', async ({ page }) => {
-    await page.goto('/domains')
+    // Since Wave 3 the name has an address of its own, reached from the index
+    // by the name itself.
+    await openName(page, HELD)
 
-    const card = page.locator('section', { hasText: HELD }).first()
-
-    await expect(page.getByRole('heading', { name: HELD })).toBeVisible()
-    await expect(card.getByText('ns1.lynomia.test')).toBeVisible()
+    await section(page, /^nameservers$/i)
+    await expect(page.getByText('ns1.lynomia.test')).toBeVisible()
 
     // Leaving is offered plainly. A platform that buries this has stopped
     // competing on being worth staying with.
-    await expect(card.getByRole('button', { name: /transfer code/i })).toBeVisible()
-    await expect(card.getByText(/we do not make that difficult/i)).toBeVisible()
+    await section(page, /^moving away$/i)
+    await expect(page.getByRole('button', { name: /transfer code/i })).toBeEnabled()
+    await expect(page.getByText(/we do not make that difficult/i)).toBeVisible()
   })
 
   test('a name the platform cannot vouch for says so and offers nothing to act on', async ({
     page,
   }) => {
-    await page.goto('/domains')
-
-    const card = page.locator('section', { hasText: UNSURE }).first()
+    await openName(page, UNSURE)
 
     /*
      * The Timeout Rule reaching a customer. The words that matter are "do not
      * try again": a screen that merely looked broken would invite a second
      * order on top of a registration that may already have succeeded.
      */
-    await expect(card.getByText(/do not try again/i)).toBeVisible()
+    await expect(page.getByText(/do not try again/i)).toBeVisible()
 
-    // And no management controls at all on a name whose registration nobody
-    // has established.
-    await expect(card.getByRole('button', { name: /transfer code/i })).toHaveCount(0)
-    await expect(card.getByRole('button', { name: /^save$/i })).toHaveCount(0)
+    /*
+     * And nothing to act on. Since Wave 3 the controls are visible and
+     * disabled rather than absent, with the sentence that says why: a missing
+     * button leaves a customer wondering whether the platform can do the
+     * thing at all, and a disabled one with no reason is worse.
+     */
+    await expect(page.getByRole('button', { name: /renew now/i }).first()).toBeDisabled()
+
+    await section(page, /^moving away$/i)
+    await expect(page.getByRole('button', { name: /transfer code/i })).toBeDisabled()
+    await expect(page.getByText(/cannot act on this name at the moment/i)).toBeVisible()
+
+    await section(page, /^nameservers$/i)
+    await expect(page.getByRole('button', { name: /^save$/i })).toBeDisabled()
   })
 })
 
@@ -124,14 +145,15 @@ test.describe('a customer whose name lapsed', () => {
   })
 
   test('sees the redemption penalty, orders the recovery, and is sent to the invoice', async ({ page }) => {
-    await page.goto('/domains')
+    await openName(page, LAPSED)
 
-    const card = page.locator('section', { hasText: LAPSED }).first()
+    const card = page.getByRole('region', { name: /recovering this name/i })
     await expect(card.getByText(/redemption window/i)).toBeVisible()
     // The registry's penalty, from the catalogue: 25.000 KWD on this namespace.
     await expect(card.getByText(/recovered for the registry's redemption penalty of/i)).toContainText('25.000')
-    // No renewal offered: the ordinary price does not apply.
-    await expect(card.getByRole('button', { name: /^save$/i })).toHaveCount(0)
+    // No renewal offered: the ordinary price does not apply, and the control
+    // that would quote it is off.
+    await expect(page.getByRole('button', { name: /renew now/i }).first()).toBeDisabled()
 
     await card.getByRole('button', { name: /recover this name/i }).click()
 
@@ -150,9 +172,9 @@ test.describe('a customer whose name lapsed', () => {
   })
 
   test('is told plainly when a namespace cannot be recovered, and offered nothing', async ({ page }) => {
-    await page.goto('/domains')
+    await openName(page, LOST)
 
-    const card = page.locator('section', { hasText: LOST }).first()
+    const card = page.getByRole('region', { name: /recovering this name/i })
     await expect(card.getByText(/redemption window/i)).toBeVisible()
     await expect(card.getByText(/we will not quote a guess/i)).toBeVisible()
     await expect(card.getByRole('button', { name: /recover this name/i })).toHaveCount(0)
@@ -162,25 +184,30 @@ test.describe('a customer whose name lapsed', () => {
 test.describe('in Arabic', () => {
   test.use({ locale: 'ar' })
 
-  test('the domains screen reads in Arabic and keeps names unmirrored', async ({ page }) => {
+  test('the domains screens read in Arabic and keep names unmirrored', async ({ page }) => {
     await signIn(page, users.customer, { headingPattern: /مرحب|أهل/ })
 
+    await openName(page, HELD)
+
+    /*
+     * The heading is Arabic-direction prose; the name inside it declares its
+     * own direction, which is what keeps a Latin identifier from mirroring.
+     */
+    const heading = page.getByRole('heading', { level: 1, name: HELD })
+    const name = heading.locator('[dir="ltr"]')
+    await expect(name).toHaveText(HELD)
+    expect(await name.evaluate((node) => getComputedStyle(node).direction)).toBe('ltr')
+
+    // The same refusal to guess, in Arabic, on the name it is about.
+    await openName(page, UNSURE)
+    await expect(page.getByText(/لا تُعِد المحاولة/)).toBeVisible()
+
+    await openName(page, LOST)
+    const redemption = page.getByRole('region', { name: 'استرداد هذا الاسم' })
+    await expect(redemption.getByText(/لن نعرض تخميناً/)).toBeVisible()
+
+    // And the search, which is where a name is bought rather than managed.
     await page.goto('/domains')
-
-    const heading = page.getByRole('heading', { name: HELD })
-    await expect(heading).toBeVisible()
-
-    // A domain name is technical and must not be mirrored: reversed, it is a
-    // different string to anybody reading it back to support.
-    expect(await heading.evaluate((node) => getComputedStyle(node).direction)).toBe('ltr')
-
-    // The same refusal to guess, in Arabic.
-    const unsure = page.locator('section', { hasText: UNSURE }).first()
-    await expect(unsure.getByText(/لا تُعِد المحاولة/)).toBeVisible()
-
-    const lost = page.locator('section', { hasText: LOST }).first()
-    await expect(lost.getByText(/لن نعرض تخميناً/)).toBeVisible()
-
     await page.getByLabel('اسم النطاق').fill('quiet-unreachable.test')
     await page.getByRole('button', { name: 'بحث' }).click()
 

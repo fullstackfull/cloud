@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace Tests\Feature\Provisioning;
 
 use Lynomia\Modules\Provisioning\Domain\Enums\CustomerFailureReason;
-use Lynomia\Modules\Provisioning\Domain\Enums\CustomerProvisioningEventState;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
+use Lynomia\Modules\Shared\Domain\Enums\RetryAdvice;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -49,13 +50,13 @@ final class ServiceEventsEndpointTest extends ServiceApiTestCase
             ->assertJsonCount(2, 'data')
             ->assertJsonPath('data.0.id', $reboot->id)
             ->assertJsonPath('data.0.kind', 'restart')
-            ->assertJsonPath('data.0.state', CustomerProvisioningEventState::InProgress->value)
-            ->assertJsonPath('data.0.is_settled', false)
+            ->assertJsonPath('data.0.state', CustomerOperationState::Processing->value)
+            ->assertJsonPath('data.0.is_terminal', false)
             ->assertJsonPath('data.0.failure_reason', null)
             ->assertJsonPath('data.1.id', $build->id)
             ->assertJsonPath('data.1.kind', 'create_vps')
-            ->assertJsonPath('data.1.state', CustomerProvisioningEventState::Completed->value)
-            ->assertJsonPath('data.1.is_settled', true)
+            ->assertJsonPath('data.1.state', CustomerOperationState::Succeeded->value)
+            ->assertJsonPath('data.1.is_terminal', true)
             ->assertJsonPath('meta.service_id', $service->id)
             ->assertJsonPath('meta.total', 2);
     }
@@ -168,9 +169,17 @@ final class ServiceEventsEndpointTest extends ServiceApiTestCase
         $this->actingAs($user)
             ->getJson("/api/v1/services/{$service->id}/events")
             ->assertOk()
-            ->assertJsonPath('data.0.state', CustomerProvisioningEventState::UnderReview->value)
+            ->assertJsonPath('data.0.state', CustomerOperationState::NeedsReview->value)
             ->assertJsonPath('data.0.failure_reason', CustomerFailureReason::AwaitingConfirmation->value)
-            ->assertJsonPath('data.0.is_settled', true);
+            ->assertJsonPath('data.0.is_terminal', true)
+            ->assertJsonPath('data.0.needs_attention', true)
+            /*
+             * And the row does not invite a second attempt. This is the whole
+             * Timeout Rule in one assertion: the machine may exist, so the
+             * server says support rather than retry, and no screen has to
+             * work that out from the state.
+             */
+            ->assertJsonPath('data.0.retry_advice', RetryAdvice::SupportRequired->value);
     }
 
     #[Test]
@@ -193,8 +202,10 @@ final class ServiceEventsEndpointTest extends ServiceApiTestCase
         $this->actingAs($user)
             ->getJson("/api/v1/services/{$service->id}/events")
             ->assertOk()
-            ->assertJsonPath('data.0.state', CustomerProvisioningEventState::Scheduled->value)
-            ->assertJsonPath('data.0.is_settled', false)
+            ->assertJsonPath('data.0.state', CustomerOperationState::Queued->value)
+            ->assertJsonPath('data.0.is_terminal', false)
+            // Ours to finish, so there is nothing for the customer to do.
+            ->assertJsonPath('data.0.retry_advice', RetryAdvice::Wait->value)
             ->assertJsonPath('data.0.failure_reason', CustomerFailureReason::TemporaryIssue->value);
     }
 
@@ -241,7 +252,18 @@ final class ServiceEventsEndpointTest extends ServiceApiTestCase
         // `parent::toArray()` would publish all three at once, and no blocklist
         // catches the column nobody has added yet.
         $this->assertSame(
-            ['id', 'kind', 'state', 'is_settled', 'failure_reason', 'created_at', 'started_at', 'finished_at'],
+            [
+                'id',
+                'kind',
+                'state',
+                'is_terminal',
+                'needs_attention',
+                'retry_advice',
+                'failure_reason',
+                'created_at',
+                'started_at',
+                'finished_at',
+            ],
             array_keys($event),
         );
 

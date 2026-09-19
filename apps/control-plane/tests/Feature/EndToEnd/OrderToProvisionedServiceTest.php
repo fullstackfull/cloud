@@ -14,6 +14,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
@@ -56,10 +57,14 @@ final class OrderToProvisionedServiceTest extends TestCase
 
         $this->customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
 
-        // One cluster and one pool: the shape of a first deployment, and the
-        // only shape in which the platform will place a machine by itself.
-        ComputeCluster::factory()->create(['status' => 'active']);
+        // One cluster, one pool and one staged image: the shape of a first
+        // deployment, and the only shape in which the platform will place a
+        // machine by itself. The image is part of that shape now — a plan
+        // that names none and a cluster offering no single one leaves the
+        // service waiting for an operator rather than building an empty disk.
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
         IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
     }
 
     private function vpsPlan(int $monthlyMinor = 9_000): Plan
@@ -238,6 +243,10 @@ final class OrderToProvisionedServiceTest extends TestCase
 
         $elsewhere = ComputeCluster::factory()->create(['status' => 'active']);
         $pool = IpPool::query()->where('ip_version', 4)->sole();
+
+        // Staged on the cluster the plan names, so the image resolves where
+        // the machine is going rather than where the default one lives.
+        VmTemplate::factory()->create(['cluster_id' => $elsewhere->getKey()]);
 
         $plan = $this->vpsPlan();
         $plan->forceFill([

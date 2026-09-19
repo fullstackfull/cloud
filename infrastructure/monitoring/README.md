@@ -8,6 +8,24 @@ database is lost with the volume and cannot be reviewed.
 **Promtail is not used anywhere in this platform.** It is end-of-life. Log
 shipping is Grafana Alloy.
 
+## Names in this directory
+
+Every hostname in this directory is a **reference** name: the hosts of the
+example inventory in `infrastructure/ansible/inventories/production/hosts.yml`,
+under `.example`, which IANA reserves for documents. None of them exists.
+
+That is a deliberate choice rather than placeholder laziness. The target lists
+are `file_sd` files precisely so that the real ones arrive at deploy time from
+the private inventory, and a committed list of plausible internal hostnames is
+one copy-paste from being configured as real. It also used to disagree with the
+application: the control plane's own endpoint policy refuses `.internal` names
+outright, so the zone this directory named was one the platform it watches
+would never talk to.
+
+The values an operator must supply — the external URLs, the environment and
+the region stamped on every sample — are variables, and the compose file fails
+loudly when they are missing. See `docs/infrastructure-naming-standard.md`.
+
 ## What runs where
 
 Run this stack on a dedicated monitoring host — never on a hypervisor and never
@@ -71,7 +89,7 @@ export GRAFANA_ADMIN_PASSWORD=...
 export POSTGRES_EXPORTER_DSN='postgresql://monitoring:...@cp-db-01:5432/lynomia?sslmode=require'
 export REDIS_EXPORTER_ADDR='redis://cp-redis-01:6379'
 export LYNOMIA_ENV=production
-export LYNOMIA_REGION=kw-central
+export LYNOMIA_REGION=...               # stamped on every sample; no default
 
 # 3. Validate before starting. Always — see "Validating the configuration".
 docker compose -f docker-compose.monitoring.yml up -d
@@ -205,7 +223,7 @@ dashboard.
 
 ### Runbooks
 
-Every alert's `runbook_url` points at `https://docs.lynomia.internal/runbooks/<slug>`,
+Every alert's `runbook_url` points at `https://docs.prod.example/runbooks/<slug>`,
 which is served from `docs/runbooks/` in this repository.
 
 Already written: `ip-exhaustion`, `payment-reconciliation`, `provisioning-stuck`.
@@ -274,26 +292,44 @@ counters: those rows are appended and never re-classified.
 
 ### 2. Proxmox Backup Server — `lynomia_backup_*`
 
-PBS has no Prometheus endpoint. These are written by a textfile collector on the
-backup host, read by its node_exporter from
-`/var/lib/node_exporter/textfile_collector/`. The collector belongs to
-`infrastructure/pbs`.
+PBS has no Prometheus endpoint of its own, so these series are the platform's
+decision rather than something it inherits.
 
-**NOT IMPLEMENTED.** `infrastructure/pbs` does not exist and nothing writes these
-series, so every alert in `backups.yml` is currently incapable of firing —
-including `BackupVerificationFailed` and `UnverifiedSnapshotsAccumulating`,
-which exist to catch the failure that looks exactly like success until somebody
-tries to restore. Blocker: `BLOCKED_HARDWARE` — the collector reads
-`proxmox-backup-manager` output, and writing it against output nobody has seen
-is guesswork with a green tick on it. `scripts/validate-monitoring.py` prints
-this gap on every run and fails the build if this paragraph is deleted while the
-directory is still missing.
+**IMPLEMENTED — by the control plane, not by a textfile collector.**
+`Monitoring\Application\Collectors\BackupCollector` produces all six from the
+`backups` table, and they are served from the control plane's own `/metrics`
+alongside every other family.
+
+That is a change of producer from what this section originally planned, and the
+reason is worth keeping. A textfile collector on the backup host can only report
+what PBS did; it cannot report a backup the control plane asked for and never
+heard about, which is the failure that matters most. It also cannot run at all
+until a PBS host exists — which, as of
+`docs/phase-30b-0-real-infrastructure-preflight.md`, it does not. The control
+plane already records every backup it requested, every task it polled and every
+verification result it was told about, so it can answer today.
+
+When a real PBS exists, a textfile collector may be added *beside* this one to
+cross-check it. The two disagreeing would itself be worth an alert.
+
+Two guarantees are enforced rather than intended:
+
+  - `tests/Architecture/EveryBackupAlertMetricHasAProducerTest` asserts the set
+    of `lynomia_backup_*` metrics the alerts read and the set the collectors
+    emit are equal in both directions, so an alert can never again read a series
+    nobody writes.
+  - `tests/Feature/Monitoring/BackupsAreVisibleToAlertingTest` asserts the
+    values, not just the names: a never-verified snapshot counts as unverified
+    rather than as a pass, and a datastore nobody has verified reports zero so
+    that `BackupVerificationStale` fires instead of staying silent.
 
 This is the contract the alerts in `backups.yml` expect:
 
 ```
-# 0 = last run succeeded, 1 = last run failed
-lynomia_backup_task_last_status{datastore,guest_type,guest_id,guest_name}
+# 0 = last run succeeded, 1 = failed, 2 = needs review (indeterminate, not failed).
+# No guest_name label: a guest's name is a customer's hostname, and it is not put
+# into a series that travels to every dashboard and notification built on it.
+lynomia_backup_task_last_status{datastore,guest_type,guest_id}
 lynomia_backup_last_success_timestamp_seconds{datastore,guest_type,guest_id}
 
 # 0 = verification passed, 1 = verification failed
@@ -305,9 +341,10 @@ lynomia_backup_unverified_snapshots{datastore}
 lynomia_backup_collector_last_run_timestamp_seconds
 ```
 
-Write the file atomically — `.prom.tmp` then `rename(2)`. node_exporter reads
-the directory on every scrape, and a half-written file is a parse error that
-drops *every* textfile metric on that host, not just the one being written.
+If a textfile collector is ever added beside the control plane's producer,
+write its file atomically — `.prom.tmp` then `rename(2)`. node_exporter reads the
+directory on every scrape, and a half-written file is a parse error that drops
+*every* textfile metric on that host, not just the one being written.
 
 ## What to verify by hand
 
@@ -369,7 +406,7 @@ a log readable during an incident is gone.
 **5. The metrics endpoint refuses an unauthenticated scrape.**
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://cp-app-01.kw.lynomia.internal/metrics
+curl -s -o /dev/null -w '%{http_code}\n' https://cp-1.prod.example/metrics
 # expect 404 — not 401. The endpoint does not confirm its own existence.
 ```
 
@@ -378,7 +415,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://cp-app-01.kw.lynomia.internal/m
 ```bash
 curl -s -o /dev/null -w 'total: %{time_total}s\n' \
   -H "Authorization: Bearer $PROMETHEUS_METRICS_TOKEN" \
-  https://cp-app-01.kw.lynomia.internal/metrics
+  https://cp-1.prod.example/metrics
 ```
 
 Well under a second. A metrics endpoint that takes ten seconds gets scraped

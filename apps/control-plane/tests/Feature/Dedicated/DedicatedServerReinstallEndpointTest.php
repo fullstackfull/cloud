@@ -147,7 +147,8 @@ final class DedicatedServerReinstallEndpointTest extends DedicatedApiTestCase
         $this->actingAs($user)
             ->postJson("/api/v1/dedicated/{$server->id}/reinstall", ['confirm_serial' => 'SNWIPE00005'])
             ->assertStatus(422)
-            ->assertJsonStructure(['error' => ['details' => ['fields' => ['idempotency_key']]]]);
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected')
+            ->assertJsonPath('error.details.header', 'Idempotency-Key');
 
         $this->assertSame(0, ProvisioningJob::query()->count());
     }
@@ -166,7 +167,7 @@ final class DedicatedServerReinstallEndpointTest extends DedicatedApiTestCase
                 'idempotency_key' => self::KEY,
             ])
             ->assertStatus(422)
-            ->assertJsonStructure(['error' => ['details' => ['fields' => ['idempotency_key']]]]);
+            ->assertJsonPath('error.code', 'request.idempotency_key_rejected');
     }
 
     #[Test]

@@ -7,7 +7,6 @@ namespace Lynomia\Modules\Provisioning\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Lynomia\Modules\Provisioning\Domain\Enums\CustomerFailureReason;
-use Lynomia\Modules\Provisioning\Domain\Enums\CustomerProvisioningEventState;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 
 /**
@@ -54,6 +53,8 @@ final class ProvisioningEventResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $state = $this->resource->status->customerState();
+
         return [
             'id' => $this->id,
             // Product terms rather than provider terms — "create_vps", never
@@ -61,11 +62,28 @@ final class ProvisioningEventResource extends JsonResource
             // the engine's benefit, and it happens to be exactly what a
             // customer can be told.
             'kind' => $this->kind->value,
-            'state' => CustomerProvisioningEventState::for($this->resource->status)->value,
+            /*
+             * The one customer vocabulary, from the one mapping. This list
+             * used to speak its own set of words — `completed` here where the
+             * operation endpoint said `succeeded`, `under_review` where it
+             * said `needs_review` — about the very same job row.
+             */
+            'state' => $state->value,
 
             // Whether the platform is still working on this. Asked of the enum
             // that decides, so it cannot disagree with what a worker would do.
-            'is_settled' => $this->resource->status->isSettled(),
+            'is_terminal' => $state->isTerminal(),
+
+            'needs_attention' => $state->needsAttention(),
+
+            /*
+             * What may be done next, decided by the server. A row in this list
+             * is the one place a customer sees a rebuild that stopped, and a
+             * screen that derived "offer a retry" from the state itself would
+             * eventually offer one beside an operation whose result nobody
+             * knows.
+             */
+            'retry_advice' => $state->retryAdvice()->value,
 
             'failure_reason' => CustomerFailureReason::for($this->resource->failure_class)?->value,
 

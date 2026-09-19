@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Link } from 'react-router'
 
 import { Alert } from '@/components/Alert'
 import { Button } from '@/components/Button'
@@ -11,16 +12,17 @@ import { MoneyText } from '@/components/MoneyText'
 import { PageHeader } from '@/components/PageHeader'
 import { Paginator } from '@/components/Paginator'
 import { StatusBadge } from '@/components/StatusBadge'
+import { Loading } from '@/components/Loading'
 import { useActiveLocale } from '@/i18n/useActiveLocale'
+import { newIdempotencyKey } from '@/lib/api'
 import { formatDate } from '@/lib/format'
-import {
-  useInvoices,
-  usePayFromWalletCredit,
-  useStartPayment,
-  useWalletCreditQuote,
-} from '@/lib/queries'
+import { useInvoices, usePayFromWalletCredit, useWalletCreditQuote } from '@/lib/queries'
 import type { Invoice } from '@/lib/types'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
+import { useUrlPage } from '@/lib/urlState'
+
+import { PaymentNextAction } from '../payments/PaymentNextAction'
+import { usePaymentLaunch } from '../payments/usePaymentLaunch'
 
 /**
  * One key per opened dialogue, not one per click.
@@ -33,7 +35,7 @@ import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
  * decision to pay, however many times the button is pressed.
  */
 function mintKey(): string {
-  return `wallet-credit-${crypto.randomUUID()}`
+  return `wallet-credit-${newIdempotencyKey()}`
 }
 
 export function InvoicesPage() {
@@ -41,9 +43,19 @@ export function InvoicesPage() {
   const locale = useActiveLocale()
   const describeError = useApiErrorMessage()
 
-  const [page, setPage] = useState(1)
+  // W5.7: in the address bar rather than in component state, so a refresh
+  // stays on this page and Back returns to it from whatever the customer
+  // opened. The one mechanism is in `useUrlPage`.
+  const [page, setPage] = useUrlPage()
   const { data, isPending, error: readError } = useInvoices(page)
-  const pay = useStartPayment()
+  /*
+   * The launcher handles all five answers the server can give — a redirect, a
+   * confirmation to make from here, a payment already taken, a refusal, and a
+   * payment nobody has decided yet. The list used to look for a redirect URL
+   * and do nothing when there was none, which made a declined card and a
+   * payment in flight both look like a button that did not work.
+   */
+  const launch = usePaymentLaunch()
 
   const [payingFromCredit, setPayingFromCredit] = useState<Invoice | null>(null)
   const [idempotencyKey, setIdempotencyKey] = useState<string>(mintKey)
@@ -51,7 +63,7 @@ export function InvoicesPage() {
   const quote = useWalletCreditQuote(payingFromCredit?.id ?? null)
   const payFromCredit = usePayFromWalletCredit()
 
-  const displayed = describeError(pay.error)
+  const displayed = describeError(launch.error)
   const creditError = describeError(quote.error ?? payFromCredit.error)
 
   function openCreditDialog(invoice: Invoice) {
@@ -59,21 +71,6 @@ export function InvoicesPage() {
     setPayingFromCredit(invoice)
   }
 
-  /**
-   * Hands the browser to the provider.
-   *
-   * This is the whole of the client's part in a payment. It does not, and must
-   * never, tell the server that the money arrived — that is decided by the
-   * webhook, server-side, and a portal that could assert it would be a portal an
-   * attacker could use to provision for free.
-   */
-  async function startPayment(invoice: Invoice) {
-    const started = await pay.mutateAsync(invoice.id).catch(() => null)
-
-    if (started?.redirect_url != null && started.redirect_url !== '') {
-      window.location.assign(started.redirect_url)
-    }
-  }
 
   const columns: Array<Column<Invoice>> = [
     {
@@ -91,6 +88,26 @@ export function InvoicesPage() {
       cell: (invoice) => (invoice.due_at === null ? '—' : formatDate(invoice.due_at, locale)),
     },
     {
+      key: 'view',
+      header: '',
+      /*
+       * "View" is enough to read and not enough to hear. A screen-reader user
+       * listing the links on a page of ten invoices got "View, View, View…"
+       * with nothing to say which invoice each one opened; the column header
+       * that disambiguates them visually is not part of a link's accessible
+       * name. So the visible word stays short and the name carries the number.
+       */
+      cell: (invoice) => (
+        <Link
+          className="tap-link text-sm underline"
+          to={`/invoices/${invoice.id}`}
+          aria-label={t('invoices.viewNamed', { number: invoice.number })}
+        >
+          {t('invoices.view')}
+        </Link>
+      ),
+    },
+    {
       key: 'pay',
       header: '',
       cell: (invoice) =>
@@ -98,8 +115,8 @@ export function InvoicesPage() {
           <div className="flex gap-2">
             <Button
               size="sm"
-              loading={pay.isPending && pay.variables === invoice.id}
-              onClick={() => void startPayment(invoice)}
+              loading={launch.isPending}
+              onClick={() => void launch.start(invoice.id)}
             >
               {t('invoices.pay')}
             </Button>
@@ -132,9 +149,15 @@ export function InvoicesPage() {
         </div>
       ) : null}
 
+      {launch.state.type !== 'idle' ? (
+        <div className="mb-4">
+          <PaymentNextAction state={launch.state} />
+        </div>
+      ) : null}
+
       <Card>
         {isPending ? (
-          <p className="py-8 text-center text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+          <Loading />
         ) : (
           <>
             <DataTable
@@ -160,7 +183,7 @@ export function InvoicesPage() {
         body={
           <div className="flex flex-col gap-3">
             {quote.isPending ? (
-              <p className="text-sm text-[var(--text-muted)]">{t('common.loading')}</p>
+              <Loading />
             ) : quote.data === undefined ? null : (
               <>
                 <dl className="flex flex-col gap-2 text-sm">

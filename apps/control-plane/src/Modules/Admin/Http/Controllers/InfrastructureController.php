@@ -44,7 +44,15 @@ final class InfrastructureController
 
             return [
                 'id' => $node->id,
-                'name' => $node->provider_name,
+                /*
+                 * `provider_name`, not `name`. It is what the hypervisor calls
+                 * this node and it is the string sent back to the hypervisor;
+                 * publishing it as "name" implied it was this platform's own
+                 * identity for the node, which is the id above. One value under
+                 * two names with two meanings is how a screen comes to offer a
+                 * rename that cannot work.
+                 */
+                'provider_name' => $node->provider_name,
                 'cluster' => $node->cluster?->slug,
                 // The id as well as the name, because an operator who can see
                 // that a cluster disagrees with the platform needs to be able
