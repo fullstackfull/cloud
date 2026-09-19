@@ -315,3 +315,62 @@ Every one of the 14 skips is `captures.e2e.ts`, the visual-record specs, which
 carry `test.skip(process.env.CAPTURES !== '1')`. That is the suite's only
 conditional skip and it accounts for all 14 — so nothing was skipped that this
 patch touches, and the three reboot specs really ran.
+
+## 11. A mistake of mine worth recording
+
+The first local run of the full backend suite reported **126 failures** across
+Billing, Console, DNS and more — modules this patch does not touch. None of them
+was real.
+
+I had run `php artisan test --env=testing`, and the `.env.testing` on this
+machine is not the file CI uses. CI copies `.env.testing.example` and runs
+`php artisan test` with `APP_ENV=testing`; the local file was a copy of `.env`,
+carrying `CACHE_STORE=redis` and `QUEUE_CONNECTION=redis` where `phpunit.xml`
+declares `array` and `sync`. Against a real Redis, `$this->travel()` moves
+Carbon's clock and does not move a cache entry's TTL, so a test that travels
+past a sixty-second console permit finds it still there — hence "an expired
+permit is refused" failing with the permit accepted, and a rate limiter counting
+across tests that `array` would have isolated.
+
+Flushing Redis did not fix it, which is what ruled out leftover state and
+pointed at the driver. Rebuilding `.env.testing` from `.env.testing.example`
+did: the same class went from 9/11 to 11/11 without a line of code changing.
+
+It is written down because the first instinct on seeing 126 red tests is to
+believe them, and the second is to dismiss them — and both would have been
+wrong. What settled it was running one failing class three times: as it was,
+after a Redis flush, and after matching CI's environment.
+
+## 12. CI
+
+| | |
+|---|---|
+| Run | 199 |
+| Run id | 35466073629 |
+| SHA | `78355a8f89fb81663fb21cf319f75c1c43c2919b` |
+| Attempt | 1 |
+| Conclusion | **success** |
+| Jobs | **9 / 9 successful** |
+
+| Job | Result |
+|---|---|
+| Backend (PHP 8.4, PostgreSQL 16) | success, tests 10m27s |
+| Backend (PHP 8.4, PostgreSQL 18) | success, tests 10m14s |
+| Browser end-to-end | success, suite 30m15s, **first attempt, no re-run** |
+| Static analysis (PHPStan) | success |
+| Frontend (tsc, eslint, unit, build) | success |
+| API description | success |
+| Security checks | success |
+| Infrastructure validation | success |
+| Production guards | success |
+
+The browser row is the one that matters here, and it is worth stating plainly:
+**green on the first attempt, with no job re-run.** Gap 6's exact-SHA run needed
+a second attempt of that job and said so; this one did not.
+
+Run 198, on the functional commit `6c4d342` alone, was **cancelled** — by my own
+push of the documentation commit, because `ci.yml` carries
+`concurrency: cancel-in-progress: true` per ref. That is a mistake in how I
+sequenced the pushes, not a CI failure, and it is recorded rather than quietly
+replaced by the run that did finish. `78355a8` is `6c4d342` plus this document
+and nothing else.
