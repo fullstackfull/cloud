@@ -179,6 +179,832 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/hosting-packages":
+    get:
+      operationId: "api_admin_catalogue_hosting_packages_index"
+      tags:
+        - "Operator"
+      summary: "The panel packages hosting plans map to"
+      description: |-
+        `meta.orderable` counts the mappings an account could actually be created under: active, and pointing at a plan.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/HostingPackage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_catalogue_hosting_packages_map"
+      tags:
+        - "Operator"
+      summary: "Map a plan to a panel package"
+      description: |-
+        Records the name this platform will ask cPanel or DirectAdmin for.
+        Nothing here contacts a panel, so the mapping is CONFIGURED and never
+        VERIFIED: whether a package by that name exists is a question for real
+        provider discovery, which has not run.
+
+        Only a shared hosting plan may be mapped. A package behind a VPS plan
+        would sit there looking configured while the build went to a
+        hypervisor the panel never sees.
+
+        The plan may be omitted: a package recorded before its plan exists is
+        a half-finished configuration an operator can see and finish.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                panel_package_name:
+                  description: "See the endpoint description; validated server-side."
+                plan_id:
+                  description: "See the endpoint description; validated server-side."
+                disk_quota_mib:
+                  description: "See the endpoint description; validated server-side."
+                bandwidth_quota_mib:
+                  description: "See the endpoint description; validated server-side."
+                max_addon_domains:
+                  description: "See the endpoint description; validated server-side."
+                max_subdomains:
+                  description: "See the endpoint description; validated server-side."
+                max_databases:
+                  description: "See the endpoint description; validated server-side."
+                max_email_accounts:
+                  description: "See the endpoint description; validated server-side."
+                cpu_limit_percent:
+                  description: "See the endpoint description; validated server-side."
+                memory_limit_mib:
+                  description: "See the endpoint description; validated server-side."
+                io_limit_kbps:
+                  description: "See the endpoint description; validated server-side."
+                process_limit:
+                  description: "See the endpoint description; validated server-side."
+                entry_process_limit:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/HostingPackageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/hosting-packages/{package}":
+    delete:
+      operationId: "api_admin_catalogue_hosting_packages_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop offering a panel package mapping"
+      description: |-
+        Deactivated, never deleted: hosting accounts already created point at the package they were built under.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - name: "package"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/HostingPackageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans":
+    get:
+      operationId: "api_admin_catalogue_plans_index"
+      tags:
+        - "Operator"
+      summary: "The plans this deployment sells"
+      description: |-
+        `meta.unpriced` counts listed plans with no active price — purchasable by nobody, and indistinguishable from a working plan in a list that shows only the two switches.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/CataloguePlan"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_catalogue_plans_record"
+      tags:
+        - "Operator"
+      summary: "Record a plan"
+      description: |-
+        `resources` is free-form because the three kinds describe different
+        things, but two of them are checked against the product's kind, and
+        both refusals exist because the failure is otherwise silent.
+
+        A VPS plan must carry `vcpu`, `memory_mib` and `disk_gib`: the build
+        reads those with defaults behind them, so a plan without them would
+        not fail — it would quietly build the smallest machine and invoice
+        whatever the price said.
+
+        A dedicated plan must carry `hardware_profile`: without one the
+        reservation looks for a machine matching nothing and reports no
+        capacity, which is retried rather than refused, so the order waits on
+        a rack that was never the problem.
+
+        A second call for the same slug is a correction and answers 200.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                product_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                description:
+                  description: "See the endpoint description; validated server-side."
+                resources:
+                  description: "See the endpoint description; validated server-side."
+                placement_constraints:
+                  description: "See the endpoint description; validated server-side."
+                stock_limit:
+                  description: "See the endpoint description; validated server-side."
+                per_customer_limit:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                is_public:
+                  description: "See the endpoint description; validated server-side."
+                sort_order:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CataloguePlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans/{plan}":
+    delete:
+      operationId: "api_admin_catalogue_plans_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop selling a plan"
+      description: |-
+        Stops future sales and nothing else. It does not suspend, terminate or reprice a service somebody is already using: those are lifecycle decisions with their own actions and their own notifications, and an operator tidying a price list must not be able to end a customer's server.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CataloguePlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans/{plan}/prices":
+    post:
+      operationId: "api_admin_catalogue_prices_set"
+      tags:
+        - "Operator"
+      summary: "Set what a plan costs"
+      description: |-
+        Amounts are whole minor units as integers — 9.000 KWD is 9000 — and a
+        decimal is refused rather than rounded. The currency must be one the
+        platform is configured to bill in.
+
+        One price exists per plan, currency and billing period; the database
+        enforces it, so a customer request can never find two answers. A second
+        call for the same three is therefore an operator changing the price,
+        and answers 200.
+
+        It changes nothing that was already sold. `order_items` snapshots the
+        unit amounts, the name, the period and the resources at the moment of
+        sale, so an invoice raised at the old price still says what was
+        charged.
+
+        Requires the `pricing.manage` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                currency:
+                  description: "See the endpoint description; validated server-side."
+                billing_period:
+                  description: "See the endpoint description; validated server-side."
+                recurring_amount_minor:
+                  description: "See the endpoint description; validated server-side."
+                setup_amount_minor:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                available_from:
+                  description: "See the endpoint description; validated server-side."
+                available_until:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CataloguePlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans/{plan}/prices/{price}":
+    delete:
+      operationId: "api_admin_catalogue_prices_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop selling a plan in one currency"
+      description: |-
+        Deactivated, never deleted. An invoice raised at this price has to stay explainable, and "what was this priced at" is the first question when a customer disputes one.
+
+        Requires the `pricing.manage` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "price"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CataloguePlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/products":
+    get:
+      operationId: "api_admin_catalogue_products_index"
+      tags:
+        - "Operator"
+      summary: "The products this deployment sells"
+      description: |-
+        The operator view: withdrawn and unlisted rows included, both languages, because "why is this not being offered" is what this answers. Requires `catalog.manage` rather than `catalog.view`, which is the permission a plain customer holds.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/CatalogueProduct"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_catalogue_products_record"
+      tags:
+        - "Operator"
+      summary: "Record a product"
+      description: |-
+        The kind is one of three — vps, dedicated, shared_hosting — and an
+        operator may not add a fourth. That is the software rather than a
+        setting: a kind with no build path behind it is an order nobody can
+        fulfil, which is why WordPress and Domains have readiness rows and no
+        catalogue kind.
+
+        A second call for the same slug is a correction, not a conflict, and
+        answers 200 rather than 201. It also re-lists a withdrawn product, so
+        withdrawing one is never a one-way door.
+
+        Recording a product does not make it sellable. That is decided by the
+        readiness engine, which reads the software state and the readiness row
+        and has never read a catalogue row.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                kind:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                description:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                is_public:
+                  description: "See the endpoint description; validated server-side."
+                sort_order:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CatalogueProductResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/products/{product}":
+    delete:
+      operationId: "api_admin_catalogue_products_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop selling a product"
+      description: |-
+        Deactivated, never deleted: orders and subscriptions point at what was sold, and destroying the row turns a support question into archaeology. Its plans and prices are left exactly as they were.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - name: "product"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/CatalogueProductResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/credentials":
     get:
       operationId: "api_admin_credentials_index"
@@ -17848,6 +18674,131 @@ components:
         available_here:
           type: "boolean"
           description: "False for the controlled drivers on a production installation."
+    CataloguePlan:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        product_id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type: "object"
+          additionalProperties:
+            type: "string"
+        description:
+          type:
+            - "object"
+            - "null"
+          additionalProperties:
+            type: "string"
+        resources:
+          type: "object"
+          description: "What the plan sells. A document rather than columns because the three kinds describe different things: a VPS plan carries vcpu, memory_mib and disk_gib, a dedicated plan carries hardware_profile, a hosting plan carries panel quota."
+        placement_constraints:
+          type:
+            - "object"
+            - "null"
+        stock_limit:
+          type:
+            - "integer"
+            - "null"
+        per_customer_limit:
+          type:
+            - "integer"
+            - "null"
+        is_active:
+          type: "boolean"
+        is_public:
+          type: "boolean"
+        sort_order:
+          type: "integer"
+        prices:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/CataloguePrice"
+        priced_in:
+          type: "array"
+          items:
+            type: "string"
+          description: "Currencies with an active price. Empty means nobody can buy this plan, however listed it looks."
+    CataloguePlanResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/CataloguePlan"
+    CataloguePrice:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        currency:
+          type: "string"
+          description: "ISO 4217, and one the platform is configured to bill in."
+        billing_period:
+          type: "string"
+          description: "hourly, daily, monthly, quarterly or yearly."
+        recurring_amount_minor:
+          type: "integer"
+          description: "Whole minor units. 9.000 KWD is 9000. Never a decimal: a decimal is a rounding decision taken by whichever layer parses it last."
+        setup_amount_minor:
+          type: "integer"
+          description: "Whole minor units, charged once."
+        is_active:
+          type: "boolean"
+        available_from:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        available_until:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+    CatalogueProduct:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type: "string"
+          description: "vps, dedicated or shared_hosting. The three this platform has a build path for; a fourth is software rather than a setting."
+        slug:
+          type: "string"
+        name:
+          type: "object"
+          additionalProperties:
+            type: "string"
+          description: "Display names by locale. Both languages are required."
+        description:
+          type:
+            - "object"
+            - "null"
+          additionalProperties:
+            type: "string"
+        is_active:
+          type: "boolean"
+          description: "Whether it is offered. Withdrawing sets this false and never deletes the row."
+        is_public:
+          type: "boolean"
+        sort_order:
+          type: "integer"
+        plans_count:
+          type: "integer"
+    CatalogueProductResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/CatalogueProduct"
     ConnectionTest:
       type: "object"
       additionalProperties: false
@@ -19208,6 +20159,40 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/HostingAccountUsage"
+    HostingPackage:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        panel_package_name:
+          type: "string"
+          description: "What this platform will ask cPanel or DirectAdmin for. Recorded, never verified: no panel has been contacted."
+        plan_id:
+          type:
+            - "string"
+            - "null"
+        is_active:
+          type: "boolean"
+        mapped:
+          type: "boolean"
+          description: "Whether a plan points at it. A package with no plan is configuration nobody can order under."
+        limits:
+          type: "object"
+          additionalProperties:
+            type:
+              - "integer"
+              - "null"
+          description: "Quota and CloudLinux limits. Null is the model's unlimited, not zero."
+    HostingPackageResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/HostingPackage"
     HostingPanelSession:
       type: "object"
       additionalProperties: false

@@ -22,6 +22,25 @@ enum AuditAction: string
     case InvoiceVoided = 'invoice.voided';
     case PaymentRefunded = 'payment.refunded';
 
+    /*
+     * What the platform sells, and for how much.
+     *
+     * These belong on a list that is otherwise about money moving because a
+     * price is the money before it moves: every invoice raised after a change
+     * here carries it, and "who set this, and when" is the first question
+     * asked when a customer disputes one. Withdrawal is on the list for the
+     * other reason — it takes something off sale, and an operator who cannot
+     * find out who did that has to guess.
+     */
+    case CatalogueProductRecorded = 'catalogue.product.recorded';
+    case CatalogueProductWithdrawn = 'catalogue.product.withdrawn';
+    case CataloguePlanRecorded = 'catalogue.plan.recorded';
+    case CataloguePlanWithdrawn = 'catalogue.plan.withdrawn';
+    case CataloguePriceSet = 'catalogue.price.set';
+    case CataloguePriceWithdrawn = 'catalogue.price.withdrawn';
+    case CatalogueHostingPackageMapped = 'catalogue.hosting_package.mapped';
+    case CatalogueHostingPackageWithdrawn = 'catalogue.hosting_package.withdrawn';
+
     // Taking a service away, and giving it back.
     case CustomerSuspended = 'customer.suspended';
     case CustomerUnsuspended = 'customer.unsuspended';

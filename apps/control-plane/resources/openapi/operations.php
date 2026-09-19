@@ -1533,6 +1533,143 @@ return [
         'query' => ['cluster', 'active'],
         'response' => ['envelope' => 'list', 'schema' => 'VmTemplate'],
     ],
+    'api.admin.catalogue.products.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The products this deployment sells',
+        'description' => 'The operator view: withdrawn and unlisted rows included, both languages, because "why is this not being offered" is what this answers. Requires `catalog.manage` rather than `catalog.view`, which is the permission a plain customer holds.',
+        'permission' => 'catalog.manage',
+        'response' => ['envelope' => 'list', 'schema' => 'CatalogueProduct'],
+    ],
+    'api.admin.catalogue.products.record' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a product',
+        'description' => <<<'TEXT'
+        The kind is one of three — vps, dedicated, shared_hosting — and an
+        operator may not add a fourth. That is the software rather than a
+        setting: a kind with no build path behind it is an order nobody can
+        fulfil, which is why WordPress and Domains have readiness rows and no
+        catalogue kind.
+
+        A second call for the same slug is a correction, not a conflict, and
+        answers 200 rather than 201. It also re-lists a withdrawn product, so
+        withdrawing one is never a one-way door.
+
+        Recording a product does not make it sellable. That is decided by the
+        readiness engine, which reads the software state and the readiness row
+        and has never read a catalogue row.
+        TEXT,
+        'permission' => 'catalog.manage',
+        'body' => ['kind', 'slug', 'name', 'description', 'is_active', 'is_public', 'sort_order'],
+        'response' => $one('CatalogueProduct', 201),
+    ],
+    'api.admin.catalogue.products.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop selling a product',
+        'description' => 'Deactivated, never deleted: orders and subscriptions point at what was sold, and destroying the row turns a support question into archaeology. Its plans and prices are left exactly as they were.',
+        'permission' => 'catalog.manage',
+        'response' => $one('CatalogueProduct'),
+    ],
+    'api.admin.catalogue.plans.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The plans this deployment sells',
+        'description' => '`meta.unpriced` counts listed plans with no active price — purchasable by nobody, and indistinguishable from a working plan in a list that shows only the two switches.',
+        'permission' => 'catalog.manage',
+        'response' => ['envelope' => 'list', 'schema' => 'CataloguePlan'],
+    ],
+    'api.admin.catalogue.plans.record' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a plan',
+        'description' => <<<'TEXT'
+        `resources` is free-form because the three kinds describe different
+        things, but two of them are checked against the product's kind, and
+        both refusals exist because the failure is otherwise silent.
+
+        A VPS plan must carry `vcpu`, `memory_mib` and `disk_gib`: the build
+        reads those with defaults behind them, so a plan without them would
+        not fail — it would quietly build the smallest machine and invoice
+        whatever the price said.
+
+        A dedicated plan must carry `hardware_profile`: without one the
+        reservation looks for a machine matching nothing and reports no
+        capacity, which is retried rather than refused, so the order waits on
+        a rack that was never the problem.
+
+        A second call for the same slug is a correction and answers 200.
+        TEXT,
+        'permission' => 'catalog.manage',
+        'body' => ['product_id', 'slug', 'name', 'description', 'resources', 'placement_constraints', 'stock_limit', 'per_customer_limit', 'is_active', 'is_public', 'sort_order'],
+        'response' => $one('CataloguePlan', 201),
+    ],
+    'api.admin.catalogue.plans.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop selling a plan',
+        'description' => 'Stops future sales and nothing else. It does not suspend, terminate or reprice a service somebody is already using: those are lifecycle decisions with their own actions and their own notifications, and an operator tidying a price list must not be able to end a customer\'s server.',
+        'permission' => 'catalog.manage',
+        'response' => $one('CataloguePlan'),
+    ],
+    'api.admin.catalogue.prices.set' => [
+        'tag' => 'Operator',
+        'summary' => 'Set what a plan costs',
+        'description' => <<<'TEXT'
+        Amounts are whole minor units as integers — 9.000 KWD is 9000 — and a
+        decimal is refused rather than rounded. The currency must be one the
+        platform is configured to bill in.
+
+        One price exists per plan, currency and billing period; the database
+        enforces it, so a customer request can never find two answers. A second
+        call for the same three is therefore an operator changing the price,
+        and answers 200.
+
+        It changes nothing that was already sold. `order_items` snapshots the
+        unit amounts, the name, the period and the resources at the moment of
+        sale, so an invoice raised at the old price still says what was
+        charged.
+        TEXT,
+        'permission' => 'pricing.manage',
+        'body' => ['currency', 'billing_period', 'recurring_amount_minor', 'setup_amount_minor', 'is_active', 'available_from', 'available_until'],
+        'response' => $one('CataloguePlan', 201),
+    ],
+    'api.admin.catalogue.prices.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop selling a plan in one currency',
+        'description' => 'Deactivated, never deleted. An invoice raised at this price has to stay explainable, and "what was this priced at" is the first question when a customer disputes one.',
+        'permission' => 'pricing.manage',
+        'response' => $one('CataloguePlan'),
+    ],
+    'api.admin.catalogue.hosting_packages.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The panel packages hosting plans map to',
+        'description' => '`meta.orderable` counts the mappings an account could actually be created under: active, and pointing at a plan.',
+        'permission' => 'catalog.manage',
+        'response' => ['envelope' => 'list', 'schema' => 'HostingPackage'],
+    ],
+    'api.admin.catalogue.hosting_packages.map' => [
+        'tag' => 'Operator',
+        'summary' => 'Map a plan to a panel package',
+        'description' => <<<'TEXT'
+        Records the name this platform will ask cPanel or DirectAdmin for.
+        Nothing here contacts a panel, so the mapping is CONFIGURED and never
+        VERIFIED: whether a package by that name exists is a question for real
+        provider discovery, which has not run.
+
+        Only a shared hosting plan may be mapped. A package behind a VPS plan
+        would sit there looking configured while the build went to a
+        hypervisor the panel never sees.
+
+        The plan may be omitted: a package recorded before its plan exists is
+        a half-finished configuration an operator can see and finish.
+        TEXT,
+        'permission' => 'catalog.manage',
+        'body' => ['slug', 'panel_package_name', 'plan_id', 'disk_quota_mib', 'bandwidth_quota_mib', 'max_addon_domains', 'max_subdomains', 'max_databases', 'max_email_accounts', 'cpu_limit_percent', 'memory_limit_mib', 'io_limit_kbps', 'process_limit', 'entry_process_limit', 'is_active'],
+        'response' => $one('HostingPackage', 201),
+    ],
+    'api.admin.catalogue.hosting_packages.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop offering a panel package mapping',
+        'description' => 'Deactivated, never deleted: hosting accounts already created point at the package they were built under.',
+        'permission' => 'catalog.manage',
+        'response' => $one('HostingPackage'),
+    ],
     'api.admin.infrastructure.templates.store' => [
         'tag' => 'Operator',
         'summary' => 'Record an installable image',

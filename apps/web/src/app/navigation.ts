@@ -175,6 +175,7 @@ export const CONTROL_CENTER_NAV: readonly NavItem[] = [
   { to: '/admin/control-center/readiness', labelKey: 'admin.nav.readiness' },
   { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
   { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },
+  { to: '/admin/control-center/catalogue', labelKey: 'admin.nav.catalogue' },
 ]
 
 /**

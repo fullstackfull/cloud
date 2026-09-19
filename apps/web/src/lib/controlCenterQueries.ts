@@ -1052,3 +1052,226 @@ export function useRegisterRack() {
     onSuccess: () => { invalidateSiteViews(queryClient) },
   })
 }
+
+/*
+ * The catalogue: what this deployment sells, and for how much.
+ *
+ * These are the operator views, not the customer ones. They show the rows a
+ * customer never sees — withdrawn products, unlisted plans, a price that is
+ * configured and switched off — because "why is this not being offered" is
+ * the question the screen exists to answer.
+ */
+
+export type ProductKind = 'vps' | 'dedicated' | 'shared_hosting'
+
+export const PRODUCT_KINDS: ProductKind[] = ['vps', 'dedicated', 'shared_hosting']
+
+export const BILLING_PERIODS = ['hourly', 'daily', 'monthly', 'quarterly', 'yearly'] as const
+
+export type BillingPeriod = (typeof BILLING_PERIODS)[number]
+
+export interface CatalogueProduct {
+  id: string
+  kind: ProductKind
+  slug: string
+  name: Record<string, string>
+  description: Record<string, string> | null
+  is_active: boolean
+  is_public: boolean
+  sort_order: number
+  plans_count?: number
+}
+
+export interface CataloguePrice {
+  id: string
+  currency: string
+  billing_period: BillingPeriod
+  recurring_amount_minor: number
+  setup_amount_minor: number
+  is_active: boolean
+  available_from: string | null
+  available_until: string | null
+}
+
+export interface CataloguePlan {
+  id: string
+  product_id: string
+  slug: string
+  name: Record<string, string>
+  description: Record<string, string> | null
+  resources: Record<string, unknown>
+  placement_constraints: Record<string, unknown> | null
+  stock_limit: number | null
+  per_customer_limit: number | null
+  is_active: boolean
+  is_public: boolean
+  sort_order: number
+  prices?: CataloguePrice[]
+  priced_in?: string[]
+}
+
+export interface HostingPackage {
+  id: string
+  slug: string
+  panel_package_name: string
+  plan_id: string | null
+  is_active: boolean
+  mapped: boolean
+  limits: Record<string, number | null>
+}
+
+interface Counted<T> {
+  data: T[]
+  meta: Record<string, number>
+}
+
+function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'catalogue'] })
+}
+
+export function useCatalogueProducts() {
+  return useQuery({
+    queryKey: ['admin', 'catalogue', 'products'],
+    queryFn: () => admin.get<Counted<CatalogueProduct>>('/catalogue/products'),
+  })
+}
+
+export interface RecordProductInput {
+  kind: ProductKind
+  slug: string
+  name: Record<string, string>
+  description?: Record<string, string>
+  is_active: boolean
+  is_public: boolean
+  sort_order?: number
+}
+
+export function useRecordCatalogueProduct() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RecordProductInput) => admin.post<Envelope<CatalogueProduct>>('/catalogue/products', input),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawCatalogueProduct() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<CatalogueProduct>>(`/catalogue/products/${encodeURIComponent(id)}`),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useCataloguePlans(productId?: string) {
+  return useQuery({
+    queryKey: ['admin', 'catalogue', 'plans', productId],
+    queryFn: () => admin.get<Counted<CataloguePlan>>('/catalogue/plans', { product: productId }),
+  })
+}
+
+export interface RecordPlanInput {
+  product_id: string
+  slug: string
+  name: Record<string, string>
+  resources: Record<string, unknown>
+  is_active: boolean
+  is_public: boolean
+}
+
+export function useRecordCataloguePlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RecordPlanInput) => admin.post<Envelope<CataloguePlan>>('/catalogue/plans', input),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawCataloguePlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<CataloguePlan>>(`/catalogue/plans/${encodeURIComponent(id)}`),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export interface SetPriceInput {
+  planId: string
+  currency: string
+  billing_period: BillingPeriod
+  /** Whole minor units. The form converts; nothing downstream sees a decimal. */
+  recurring_amount_minor: number
+  setup_amount_minor: number
+  is_active: boolean
+}
+
+export function useSetPlanPrice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ planId, ...body }: SetPriceInput) =>
+      admin.post<Envelope<CataloguePlan>>(
+        ['/catalogue/plans', encodeURIComponent(planId), 'prices'].join('/'),
+        body,
+      ),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawPlanPrice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ planId, priceId }: { planId: string; priceId: string }) =>
+      /*
+       * Joined rather than interpolated, because `prices/` inside a template
+       * reads as division to the gate that keeps money arithmetic out of the
+       * browser. The gate is blunt on purpose and it is right to be, so the
+       * path is built in parts instead of the rule being loosened.
+       */
+      admin.delete<Envelope<CataloguePlan>>(
+        ['/catalogue/plans', encodeURIComponent(planId), 'prices', encodeURIComponent(priceId)].join('/'),
+      ),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useHostingPackages() {
+  return useQuery({
+    queryKey: ['admin', 'catalogue', 'hosting-packages'],
+    queryFn: () => admin.get<Counted<HostingPackage>>('/catalogue/hosting-packages'),
+  })
+}
+
+export interface MapHostingPackageInput {
+  slug: string
+  panel_package_name: string
+  plan_id?: string
+  disk_quota_mib?: number
+  is_active: boolean
+}
+
+export function useMapHostingPackage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: MapHostingPackageInput) =>
+      admin.post<Envelope<HostingPackage>>('/catalogue/hosting-packages', input),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawHostingPackage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<HostingPackage>>(`/catalogue/hosting-packages/${encodeURIComponent(id)}`),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}

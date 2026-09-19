@@ -1313,6 +1313,68 @@ return [
      * — an entry with no provider reference is a commercial intention rather
      * than something a machine can be built from, and placement refuses it.
      */
+    'CatalogueProduct' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => 'string', 'description' => 'vps, dedicated or shared_hosting. The three this platform has a build path for; a fourth is software rather than a setting.'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'], 'description' => 'Display names by locale. Both languages are required.'],
+            'description' => ['type' => ['object', 'null'], 'additionalProperties' => ['type' => 'string']],
+            'is_active' => ['type' => 'boolean', 'description' => 'Whether it is offered. Withdrawing sets this false and never deletes the row.'],
+            'is_public' => ['type' => 'boolean'],
+            'sort_order' => ['type' => 'integer'],
+            'plans_count' => ['type' => 'integer'],
+        ],
+    ],
+    'CataloguePrice' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'currency' => ['type' => 'string', 'description' => 'ISO 4217, and one the platform is configured to bill in.'],
+            'billing_period' => ['type' => 'string', 'description' => 'hourly, daily, monthly, quarterly or yearly.'],
+            'recurring_amount_minor' => ['type' => 'integer', 'description' => 'Whole minor units. 9.000 KWD is 9000. Never a decimal: a decimal is a rounding decision taken by whichever layer parses it last.'],
+            'setup_amount_minor' => ['type' => 'integer', 'description' => 'Whole minor units, charged once.'],
+            'is_active' => ['type' => 'boolean'],
+            'available_from' => ['type' => ['string', 'null'], 'format' => 'date-time'],
+            'available_until' => ['type' => ['string', 'null'], 'format' => 'date-time'],
+        ],
+    ],
+    'CataloguePlan' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'product_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            'description' => ['type' => ['object', 'null'], 'additionalProperties' => ['type' => 'string']],
+            'resources' => ['type' => 'object', 'description' => 'What the plan sells. A document rather than columns because the three kinds describe different things: a VPS plan carries vcpu, memory_mib and disk_gib, a dedicated plan carries hardware_profile, a hosting plan carries panel quota.'],
+            'placement_constraints' => ['type' => ['object', 'null']],
+            'stock_limit' => ['type' => ['integer', 'null']],
+            'per_customer_limit' => ['type' => ['integer', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'is_public' => ['type' => 'boolean'],
+            'sort_order' => ['type' => 'integer'],
+            'prices' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/CataloguePrice']],
+            'priced_in' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Currencies with an active price. Empty means nobody can buy this plan, however listed it looks.'],
+        ],
+    ],
+    'HostingPackage' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'panel_package_name' => ['type' => 'string', 'description' => 'What this platform will ask cPanel or DirectAdmin for. Recorded, never verified: no panel has been contacted.'],
+            'plan_id' => ['type' => ['string', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'mapped' => ['type' => 'boolean', 'description' => 'Whether a plan points at it. A package with no plan is configuration nobody can order under.'],
+            'limits' => ['type' => 'object', 'additionalProperties' => ['type' => ['integer', 'null']], 'description' => 'Quota and CloudLinux limits. Null is the model\'s unlimited, not zero.'],
+        ],
+    ],
     'VmTemplate' => [
         'type' => 'object',
         'additionalProperties' => false,

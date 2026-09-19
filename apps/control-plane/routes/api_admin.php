@@ -14,6 +14,7 @@ use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
+use Lynomia\Modules\Catalog\Http\Controllers\OperatorCatalogueController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
@@ -30,6 +31,7 @@ use Lynomia\Modules\Providers\Http\Controllers\LicenceController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderCatalogueController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\SharedHosting\Http\Controllers\OperatorHostingPackageController;
 use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 
 /*
@@ -345,6 +347,77 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
      * the row, and "which image is this server running" is the first question
      * asked when a rebuild goes wrong.
      */
+    /*
+     * The catalogue: what this platform sells, and for how much.
+     *
+     * Before these existed nothing could write `products`, `plans`,
+     * `plan_prices` or `hosting_packages` in production — the only writer was
+     * a seeder that refuses to run there — so a clean deployment could model
+     * everything it sells and sell none of it. That was E-11.
+     *
+     * POST is an upsert keyed on the slug, or on (plan, currency, period) for
+     * a price: recording something twice is an operator correcting it, and
+     * answering 409 would leave "fix the typo" with no route through the API.
+     * DELETE withdraws rather than destroys, because orders, invoices and
+     * subscriptions point at these rows.
+     *
+     * Pricing is its own permission. Changing what a thing costs is a
+     * different act from describing it, and the roles that may do one are not
+     * always the roles that may do the other.
+     *
+     * Every route here is `catalog.manage`, including the reads, and that is
+     * deliberate rather than lazy. `catalog.view` looks like the obvious guard
+     * for a listing and is the one permission a plain customer holds — the
+     * baseline every customer login carries, which `AuthorizationTest` treats
+     * as the sole exception to "staff only". Guarding these with it would hand
+     * every customer the operator catalogue: withdrawn products, unlisted
+     * plans, both languages and every price, active or not. A read of the
+     * operator surface is an operator act.
+     */
+    Route::get('catalogue/products', [OperatorCatalogueController::class, 'products'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.products.index');
+
+    Route::post('catalogue/products', [OperatorCatalogueController::class, 'recordProduct'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.products.record');
+
+    Route::delete('catalogue/products/{product}', [OperatorCatalogueController::class, 'withdrawProduct'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.products.withdraw');
+
+    Route::get('catalogue/plans', [OperatorCatalogueController::class, 'plans'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.plans.index');
+
+    Route::post('catalogue/plans', [OperatorCatalogueController::class, 'recordPlan'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.plans.record');
+
+    Route::delete('catalogue/plans/{plan}', [OperatorCatalogueController::class, 'withdrawPlan'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.plans.withdraw');
+
+    Route::post('catalogue/plans/{plan}/prices', [OperatorCatalogueController::class, 'setPrice'])
+        ->middleware('permission:'.Permission::PricingManage->value)
+        ->name('catalogue.prices.set');
+
+    Route::delete('catalogue/plans/{plan}/prices/{price}', [OperatorCatalogueController::class, 'withdrawPrice'])
+        ->middleware('permission:'.Permission::PricingManage->value)
+        ->name('catalogue.prices.withdraw');
+
+    Route::get('catalogue/hosting-packages', [OperatorHostingPackageController::class, 'index'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.hosting_packages.index');
+
+    Route::post('catalogue/hosting-packages', [OperatorHostingPackageController::class, 'store'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.hosting_packages.map');
+
+    Route::delete('catalogue/hosting-packages/{package}', [OperatorHostingPackageController::class, 'destroy'])
+        ->middleware('permission:'.Permission::CatalogManage->value)
+        ->name('catalogue.hosting_packages.withdraw');
+
     Route::get('infrastructure/templates', [VmTemplateController::class, 'index'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.templates.index');
