@@ -328,6 +328,44 @@ authenticated calls made its second "unauthenticated" request as whoever the
 previous iteration logged in, and read 403 where it meant 401. The calls are
 ordered so every unauthenticated one happens before anything authenticates.
 
+## 11b. Software closure, re-certified
+
+Recomputed rather than copied. The question each one asks was asked again
+against the tree as it is.
+
+| Count | Value | How it was arrived at |
+| --- | --- | --- |
+| Approved-scope real code gaps | **0** | E-11 was the one. See below for the question it raised about Backups |
+| Unresolved product decisions | **0** | Scope is unchanged: five Complete, six Prepared, one ReadinessOnly. Nothing here moved a product, and `ProductKind` still refuses to name one that is not Complete |
+| Known flakes | **0** | Two consecutive full-suite runs from a rebuilt database, 3748 and then 3749 tests, no test failing in one and passing in the other |
+| Unknown executable stubs | **0** | Every method added here has a route, a caller and a test. `NoDeadMethodsTest`, `EveryControllerMethodIsReachableTest` and the portal's own no-hook-without-a-caller gate all pass, and the last of those caught a real one — `useWithdrawPlanPrice` had no screen until a price got a withdraw button |
+| Unsafe deferred architecture items | **0** | The addon writer gap is deferred and is **not** unsafe: it blocks no approved product. Evidenced below |
+
+### The question Backups raised, and its answer
+
+Backups is an approved Complete product with no catalogue kind of its own,
+which makes it fair to ask whether these endpoints can configure it at all — and
+whether the missing addon writer blocks it, since `addons.kind` names `backup`
+as an example.
+
+They can, and it does not. `BackupPolicy::fromPlanResources()` reads
+`backup_retention_days`, `backup_max_retained` and `backup_manual_allowance`
+from the **plan's** resources, and the Backups module references addons
+nowhere. So a plan recorded through this write path carries its own backup
+terms.
+
+That is asserted rather than argued:
+`a_backup_policy_is_part_of_the_plan_an_operator_records` records a plan with
+thirty-day retention through the API and reads the policy back out of the
+stored row. It also pins a property the write path needs and nothing else
+states — the resources document is stored exactly as given, not filtered to the
+keys this endpoint validates. A path that kept only what it recognised would
+drop every product-specific setting a plan carries, and the first symptom would
+be backups retained for the default seven days on a plan that sold thirty.
+
+So addons remain an optional commercial mechanism for extras, and their missing
+writer is a recorded non-blocking item rather than a second E-11.
+
 ## 12. What this does not close
 
 - **E-1 through E-10 are untouched.** There is still no trusted runner, no

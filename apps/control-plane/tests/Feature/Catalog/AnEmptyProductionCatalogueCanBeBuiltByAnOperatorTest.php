@@ -8,6 +8,7 @@ use Database\Seeders\CatalogueSeeder;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Backups\Domain\ValueObjects\BackupPolicy;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
@@ -194,6 +195,58 @@ final class AnEmptyProductionCatalogueCanBeBuiltByAnOperatorTest extends TestCas
         $this->actingAs($operator)->getJson('/api/admin/catalogue/plans')
             ->assertOk()
             ->assertJsonPath('meta.unpriced', 0);
+    }
+
+    #[Test]
+    public function a_backup_policy_is_part_of_the_plan_an_operator_records(): void
+    {
+        /*
+         * Backups is an approved Complete product and has no catalogue kind of
+         * its own, which raises the fair question of whether it can be
+         * configured at all through these endpoints.
+         *
+         * It can, because it is not sold as a separate line: BackupPolicy is
+         * read from the plan's resources, and the Backups module references
+         * addons nowhere. So a VPS plan recorded here carries its own backup
+         * terms, and the resources document is stored exactly as given rather
+         * than filtered down to the keys this endpoint happens to know about.
+         *
+         * That last part is what this asserts. A write path that kept only the
+         * keys it validated would silently drop every product-specific setting
+         * a plan carries, and the first symptom would be backups retained for
+         * the default seven days on a plan that sold thirty.
+         */
+        $operator = $this->operator();
+
+        $product = $this->actingAs($operator)->postJson('/api/admin/catalogue/products', [
+            'kind' => 'vps',
+            'slug' => 'backed-up-vps',
+            'name' => ['en' => 'Backed-up VPS', 'ar' => 'خادم بنسخ احتياطي'],
+            'is_active' => true,
+            'is_public' => true,
+        ])->assertCreated();
+
+        $plan = $this->actingAs($operator)->postJson('/api/admin/catalogue/plans', [
+            'product_id' => $product->json('data.id'),
+            'slug' => 'backed-up-vps-1',
+            'name' => ['en' => 'VPS 1', 'ar' => 'خادم ١'],
+            'resources' => [
+                'vcpu' => 2,
+                'memory_mib' => 4096,
+                'disk_gib' => 80,
+                'backup_retention_days' => 30,
+                'backup_max_retained' => 10,
+            ],
+            'is_active' => true,
+            'is_public' => true,
+        ])->assertCreated();
+
+        $policy = BackupPolicy::fromPlanResources(
+            (array) Plan::query()->findOrFail($plan->json('data.id'))->resources,
+        );
+
+        $this->assertSame(30, $policy->retentionDays);
+        $this->assertSame(10, $policy->maxRetained);
     }
 
     #[Test]

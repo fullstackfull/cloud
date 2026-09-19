@@ -444,6 +444,12 @@ purchased or activated automatically.**
 
 ## 22a. Architecture finding — the sellable catalogue has no production write path
 
+> **Closed in software.** An operator now configures the catalogue through the
+> Control Center: `docs/gap-8-e11-production-catalogue-control-closure.md`. The
+> finding below is left as written, because it is the record of what was wrong
+> and of how it was found.
+
+
 Found by doing §36's work: mapping real hosting packages onto Lynomia plans.
 Raised rather than fixed, because the fix is application code and this phase is
 environment preparation.
@@ -628,14 +634,16 @@ tree stays clean afterwards.
 | **E-8** | Hosting panel licence position `UNKNOWN` | `BLOCKED_LICENCE` | operator — §22 |
 | **E-9** | The real internal DNS suffix is not chosen, and `.internal` would need an architecture decision | configuration, not a blocker label | operator — §8 |
 | **E-10** | No non-customer validation subnet or IP pool identified | configuration, not a blocker label | operator — §21 |
-| **E-11** | **The sellable catalogue has no production write path** — no product, plan, price or hosting package can be created outside a seeder that refuses to run in production. Blocks 30B.3 and `READY_TO_SELL`, not the trusted 30B.0 | architecture finding, not an environment blocker | **application change, §22a** |
+| **E-11** | ~~The sellable catalogue has no production write path~~ — **CLOSED IN SOFTWARE.** An operator configures products, plans, prices and hosting package mappings through the Control Center, with no seeder, SQL or code edit. See `docs/gap-8-e11-production-catalogue-control-closure.md` | closed | closed |
 
 E-9 and E-10 are deliberately not forced into a canonical blocker label. They are
 configuration states with precise next actions, and calling them
-`BLOCKED_NETWORK` would misdescribe both. E-11 is not an environment blocker at
-all — no runner, route or credential closes it — which is why it is named
-separately rather than folded into the list a person with estate access can work
-through.
+`BLOCKED_NETWORK` would misdescribe both. E-11 was not an environment blocker at
+all — no runner, route or credential would have closed it — which is why it was
+named separately rather than folded into the list a person with estate access
+can work through. **It is now closed in software, and E-1 through E-10 are
+exactly as they were.** Nothing about the catalogue write path brings a trusted
+runner any closer.
 
 ## 31. Readiness for the trusted 30B.0
 
