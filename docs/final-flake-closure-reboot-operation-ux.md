@@ -374,3 +374,103 @@ push of the documentation commit, because `ci.yml` carries
 sequenced the pushes, not a CI failure, and it is recorded rather than quietly
 replaced by the run that did finish. `78355a8` is `6c4d342` plus this document
 and nothing else.
+
+## 13. The gates, run locally
+
+Every one of these was run on this machine after the environment was corrected,
+on a database dropped and rebuilt first.
+
+| Gate | Result |
+|---|---|
+| Full backend (`APP_ENV=testing php artisan test`) | **3750 passed / 3750**, 143,043 assertions, 0 failed, 9m57s |
+| Architecture suite | **120 / 120**, 8,454 assertions |
+| E-11 focused (the five catalogue closure tests) | **43 / 43** |
+| Golden paths (`tests/Feature/Simulation`) | **151 / 151** |
+| VPS (`tests/Feature/Vps`) | **141 / 141** |
+| Affected browser spec × 50 | **150 / 150**, 0 failed |
+| Full browser suite | **364 passed, 14 skipped, 0 failed** |
+| Frontend unit (vitest) | **454 / 454**, 82 files |
+| `tsc -b --noEmit` | 0 |
+| `eslint .` | 0 |
+| `npm run build` | 0 |
+| Pint | passed |
+| `openapi:generate --check` | up to date, 263 operations |
+| `openapi:lint` | valid, 6 warnings — the same 6, none new |
+| PHPStan | **not runnable here** — composer cannot reach GitHub through this environment's proxy to install the analysis toolchain. Green in CI, run 199 |
+
+The frontend count moved from 451 to 454: the three tests added to
+`watching-what-was-started.test.tsx`.
+
+The backend count reads 3750 where the brief's header says 3749, and that is
+worth one sentence rather than a shrug. This patch's only backend change is
+`$this->freezeTime()` and a comment inside an existing test method — it declares
+no new test — so 3750 is what `f0d89fb` measures as well. The 3749 in the header
+is a stale figure from before `44b7be3`, which added the Backups test to
+`AnEmptyProductionCatalogueCanBeBuiltByAnOperatorTest`. Nothing went missing and
+nothing appeared; one number was written down a commit too early.
+
+## 14. The known-flake count, recomputed
+
+Not copied. Derived, from the records and from the runs above.
+
+**The carried record.** Every mention of a flake in `docs/` was read. Two are
+live entries: Gap 6 §31, which measured the reboot race, and Gap 7 §33, which
+lists it as `KNOWN FLAKE — CARRIED`. The remaining seven mentions
+(`security-review.md`, `phase-30b-sim-gap-4`, `phase-29-final-software-closure`,
+the three portal wave reports and `api.md`) are either prose about something
+else or records of flakes already closed, and none of them carries an open item.
+
+**The two that were live.**
+
+| | Status | Evidence |
+|---|---|---|
+| The reboot acknowledgement race | **CLOSED** | The assertion that raced it no longer exists. 150/150 repetitions, the full suite green locally and in CI on first attempt, and a deterministic test that holds each ordering |
+| The `ShowHostingAccountEndpointTest` clock race | **CLOSED** | Frozen. 3750/3750 locally, both CI backend jobs green |
+
+**What was not claimed.** The reboot race itself is not gone and cannot be,
+because one toast id replaced on the first terminal read is the correct design.
+What was removed is a test that raced it. That distinction was made in Gap 8 and
+is repeated here rather than improved upon, because it is the accurate one.
+
+```
+KNOWN FLAKES = 0
+```
+
+## 15. Where this leaves the software counts
+
+| | |
+|---|---|
+| Approved-scope real code gaps | **0** — E-11 was the one, and its five suites are 43/43 |
+| Product decisions unresolved | **0** — scope unchanged; this patch decided one UX contract that was already implemented |
+| Known flakes | **0** — §14 |
+| Unknown executable stubs | **0** — the gates that enforce it ran: the architecture suite's reachability and dead-method tests, 120/120, and the portal's no-hook-without-a-caller rule under `eslint .`, 0 |
+| Unsafe deferred architecture items | **0** — the addon writer gap is deferred and blocks no approved product, which was proved by gate in the previous patch and is unchanged here |
+
+Nothing in this patch touches infrastructure, providers, credentials or money.
+No application file changed at all.
+
+```
+30B.0-E                 = NOT READY
+REAL_INFRA_VERIFIED     = NONE
+REAL_PAYMENT_VERIFIED   = NONE
+REAL_REGISTRAR_VERIFIED = NONE
+REAL_HOSTING_VERIFIED   = NONE
+READY_TO_SELL           = NONE
+```
+
+## 16. Verdict
+
+```
+FINAL FLAKE CLOSURE
+REBOOT OPERATION UX CONTRACT
+
+Status: CLOSED
+```
+
+The contract is written down, the tests assert it, six breakages prove they
+assert it, and the assertion that raced a correct design no longer exists.
+
+What is being claimed is narrow and is worth stating in the same breath: the
+race is still in the product and is still right. A customer whose machine
+reboots in under one HTTP round trip will never see "Reboot requested", and that
+is the portal telling them something better. The old test called that a failure.
