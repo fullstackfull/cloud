@@ -337,9 +337,40 @@ against the tree as it is.
 | --- | --- | --- |
 | Approved-scope real code gaps | **0** | E-11 was the one. See below for the question it raised about Backups |
 | Unresolved product decisions | **0** | Scope is unchanged: five Complete, six Prepared, one ReadinessOnly. Nothing here moved a product, and `ProductKind` still refuses to name one that is not Complete |
-| Known flakes | **0** | Two consecutive full-suite runs from a rebuilt database, 3748 and then 3749 tests, no test failing in one and passing in the other |
+| Known flakes | **1**, carried | The browser reboot-acknowledgement race, carried since Gap 6 §31 and re-carried in Gap 7 §33. It fired in CI run 196. See below — **this count was first written as 0, which was wrong** |
 | Unknown executable stubs | **0** | Every method added here has a route, a caller and a test. `NoDeadMethodsTest`, `EveryControllerMethodIsReachableTest` and the portal's own no-hook-without-a-caller gate all pass, and the last of those caught a real one — `useWithdrawPlanPrice` had no screen until a price got a withdraw button |
 | Unsafe deferred architecture items | **0** | The addon writer gap is deferred and is **not** unsafe: it blocks no approved product. Evidenced below |
+
+### The flake count was wrong, and the correction is the point
+
+This section first said **0** known flakes, on the evidence of two consecutive
+full backend runs with nothing flipping. That was a real error: the backend is
+not the whole suite, and the repository already carries exactly one browser
+flake — the reboot-acknowledgement race, measured in Gap 6 §31 and listed in
+Gap 7 §33 as `KNOWN FLAKE — CARRIED`.
+
+It then fired, in CI run 196:
+
+```
+Error: expect(locator).toBeVisible() failed
+> 80 |  await expect(channel.getByText(/Reboot requested/)).toBeVisible()
+1 failed
+363 passed (30.3m)
+```
+
+That is the carried race and not a regression from this work, on three
+grounds. Gap 6 diagnosed the mechanism — the acknowledgement is announced under
+an operation's id and replaced the moment the watcher's first read comes back
+terminal, and this suite runs the queue inline, so the window in which those
+words exist is one HTTP round trip. It is one spec of 364, in the customer
+mobile journey. And nothing in this patch is reachable from it: the catalogue
+endpoints, the operator screen, the audit actions and the validation names
+touch no VPS operation, no updates channel and no mobile view.
+
+It is **not** fixed here. It is somebody's task, it is measured, and widening
+an E-11 closure to chase a timing race in the reboot acknowledgement is how a
+patch stops being reviewable. What is corrected is the count, which should have
+said 1 from the start.
 
 ### The question Backups raised, and its answer
 

@@ -94,7 +94,7 @@ final class OperatorCatalogueController
                 description: $this->optionalLocalised($request->array('description')),
                 isActive: $request->boolean('is_active'),
                 isPublic: $request->boolean('is_public'),
-                sortOrder: (int) ($request->integer('sort_order') ?? 0),
+                sortOrder: $request->integer('sort_order'),
                 operator: $operator,
             );
         } catch (CatalogueRefused $refusal) {
@@ -179,7 +179,7 @@ final class OperatorCatalogueController
                 perCustomerLimit: $request->filled('per_customer_limit') ? $request->integer('per_customer_limit') : null,
                 isActive: $request->boolean('is_active'),
                 isPublic: $request->boolean('is_public'),
-                sortOrder: (int) ($request->integer('sort_order') ?? 0),
+                sortOrder: $request->integer('sort_order'),
                 operator: $operator,
             );
         } catch (CatalogueRefused $refusal) {
@@ -230,8 +230,8 @@ final class OperatorCatalogueController
                 plan: $found,
                 currency: $currency,
                 period: $period,
-                recurringMinor: (int) $request->integer('recurring_amount_minor'),
-                setupMinor: (int) ($request->integer('setup_amount_minor') ?? 0),
+                recurringMinor: $request->integer('recurring_amount_minor'),
+                setupMinor: $request->integer('setup_amount_minor'),
                 isActive: $request->boolean('is_active'),
                 availableFrom: $request->filled('available_from')
                     ? CarbonImmutable::parse($request->string('available_from')->value())
