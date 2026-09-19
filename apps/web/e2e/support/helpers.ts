@@ -308,18 +308,18 @@ export function operationsChannel(page: Page) {
  * at one — a helper that accepted six of the seven would be the same race in
  * a different place.
  */
+function everyLifecycleMessageFor(action: string): RegExp {
+  return new RegExp(
+    `${action} (requested|completed|did not finish` +
+      `|stopped and we are looking at it|cancelled|is taking longer than usual)` +
+      `|We could not confirm the result of ${action}`,
+  )
+}
+
 export async function expectOperationReported(page: Page, action: string): Promise<void> {
   const channel = operationsChannel(page)
 
-  await expect(
-    channel.getByText(
-      new RegExp(
-        `${action} (requested|completed|did not finish` +
-          `|stopped and we are looking at it|cancelled|is taking longer than usual)` +
-          `|We could not confirm the result of ${action}`,
-      ),
-    ),
-  ).toBeVisible()
+  await expect(channel.getByText(everyLifecycleMessageFor(action))).toBeVisible()
 
   /*
    * And never the word that would be a claim rather than a report. This part
@@ -327,4 +327,20 @@ export async function expectOperationReported(page: Page, action: string): Promi
    * a count of zero is true at every moment rather than only at one.
    */
   await expect(channel.getByText(/^Success/)).toHaveCount(0)
+}
+
+/**
+ * Waits until the channel reports this action no longer, whatever it said.
+ *
+ * The companion to {@see expectOperationReported}, and it has to use the same
+ * pattern for the same reason. A dismissal asserted against one of the seven
+ * messages — "Reboot requested", say — passes without the dismiss button doing
+ * anything at all, on every run where the operation had already reached its
+ * outcome and the channel was showing "Reboot completed" instead. That is the
+ * race the positive assertion had, mirrored, and it is worse: it fails open.
+ */
+export async function expectOperationNoLongerReported(page: Page, action: string): Promise<void> {
+  await expect(
+    operationsChannel(page).getByText(everyLifecycleMessageFor(action)),
+  ).toHaveCount(0)
 }

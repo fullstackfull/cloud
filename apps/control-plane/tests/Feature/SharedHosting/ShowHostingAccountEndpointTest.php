@@ -73,6 +73,20 @@ final class ShowHostingAccountEndpointTest extends HostingApiTestCase
     #[Test]
     public function a_suspended_account_states_when_its_data_may_be_released(): void
     {
+        /*
+         * Frozen, because this asserts a date derived from another date and
+         * reads `now()` at both ends: once when the suspension is recorded,
+         * and again when the expected release is computed. A second ticking
+         * between the two makes them differ by exactly one second, which is
+         * what failed CI run 197 —
+         *
+         *   -'2026-10-19T17:13:53+00:00'
+         *   +'2026-10-19T17:13:52+00:00'
+         *
+         * The thirty days is the claim; the wall clock was never part of it.
+         */
+        $this->freezeTime();
+
         [$customer, $user] = $this->accountWithOwner();
         $account = $this->hostingAccountFor($customer, HostingAccountStatus::Suspended, 'acmestop', atPanel: false);
         $account->forceFill(['suspended_at' => now(), 'suspension_reason' => 'invoice 4471 unpaid'])->save();

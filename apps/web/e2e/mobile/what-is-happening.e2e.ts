@@ -1,6 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { fixtures, signIn, users } from '../support/helpers'
+import {
+  expectOperationNoLongerReported,
+  expectOperationReported,
+  fixtures,
+  operationsChannel,
+  signIn,
+  users,
+} from '../support/helpers'
 import { openMenu } from '../support/mobile'
 
 /*
@@ -69,27 +76,76 @@ test.describe('what is happening, on a phone', () => {
     await noSidewaysScroll(page)
   })
 
-  test('shows the acknowledgement without covering the controls it is about', async ({ page }) => {
+  test('reports the operation without covering the controls it is about', async ({ page }) => {
+    /*
+     * This is a layout test, and it used to assert the acknowledgement
+     * sentence exactly — `getByText(/Reboot requested/)`. That was the last
+     * home of the race carried since Gap 6: the acknowledgement is replaced
+     * under the same operation id as soon as the watcher's first read comes
+     * back terminal, this suite runs the queue inline, and so the window in
+     * which those exact words exist is one HTTP round trip. Three other specs
+     * were migrated to the lifecycle contract when that was diagnosed; this
+     * one was missed, and it is what failed CI run 196.
+     *
+     * The contract it asserts now is the product's actual promise: the channel
+     * says where the operation stands, in the lifecycle's own words, whichever
+     * end of it the browser caught. The exact sentence is still asserted
+     * exactly, in `watching-what-was-started.test.tsx`, where the read is a
+     * controlled fake and the timing is the test's own.
+     */
+    const mutations: string[] = []
+
+    page.on('request', (request) => {
+      if (request.method() !== 'GET' && request.method() !== 'HEAD' && /\/operations|power|reboot|restart/.test(request.url())) {
+        mutations.push(`${request.method()} ${new URL(request.url()).pathname}`)
+      }
+    })
+
     await page.goto('/vps')
     await page.getByRole('link', { name: fixtures.operableHostname, exact: true }).first().click()
 
     const reboot = page.getByRole('button', { name: 'Reboot' }).first()
     await reboot.click()
 
-    const channel = page.getByRole('region', { name: 'Updates' })
-    await expect(channel.getByText(/Reboot requested/)).toBeVisible()
-
-    await noSidewaysScroll(page)
+    await expectOperationReported(page, 'Reboot')
 
     /*
+     * Everything this test has to say about the panel is said here, in the
+     * steps immediately after the message was seen, and that ordering is
+     * deliberate.
+     *
+     * The channel is transient by design: an info or success message clears
+     * itself six seconds after it was announced (TRANSIENT_MS in Toasts.tsx —
+     * a warning or a failure stays, because bad news has to be read). So a
+     * browser assertion that needs the panel to still be there is spending a
+     * six-second budget, and any work put between the sighting and the
+     * assertions is spent out of it. These are three round trips.
+     *
      * The panel is fixed to the bottom of a small screen, which is the right
      * place for it and the easiest place to cover something with it. It has a
      * dismiss button, and the dismiss button is reachable.
      */
+    const channel = operationsChannel(page)
     const dismiss = channel.getByRole('button', { name: 'Dismiss' }).first()
     await expect(dismiss).toBeVisible()
 
+    await noSidewaysScroll(page)
+
     await dismiss.click()
-    await expect(channel.getByText(/Reboot requested/)).toHaveCount(0)
+
+    /*
+     * Against every message the channel can carry, not just the
+     * acknowledgement. Asserting the dismissal against one of the seven would
+     * pass on every run where the operation had already settled and the panel
+     * was showing its outcome instead — the same race, mirrored, and failing
+     * open rather than closed.
+     */
+    await expectOperationNoLongerReported(page, 'Reboot')
+
+    /*
+     * One press, one mutation. A display race must never be answered by
+     * sending the reboot again, so the count is asserted rather than assumed.
+     */
+    expect(mutations, `One press sent: ${mutations.join(', ')}`).toHaveLength(1)
   })
 })
