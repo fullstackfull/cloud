@@ -1038,10 +1038,15 @@ Two items from Part I have moved, and neither moves a `REAL_*` status.
   real cluster to read images from, not the ability to record them.
 
 **D-1**, the disagreement between `*.prod.example` in the inventories and
-`*.kw.lynomia.internal` in the monitoring targets, is unchanged and still
-`30B_DRIFT`. §II.10 adds one fact to it: `.internal` is refused by EndpointPolicy,
-so the monitoring naming scheme is not one a provider row could adopt even if a real
-inventory arbitrated in its favour. Recorded, not "fixed" here.
+`*.kw.lynomia.internal` in the monitoring targets, was recorded here as unchanged and
+still `30B_DRIFT`. **That was wrong, and it is corrected in
+`docs/phase-30b-0e-trusted-runner-bootstrap.md` §2.** It was carried forward from
+Part I without re-reading the target files. All eight files in
+`infrastructure/monitoring/prometheus/targets/` name hosts under `.example`, matching
+the inventories, and each carries a header saying the real list is operator-supplied
+and that `.internal` is refused by this platform's own endpoint policy. No non-comment
+`.internal` hostname exists anywhere in the repository. **D-1 is closed**, and the
+operator has one real suffix to choose rather than two schemes to reconcile.
 
 ## II.13 Blockers
 
