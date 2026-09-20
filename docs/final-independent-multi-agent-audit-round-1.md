@@ -26,8 +26,9 @@ instances can be closed:
    `::Credit` are constructed only inside a DTO that nothing consumes — so no
    invoice in this codebase can carry a proration line at all. A measured,
    adversarially-adjudicated sweep puts the confirmed dead-declaration count at
-   **21 enum cases** (see *Corrections* below — the first figure published here
-   was wrong, and it was wrong in the direction of overstating the problem).
+   **29 enum cases**, among them 16 of the 55 notification types the platform
+   declares (see *Corrections* below — the first figure published here was
+   wrong, and it was wrong in the direction of overstating the problem).
 2. **Consequences have no owner.** Twelve of roughly two hundred
    `Application/Actions` classes dispatch a domain event. `RefundIssued` does
    not carry an order id, so the listener that would unwind a refunded order
@@ -88,27 +89,40 @@ personally, by running the check rather than trusting the report. Where a
 finder's claim did not survive that check, the finding was downgraded, rewritten
 or dropped, and this report says so by name.
 
-### The backend suite's state, and why this report does not publish a number
+### The backend suite's state — measured, and green
 
-Before the audit fan-out, the full backend suite measured **3,750 / 3,750** on
-this tree. After it, two full runs on the same unchanged commit produced **55**
-and **47** failures with *different, overlapping* failing sets — and targeted
-re-runs of the failing areas pass in isolation (`tests/Feature/Vps` 141/141).
+**3,750 tests, 3,750 passed, 143,043 assertions, zero failures.**
 
-The failure signatures are not assertion-logic mismatches. They are foreign row
-counts (a test asserting "nothing queued" finding 16), and — in one attempted
-isolation run — `WorkerHarness` correctly refusing to empty a database whose
-name did not identify it as a test database. Three things make a clean
-measurement hard in this environment and are themselves findings:
-`phpunit.xml` pins nothing (F-41), `WorkerHarness` requires a conventionally
-named database, and roughly forty agents created, migrated and dropped
-databases and Redis keys on one host for several hours.
+That number was obtained after this audit's first publication, on a freshly
+restarted container with no other agent running, by the exact invocation CI uses
+(`APP_ENV=testing php artisan test`, no `DB_DATABASE` override). It settles a
+question the first version of this report deliberately left open.
 
-**This report therefore publishes no post-audit pass/fail count.** The number it
-stands behind is the pre-fan-out 3,750 / 3,750; the post-fan-out runs are
-recorded as unmeasured rather than as red. Re-establishing the baseline on a
-dedicated runner is the first thing Round 2 should do, and `tests/Feature/Queue`
-×10 contention-free remains specifically owed.
+During the audit two full runs on the same unchanged commit produced **55** and
+**47** failures with different, overlapping failing sets. This report declined to
+publish either, and that caution was correct: **every one of those failures was
+cross-agent contamination, not a code defect.** Roughly forty agents were
+creating, migrating and dropping databases and sharing one Redis instance on a
+single host. The signatures said so at the time — tests asserting "nothing
+queued" finding 16, and `WorkerHarness` correctly refusing to empty a database
+whose name did not identify it as a test database — and an isolated re-run of
+the largest failing area passed 141/141. The clean measurement confirms it.
+
+The methodology error was the coordinator's: pointing the primary groups at one
+shared `lynomia_test`, which `phpunit.xml` pins without `force="true"`. It cost
+an unknown number of early runs, and it is why no finding in this report rests
+on a full-suite result.
+
+Two things this does **not** retract. `phpunit.xml` still pins nothing
+enforceably (F-41), and `RefreshDatabase` still runs `migrate:fresh` with no
+safe-database guard while `WorkerHarness` in the same tree enforces four — the
+suite is green *and* unsafe to run twice concurrently on one host. And the
+`apps/web` vitest gate remains load-triggered flaky (F-42), which is a separate
+measurement on a separate runner.
+
+`tests/Feature/Queue`, the one measurement this report recorded as owed, was
+also taken on the clean container: **10 runs, 10 passed.** Its 4-of-10 failures
+during the audit were contention, not a flake.
 
 ### Method limitations, stated plainly
 
@@ -123,9 +137,10 @@ dedicated runner is the first thing Round 2 should do, and `tests/Feature/Queue`
   answered only after a direct request. Its findings arrived after the report
   body was drafted and are integrated below; two of them correct this
   coordinator's own prior work.
-- **One measurement is owed.** `tests/Feature/Queue` failed 4 of 10 runs under
-  heavy cross-agent contention and no contention-free re-run was obtained. It is
-  recorded as unresolved, **not** scored as a flake.
+- **The owed measurement was taken and is clean.** `tests/Feature/Queue` failed
+  4 of 10 runs under heavy cross-agent contention during the audit. Re-run
+  contention-free on a restarted container: **10 of 10 passed.** Those failures
+  were contention, as suspected but not then provable. It is not a flake.
 - **Provider-side consequences are inferred, not executed.** No real provider
   was contacted. Where a defect's final consequence depends on real Proxmox,
   Cloudflare, WHM or DirectAdmin semantics, this report says so and does not
@@ -512,11 +527,17 @@ verdict then handed to a separate agent instructed to **refute** it:
 | GENUINELY_DEAD — surviving adversarial refutation | **21** |
 
 So roughly a quarter of the statically-dead set is truly dead. Two caveats
-stated plainly: **11 cases were dropped** because the coordinator hand-transcribed
-the work-list instead of passing it programmatically — the same class of sloppy-list
-error criticised above — and **zero** of the 21 were refuted away, which may mean
-the classification was conservative or may mean the refuters were not aggressive
-enough. Neither caveat is resolved here.
+were stated when this section was first written; one is now resolved. **11 cases
+were dropped** because the coordinator hand-transcribed the work-list instead of
+passing it programmatically — the same class of sloppy-list error criticised
+above. Those 11 have since been adjudicated by hand: **8 were `NotificationType`
+cases and all 8 are genuinely dead** (folded into F-46, which grows from 8 to
+16), and **3 were `Permission` cases that are referenced in `routes/` and are
+therefore not dead at all** — their real defect is that no seeded role holds
+them, which is F-03 and was already recorded. The confirmed dead-declaration
+count is therefore **29**, not 21. The second caveat stands unresolved: **zero**
+of the 21 were refuted away, which may mean the classification was conservative
+or may mean the refuters were not aggressive enough.
 
 **None of this disturbs F-19.** The `OrderStatus` 9-of-13 result was derived
 directly from a complete `grep -rn 'OrderStatus::'` over `src` and `app`, not
@@ -524,17 +545,37 @@ from any sweep, and was re-verified independently.
 
 **Two findings are added, both stronger than the figure they replace.**
 
-- **F-46 — eight notification types are declared, translated into both
-  languages, and never sent.** `NotificationType::BackupCompleted` and
-  `::BackupFailed` have customer-facing copy in `lang/en/notifications.php:160,164`
-  and `lang/ar/notifications.php:160,164`, and no code path produces either.
-  The Backups module does send `FileRestoreCompleted`/`Failed`/`NeedsReview`, so
-  file-restore notifications work and backup-outcome notifications do not.
-  **Backups is an approved launch product: a customer's backup fails and they
-  are never told.** The same holds for `IncidentAffectingService`,
-  `MaintenanceScheduled`, `NewSignIn`, `OrderPlaced`, `PasswordChanged` and
-  `ReinstallStarted`. Class: OPERABILITY_GAP, and for the two backup types,
-  approved-scope.
+- **F-46 — sixteen of the platform's fifty-five notification types are
+  declared, have customer-facing copy written and translated into BOTH English
+  and Arabic, and are produced by nothing.** Verified exhaustively: no
+  `NotificationType::from()`, `::tryFrom()` or `::cases()` exists anywhere in
+  `src`, `app`, `database`, `routes` or `config`, so there is no dynamic escape
+  hatch; the Eloquent cast at `Notification.php:54` is a read path that can only
+  hydrate rows something already wrote. 39 types are produced; these 16 are not:
+
+  | Group | Never produced |
+  |---|---|
+  | Account security | `PasswordChanged`, `TwoFactorEnabled`, `TwoFactorDisabled`, `NewSignIn` |
+  | Backups (approved) | `BackupCompleted`, `BackupFailed`, `RestoreCompleted`, `RestoreFailed` |
+  | Billing | `OrderPlaced`, `RenewalUpcoming`, `RenewalFailed`, `SuspensionWarning` |
+  | Service lifecycle | `ServiceProvisioning`, `ReinstallStarted`, `IncidentAffectingService`, `MaintenanceScheduled` |
+
+  Three consequences are worth separating. **The account-security four are the
+  standard account-takeover detection mechanism** — a password change, a 2FA
+  disable, a sign-in from a new device — and none of them fires, so the victim
+  is never told. **The Backups four are approved launch scope**, and the
+  asymmetry inside that one module is the proof this is an omission rather than
+  policy: `ReconcileFileRestores.php:135-137` does send `FileRestoreCompleted`,
+  `FileRestoreFailed` and `FileRestoreNeedsReview`, so *file*-restore
+  notifications work while *backup* and *whole-machine restore* notifications do
+  not. **It compounds F-09**: a restore is already wrongly reported as complete
+  by polling the finished backup task, and now no notification fires either, so
+  the customer has two independent reasons to be misinformed about the same
+  operation. `SuspensionWarning` means a customer is suspended without warning.
+  Class: OPERABILITY_GAP; the account-security four are arguably
+  CONFIRMED_SECURITY_DEFECT and are listed here rather than there only because
+  no evidence was gathered on whether an alternative channel covers them.
+
 - **F-47 — `DedicatedServerStatus::Retired`**: a legal transition target from
   three states, with a dedicated `isRetired()` predicate, an exclusion in the
   inventory sweep, and a concurrency comment in `SyncDedicatedServer.php:56`
