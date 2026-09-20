@@ -28,7 +28,23 @@ return [
     |
     */
 
-    'env' => env('APP_ENV', 'production'),
+    /*
+     * Normalised, and deliberately so. Every production guard in this platform
+     * is an exact string comparison against `production`: `isProduction()` and
+     * `environment('production')` both compare this value verbatim, at 38 call
+     * sites that include the ones refusing a fake payment, compute, dedicated,
+     * hosting, DNS or backup driver, the one refusing to load the reference
+     * estate into a real database, and the one deciding whether the readiness
+     * ladder is enforced at all.
+     *
+     * An unset value already failed closed, on the default below. A
+     * miscapitalised one did not: `APP_ENV=Production` is not `production`, so
+     * every one of those guards silently decided it was somewhere else and
+     * stood down together. Trimming and lower-casing here means no guard has to
+     * remember to do it, and an empty value falls back to `production` rather
+     * than becoming a blank environment that matches nothing.
+     */
+    'env' => strtolower(trim((string) env('APP_ENV', 'production'))) ?: 'production',
 
     /*
     |--------------------------------------------------------------------------
