@@ -8,7 +8,9 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Throwable;
 
 final class RateLimitServiceProvider extends ServiceProvider
 {
@@ -139,14 +141,38 @@ final class RateLimitServiceProvider extends ServiceProvider
          * reputation attached, and two administrators of the same account
          * sharing one bucket is the correct arrangement — the limit protects
          * the recipients, and the recipients do not care which colleague sent
-         * it. Falling back to the user, and then to the address, keeps the
-         * limiter defined for a request that somehow arrives without an
-         * account resolved.
+         * it.
+         *
+         * Keyed on the account the middleware resolved, never on the
+         * `X-Lynomia-Customer` header. `throttle:team-invitations` runs after
+         * `ResolveActingCustomer` on both invitation routes, so the account is
+         * already settled by the time this closure runs.
+         *
+         * The header used to be consulted first, with a fallback that fired
+         * only when it was ABSENT. A caller who sent junk therefore still
+         * acted on their own account — the resolver treats an unparseable
+         * value as absent — while presenting a bucket key nobody had ever
+         * used. That is not a rotated limit but an unbounded one: every
+         * distinct value is a fresh budget, and the same held for merely
+         * case-folding the caller's own id, since Crockford base32 is
+         * case-insensitive and the resolver lower-cases it while the limiter
+         * did not. This bucket is the whole control — `ResendInvitation`
+         * writes `sent_count` and `last_sent_at` and compares neither, so it
+         * has no cooldown of its own.
+         *
+         * Falling back to the user, and then to the address, keeps the limiter
+         * defined for a request that somehow arrives without an account
+         * resolved — a route in the wrong middleware group, which is a wiring
+         * mistake rather than something a caller can arrange.
          */
         RateLimiter::for('team-invitations', function (Request $request): Limit {
             $user = $request->user();
-            $account = $request->header('X-Lynomia-Customer')
-                ?? ($user instanceof User ? 'user:'.$user->id : null);
+
+            try {
+                $account = 'account:'.app(ActingCustomer::class)->id();
+            } catch (Throwable) {
+                $account = $user instanceof User ? 'user:'.$user->id : null;
+            }
 
             return Limit::perHour((int) config('security.rate_limits.team_invitations.attempts', 30))
                 ->by('invite:'.($account ?? $request->ip() ?? 'unknown'));
