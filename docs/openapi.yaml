@@ -21445,6 +21445,31 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         period_end:
           "$ref": "#/components/schemas/Timestamp"
+        invoice:
+          "$ref": "#/components/schemas/PlanChangeInvoice"
+        awaits_payment:
+          type: "boolean"
+        resize:
+          "$ref": "#/components/schemas/PlanChangeResize"
+        awaits_infrastructure:
+          type: "boolean"
+    PlanChangeInvoice:
+      type:
+        - "object"
+        - "null"
+      additionalProperties: false
+      description: "The proration invoice an upgrade leaves behind. Null when the change owes nothing."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        number:
+          type:
+            - "string"
+            - "null"
+        status:
+          type: "string"
+        total:
+          "$ref": "#/components/schemas/Money"
     PlanChangeQuote:
       type: "object"
       additionalProperties: false
@@ -21505,6 +21530,19 @@ components:
             "$ref": "#/components/schemas/PlanChangeQuote"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    PlanChangeResize:
+      type:
+        - "object"
+        - "null"
+      additionalProperties: false
+      description: "The queued provider job, once there is one. Null while an upgrade is still unpaid."
+      properties:
+        job_id:
+          type: "string"
+        status:
+          type:
+            - "string"
+            - "null"
     PlanChangeResponse:
       type: "object"
       required:

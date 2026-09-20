@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Queue;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
@@ -151,11 +152,22 @@ final class PlanChangeEndpointTest extends BillingApiTestCase
     }
 
     #[Test]
-    public function an_upgrade_charges_the_difference_and_queues_the_resize(): void
+    public function an_upgrade_invoices_the_difference_and_waits_to_be_paid(): void
     {
+        /*
+         * This test used to assert that an upgrade queued its resize on the
+         * spot, and it was right about the code and wrong about the contract:
+         * the difference was never invoiced at all, so the platform handed
+         * over the bigger machine and collected nothing. An upgrade is a
+         * purchase, and a purchase is delivered on settlement — the rule every
+         * order in this system already followed.
+         *
+         * The settlement half, and the shape the job is finally given, are
+         * proved in APlanChangeSettlesItsMoneyTest.
+         */
         [$customer, $user] = $this->accountWithOwner();
         $subscription = $this->subscriptionOn($customer, $this->small);
-        $service = $this->serviceWithMachine($customer, $subscription);
+        $this->serviceWithMachine($customer, $subscription);
 
         $response = $this->actingAs($user)
             ->withHeader('Idempotency-Key', 'upgrade-1')
@@ -169,22 +181,23 @@ final class PlanChangeEndpointTest extends BillingApiTestCase
         $this->assertSame($this->large->id, $subscription->fresh()?->plan_id);
         $this->assertSame(18_000, $subscription->fresh()?->recurring_amount_minor);
 
+        // And there is a document for the difference, not just a number in a
+        // response body that nothing will ever collect against.
+        $invoice = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+
+        $response->assertJsonPath('data.awaits_payment', true);
+        $response->assertJsonPath('data.invoice.id', (string) $invoice->getKey());
+        $this->assertTrue($invoice->total_minor > 0);
+
         /*
-         * And the machine has not. The response says so rather than reporting
-         * a completed upgrade: the money moved in a millisecond and the
-         * hypervisor takes minutes.
+         * The machine has not moved, and the response says so rather than
+         * reporting a completed upgrade.
          */
         $response->assertJsonPath('data.awaits_infrastructure', true);
-        $this->assertNotNull($response->json('data.resize.job_id'));
+        $this->assertNull($response->json('data.resize'));
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize->value)->count());
 
-        $job = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize->value)->sole();
-
-        $this->assertSame($service->getKey(), $job->service_id);
-        $this->assertSame(4, $job->payload['vcpu']);
-        $this->assertSame(8192, $job->payload['memory_mib']);
-        $this->assertSame(80, $job->payload['disk_gib']);
-
-        Queue::assertPushed(RunProvisioningJob::class, 1);
+        Queue::assertNotPushed(RunProvisioningJob::class);
     }
 
     #[Test]
@@ -246,7 +259,10 @@ final class PlanChangeEndpointTest extends BillingApiTestCase
             ->postJson("/api/v1/subscriptions/{$subscription->id}/plan", $payload)
             ->assertStatus(409);
 
-        $this->assertSame(1, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize->value)->count());
+        // One proration, one document, and nothing queued: the upgrade has
+        // not been paid for yet, so there is no machine change to duplicate.
+        $this->assertSame(1, Invoice::query()->where('subscription_id', $subscription->getKey())->count());
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize->value)->count());
     }
 
     #[Test]

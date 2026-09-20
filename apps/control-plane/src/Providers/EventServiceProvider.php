@@ -28,6 +28,7 @@ use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
 use Lynomia\Modules\SharedHosting\Application\Listeners\InstallWordPressOnceTheAccountExists;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
 use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
@@ -38,7 +39,9 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  *     OrderPlaced             → decide what is owed: issue an invoice, or, when
  *                               nothing is owed, settle the order outright
  *     PaymentCaptured         → settle the invoice
- *     InvoicePaid             → announce that the order owes nothing further
+ *     InvoicePaid             → announce that the order owes nothing further,
+ *                               and release a plan change that had to be paid
+ *                               for before it could be built
  *     OrderFinanciallySettled → mark the order paid, redeem the coupon, start
  *                               the subscription, create the service and ask
  *                               for it to be built
@@ -80,6 +83,14 @@ final class EventServiceProvider extends BaseEventServiceProvider
             // A renewal being paid is what ends dunning. Without this the
             // money arrived and the subscription stayed suspended.
             ReviveSubscriptionOnRenewalPayment::class,
+
+            /*
+             * An upgrade's proration invoice being paid is what releases the
+             * bigger machine. Without this the customer paid the difference
+             * and nothing ever grew; with the resize queued at request time
+             * instead, they got it whether or not they ever paid.
+             */
+            ResizeOnPlanChangeSettlement::class,
 
             /*
              * A domain is registered only once its invoice is paid. It listens

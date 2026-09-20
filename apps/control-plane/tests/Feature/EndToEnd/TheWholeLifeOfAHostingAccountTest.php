@@ -154,8 +154,26 @@ final class TheWholeLifeOfAHostingAccountTest extends TestCase
 
         $this->assertSame((string) $business->getKey(), (string) $subscription->refresh()->plan_id);
 
-        // Both halves. The money moved when the customer confirmed; the quota
-        // is what they actually bought.
+        /*
+         * The quota does not move yet. An upgrade is a purchase: the plan
+         * change issues an invoice for the difference and the panel is not
+         * touched until it is paid — the same rule the original order above
+         * followed. Until this was true the customer was moved onto the larger
+         * package and the difference was never billed at all.
+         */
+        $this->assertSame(
+            (string) $this->packageOf($starter)->getKey(),
+            (string) $account->refresh()->hosting_package_id,
+            'The bigger quota was handed over before it was paid for.',
+        );
+
+        $this->settle(
+            Invoice::query()
+                ->where('subscription_id', $subscription->getKey())
+                ->sole()
+        );
+
+        // Both halves. The money has settled; the quota is what they bought.
         $this->assertSame(
             (string) $this->packageOf($business)->getKey(),
             (string) $account->refresh()->hosting_package_id,
@@ -261,19 +279,25 @@ final class TheWholeLifeOfAHostingAccountTest extends TestCase
         /** @var Invoice $invoice */
         $invoice = Invoice::query()->where('order_id', $order->getKey())->sole();
 
-        $transaction = Transaction::factory()->create([
-            'customer_id' => $this->customer->getKey(),
-            'invoice_id' => $invoice->getKey(),
-            'amount_minor' => $invoice->total_minor,
-            'currency' => $invoice->currency,
-        ]);
-
-        app(SettleInvoice::class)->execute($invoice, $transaction);
+        $this->settle($invoice);
 
         /** @var Service $service */
         $service = Service::query()->where('order_id', $order->getKey())->sole();
 
         return $service;
+    }
+
+    /**
+     * Pay an invoice in full, the way the platform does it.
+     */
+    private function settle(Invoice $invoice): void
+    {
+        app(SettleInvoice::class)->execute($invoice, Transaction::factory()->create([
+            'customer_id' => $this->customer->getKey(),
+            'invoice_id' => $invoice->getKey(),
+            'amount_minor' => $invoice->total_minor,
+            'currency' => $invoice->currency,
+        ]));
     }
 
     /**

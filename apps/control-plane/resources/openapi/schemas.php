@@ -2491,6 +2491,43 @@ return [
             'net' => ['$ref' => '#/components/schemas/Money'],
             'effective_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'period_end' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            /*
+             * The two halves that finish after the response does. An upgrade
+             * owes money, so it leaves an invoice and its machine is not
+             * touched until that invoice is paid; a downgrade owes nothing and
+             * its resize is queued at once. A client that read only the money
+             * above would report both as finished.
+             *
+             * `resize` and `awaits_infrastructure` were already being returned
+             * and were missing from here. With additionalProperties false this
+             * schema is an exhaustive list, so documenting the new pair and
+             * not the old one would have left it just as wrong.
+             */
+            'invoice' => ['$ref' => '#/components/schemas/PlanChangeInvoice'],
+            'awaits_payment' => ['type' => 'boolean'],
+            'resize' => ['$ref' => '#/components/schemas/PlanChangeResize'],
+            'awaits_infrastructure' => ['type' => 'boolean'],
+        ],
+    ],
+    'PlanChangeInvoice' => [
+        'type' => ['object', 'null'],
+        'additionalProperties' => false,
+        'description' => 'The proration invoice an upgrade leaves behind. Null when the change owes nothing.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'number' => ['type' => ['string', 'null']],
+            'status' => ['type' => 'string'],
+            'total' => ['$ref' => '#/components/schemas/Money'],
+        ],
+    ],
+    'PlanChangeResize' => [
+        'type' => ['object', 'null'],
+        'additionalProperties' => false,
+        'description' => 'The queued provider job, once there is one. Null while an upgrade is still unpaid.',
+        'properties' => [
+            'job_id' => ['type' => 'string'],
+            'status' => ['type' => ['string', 'null']],
         ],
     ],
     'AdminAdoptedJob' => [

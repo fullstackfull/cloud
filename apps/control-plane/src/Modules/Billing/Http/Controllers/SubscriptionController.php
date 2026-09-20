@@ -21,6 +21,7 @@ use Lynomia\Modules\Billing\Infrastructure\Queries\CustomerSubscriptions;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QuotePlanChange;
@@ -203,6 +204,13 @@ final class SubscriptionController
             price: $price,
             units: $request->units(),
             idempotencyKey: $request->idempotencyKey(),
+            /*
+             * Who is changing the plan, carried through because a downgrade
+             * posts wallet credit and the ledger will not accept an adjustment
+             * that nobody owns. It is the person who pressed confirm — which
+             * on a team account is the member acting, not the account holder.
+             */
+            actor: $request->user() instanceof User ? $request->user() : null,
         );
 
         $proration = $outcome->proration;
@@ -225,7 +233,21 @@ final class SubscriptionController
                  * the billing would have the portal announce a completed
                  * upgrade while the customer's server is still the old size.
                  */
-                'resize' => $outcome->awaitsInfrastructure() ? [
+                /*
+                 * What is owed before any of it happens. An upgrade is a
+                 * purchase: the invoice is published here so the portal can
+                 * send the customer to pay it, rather than reporting a change
+                 * that will not take effect until they do.
+                 */
+                'invoice' => $outcome->invoice === null ? null : [
+                    'id' => (string) $outcome->invoice->getKey(),
+                    'number' => $outcome->invoice->number,
+                    'status' => $outcome->invoice->status->value,
+                    'total' => $outcome->invoice->total()->jsonSerialize(),
+                ],
+                'awaits_payment' => $outcome->awaitsPayment(),
+
+                'resize' => $outcome->resizeJob !== null ? [
                     'job_id' => (string) $outcome->resizeJob?->getKey(),
                     'status' => $outcome->resizeJob?->status->value,
                 ] : null,

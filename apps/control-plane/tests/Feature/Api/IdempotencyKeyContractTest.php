@@ -227,12 +227,21 @@ final class IdempotencyKeyContractTest extends TestCase
 
         $this->actingAs($user)->withHeader('Idempotency-Key', 'upgrade-0001')->postJson($url, $body)->assertSuccessful();
         $this->assertSame($large->getKey(), $subscription->fresh()?->plan_id);
-        $resizes = ProvisioningJob::query()->count();
-        $this->assertSame(1, $resizes);
 
-        // The same key again: no second resize is queued.
+        /*
+         * What an upgrade leaves behind is its proration invoice, not a resize
+         * job: the machine is not touched until that invoice is paid. So the
+         * invoice is what a replay must not duplicate.
+         */
+        $invoices = fn (): int => Invoice::query()->where('subscription_id', $subscription->getKey())->count();
+
+        $this->assertSame(1, $invoices());
+        $this->assertSame(0, ProvisioningJob::query()->count());
+
+        // The same key again: nothing is billed a second time.
         $this->actingAs($user)->withHeader('Idempotency-Key', 'upgrade-0001')->postJson($url, $body);
-        $this->assertSame(1, ProvisioningJob::query()->count());
+        $this->assertSame(1, $invoices());
+        $this->assertSame(0, ProvisioningJob::query()->count());
     }
 
     #[Test]
