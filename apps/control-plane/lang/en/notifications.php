@@ -173,6 +173,10 @@ return [
             'title' => 'Restore of :service did not complete',
             'body' => 'The restore of :service did not finish. Our team has been alerted.',
         ],
+        'backup_needs_review' => [
+            'title' => 'Backup needs review',
+            'body' => 'We could not confirm the final state of this backup. Do not rely on it until it has been reviewed.',
+        ],
         'restore_needs_review' => [
             'title' => 'Restore needs review',
             'body' => 'We could not confirm whether the restore completed. Please contact support before trying another restore.',

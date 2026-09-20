@@ -50,6 +50,25 @@ final readonly class BackupNotificationKey
     }
 
     /**
+     * The platform cannot account for this backup at all.
+     *
+     * Scoped to the row and nothing else, and that is the canonical identity
+     * rather than a convenient one. Two facts from the model make it so:
+     * `NeedsReview` is terminal, and every backup run creates its own row, so
+     * one row reaches this outcome at most once in its life.
+     *
+     * Scoping it to the provider task would be weaker, not stronger. A
+     * verification overwrites `provider_task_id`, so it is not stable for the
+     * life of the row — and the route that matters most here, a start call
+     * that never answered, has no task id at all. That is what indeterminate
+     * means.
+     */
+    public static function needsReview(string $backupId): string
+    {
+        return self::backup($backupId, 'needs_review');
+    }
+
+    /**
      * The archive was read back and did not come back.
      *
      * Scoped to the row alone, and that is the only identity the two writers

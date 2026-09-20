@@ -99,6 +99,15 @@ enum NotificationType: string
     case RestoreNeedsReview = 'service.restore_needs_review';
 
     /*
+     * The backup's own third answer. Not "it failed" — nothing failed, and
+     * saying so would send a customer to take another backup when the first
+     * one may be sitting on a datastore taking up space. Not "it completed"
+     * either. The platform lost track of the task and only a person looking at
+     * the datastore can settle whether the archive is there.
+     */
+    case BackupNeedsReview = 'service.backup_needs_review';
+
+    /*
      * The archive stored and cannot be read back.
      *
      * Not BackupFailed, which would be false: the backup ran, the task
@@ -239,6 +248,7 @@ enum NotificationType: string
             self::PlanChangeFailed,
             self::ReinstallFailed,
             self::BackupFailed,
+            self::BackupNeedsReview,
             self::BackupVerificationFailed,
             self::RestoreFailed,
             self::RestoreNeedsReview,

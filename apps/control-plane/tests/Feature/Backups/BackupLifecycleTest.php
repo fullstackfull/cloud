@@ -118,7 +118,15 @@ final class BackupLifecycleTest extends TestCase
 
     private function request(): RequestServiceBackup
     {
-        return new RequestServiceBackup($this->factory(), $this->app->make(SecretRedactor::class));
+        return new RequestServiceBackup(
+            $this->factory(),
+            $this->app->make(SecretRedactor::class),
+            // Built by the container rather than stubbed, for the same reason
+            // reconcile() is: a request that stops without an answer now tells
+            // the customer, and a double here would let this file keep passing
+            // while nobody was ever told anything.
+            $this->app->make(NotifyCustomer::class),
+        );
     }
 
     private function reconcile(): ReconcileBackup

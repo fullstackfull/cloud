@@ -82,12 +82,16 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * `Restored` row that somehow got asked about again must not produce a second
  * message.
  *
- * `NeedsReview` announces nothing. There is no truthful notification type for
- * it in this vocabulary — `FileRestoreNeedsReview` exists, its whole-machine
- * counterpart does not — and reporting "we do not know whether your restore
- * ran" as either completed or failed would be the exact class of lie this
- * module is arranged to prevent. It stays an operator's row until somebody
- * decides what the customer should be told.
+ * `NeedsReview` now has words of its own on both sides — a restore nobody can
+ * settle and a backup nobody can account for — and they say what is true:
+ * that the outcome could not be confirmed. Reporting either as completed or
+ * failed would be the class of lie this module is arranged to prevent, and
+ * saying nothing at all, which is what both did until recently, leaves a
+ * customer relying on an archive that may not exist.
+ *
+ * A failed verification is the one ending that still borrows nothing and adds
+ * nothing: its verdict is `BackupVerificationFailed`, which is about the data
+ * rather than about the operation.
  */
 final readonly class ReconcileBackup
 {
@@ -287,11 +291,12 @@ final readonly class ReconcileBackup
          * be run reaches NeedsReview with `verified` still null, which is not
          * a verdict and must not be announced as one.
          *
-         * A backup that reaches NeedsReview says nothing either, and the guard
-         * below is load-bearing: without it, routing every quarantine through
-         * here would start announcing BackupFailed for a backup nobody can
-         * account for, which is a new false statement rather than a fixed one.
-         * There is no BackupNeedsReview in this vocabulary to say it properly.
+         * A backup has three endings of its own, and the third one used to be
+         * silence for want of a word. `NeedsReview` is not a failure: nothing
+         * failed, and telling a customer it did sends them to take another
+         * backup while the first may be sitting on a datastore they are paying
+         * for. It is the platform saying it lost track, which only a person
+         * looking at the datastore can settle.
          */
         [$type, $key] = match (true) {
             $operation === BackupState::Restoring => [
@@ -310,13 +315,18 @@ final readonly class ReconcileBackup
                 NotificationType::BackupVerificationFailed,
                 BackupNotificationKey::verificationFailed($id),
             ],
-            in_array($operation, [BackupState::Requested, BackupState::Running], true)
-                && $landed !== BackupState::NeedsReview => [
-                    $landed === BackupState::Succeeded
-                        ? NotificationType::BackupCompleted
-                        : NotificationType::BackupFailed,
-                    BackupNotificationKey::backup($id, $landed === BackupState::Succeeded ? 'succeeded' : 'failed'),
-                ],
+            in_array($operation, [BackupState::Requested, BackupState::Running], true) => [
+                match ($landed) {
+                    BackupState::Succeeded => NotificationType::BackupCompleted,
+                    BackupState::NeedsReview => NotificationType::BackupNeedsReview,
+                    default => NotificationType::BackupFailed,
+                },
+                match ($landed) {
+                    BackupState::Succeeded => BackupNotificationKey::backup($id, 'succeeded'),
+                    BackupState::NeedsReview => BackupNotificationKey::needsReview($id),
+                    default => BackupNotificationKey::backup($id, 'failed'),
+                },
+            ],
             default => [null, null],
         };
 

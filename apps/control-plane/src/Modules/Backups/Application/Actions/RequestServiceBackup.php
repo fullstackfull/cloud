@@ -11,10 +11,14 @@ use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupNotConfiguredException;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -52,6 +56,7 @@ final readonly class RequestServiceBackup
     public function __construct(
         private BackupProviderFactory $providers,
         private SecretRedactor $redactor,
+        private NotifyCustomer $notify,
     ) {}
 
     /**
@@ -152,7 +157,7 @@ final readonly class RequestServiceBackup
                 ],
             );
 
-            return $backup->refresh();
+            return $this->announceIfUnaccountable($backup->refresh());
         }
 
         $backup->transitionTo(BackupState::Running, [
@@ -161,5 +166,45 @@ final readonly class RequestServiceBackup
         ]);
 
         return $backup->refresh();
+    }
+
+    /**
+     * Say so when a backup request stops without an answer.
+     *
+     * The poller cannot reach this row: an indeterminate start leaves no task
+     * id, so `isAwaitingProvider()` is false and no sweep will ever pick it
+     * up. If it is not announced here it is never announced at all, and the
+     * customer is left believing a backup they asked for is running.
+     *
+     * Only the indeterminate half. A provider that refused outright lands the
+     * row in `Failed`, which is a settled outcome and a different sentence —
+     * and one this action deliberately does not raise, because it is not this
+     * change's to add. That remains a gap: a backup refused at the door tells
+     * the customer nothing, while one that fails later does.
+     */
+    private function announceIfUnaccountable(Backup $backup): Backup
+    {
+        if ($backup->state !== BackupState::NeedsReview) {
+            return $backup;
+        }
+
+        /** @var ?Service $service */
+        $service = $backup->service()->first();
+        $label = $service?->label;
+
+        $this->notify->execute(
+            customerId: $backup->customer_id,
+            type: NotificationType::BackupNeedsReview,
+            idempotencyKey: BackupNotificationKey::needsReview((string) $backup->getKey()),
+            subject: $backup,
+            data: [
+                'service' => is_string($label) && $label !== ''
+                    ? $label
+                    : (string) ($service?->getKey() ?? $backup->service_id),
+            ],
+            link: '/backups',
+        );
+
+        return $backup;
     }
 }
