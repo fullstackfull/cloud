@@ -154,6 +154,34 @@ class Backup extends Model
     }
 
     /**
+     * Whether a restore could actually be started from this archive.
+     *
+     * The state is not the whole answer, and treating it as one was the
+     * defect. `BackupState::isRestorable()` knows that a row has finished and
+     * has not been deleted; it knows nothing about whether the archive can be
+     * read, because that verdict lives in a different column.
+     *
+     * `verified` is three-valued and all three values matter here:
+     *
+     *  - **true** — the datastore read it back. Restorable, obviously.
+     *  - **null** — nobody has checked. Still restorable, and deliberately so:
+     *    the product contract on {@see BackupState::isRestorable()} says a
+     *    customer facing a lost machine would rather try an unverified backup
+     *    than be told no. Refusing here would be inventing a policy nobody set
+     *    — and on Proxmox Backup Server, which verifies on its own schedule,
+     *    it would refuse most archives for most of their life.
+     *  - **false** — the datastore read it and it did not come back. Refused.
+     *    This is the one the platform had no answer for: a confirmed-corrupt
+     *    archive sat on a row that looked like every other completed backup,
+     *    with a Restore button beside it, and restoring it writes an
+     *    unreadable image over a machine that is currently working.
+     */
+    public function isRestorable(): bool
+    {
+        return $this->state->isRestorable() && $this->verified !== false;
+    }
+
+    /**
      * Whether this row still needs the provider asked about it.
      */
     public function isAwaitingProvider(): bool

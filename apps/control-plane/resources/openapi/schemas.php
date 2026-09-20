@@ -77,10 +77,27 @@ return [
             'trigger' => ['type' => ['string', 'null']],
             'mode' => ['type' => ['string', 'null']],
             'is_in_flight' => ['type' => 'boolean'],
-            'is_restorable' => ['type' => 'boolean'],
+            'is_restorable' => [
+                'type' => 'boolean',
+                'description' => 'Whether a restore can actually be started from this archive. Carries the read-back verdict as well as the state: an archive the datastore read and could not return is false here, and the restore endpoint refuses it, whatever the screen offered.',
+            ],
             'needs_attention' => ['type' => 'boolean'],
             'size_bytes' => ['type' => ['integer', 'null']],
-            'verified' => ['type' => 'boolean'],
+            /*
+             * Three-valued, and the schema said boolean.
+             *
+             * The resource has always returned null for an archive nobody has
+             * read back, and its docblock is explicit that null and false are
+             * not interchangeable. A client generated from the old schema had
+             * two options for the null it was going to receive: reject the
+             * response, or coerce it to false — which reports an unchecked
+             * backup as a broken one, the exact collapse this field exists to
+             * prevent.
+             */
+            'verified' => [
+                'type' => ['boolean', 'null'],
+                'description' => 'true: the datastore read this archive back cleanly. false: it read it and it did not come back. null: nobody has checked yet. Never fold null into false — an unchecked backup is not a broken one.',
+            ],
             'verified_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'retention_days' => ['type' => ['integer', 'null']],
             'is_being_deleted' => ['type' => 'boolean', 'description' => 'True from the moment a deletion is asked for until the provider is seen to have done it. A screen showing "deleted" for an archive still on a datastore would be the same false claim as one showing "available" for one that has gone.'],

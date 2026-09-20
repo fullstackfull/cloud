@@ -18,6 +18,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
@@ -122,7 +123,14 @@ final class BackupLifecycleTest extends TestCase
 
     private function reconcile(): ReconcileBackup
     {
-        return new ReconcileBackup($this->factory(), $this->app->make(SecretRedactor::class));
+        return new ReconcileBackup(
+            $this->factory(),
+            $this->app->make(SecretRedactor::class),
+            // Built by the container rather than stubbed: settling a task now
+            // also tells the customer, and a double here would let this file
+            // keep passing while nobody was ever told anything.
+            $this->app->make(NotifyCustomer::class),
+        );
     }
 
     #[Test]

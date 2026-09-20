@@ -178,6 +178,26 @@ final readonly class RestoreServiceBackup
             );
         }
 
+        if ($backup->verified === false) {
+            /*
+             * The datastore read this archive back and it did not come back.
+             *
+             * Refused here and not only in the portal, because the portal is
+             * not a security boundary and this is the one refusal where being
+             * bypassed destroys data: restoring an archive known to be
+             * unreadable writes it over a machine that is currently working.
+             *
+             * Only `false` refuses. `null` is not a verdict — see
+             * {@see Backup::isRestorable()} — and folding the two together
+             * would refuse most archives on the one provider that can run in
+             * production, which verifies on its own schedule.
+             */
+            throw RestoreRefusedException::notRestorable(
+                (string) $backup->getKey(),
+                'the datastore read this archive back and it did not come back; restoring it would write an unreadable image over a working machine',
+            );
+        }
+
         $inFlight = Backup::query()
             ->where('virtual_machine_id', $machine->getKey())
             ->where('state', BackupState::Restoring->value)

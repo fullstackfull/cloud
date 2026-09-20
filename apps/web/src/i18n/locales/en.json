@@ -1698,6 +1698,8 @@
     "verified": "Verified",
     "verifiedYes": "Restore tested",
     "verifiedNo": "Not tested",
+    "verifiedFailed": "Unreadable",
+    "restoreUnreadable": "The datastore read this backup back and it did not come back. Restoring it would write an unreadable image over this machine.",
     "takeOne": "Take a backup",
     "restore": "Restore",
     "empty": "No backups for this server yet.",

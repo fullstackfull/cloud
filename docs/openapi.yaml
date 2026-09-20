@@ -18455,6 +18455,7 @@ components:
           type: "boolean"
         is_restorable:
           type: "boolean"
+          description: "Whether a restore can actually be started from this archive. Carries the read-back verdict as well as the state: an archive the datastore read and could not return is false here, and the restore endpoint refuses it, whatever the screen offered."
         needs_attention:
           type: "boolean"
         size_bytes:
@@ -18462,7 +18463,10 @@ components:
             - "integer"
             - "null"
         verified:
-          type: "boolean"
+          type:
+            - "boolean"
+            - "null"
+          description: "true: the datastore read this archive back cleanly. false: it read it and it did not come back. null: nobody has checked yet. Never fold null into false — an unchecked backup is not a broken one."
         verified_at:
           "$ref": "#/components/schemas/Timestamp"
         retention_days:
