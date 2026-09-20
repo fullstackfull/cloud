@@ -139,14 +139,34 @@ final class ABackupNobodyCanAccountForTest extends VpsApiTestCase
         $this->datastore($machine, [self::BACKUP_TASK => $this->running()]);
         $this->travel($this->window() + 1)->hours();
 
+        /*
+         * A second worker that loaded this row before the first one settled
+         * it. Held deliberately stale: `isAwaitingProvider()` reads the model
+         * in memory, which still says Running, so this instance will poll,
+         * quarantine and announce all over again.
+         *
+         * That is the only way this key is ever exercised, and writing the
+         * test without it proved nothing. A loop of sweeps cannot reach the
+         * announcement a second time — the row is terminal after the first,
+         * so `isAwaitingProvider()` is false and the action returns before it
+         * asks anything. The first version of this test did exactly that and
+         * passed with the dedup key removed entirely.
+         */
+        $racer = Backup::query()->findOrFail($backup->getKey());
+
         app(ReconcileBackup::class)->execute($backup);
+        app(ReconcileBackup::class)->execute($racer);
 
         for ($i = 0; $i < 10; $i++) {
             app(ReconcileBackup::class)->execute($backup->refresh());
             app(ReconcileRunningBackups::class)->execute();
         }
 
-        $this->assertSame(1, $this->notifications($customer, NotificationType::BackupNeedsReview));
+        $this->assertSame(
+            1,
+            $this->notifications($customer, NotificationType::BackupNeedsReview),
+            'Two workers settling one row is one event, and the customer hears about it once.',
+        );
     }
 
     // ---- 3. nothing else borrows the word ---------------------------------
