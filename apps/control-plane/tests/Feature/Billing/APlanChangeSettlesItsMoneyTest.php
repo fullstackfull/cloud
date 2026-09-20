@@ -281,20 +281,21 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
             }
             $fired = true;
 
-            $this->changePlan($user, $subscription, $this->large, 'racer-b', assertOk: false);
+            $this->changePlan($user, $subscription, $this->large, 'racer-bbb', assertOk: false);
         });
 
         try {
-            $this->changePlan($user, $subscription, $this->large, 'racer-a', assertOk: false);
+            $this->changePlan($user, $subscription, $this->large, 'racer-aaa', assertOk: false);
         } finally {
             Invoice::flushEventListeners();
         }
 
-        $this->assertLessThanOrEqual(
+        $this->assertSame(
             1,
             Invoice::query()->where('subscription_id', $subscription->getKey())->count(),
-            'Two concurrent plan changes must not produce two proration invoices.'
+            'Two concurrent plan changes must produce exactly one proration invoice.'
         );
+        $this->assertSame($this->large->id, $subscription->fresh()?->plan_id);
     }
 
     // ---- 8. history is immutable ------------------------------------------
@@ -379,6 +380,19 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
         if ($assertOk) {
             $response->assertOk();
         }
+
+        /*
+         * Asserted even for the calls that are expected to be refused. An
+         * Idempotency-Key shorter than eight characters is rejected by
+         * validation before the controller is reached, and a test whose racing
+         * request never ran at all would pass every "nothing was billed twice"
+         * assertion while proving nothing. This caught exactly that.
+         */
+        $this->assertNotSame(
+            'request.idempotency_key_rejected',
+            $response->json('error.code'),
+            'The request never reached the action, so whatever this test asserts next is vacuous.'
+        );
 
         return (array) $response->json();
     }
