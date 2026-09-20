@@ -88,6 +88,27 @@ enum NotificationType: string
     case RestoreFailed = 'service.restore_failed';
 
     /*
+     * The third answer a whole-machine restore can give, and the reason it has
+     * to exist: a provider that stopped answering leaves a restore that may be
+     * writing to the customer's disks right now. Reporting that as failed
+     * invites them to start a second one over the top; reporting it as
+     * completed is simply untrue. The file-level path has had this word since
+     * it was written — see FileRestoreNeedsReview — and the whole-machine path
+     * announced nothing at all.
+     */
+    case RestoreNeedsReview = 'service.restore_needs_review';
+
+    /*
+     * The archive stored and cannot be read back.
+     *
+     * Not BackupFailed, which would be false: the backup ran, the task
+     * reported OK, and what is wrong is the data it left behind. Raised only
+     * on a verdict — a datastore that timed out or has not looked yet has said
+     * nothing, and `verified` stays null for exactly that reason.
+     */
+    case BackupVerificationFailed = 'service.backup_verification_failed';
+
+    /*
      * Files put back from a backup. Three outcomes, and the third is the
      * one that must not be dressed as either of the others: a restore the
      * provider never answered for may or may not have written the files.
@@ -183,7 +204,14 @@ enum NotificationType: string
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,
             self::ServiceEnded, self::ServiceTerminated, self::DataRetentionEnding,
             self::ReinstallCompleted, self::ReinstallFailed,
-            self::RestoreCompleted, self::RestoreFailed,
+            /*
+             * A restore nobody can settle is emailed beside the other two
+             * outcomes of the same operation. The channel follows the family
+             * rather than a fresh judgement about severity: a customer who is
+             * told "do not start another one until we have looked" needs that
+             * away from the portal, for the same reason the other two are.
+             */
+            self::RestoreCompleted, self::RestoreFailed, self::RestoreNeedsReview,
             self::PlanChangeCompleted, self::PlanChangeFailed,
             self::IncidentAffectingService, self::MaintenanceScheduled,
         ];
@@ -211,7 +239,9 @@ enum NotificationType: string
             self::PlanChangeFailed,
             self::ReinstallFailed,
             self::BackupFailed,
+            self::BackupVerificationFailed,
             self::RestoreFailed,
+            self::RestoreNeedsReview,
             self::FileRestoreFailed,
             self::FileRestoreNeedsReview,
             self::WordPressPushFailed,

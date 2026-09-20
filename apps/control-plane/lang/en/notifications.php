@@ -173,6 +173,14 @@ return [
             'title' => 'Restore of :service did not complete',
             'body' => 'The restore of :service did not finish. Our team has been alerted.',
         ],
+        'restore_needs_review' => [
+            'title' => 'Restore needs review',
+            'body' => 'We could not confirm whether the restore completed. Please contact support before trying another restore.',
+        ],
+        'backup_verification_failed' => [
+            'title' => 'Backup verification found a problem',
+            'body' => 'This backup did not pass integrity verification. Do not rely on it for restore until it has been reviewed.',
+        ],
         'file_restore_completed' => [
             'title' => 'Files restored to :service',
             'body' => ':count path(s) from the backup have been put back on :service. Whatever was at those paths before has been replaced.',

@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
@@ -124,7 +125,7 @@ final readonly class ReconcileBackup
              * `max_poll_hours` the row goes to a person, which is the only
              * thing that can establish whether a restore is running.
              */
-            return $this->giveUpIfOverdue($backup);
+            return $this->giveUpIfOverdue($backup, $operation);
         }
 
         $cluster = $backup->cluster()->first();
@@ -132,11 +133,11 @@ final readonly class ReconcileBackup
         if ($cluster === null) {
             // The cluster row is gone. Nothing can be asked, and the archive
             // may still exist on a datastore nobody is now looking at.
-            $backup->transitionTo(BackupState::NeedsReview, [
-                'failure_reason' => 'the cluster this backup was taken on no longer exists in the platform',
-            ]);
-
-            return $backup->refresh();
+            return $this->quarantine(
+                $backup,
+                $operation,
+                'the cluster this backup was taken on no longer exists in the platform',
+            );
         }
 
         $provider = $this->providers->for($cluster);
@@ -149,23 +150,19 @@ final readonly class ReconcileBackup
                 // we asked, and ask again later.
                 $backup->forceFill(['last_polled_at' => now(), 'poll_count' => $backup->poll_count + 1])->save();
 
-                return $this->giveUpIfOverdue($backup);
+                return $this->giveUpIfOverdue($backup, $operation);
             }
 
             // The provider answered and said something is wrong with the task
             // itself — most often that it has never heard of it, which after a
             // node reboot means the task is gone and its outcome with it.
-            $backup->transitionTo(BackupState::NeedsReview, [
-                'failure_reason' => $this->redactor->redactString($e->getMessage()),
-            ]);
-
-            return $backup->refresh();
+            return $this->quarantine($backup, $operation, $this->redactor->redactString($e->getMessage()));
         }
 
         $backup->forceFill(['last_polled_at' => now(), 'poll_count' => $backup->poll_count + 1])->save();
 
         if ($state->isRunning()) {
-            return $this->giveUpIfOverdue($backup);
+            return $this->giveUpIfOverdue($backup, $operation);
         }
 
         if ($state->hasFailed()) {
@@ -177,7 +174,7 @@ final readonly class ReconcileBackup
                 ...$this->failedVerificationAttributesFor($backup),
             ]);
 
-            return $this->announce($backup->refresh(), $operation, succeeded: false);
+            return $this->announce($backup->refresh(), $operation);
         }
 
         $backup->transitionTo($this->successStateFor($backup), [
@@ -188,7 +185,7 @@ final readonly class ReconcileBackup
             ...$this->restoreAttributesFor($backup),
         ]);
 
-        return $this->announce($backup->refresh(), $operation, succeeded: true);
+        return $this->announce($backup->refresh(), $operation);
     }
 
     /**
@@ -271,29 +268,55 @@ final readonly class ReconcileBackup
      * creation task, so its outcome needs no such qualifier — and must not
      * borrow `provider_task_id`, which a later verification overwrites.
      */
-    private function announce(Backup $backup, BackupState $operation, bool $succeeded): Backup
+    private function announce(Backup $backup, BackupState $operation): Backup
     {
+        $landed = $backup->state;
+        $id = (string) $backup->getKey();
+
+        /*
+         * Read as a pair: what the row was doing, and where it ended up. Three
+         * operations and three endings each, and no ending is allowed to
+         * borrow another operation's words — the defect this module keeps
+         * producing is a true sentence about the wrong thing.
+         *
+         * A verification's endings are the asymmetric ones. Unreadable gets
+         * its own message, because "your backup failed" would be false: the
+         * backup ran and reported OK, and what is wrong is the data it left.
+         * Readable gets none at all — a customer does not need telling that a
+         * check they never asked for passed. And a verification that could not
+         * be run reaches NeedsReview with `verified` still null, which is not
+         * a verdict and must not be announced as one.
+         *
+         * A backup that reaches NeedsReview says nothing either, and the guard
+         * below is load-bearing: without it, routing every quarantine through
+         * here would start announcing BackupFailed for a backup nobody can
+         * account for, which is a new false statement rather than a fixed one.
+         * There is no BackupNeedsReview in this vocabulary to say it properly.
+         */
         [$type, $key] = match (true) {
             $operation === BackupState::Restoring => [
-                $succeeded ? NotificationType::RestoreCompleted : NotificationType::RestoreFailed,
-                sprintf(
-                    'restore:%s:%s:%s',
-                    $backup->getKey(),
-                    $backup->restore_task_id ?? 'unknown',
-                    $succeeded ? 'restored' : 'failed',
-                ),
+                match ($landed) {
+                    BackupState::Restored => NotificationType::RestoreCompleted,
+                    BackupState::NeedsReview => NotificationType::RestoreNeedsReview,
+                    default => NotificationType::RestoreFailed,
+                },
+                BackupNotificationKey::restore($id, $backup->restore_task_id, match ($landed) {
+                    BackupState::Restored => 'restored',
+                    BackupState::NeedsReview => 'needs_review',
+                    default => 'failed',
+                }),
             ],
-            in_array($operation, [BackupState::Requested, BackupState::Running], true) => [
-                $succeeded ? NotificationType::BackupCompleted : NotificationType::BackupFailed,
-                sprintf('backup:%s:%s', $backup->getKey(), $succeeded ? 'succeeded' : 'failed'),
+            $operation === BackupState::Verifying && $backup->verified === false => [
+                NotificationType::BackupVerificationFailed,
+                BackupNotificationKey::verificationFailed($id),
             ],
-            /*
-             * A verification. Its verdict is on the row, in `verified`, where
-             * the operator alert reads it; there is no BackupVerificationFailed
-             * in this vocabulary, and announcing a failed read-back as
-             * "your backup failed" would be false — the backup did not fail,
-             * it cannot be read, which is a different and worse thing.
-             */
+            in_array($operation, [BackupState::Requested, BackupState::Running], true)
+                && $landed !== BackupState::NeedsReview => [
+                    $landed === BackupState::Succeeded
+                        ? NotificationType::BackupCompleted
+                        : NotificationType::BackupFailed,
+                    BackupNotificationKey::backup($id, $landed === BackupState::Succeeded ? 'succeeded' : 'failed'),
+                ],
             default => [null, null],
         };
 
@@ -388,7 +411,7 @@ final readonly class ReconcileBackup
     /**
      * The row has been in flight longer than the platform is willing to track.
      */
-    private function giveUpIfOverdue(Backup $backup): Backup
+    private function giveUpIfOverdue(Backup $backup, BackupState $operation): Backup
     {
         $limit = max(1, (int) config('backups.max_poll_hours', 12));
 
@@ -398,13 +421,25 @@ final readonly class ReconcileBackup
             return $backup;
         }
 
-        $backup->transitionTo(BackupState::NeedsReview, [
-            'failure_reason' => sprintf(
-                'the provider task was still unfinished after %d hours; the platform has stopped tracking it',
-                $limit,
-            ),
-        ]);
+        return $this->quarantine($backup, $operation, sprintf(
+            'the provider task was still unfinished after %d hours; the platform has stopped tracking it',
+            $limit,
+        ));
+    }
 
-        return $backup->refresh();
+    /**
+     * Hand the row to a person, and say so where it is somebody's problem.
+     *
+     * Every route to `NeedsReview` in this class goes through here, which is
+     * the point: a restore reaching it is the most dangerous outcome the
+     * module produces — the provider may be writing to the customer's disks
+     * right now — and it used to be the quietest. A customer told nothing has
+     * no reason not to press restore again.
+     */
+    private function quarantine(Backup $backup, BackupState $operation, string $reason): Backup
+    {
+        $backup->transitionTo(BackupState::NeedsReview, ['failure_reason' => $reason]);
+
+        return $this->announce($backup->refresh(), $operation);
     }
 }
