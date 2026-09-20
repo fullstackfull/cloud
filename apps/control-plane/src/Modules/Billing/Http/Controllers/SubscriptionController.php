@@ -248,8 +248,8 @@ final class SubscriptionController
                 'awaits_payment' => $outcome->awaitsPayment(),
 
                 'resize' => $outcome->resizeJob !== null ? [
-                    'job_id' => (string) $outcome->resizeJob?->getKey(),
-                    'status' => $outcome->resizeJob?->status->value,
+                    'job_id' => (string) $outcome->resizeJob->getKey(),
+                    'status' => $outcome->resizeJob->status->value,
                 ] : null,
                 'awaits_infrastructure' => $outcome->awaitsInfrastructure(),
             ],
