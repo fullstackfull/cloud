@@ -22,10 +22,12 @@ missing, and each one keeps producing defects faster than the individual
 instances can be closed:
 
 1. **The declaration layer outran the write layer.** Nine of thirteen
-   `OrderStatus` cases can never be written. 144 of 942 enum cases have no
-   production writer. `InvoiceItemKind::Proration` and `::Credit` are
-   constructed only inside a DTO that nothing consumes — so no invoice in this
-   codebase can carry a proration line at all.
+   `OrderStatus` cases can never be written. `InvoiceItemKind::Proration` and
+   `::Credit` are constructed only inside a DTO that nothing consumes — so no
+   invoice in this codebase can carry a proration line at all. A measured,
+   adversarially-adjudicated sweep puts the confirmed dead-declaration count at
+   **21 enum cases** (see *Corrections* below — the first figure published here
+   was wrong, and it was wrong in the direction of overstating the problem).
 2. **Consequences have no owner.** Twelve of roughly two hundred
    `Application/Actions` classes dispatch a domain event. `RefundIssued` does
    not carry an order id, so the listener that would unwind a refunded order
@@ -474,6 +476,78 @@ passed 20 of 20. Both are rejected as flakes. `tests/Feature/Queue` failed 4 of
 10 under 6–12 foreign worker processes sharing one Redis database, and no clean
 re-run was obtained — recorded as the one unresolved measurement, not as a
 flake.
+
+## Corrections to this report
+
+Published after the first commit of this report, and recorded here rather than
+silently amended.
+
+**The enum dead-declaration figure was overstated and is corrected.** The first
+version of this report said "144 of 942 enum cases have no production writer",
+taken from an agent's sweep. Three problems were then found, in order:
+
+1. That agent disclosed that its per-state-machine table had been built by
+   *guessing* enum filenames, that two of eight state machines were silently
+   skipped, and that it had nonetheless labelled the table "complete".
+2. Recomputing it independently gave different numbers (132 enums / 921 cases /
+   174 unreferenced / 95 wholly dead, against the original 136 / 942 / 144 / 42).
+   The gap is corpus: the original searched `routes`, `database`, `config`,
+   `lang`, `resources` and the React portal; the recomputation searched only
+   `src` and `app`.
+3. **The first recomputation was itself wrong** — its regular expression matched
+   the word "case" inside prose comments, inventing non-existent cases such as
+   `ControlledDriver::above`. Stripping comments and requiring a real
+   `case X = '...';` form fixed it.
+
+More importantly, *every* static figure overstates deadness, because a case
+hydrated at runtime — `Enum::from($row->type)`, an Eloquent `casts()` entry, a
+`cases()` loop — has no static mention yet is perfectly reachable. 84 of the 95
+statically-dead cases were therefore adjudicated one enum at a time, each
+verdict then handed to a separate agent instructed to **refute** it:
+
+| Verdict | Count |
+|---|---|
+| DYNAMIC — hydrated at runtime, reachable | **56** |
+| REFERENCED_OUTSIDE_SRC — reachable via routes/database/config/lang/portal | **7** |
+| GENUINELY_DEAD — surviving adversarial refutation | **21** |
+
+So roughly a quarter of the statically-dead set is truly dead. Two caveats
+stated plainly: **11 cases were dropped** because the coordinator hand-transcribed
+the work-list instead of passing it programmatically — the same class of sloppy-list
+error criticised above — and **zero** of the 21 were refuted away, which may mean
+the classification was conservative or may mean the refuters were not aggressive
+enough. Neither caveat is resolved here.
+
+**None of this disturbs F-19.** The `OrderStatus` 9-of-13 result was derived
+directly from a complete `grep -rn 'OrderStatus::'` over `src` and `app`, not
+from any sweep, and was re-verified independently.
+
+**Two findings are added, both stronger than the figure they replace.**
+
+- **F-46 — eight notification types are declared, translated into both
+  languages, and never sent.** `NotificationType::BackupCompleted` and
+  `::BackupFailed` have customer-facing copy in `lang/en/notifications.php:160,164`
+  and `lang/ar/notifications.php:160,164`, and no code path produces either.
+  The Backups module does send `FileRestoreCompleted`/`Failed`/`NeedsReview`, so
+  file-restore notifications work and backup-outcome notifications do not.
+  **Backups is an approved launch product: a customer's backup fails and they
+  are never told.** The same holds for `IncidentAffectingService`,
+  `MaintenanceScheduled`, `NewSignIn`, `OrderPlaced`, `PasswordChanged` and
+  `ReinstallStarted`. Class: OPERABILITY_GAP, and for the two backup types,
+  approved-scope.
+- **F-47 — `DedicatedServerStatus::Retired`**: a legal transition target from
+  three states, with a dedicated `isRetired()` predicate, an exclusion in the
+  inventory sweep, and a concurrency comment in `SyncDedicatedServer.php:56`
+  reasoning about a server being "Retired between the sweep and the worker" — a
+  race against a state no production code can produce. The only writer is a test
+  factory (`database/factories/DedicatedServerFactory.php:79`). Three readers,
+  one of them a race-condition argument, against zero production writers.
+
+Also recorded: `PaymentMethodKind::{ApplePay, GooglePay, BankTransfer}` have zero
+producers anywhere, and the claim that a sweep "corroborated or contradicted"
+finding B1-04 is withdrawn to UNKNOWN — write-reachability of an enum case and
+reachability of the caller path that writes it are different questions, and only
+the first was tested.
 
 ## Rejected findings
 
