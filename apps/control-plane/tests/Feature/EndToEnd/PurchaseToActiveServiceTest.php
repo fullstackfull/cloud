@@ -37,6 +37,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -54,6 +55,7 @@ use Tests\TestCase;
  */
 final class PurchaseToActiveServiceTest extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private FakePaymentProvider $provider;
@@ -61,6 +63,11 @@ final class PurchaseToActiveServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Checkout refuses a plan the platform cannot say where to build.
+        // These tests are about something else, so they are given an
+        // estate to be placeable on rather than an exemption.
+        $this->estateThatCanPlaceAVps();
 
         $this->seed(RolePermissionSeeder::class);
 

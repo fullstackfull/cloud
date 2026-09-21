@@ -111,6 +111,7 @@ return [
         'empty_basket' => 'The basket is empty.',
         'idempotency_key_reused' => 'This key was already used for a different order. Reload the page and try again.',
         'invalid_quantity' => 'That quantity is not allowed for this plan.',
+        'not_deliverable' => 'That product is temporarily unavailable to order. Nothing has been charged; please try again later.',
         'out_of_stock' => 'That plan has just sold out.',
         'per_customer_limit' => 'You already have as many of this plan as one account may hold.',
         'plan_unavailable' => 'One of the selected plans is no longer available.',

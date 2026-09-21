@@ -81,6 +81,30 @@ final class CheckoutRejectedException extends DomainException
         return $exception->as('checkout.per_customer_limit');
     }
 
+    /**
+     * The platform already knows, from its own rows, that it cannot place this.
+     *
+     * The reason is deliberately **not** carried here. A DomainException's
+     * context is published to the client as `error.details`, and the reason
+     * names a cluster, an IP pool or a panel package — internal topology a
+     * customer has no business seeing, could not act on, and that tells an
+     * attacker the shape of the estate. It goes to the log instead, beside
+     * the plan id, which is where the operator asking "why was this refused?"
+     * is looking.
+     *
+     * What the customer gets is what they can act on: not right now, nothing
+     * has been charged, and it is not something they did.
+     */
+    public static function becauseItCannotBeDelivered(string $planId): self
+    {
+        $exception = new self(
+            'That product is temporarily unavailable to order. Nothing has been charged; please try again later.'
+        );
+        $exception->withContext(['plan_id' => $planId]);
+
+        return $exception->as('checkout.not_deliverable');
+    }
+
     public static function becauseQuantityIsInvalid(string $planId, int $quantity): self
     {
         $exception = new self('The requested quantity is not valid.');

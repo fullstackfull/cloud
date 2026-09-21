@@ -24,6 +24,7 @@ use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Shared\Domain\Enums\DeploymentEnvironment;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -40,6 +41,7 @@ use Tests\TestCase;
  */
 final class CatalogueRespectsProductReadinessTest extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private Plan $plan;
@@ -49,6 +51,11 @@ final class CatalogueRespectsProductReadinessTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Checkout refuses a plan the platform cannot say where to build.
+        // These tests are about something else, so they are given an
+        // estate to be placeable on rather than an exemption.
+        $this->estateThatCanPlaceAVps();
 
         $this->seed(RolePermissionSeeder::class);
 

@@ -20,6 +20,8 @@ use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\LeavesNothingCommitted;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -41,6 +43,8 @@ use Tests\TestCase;
  */
 final class ConcurrentOrderPlacementTest extends TestCase
 {
+    use LeavesNothingCommitted;
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private const string WORKER_A = 'orders_a';
@@ -64,6 +68,13 @@ final class ConcurrentOrderPlacementTest extends TestCase
      */
     private function committedFixtures(): array
     {
+        // Checkout will not sell a plan the platform cannot say where to
+        // build; these fixtures are about the idempotency race, not placement.
+        // Committed on worker A, because one of these tests runs the action
+        // there and would otherwise be looking for an estate in a transaction
+        // it cannot see.
+        $this->estateThatCanPlaceAVpsOn(self::WORKER_A);
+
         $customer = Customer::factory()->make(['currency' => 'KWD', 'country' => 'KW']);
         $customer->setConnection(self::WORKER_A)->save();
 

@@ -9,6 +9,8 @@ use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\BillableLine;
 use Lynomia\Modules\Subscriptions\Application\DTOs\RenewalPlan;
@@ -63,6 +65,23 @@ final readonly class RenewSubscription
                 ->findOrFail($subscription->getKey());
 
             $this->assertRenewable($locked);
+
+            if ($this->wasNeverDelivered($locked)) {
+                /*
+                 * Skipped rather than refused. The subscription is perfectly
+                 * renewable in its own terms — active, auto-renewing, due —
+                 * and what is wrong is on the other side of it: the service it
+                 * pays for never left PENDING because the platform could not
+                 * place it.
+                 *
+                 * Returning null puts this in the sweep's `skipped` count,
+                 * which is where "nothing to do here" belongs. Throwing would
+                 * put it in `failed` and raise an alarm about the renewal
+                 * machinery, when the machinery is working and the service is
+                 * the problem.
+                 */
+                return null;
+            }
 
             /*
              * The caller's copy was read before the lock. If the period has
@@ -173,6 +192,37 @@ final readonly class RenewSubscription
     /**
      * @throws SubscriptionNotRenewableException
      */
+    /**
+     * Whether this subscription pays for something that never arrived.
+     *
+     * Deliberately one narrow condition rather than a rule about service
+     * states in general: PENDING *and* carrying a placement-blocked reason.
+     * That pair means the platform never got as far as asking a provider for
+     * anything — `ServiceStatus::holdsResources()` is false for PENDING, so
+     * nothing is being held on the customer's behalf — and billing a second
+     * period for it would charge rent on an empty room.
+     *
+     * Every other state is left alone, because each has a reason to keep
+     * billing that this method has no business overriding. PROVISIONING and
+     * ACTIVE and SUSPENDED all hold real resources. FAILED does not, but a
+     * failed build is a different question with a different answer — it may
+     * be retried, refunded or terminated by an operator — and inventing a
+     * renewal policy for it here would be inventing product.
+     */
+    private function wasNeverDelivered(Subscription $subscription): bool
+    {
+        /** @var Service|null $service */
+        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+
+        if ($service === null || $service->status !== ServiceStatus::Pending) {
+            return false;
+        }
+
+        $resources = (array) $service->resources;
+
+        return ($resources['placement_blocked_reason'] ?? null) !== null;
+    }
+
     private function assertRenewable(Subscription $subscription): void
     {
         if (! $subscription->status->shouldRenew()) {

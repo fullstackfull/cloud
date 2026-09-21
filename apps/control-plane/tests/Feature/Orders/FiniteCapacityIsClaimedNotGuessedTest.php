@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Orders;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,8 @@ use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Process\Process;
+use Tests\Support\LeavesNothingCommitted;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -63,6 +66,8 @@ use Tests\TestCase;
  */
 final class FiniteCapacityIsClaimedNotGuessedTest extends TestCase
 {
+    use LeavesNothingCommitted;
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private const string SECOND_CHECKOUT = 'pgsql_capacity_b';
@@ -81,11 +86,26 @@ final class FiniteCapacityIsClaimedNotGuessedTest extends TestCase
         ]);
     }
 
+    /**
+     * Nothing here rolls back, so everything here is put back by hand.
+     *
+     * The list this used to name — plans, products, customers, users, orders —
+     * was right until checkout started needing an estate to place a plan on.
+     * The cluster, the address pool and the image it now creates were
+     * committed and never removed, and what failed was not this file: it was
+     * an unrelated module two hundred tests later whose `sole()` found two
+     * rows. LeavesNothingCommitted empties every table instead of guessing
+     * which ones, which is what makes that class of failure impossible rather
+     * than merely fixed.
+     */
     protected function tearDown(): void
     {
         DB::statement("SET lock_timeout = '0'");
         DB::purge(self::SECOND_CHECKOUT);
-        DB::statement('TRUNCATE plans, products, customers, users, orders RESTART IDENTITY CASCADE');
+
+        // Called rather than inherited: a class method wins over a trait's, so
+        // declaring tearDown here silently replaces the trait's.
+        $this->emptyEveryTable();
 
         parent::tearDown();
     }
@@ -268,15 +288,40 @@ final class FiniteCapacityIsClaimedNotGuessedTest extends TestCase
     {
         /*
          * Two baskets naming the same two plans in opposite orders. Locked in
-         * request order they can deadlock against each other; locked in a
-         * stable order — sorted ids — they queue instead.
+         * request order they can deadlock against each other — each holding
+         * what the other wants next; locked in a stable order, sorted ids,
+         * they queue instead.
          *
-         * A single-threaded test cannot hold two baskets open at once, so what
-         * is asserted is the property that makes the deadlock impossible: the
-         * first row either checkout touches is the same one. The second
-         * connection holds the lower id, and a basket that names it *second*
-         * must still block, which only happens if the order was sorted.
+         * A single-threaded test cannot hold two baskets open at once, so the
+         * property asserted is the one that makes the deadlock impossible:
+         * **the sequence of plan rows a basket locks is the same whichever
+         * way the basket was written.** That is read from the statements the
+         * checkout actually issued, which is the only place the ordering is
+         * observable — a test that watched only for a block would pass with
+         * the sorting removed, because an unsorted basket still blocks, just
+         * on its second row instead of its first.
          */
+        foreach ([true, false] as $reversed) {
+            // A fresh pair each time: these baskets are placed rather than
+            // refused, and a plan held at one unit cannot be bought twice.
+            [$low, $high] = $this->twoPlans();
+            $written = $reversed ? [$high, $low] : [$low, $high];
+
+            $locked = $this->lockedPlanRows(
+                fn (): Order => $this->placeLines($this->customer(), [
+                    new CheckoutLine($written[0]->id, 1),
+                    new CheckoutLine($written[1]->id, 1),
+                ]),
+            );
+
+            $this->assertSame(
+                [$low->id, $high->id],
+                $locked,
+                'The basket locked its plan rows in the order it was written, not in a stable one: '
+                .'two baskets naming the same plans the other way round can then deadlock.',
+            );
+        }
+
         [$low, $high] = $this->twoPlans();
         $customer = $this->customer();
 
@@ -402,6 +447,10 @@ final class FiniteCapacityIsClaimedNotGuessedTest extends TestCase
 
     private function plan(?int $stockLimit = null, ?int $perCustomerLimit = null): Plan
     {
+        // Capacity is what this file is about, and a plan the platform cannot
+        // place never gets as far as the capacity claim.
+        $this->estateThatCanPlaceAVps();
+
         $product = Product::factory()->create();
 
         $plan = Plan::factory()->create([
@@ -447,6 +496,48 @@ final class FiniteCapacityIsClaimedNotGuessedTest extends TestCase
     /**
      * @param  list<CheckoutLine>  $lines
      */
+    /**
+     * The plan rows a checkout locked, in the order it locked them.
+     *
+     * Read from the statements the connection issued rather than inferred
+     * from what blocked: the ordering is a property of the code, and the only
+     * way to see it is to watch the `SELECT ... FOR UPDATE`s go past. Bindings
+     * are what carries the id, because the SQL itself is parameterised.
+     *
+     * @param  callable(): Order  $checkout
+     * @return list<string>
+     */
+    private function lockedPlanRows(callable $checkout): array
+    {
+        /** @var list<string> $locked */
+        $locked = [];
+
+        DB::listen(function (QueryExecuted $query) use (&$locked): void {
+            $sql = strtolower($query->sql);
+
+            if (! str_contains($sql, 'from "plans"') || ! str_contains($sql, 'for update')) {
+                return;
+            }
+
+            foreach ($query->bindings as $binding) {
+                if (is_string($binding)) {
+                    $locked[] = $binding;
+                }
+            }
+        });
+
+        try {
+            $checkout();
+        } finally {
+            // Laravel has no public unlisten; a fresh connection drops the
+            // listener with the old one rather than leaving it counting every
+            // later test's statements.
+            DB::purge();
+        }
+
+        return $locked;
+    }
+
     private function placeLines(Customer $customer, array $lines, ?string $key = null): Order
     {
         return app(PlaceOrder::class)->execute($customer, new CheckoutRequest(

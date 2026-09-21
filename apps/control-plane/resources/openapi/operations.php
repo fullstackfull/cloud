@@ -1256,6 +1256,14 @@ return [
         'body' => ['verdict', 'evidence'],
         'response' => $one('AdminReinstallVerdict'),
     ],
+    'api.admin.services.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Every service, and why the stuck ones are stuck',
+        'description' => 'Newest first. `blocked=1` narrows it to the services the platform could not place — the list an operator actually wants, because a placement-blocked service is one a customer has paid for and nobody is building. Checkout refuses what the platform already knows it cannot place, so this should be short; it is not always empty, because configuration can be removed between a payment and a build. `status` and `customer_id` filter as usual. Operator-only: the reason names internal topology and is deliberately absent from the customer-facing service document.',
+        'permission' => 'service.view_any',
+        'query' => ['blocked', 'status', 'customer_id'],
+        'response' => $many('AdminService'),
+    ],
     'api.admin.services.terminate' => [
         'tag' => 'Operator',
         'summary' => 'End a service and destroy its machine',

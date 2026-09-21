@@ -7352,6 +7352,77 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/services":
+    get:
+      operationId: "api_admin_services_index"
+      tags:
+        - "Operator"
+      summary: "Every service, and why the stuck ones are stuck"
+      description: |-
+        Newest first. `blocked=1` narrows it to the services the platform could not place — the list an operator actually wants, because a placement-blocked service is one a customer has paid for and nobody is building. Checkout refuses what the platform already knows it cannot place, so this should be short; it is not always empty, because configuration can be removed between a payment and a build. `status` and `customer_id` filter as usual. Operator-only: the reason names internal topology and is deliberately absent from the customer-facing service document.
+
+        Requires the `service.view_any` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "blocked"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "customer_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminServicePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/services/{service}":
     delete:
       operationId: "api_admin_services_terminate"
@@ -18221,6 +18292,69 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminReturnedServer"
+    AdminService:
+      type: "object"
+      additionalProperties: false
+      description: "One service, as an operator sees it. `placement_blocked_reason` is the whole point of this list: it is written when the platform cannot decide where a purchased service goes, and until this endpoint existed it could only be read with a SQL client. It names a cluster, an address pool or a panel package, which is why it appears here and never on the customer's own copy of the same row."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        customer_id:
+          type:
+            - "string"
+            - "null"
+        order_id:
+          type:
+            - "string"
+            - "null"
+        order_item_id:
+          type:
+            - "string"
+            - "null"
+        subscription_id:
+          type:
+            - "string"
+            - "null"
+        plan_id:
+          type:
+            - "string"
+            - "null"
+        kind:
+          type:
+            - "string"
+            - "null"
+        label:
+          type:
+            - "string"
+            - "null"
+        status:
+          type:
+            - "string"
+            - "null"
+        needs_attention:
+          type: "boolean"
+          description: "Whether this status is one a person has to look at."
+        placement_blocked_reason:
+          type:
+            - "string"
+            - "null"
+          description: "Why the platform could not decide where this service goes. Null for everything it could place."
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        updated_at:
+          "$ref": "#/components/schemas/Timestamp"
+    AdminServicePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminService"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
     AdminTerminatedService:
       type: "object"
       additionalProperties: false

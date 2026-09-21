@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Admin\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
@@ -35,6 +36,77 @@ use Lynomia\Modules\Vps\Application\Actions\TerminateVpsService;
  */
 final class ServiceController
 {
+    use ListsAcrossTenants;
+
+    /**
+     * Every service, and why the stuck ones are stuck.
+     *
+     * ---------------------------------------------------------------------
+     * The reason nobody could read
+     * ---------------------------------------------------------------------
+     *
+     * `placement_blocked_reason` has been written into a service's resources
+     * for as long as ProvisionOrderedService has existed, and until now there
+     * was no way to read it that did not involve a SQL client. A paid customer
+     * whose machine could not be placed was a row in a JSON column that no
+     * screen and no endpoint mentioned. The audit found the value written and
+     * effectively unread.
+     *
+     * Checkout now refuses what the platform knows it cannot place, so this
+     * should be a short list. It will not always be empty: configuration can
+     * be removed between a payment and a build, and that race is covered by
+     * keeping the paid service visible rather than by pretending it cannot
+     * happen. `?blocked=1` is the filter an operator actually wants.
+     *
+     * Published for operators only, and it says what it says: the reason names
+     * a cluster, an IP pool or a panel package, which is exactly the internal
+     * topology the customer-facing resource is careful never to expose.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $services = Service::query()
+            ->when(
+                $request->boolean('blocked'),
+                static fn ($query) => $query->whereNotNull('resources->placement_blocked_reason'),
+            )
+            ->when(
+                $request->filled('status'),
+                static fn ($query) => $query->where('status', $request->string('status')->value()),
+            )
+            ->when(
+                $request->filled('customer_id'),
+                static fn ($query) => $query->where('customer_id', $request->string('customer_id')->value()),
+            )
+            /*
+             * Newest first, with the ULID breaking ties: two services created
+             * in the same millisecond by one order must not swap places
+             * between pages.
+             */
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
+
+        return $this->paginated($services, static function (Service $service): array {
+            $resources = (array) $service->resources;
+
+            return [
+                'id' => (string) $service->getKey(),
+                'customer_id' => $service->customer_id,
+                'order_id' => $service->order_id,
+                'order_item_id' => $service->order_item_id,
+                'subscription_id' => $service->subscription_id,
+                'plan_id' => $service->plan_id,
+                'kind' => $service->kind,
+                'label' => $service->label,
+                'status' => $service->status->value,
+                'needs_attention' => $service->status->needsAttention(),
+                'placement_blocked_reason' => $resources['placement_blocked_reason'] ?? null,
+                'created_at' => $service->created_at?->toIso8601String(),
+                'updated_at' => $service->updated_at?->toIso8601String(),
+            ];
+        });
+    }
+
     public function terminate(Request $request, string $service): JsonResponse
     {
         $found = Service::query()->findOrFail($service);

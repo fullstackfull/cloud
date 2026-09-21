@@ -217,13 +217,23 @@ final class OrderToProvisionedServiceTest extends TestCase
     {
         Queue::fake([RunProvisioningJob::class]);
 
-        // A second active cluster, and a plan that names neither: the platform
-        // has no basis for choosing, and choosing anyway is how a customer's
-        // machine appears in the wrong country.
-        ComputeCluster::factory()->create(['status' => 'active']);
-
         $plan = $this->vpsPlan();
         $order = $this->place($plan);
+
+        /*
+         * A second active cluster, staged between the payment page and the
+         * build, and a plan that names neither: the platform has no basis for
+         * choosing, and choosing anyway is how a customer's machine appears in
+         * the wrong country.
+         *
+         * It arrives after the order on purpose. Checkout refuses a plan whose
+         * placement cannot be resolved, so this order could not be placed at
+         * all in that state — which is the point of that rule. What is left,
+         * and what this test is about, is the window it cannot close: the
+         * estate changing under an order that has already been paid for.
+         */
+        ComputeCluster::factory()->create(['status' => 'active']);
+
         $this->payFor($order);
 
         /** @var Service $service */

@@ -45,6 +45,13 @@ use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
  * catalogue. It is the plan's shape, not the machine's, so a later plan edit
  * cannot make this row describe something the customer did not buy.
  *
+ * One key in that column is not the entitlement and is stripped:
+ * `placement_blocked_reason`. It is an operator diagnostic that happens to
+ * share the JSON column, and it names a cluster, an IP pool or a panel package
+ * — precisely the internal topology every other line of this document is
+ * careful to keep out. Publishing the whole column published it too, to the
+ * customer, in a field documented as "what you bought".
+ *
  * @mixin Service
  */
 final class ServiceResource extends JsonResource
@@ -87,7 +94,7 @@ final class ServiceResource extends JsonResource
             // cannot drift away from what the platform would actually allow.
             'is_usable' => $this->resource->isUsable(),
 
-            'resources' => $this->resources,
+            'resources' => $this->entitlement(),
 
             // The catalogue plan and the customer's own order line and
             // subscription, so a client can link a service back to what bought
@@ -112,6 +119,28 @@ final class ServiceResource extends JsonResource
             'terminated_at' => $this->terminated_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * What the customer bought, without what an operator writes beside it.
+     *
+     * The service's `resources` column carries the entitlement snapshotted at
+     * purchase, and ProvisionOrderedService adds `placement_blocked_reason` to
+     * the same column when it cannot decide where the service goes. The row
+     * itself is not hidden — a blocked service still appears here, still with
+     * its honest state — but the reason is for the operator surface, which
+     * requires a staff permission, and not for the account it belongs to.
+     *
+     * @return array<string, mixed>
+     */
+    private function entitlement(): array
+    {
+        /** @var array<string, mixed> $resources */
+        $resources = (array) $this->resource->resources;
+
+        unset($resources['placement_blocked_reason']);
+
+        return $resources;
     }
 
     /**

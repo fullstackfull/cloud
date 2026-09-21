@@ -18,6 +18,7 @@ use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -31,6 +32,7 @@ use Tests\TestCase;
  */
 final class PlacingAnOrderIssuesItsInvoiceTest extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private Customer $customer;
@@ -38,6 +40,11 @@ final class PlacingAnOrderIssuesItsInvoiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Checkout refuses a plan the platform cannot say where to build.
+        // These tests are about something else, so they are given an
+        // estate to be placeable on rather than an exemption.
+        $this->estateThatCanPlaceAVps();
 
         $this->customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
     }

@@ -688,6 +688,15 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
      * inside the controller, because "terminate what has expired" and "delete
      * a live customer's data today" are different decisions.
      */
+    /*
+     * The service list, and the only place `placement_blocked_reason` can be
+     * read without a SQL client. `?blocked=1` narrows it to the customers who
+     * have paid for something the platform could not place.
+     */
+    Route::get('services', [ServiceController::class, 'index'])
+        ->middleware('permission:'.Permission::ServiceViewAny->value)
+        ->name('services.index');
+
     Route::delete('services/{service}', [ServiceController::class, 'terminate'])
         ->middleware('permission:'.Permission::ServiceTerminate->value)
         ->name('services.terminate');
