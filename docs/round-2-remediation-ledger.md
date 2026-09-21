@@ -205,6 +205,37 @@ independent reviewer's verdict, which is never the implementer's.
 |---|---|---|---|---|
 | F-45 | Medium | TEST_GAP | `OPEN` | WordPress admin password redacted before it reaches the installer, which receives the literal `[redacted]`; the guarding test inspects column names, not values. Out of approved launch scope and latent. May not be closed by promoting WordPress. If any change makes WordPress production-complete or sellable, F-45 becomes blocking. |
 
+## Migrations awaiting integration review
+
+Two parallel agents may not independently add migrations touching the same table
+family without review, and the coordinator orders them before integration.
+
+Three branches each added a migration and each chose the same timestamp,
+`2026_04_15_000000`:
+
+| Branch | Migration | Table |
+|---|---|---|
+| `remediation/f04` | `…_record_the_domain_a_hosting_line_was_bought_for` | `order_items` |
+| `remediation/f08` | `…_record_which_payment_failure_the_dunning_counter_counted` | `subscriptions` |
+| `remediation/f15` | `…_reserve_a_provider_identity_before_the_call` | `provisioning_jobs` |
+
+Nothing is broken by this — the three touch unrelated tables, there is no
+dependency between them, and Laravel orders by filename so the sequence is
+deterministic. But a timestamp is a record of when something was written, and
+three files claiming the same instant is a record that is false and that makes
+the history harder to read than it needs to be. They are renumbered to distinct
+timestamps at integration, preserving the order in which they were verified.
+That is a rename; no content changes.
+
+All three are additive and nullable. Each is checked at integration for a clean
+`migrate:fresh`, a rollback that removes what it added, and a re-apply.
+
+`remediation/f15` edited its own migration in place rather than adding a second
+one to change a column from a string to an append-only list. That is correct
+here and only here: the migration is unmerged and has never run outside a test
+database, so a column added and dropped two commits later would be a worse
+record than one column that was always a list.
+
 ## Discovered / out of scope
 
 Defects found while repairing a finding, recorded rather than numbered. Repaired
