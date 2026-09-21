@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Orders\Application\Services;
 
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricedOrder;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
@@ -18,7 +17,6 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Application\DTOs\PricedCheckout;
-use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\ProductReadiness\Application\Actions\AssertProductMaySell;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
@@ -57,6 +55,7 @@ final readonly class OrderPricing
         private TaxResolver $taxResolver,
         private CouponValidator $coupons,
         private AssertProductMaySell $sellable,
+        private PlanCapacity $capacity,
     ) {}
 
     /**
@@ -249,49 +248,30 @@ final readonly class OrderPricing
     private function assertStock(Customer $customer, Plan $plan, int $quantity): void
     {
         /*
-         * Checked at order time as well as at provisioning time. An order that
-         * fails at provisioning has already taken the customer's money and
-         * costs a refund plus the support conversation; an order that is never
-         * accepted costs neither.
+         * A courtesy, and explicitly not the guarantee.
          *
-         * This is a pre-check, not a reservation — the authoritative claim
-         * happens when the paid order reserves capacity.
+         * Telling a customer the plan is gone before they fill in a card form
+         * is worth doing, and this read does it. What it cannot do is stop an
+         * oversell: nothing is locked here, so every checkout in flight reads
+         * the same remaining capacity and every one of them likes the answer.
+         *
+         * This comment used to say the authoritative claim happened later,
+         * "when the paid order reserves capacity". There was no such code. The
+         * claim now exists, it is {@see PlanCapacity::claim()}, and it runs
+         * inside the transaction that writes the order.
          */
-        if ($plan->stock_limit !== null) {
-            $sold = $this->soldCount($plan);
-
-            if ($sold + $quantity > $plan->stock_limit) {
-                throw CheckoutRejectedException::becausePlanIsOutOfStock((string) $plan->getKey());
-            }
+        if ($plan->stock_limit !== null
+            && $this->capacity->claimed((string) $plan->getKey()) + $quantity > $plan->stock_limit) {
+            throw CheckoutRejectedException::becausePlanIsOutOfStock((string) $plan->getKey());
         }
 
-        if ($plan->per_customer_limit !== null) {
-            $owned = $this->soldCount($plan, $customer);
-
-            if ($owned + $quantity > $plan->per_customer_limit) {
-                throw CheckoutRejectedException::becausePerCustomerLimitReached(
-                    (string) $plan->getKey(),
-                    $plan->per_customer_limit,
-                );
-            }
+        if ($plan->per_customer_limit !== null
+            && $this->capacity->claimed((string) $plan->getKey(), $customer) + $quantity > $plan->per_customer_limit) {
+            throw CheckoutRejectedException::becausePerCustomerLimitReached(
+                (string) $plan->getKey(),
+                $plan->per_customer_limit,
+            );
         }
-    }
-
-    private function soldCount(Plan $plan, ?Customer $customer = null): int
-    {
-        return (int) DB::table('order_items')
-            ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->where('order_items.plan_id', $plan->getKey())
-            // Cancelled and refunded orders release their stock; everything
-            // else still holds it, including orders awaiting payment, so a
-            // basket cannot oversell while the customer is at the card form.
-            ->whereNotIn('orders.status', [
-                OrderStatus::Cancelled->value,
-                OrderStatus::Refunded->value,
-                OrderStatus::Terminated->value,
-            ])
-            ->when($customer !== null, fn ($q) => $q->where('orders.customer_id', $customer->getKey()))
-            ->sum('order_items.quantity');
     }
 
     /**
