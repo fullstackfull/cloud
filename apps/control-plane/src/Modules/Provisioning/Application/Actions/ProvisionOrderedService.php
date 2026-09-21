@@ -164,10 +164,6 @@ final readonly class ProvisionOrderedService
     }
 
     /**
-     * @return array<string, mixed>|null null when the platform cannot decide
-     *                                   where this belongs
-     */
-    /**
      * The placement this line will be built with, or null when the platform
      * cannot describe one.
      *
@@ -177,6 +173,9 @@ final readonly class ProvisionOrderedService
      * being the one that charges the card. What stays here is what only this
      * action knows: the service's own resources, and a hostname that cannot
      * exist until the service row does.
+     *
+     * @return array<string, mixed>|null null when the platform cannot decide
+     *                                   where this belongs
      */
     private function payloadFor(Plan $plan, Service $service): ?array
     {

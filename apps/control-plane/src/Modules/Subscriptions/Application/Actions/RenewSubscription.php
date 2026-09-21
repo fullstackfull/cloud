@@ -200,9 +200,6 @@ final readonly class RenewSubscription
     }
 
     /**
-     * @throws SubscriptionNotRenewableException
-     */
-    /**
      * The service this subscription pays for, when it never arrived.
      *
      * Deliberately one narrow condition rather than a rule about service
@@ -233,6 +230,9 @@ final readonly class RenewSubscription
         return ($resources['placement_blocked_reason'] ?? null) !== null ? $service : null;
     }
 
+    /**
+     * @throws SubscriptionNotRenewableException
+     */
     private function assertRenewable(Subscription $subscription): void
     {
         if (! $subscription->status->shouldRenew()) {
