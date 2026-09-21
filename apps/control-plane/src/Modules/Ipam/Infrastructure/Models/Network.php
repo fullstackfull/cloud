@@ -9,7 +9,9 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Ipam\Domain\Enums\NetworkPurpose;
 
 /**
@@ -23,6 +25,7 @@ use Lynomia\Modules\Ipam\Domain\Enums\NetworkPurpose;
  * @property string $id
  * @property string $datacenter_id
  * @property string $slug
+ * @property string $name
  * @property NetworkPurpose $purpose
  * @property ?int $vlan_id
  * @property ?string $bridge
@@ -47,6 +50,21 @@ class Network extends Model
             'is_customer_facing' => 'boolean',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * The building this VLAN is carried in.
+     *
+     * Declared for the same reason {@see IpPool::datacenter()} is: an operator
+     * reading a network wants the site's name, not its identifier, and a list
+     * that resolved it by a second query per row would be the N+1 the eager
+     * load exists to avoid.
+     *
+     * @return BelongsTo<Datacenter, $this>
+     */
+    public function datacenter(): BelongsTo
+    {
+        return $this->belongsTo(Datacenter::class);
     }
 
     /**

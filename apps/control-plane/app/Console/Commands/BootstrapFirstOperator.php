@@ -159,7 +159,13 @@ final class BootstrapFirstOperator extends Command
             return;
         }
 
-        $token = Password::broker()->createToken($operator);
+        /*
+         * The facade's own broker, not one resolved by hand: `createToken()`
+         * is declared on `Password` and is only on the concrete broker
+         * underneath, so reaching through `broker()` first would trade a
+         * typed call for an untyped one and buy nothing.
+         */
+        $token = Password::createToken($operator);
 
         $this->newLine();
         $this->warn('One-time link — it expires, it works once, and it is now in this terminal’s history:');
