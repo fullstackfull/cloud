@@ -59,6 +59,32 @@ abstract class WorkerHarness extends TestCase
     /** Reserved for these suites, and emptied before every test in them. */
     protected const int REDIS_DATABASE = 15;
 
+    /**
+     * Which Redis database this run owns.
+     *
+     * The index used to be the constant above and nothing else, which is
+     * correct for one checkout and wrong for several. `setUp()` empties the
+     * whole database — `flushdb`, not a prefixed delete — so two checkouts
+     * running these suites at once delete each other's queued messages
+     * mid-test, and a worker subprocess in one can pop a message belonging to
+     * the other and fail looking up a row in a database it cannot see. The
+     * failures are non-deterministic, land in whichever suite happened to be
+     * unlucky, and name modules the change under test never touched: measured
+     * here as fifteen Simulation failures that became none the moment the two
+     * runs stopped sharing an index.
+     *
+     * So the index is a default rather than a fact. `REDIS_DB` is already the
+     * variable `config/database.php` reads and already the one this harness
+     * hands its worker subprocesses, so a checkout that wants its own
+     * keyspace sets that and everything downstream follows.
+     */
+    protected static function redisDatabase(): int
+    {
+        $configured = env('REDIS_DB');
+
+        return is_numeric($configured) ? (int) $configured : self::REDIS_DATABASE;
+    }
+
     /** Where the fake hypervisor keeps its fleet for this test. */
     private string $fleetPath = '';
 
@@ -130,7 +156,7 @@ abstract class WorkerHarness extends TestCase
 
         config()->set('database.connections.'.self::CONNECTION, config('database.connections.pgsql'));
 
-        config()->set('database.redis.default.database', self::REDIS_DATABASE);
+        config()->set('database.redis.default.database', static::redisDatabase());
 
         /*
          * The Redis manager reads its configuration once, when the container
@@ -467,7 +493,7 @@ abstract class WorkerHarness extends TestCase
                 'QUEUE_CONNECTION' => 'redis',
                 // The same Redis database, so the worker reads the queue this
                 // test wrote and not the one a developer is using.
-                'REDIS_DB' => (string) self::REDIS_DATABASE,
+                'REDIS_DB' => (string) static::redisDatabase(),
                 // The committed database, not the test transaction.
                 'DB_DATABASE' => config('database.connections.pgsql.database'),
                 'DB_PASSWORD' => config('database.connections.pgsql.password'),
@@ -508,7 +534,7 @@ abstract class WorkerHarness extends TestCase
             [
                 'APP_ENV' => 'testing',
                 'QUEUE_CONNECTION' => 'redis',
-                'REDIS_DB' => (string) self::REDIS_DATABASE,
+                'REDIS_DB' => (string) static::redisDatabase(),
                 'DB_DATABASE' => config('database.connections.pgsql.database'),
                 'DB_PASSWORD' => config('database.connections.pgsql.password'),
                 'MAIL_MAILER' => 'array',
