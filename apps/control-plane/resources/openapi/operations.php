@@ -1256,6 +1256,213 @@ return [
         'body' => ['verdict', 'evidence'],
         'response' => $one('AdminReinstallVerdict'),
     ],
+    /* ---------------------------------------------------------------------
+     | The estate an operator configures
+     |
+     | These are what a fresh deployment is brought to life with. Before them,
+     | four of these objects could be listed and not created, three writers
+     | each began by finding a parent that had no writer, and two had nothing
+     | at all — so a new deployment could only be configured with a SQL
+     | client, an edited seeder or the reference topology.
+     |
+     | None of them contacts anything. Recording a cluster, a panel server or
+     | a BMC is an operator saying a thing exists; whether it answers is a
+     | reconciler's question, and the difference is why nothing here sets a
+     | verification field.
+     */
+    'api.admin.infrastructure.regions.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a region',
+        'description' => 'The top of the chain, and the row every other one hangs off through a datacenter. A region is created accepting new services; the two flags stay separate so that winding one down refuses new orders without disturbing the customers already there.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['slug', 'name', 'country', 'city'],
+        'response' => $one('AdminRegion', 201),
+    ],
+    'api.admin.infrastructure.regions.update' => [
+        'tag' => 'Operator',
+        'summary' => 'Correct a region',
+        'description' => 'Display name, city and the two flags. Never the slug: a plan\'s placement constraints and an order weeks old name this row by it. Switching a region off is refused while clusters still sit in it; refusing new services never is. Send the `version` from a read as an If-Match-style precondition — a stale one answers 409 rather than overwriting somebody.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['name', 'city', 'is_active', 'accepts_new_services', 'version'],
+        'response' => $one('AdminRegion'),
+    ],
+    'api.admin.infrastructure.clusters.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Hypervisor clusters',
+        'description' => 'Every cluster the platform knows about, with what it would be reached at and whether it accepts placement. `last_synced_at` null means nothing has ever spoken to it.',
+        'permission' => 'infrastructure.view',
+        'query' => ['datacenter'],
+        'response' => ['envelope' => 'list', 'schema' => 'AdminComputeCluster'],
+    ],
+    'api.admin.infrastructure.clusters.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a hypervisor cluster',
+        'description' => 'The row VmTemplateController used to look for and never find. The endpoint is checked by the platform\'s outbound policy at the moment it is written: private addressing is expected on our own management network, loopback and the cloud metadata services are refused, and a credential in the URL is refused. The credential itself is a reference the secret resolver looks up; no field here accepts a secret. Nothing is dialled — the cluster is recorded, not contacted.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['datacenter_id', 'slug', 'name', 'driver', 'api_endpoint', 'verify_tls', 'credentials_reference'],
+        'response' => $one('AdminComputeCluster', 201),
+    ],
+    'api.admin.infrastructure.clusters.update' => [
+        'tag' => 'Operator',
+        'summary' => 'Correct a cluster',
+        'description' => 'Name, endpoint, TLS verification, credential reference and status. Taking a cluster to maintenance stops placement and disturbs nothing already running on it, which is the supported way to wind one down.',
+        'permission' => 'infrastructure.manage',
+        'body' => ['name', 'api_endpoint', 'verify_tls', 'credentials_reference', 'status', 'version'],
+        'response' => $one('AdminComputeCluster'),
+    ],
+    'api.admin.infrastructure.networks.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Network segments',
+        'permission' => 'ipam.view',
+        'query' => ['datacenter'],
+        'response' => ['envelope' => 'list', 'schema' => 'AdminNetwork'],
+    ],
+    'api.admin.infrastructure.networks.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a network segment',
+        'description' => '`is_customer_facing` is accepted and then decided: management and cluster-interconnect segments never carry customer workloads whatever the request says, because that is the rule the allocator and the placement path depend on rather than a display preference.',
+        'permission' => 'network.manage',
+        'body' => ['datacenter_id', 'slug', 'name', 'purpose', 'vlan_id', 'bridge', 'is_customer_facing'],
+        'response' => $one('AdminNetwork', 201),
+    ],
+    'api.admin.infrastructure.networks.update' => [
+        'tag' => 'Operator',
+        'summary' => 'Correct a network segment',
+        'description' => 'Deactivating one is refused while active subnets still sit on it.',
+        'permission' => 'network.manage',
+        'body' => ['name', 'vlan_id', 'bridge', 'is_active', 'version'],
+        'response' => $one('AdminNetwork'),
+    ],
+    'api.admin.infrastructure.ip_pools.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register an address pool',
+        'description' => 'The scope is the security-relevant field and is fixed at creation. `management` reaches the hypervisor and BMC control planes: the allocator refuses to give one to a customer service and placement refuses to count one as capacity. A pool of the other kind is a new pool, never an edit — reclassifying would move addresses already allocated between the control plane and the customer estate.',
+        'permission' => 'ipam.manage',
+        'body' => ['datacenter_id', 'slug', 'name', 'ip_version', 'scope', 'quarantine_days'],
+        'response' => $one('AdminIpPool', 201),
+    ],
+    'api.admin.infrastructure.ip_pools.update' => [
+        'tag' => 'Operator',
+        'summary' => 'Correct an address pool',
+        'description' => 'Name, quarantine window and whether it is active. Sending `scope` or `ip_version` is refused rather than ignored. Deactivating is refused while any address in it is anything other than available.',
+        'permission' => 'ipam.manage',
+        'body' => ['name', 'quarantine_days', 'is_active', 'version'],
+        'response' => $one('AdminIpPool'),
+    ],
+    'api.admin.infrastructure.subnets.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The blocks under a pool',
+        'permission' => 'ipam.view',
+        'response' => ['envelope' => 'list', 'schema' => 'AdminSubnet'],
+    ],
+    'api.admin.infrastructure.subnets.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Add a block to a pool',
+        'description' => 'The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool.',
+        'permission' => 'ipam.manage',
+        'body' => ['cidr', 'gateway', 'network_id'],
+        'response' => $one('AdminSubnet', 201),
+    ],
+    'api.admin.infrastructure.hosting_nodes.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Register a panel server',
+        'description' => 'Created claiming nothing: no licence state, no usage, no accounts. Those are statements only the panel can make and the reconciler is what asks it. The endpoint goes through the same outbound policy a cluster\'s does.',
+        'permission' => 'hosting_node.manage',
+        'body' => ['datacenter_id', 'slug', 'hostname', 'panel', 'api_endpoint', 'verify_tls', 'credentials_reference', 'max_accounts'],
+        'response' => $one('AdminHostingNode', 201),
+    ],
+    'api.admin.infrastructure.hosting_nodes.update' => [
+        'tag' => 'Operator',
+        'summary' => 'Correct a panel server',
+        'description' => 'Taking a node offline is refused while accounts are still on it. Draining — `accepts_new_accounts: false` — is the supported way to wind one down and is never refused.',
+        'permission' => 'hosting_node.manage',
+        'body' => ['hostname', 'api_endpoint', 'verify_tls', 'credentials_reference', 'max_accounts', 'accepts_new_accounts', 'status', 'version'],
+        'response' => $one('AdminHostingNode'),
+    ],
+    'api.admin.infrastructure.dedicated.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Add a machine to dedicated stock',
+        'description' => 'The one piece of inventory that has to be carried into a building by a person, so nothing can discover it. It arrives available, owned by nobody, with its power state unknown rather than off.',
+        'permission' => 'dedicated.manage',
+        'body' => ['datacenter_id', 'rack_id', 'manufacturer', 'model', 'serial', 'asset_tag', 'rack_unit', 'height_units', 'hardware_profile', 'notes'],
+        'response' => $one('AdminDedicatedStock', 201),
+    ],
+    'api.admin.infrastructure.dedicated.bmc.show' => [
+        'tag' => 'Operator',
+        'summary' => 'Where a machine\'s controller is',
+        'permission' => 'infrastructure.view',
+        'response' => $one('AdminBmcEndpoint'),
+    ],
+    'api.admin.infrastructure.dedicated.bmc.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a machine\'s controller',
+        'description' => 'Configuration, behind `dedicated.manage` rather than `bmc.access`: recording where a controller is and being allowed to use one are different authorities. The address is checked by the outbound policy when it is written rather than only when it is dialled, and nothing here accepts a password — the credential is a reference. One controller per machine; a second call corrects the first.',
+        'permission' => 'dedicated.manage',
+        'body' => ['protocol', 'address', 'port', 'username', 'verify_tls', 'credentials_reference'],
+        'response' => $one('AdminBmcEndpoint', 201),
+    ],
+
+    /* ---------------------------------------------------------------------
+     | Who may operate the platform
+     |
+     | `role.manage` was in the permission catalogue and referenced by no
+     | route, so a deployment had exactly as many operators as it was born
+     | with — and a production deployment was born with none.
+     |
+     | One permission covers reading and writing here on purpose: a list of
+     | who is privileged and what they hold is a map of how to escalate.
+     */
+    'api.admin.operators.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The people who operate the platform',
+        'description' => 'Staff only — a customer login holds the baseline customer role and never appears here.',
+        'permission' => 'role.manage',
+        'query' => ['q'],
+        'response' => $many('AdminOperator'),
+    ],
+    'api.admin.operators.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Add an operator',
+        'description' => 'No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.',
+        'permission' => 'role.manage',
+        'body' => ['email', 'name', 'roles'],
+        'response' => $one('AdminOperator', 201),
+    ],
+    'api.admin.operators.roles' => [
+        'tag' => 'Operator',
+        'summary' => 'Change what an operator may do',
+        'description' => 'Three refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant, and the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back.',
+        'permission' => 'role.manage',
+        'body' => ['roles'],
+        'response' => $one('AdminOperator'),
+    ],
+    'api.admin.roles.index' => [
+        'tag' => 'Operator',
+        'summary' => 'Roles and what each may do',
+        'permission' => 'role.manage',
+        'response' => ['envelope' => 'list', 'schema' => 'AdminRole'],
+    ],
+    'api.admin.roles.show' => [
+        'tag' => 'Operator',
+        'summary' => 'One role',
+        'permission' => 'role.manage',
+        'response' => $one('AdminRole'),
+    ],
+    'api.admin.roles.permissions' => [
+        'tag' => 'Operator',
+        'summary' => 'Set what a role may do',
+        'description' => 'Super Admin is refused: its authority comes from a bypass and not from the rows attached to it, so editing that list would change nothing while looking like it had. An operator cannot grant through a role a permission they could not grant directly, or `role.manage` on its own would quietly be every permission the platform has.',
+        'permission' => 'role.manage',
+        'body' => ['permissions'],
+        'response' => $one('AdminRole'),
+    ],
+    'api.admin.permissions.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The permission catalogue',
+        'description' => 'Every permission the platform defines, grouped, with the default roles that hold each. A permission held by no default role is reachable only through the super-admin bypass until somebody grants it — which, until this surface existed, nobody could.',
+        'permission' => 'role.manage',
+        'response' => ['envelope' => 'list', 'schema' => 'AdminPermission'],
+    ],
     'api.admin.services.index' => [
         'tag' => 'Operator',
         'summary' => 'Every service, and why the stuck ones are stuck',

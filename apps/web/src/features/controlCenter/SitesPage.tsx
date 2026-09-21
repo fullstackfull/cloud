@@ -8,17 +8,32 @@ import { Field } from '@/components/Field'
 import { LoadFailure } from '@/components/LoadFailure'
 import { PageHeader } from '@/components/PageHeader'
 import { Loading } from '@/components/Loading'
-import { useDatacenters, useRacks, useRegions, useRegisterDatacenter, useRegisterRack } from '@/lib/controlCenterQueries'
+import {
+  useDatacenters,
+  useRacks,
+  useRegions,
+  useRegisterDatacenter,
+  useRegisterRack,
+  useRegisterRegion,
+} from '@/lib/controlCenterQueries'
 import { useApiErrorMessage } from '@/lib/useApiErrorMessage'
 
 /**
  * Where machines are. Registered, never inferred: the platform has no way to
- * know a building or a rack exists until somebody says so.
+ * know a region, a building or a rack exists until somebody says so.
+ *
+ * The region form is the newest and the one that mattered most. Registering a
+ * datacenter has always begun by choosing a region, and there was no way to
+ * create one — so on a fresh deployment this screen opened with an empty
+ * dropdown and no way to fill it, and the whole inventory chain below it was
+ * unreachable from its first link.
  */
 export function SitesPage() {
   const { t } = useTranslation()
+  const regions = useRegions()
   const datacenters = useDatacenters()
   const racks = useRacks()
+  const [addingRegion, setAddingRegion] = useState(false)
   const [addingDatacenter, setAddingDatacenter] = useState(false)
   const [addingRack, setAddingRack] = useState(false)
 
@@ -28,13 +43,15 @@ export function SitesPage() {
         title={t('admin.sites.title')}
         description={t('admin.sites.subtitle')}
         actions={
-          <span className="flex gap-2">
+          <span className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => { setAddingRegion((open) => !open); }}>{t('admin.sites.registerRegion')}</Button>
             <Button variant="secondary" onClick={() => { setAddingDatacenter((open) => !open); }}>{t('admin.sites.registerDatacenter')}</Button>
             <Button onClick={() => { setAddingRack((open) => !open); }}>{t('admin.sites.registerRack')}</Button>
           </span>
         }
       />
 
+      {addingRegion ? <RegionForm onDone={() => { setAddingRegion(false); }} /> : null}
       {addingDatacenter ? <DatacenterForm onDone={() => { setAddingDatacenter(false); }} /> : null}
       {addingRack ? <RackForm onDone={() => { setAddingRack(false); }} /> : null}
 
@@ -46,7 +63,9 @@ export function SitesPage() {
         ) : racks.error ? (
           <LoadFailure error={racks.error} />
         ) : datacenters.data.data.length === 0 ? (
-          <p className="text-sm text-[var(--text-muted)]">{t('admin.sites.empty')}</p>
+          <p className="text-sm text-[var(--text-muted)]">
+            {(regions.data?.data ?? []).length === 0 ? t('admin.sites.emptyEstate') : t('admin.sites.empty')}
+          </p>
         ) : (
           <ul className="flex flex-col gap-4" aria-label={t('admin.sites.title')}>
             {datacenters.data.data.map((datacenter) => (
@@ -77,6 +96,56 @@ export function SitesPage() {
         )}
       </Card>
     </>
+  )
+}
+
+/**
+ * A region: the top of the chain, and the only object with no parent.
+ *
+ * The name is bilingual because it is what a customer reads in the catalogue;
+ * everything else on this form is operator-facing.
+ */
+function RegionForm({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation()
+  const describe = useApiErrorMessage()
+  const register = useRegisterRegion()
+  const [slug, setSlug] = useState('')
+  const [nameEn, setNameEn] = useState('')
+  const [nameAr, setNameAr] = useState('')
+  const [country, setCountry] = useState('')
+  const [city, setCity] = useState('')
+  const failure = describe(register.error)
+  const fieldError = (field: string): string | undefined => failure?.fields?.[field]?.[0]
+
+  return (
+    <Card>
+      <form
+        aria-label={t('admin.sites.registerRegion')}
+        className="flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          register.mutate({
+            slug: slug.trim(),
+            name: { en: nameEn.trim(), ...(nameAr.trim() === '' ? {} : { ar: nameAr.trim() }) },
+            country: country.trim().toUpperCase(),
+            ...(city.trim() === '' ? {} : { city: city.trim() }),
+          }, { onSuccess: onDone })
+        }}
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label={t('admin.sites.slug')} hint={t('admin.sites.slugHint')} value={slug} onChange={(e) => { setSlug(e.target.value); }} error={fieldError('slug')} dir="ltr" required />
+          <Field label={t('admin.sites.countryLabel')} hint={t('admin.sites.countryHint')} value={country} onChange={(e) => { setCountry(e.target.value); }} error={fieldError('country')} dir="ltr" maxLength={2} required />
+          <Field label={t('admin.sites.nameEn')} value={nameEn} onChange={(e) => { setNameEn(e.target.value); }} error={fieldError('name.en')} dir="ltr" required />
+          <Field label={t('admin.sites.nameAr')} value={nameAr} onChange={(e) => { setNameAr(e.target.value); }} error={fieldError('name.ar')} dir="rtl" />
+          <Field label={t('admin.sites.cityLabel')} value={city} onChange={(e) => { setCity(e.target.value); }} error={fieldError('city')} />
+        </div>
+        {failure !== null && failure.fields === null ? <Alert tone="error">{failure.message}</Alert> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onDone}>{t('common.cancel')}</Button>
+          <Button type="submit" loading={register.isPending}>{t('admin.sites.registerRegion')}</Button>
+        </div>
+      </form>
+    </Card>
   )
 }
 

@@ -23,6 +23,8 @@ import { PlansPage } from '@/features/controlCenter/PlansPage'
 import { ProvidersPage } from '@/features/controlCenter/ProvidersPage'
 import { ReadinessPage } from '@/features/controlCenter/ReadinessPage'
 import { ServersPage } from '@/features/controlCenter/ServersPage'
+import { NetworkingPage } from '@/features/controlCenter/NetworkingPage'
+import { OperatorsPage } from '@/features/controlCenter/OperatorsPage'
 import { SitesPage } from '@/features/controlCenter/SitesPage'
 import { InvoicesPage } from '@/features/billing/InvoicesPage'
 import { SubscriptionsPage } from '@/features/billing/SubscriptionsPage'
@@ -309,6 +311,8 @@ export function App() {
                       <Route path="/admin/payments" element={<AdminPaymentsPage />} />
                       <Route path="/admin/control-center" element={<OverviewPage />} />
                       <Route path="/admin/control-center/sites" element={<SitesPage />} />
+                      <Route path="/admin/control-center/networking" element={<NetworkingPage />} />
+                      <Route path="/admin/control-center/operators" element={<OperatorsPage />} />
                       <Route path="/admin/control-center/catalogue" element={<OperatorCataloguePage />} />
                       <Route path="/admin/control-center/credentials" element={<CredentialsPage />} />
                       <Route path="/admin/control-center/licences" element={<LicencesPage />} />
