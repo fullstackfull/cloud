@@ -283,6 +283,51 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         }
     }
 
+    // ---- the pool a customer may actually be given ------------------------
+
+    #[Test]
+    public function a_management_pool_neither_places_a_machine_nor_hides_the_one_that_can(): void
+    {
+        /*
+         * Management addresses reach the hypervisor and BMC control planes,
+         * and IpAllocator refuses to hand one to a customer service. Counting
+         * them here would do the damage twice over: beside a customer pool the
+         * estate looks ambiguous and a placeable plan is refused; alone, the
+         * placement resolves to something guaranteed to fail at the allocator
+         * after the money has moved.
+         *
+         * This is the estate the reference topology actually builds, which is
+         * how the case was found.
+         */
+        [$customer] = $this->accountWithOwner();
+
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+
+        $management = IpPool::factory()->management()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $plan = $this->planFor(ProductKind::Vps);
+
+        // Alone, it is no pool at all.
+        try {
+            $this->place($customer, $plan);
+            $this->fail('A machine was sold onto a management address pool.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertSame('checkout.not_deliverable', $e->errorCode());
+        }
+
+        $this->assertSame(0, Order::query()->count());
+
+        // Beside one customer pool it is not ambiguity either: there is still
+        // exactly one pool a customer may be given an address from.
+        IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $this->place($customer, $plan->fresh(['prices', 'product']));
+
+        $this->assertSame(1, Order::query()->count());
+        $this->assertNotNull($management->fresh(), 'The management pool is still there; it is simply not a candidate.');
+    }
+
     // ---- fixtures ---------------------------------------------------------
 
     private function place(Customer $customer, Plan $plan): Order

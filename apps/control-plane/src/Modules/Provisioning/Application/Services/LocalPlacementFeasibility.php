@@ -9,6 +9,7 @@ use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
+use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Provisioning\Application\DTOs\PlacementResolution;
@@ -103,11 +104,26 @@ final readonly class LocalPlacementFeasibility
 
         $pool = $this->soleTarget(
             $constraints['ip_pool_id'] ?? null,
-            static fn (): ?string => self::soleId(IpPool::query()->where('is_active', true)->where('ip_version', 4)),
+            static fn (): ?string => self::soleId(
+                IpPool::query()
+                    ->where('is_active', true)
+                    ->where('ip_version', 4)
+                    /*
+                     * Management addresses reach the hypervisor and BMC
+                     * control planes, and IpAllocator refuses to hand one to
+                     * a customer service — so a management pool is not a
+                     * candidate here either. Counting it would do the damage
+                     * twice over: with one customer pool beside it the estate
+                     * would look ambiguous and a perfectly placeable plan
+                     * would be refused, and alone it would resolve to a
+                     * placement guaranteed to fail at the allocator.
+                     */
+                    ->whereIn('scope', self::customerAllocatableScopes()),
+            ),
         );
 
         if ($pool === null) {
-            return PlacementResolution::blocked('no single IP pool, and the plan names none');
+            return PlacementResolution::blocked('no single customer IP pool, and the plan names none');
         }
 
         $template = $this->templateFor($cluster, $constraints['template_slug'] ?? null);
@@ -171,6 +187,25 @@ final readonly class LocalPlacementFeasibility
         }
 
         return $fallback();
+    }
+
+    /**
+     * The scopes IpAllocator will actually allocate from, asked of the enum
+     * that decides rather than listed here — a second list would drift from
+     * the allocator's, and the drift would be a customer machine on a
+     * management address.
+     *
+     * @return list<string>
+     */
+    private static function customerAllocatableScopes(): array
+    {
+        return array_values(array_map(
+            static fn (IpPoolScope $scope): string => $scope->value,
+            array_filter(
+                IpPoolScope::cases(),
+                static fn (IpPoolScope $scope): bool => $scope->isCustomerAllocatable(),
+            ),
+        ));
     }
 
     /**
