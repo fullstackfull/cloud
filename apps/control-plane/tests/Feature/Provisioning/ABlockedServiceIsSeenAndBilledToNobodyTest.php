@@ -6,6 +6,7 @@ namespace Tests\Feature\Provisioning;
 
 use Carbon\CarbonImmutable;
 use Database\Seeders\RolePermissionSeeder;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
@@ -25,6 +26,7 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -177,6 +179,45 @@ final class ABlockedServiceIsSeenAndBilledToNobodyTest extends ServiceApiTestCas
 
         $this->assertSame(1, $sweep->renewed);
         $this->assertSame(1, Invoice::query()->count());
+    }
+
+    #[Test]
+    public function a_skipped_renewal_says_so_where_an_operator_can_read_it(): void
+    {
+        /*
+         * A subscription that is skipped and says nothing is a subscription
+         * that stops billing silently. The sweep's `skipped` count is a
+         * number with no names in it, so the reason is written down beside
+         * the subscription, the customer and the service it is waiting on.
+         */
+        [$customer] = $this->accountWithOwner();
+        $subscription = $this->subscriptionFor($customer);
+
+        $service = $this->serviceFor($customer, [
+            'subscription_id' => $subscription->getKey(),
+            'status' => ServiceStatus::Pending,
+            'resources' => ['placement_blocked_reason' => 'no single IP pool, and the plan names none'],
+        ]);
+
+        Log::shouldReceive('error')->zeroOrMoreTimes();
+        Log::shouldReceive('warning')->zeroOrMoreTimes();
+        Log::shouldReceive('debug')->zeroOrMoreTimes();
+        Log::shouldReceive('info')
+            ->once()
+            ->with(
+                'A renewal was skipped: the service it pays for was never delivered.',
+                Mockery::on(static fn (array $context): bool => $context['subscription_id'] === (string) $subscription->getKey()
+                    && $context['service_id'] === (string) $service->getKey()
+                    && $context['reason'] === 'no single IP pool, and the plan names none'),
+            );
+
+        $this->travelTo(CarbonImmutable::parse('2026-06-01 00:00:00'));
+
+        $sweep = app(RenewDueSubscriptions::class)->execute();
+
+        // The positive control: the sweep really did reach this subscription.
+        $this->assertSame(1, $sweep->considered);
+        $this->assertSame(1, $sweep->skipped);
     }
 
     // ---- the operator surface --------------------------------------------

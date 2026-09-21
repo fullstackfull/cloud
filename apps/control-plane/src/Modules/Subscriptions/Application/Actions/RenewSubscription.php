@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Subscriptions\Application\Actions;
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -66,7 +67,9 @@ final readonly class RenewSubscription
 
             $this->assertRenewable($locked);
 
-            if ($this->wasNeverDelivered($locked)) {
+            $undelivered = $this->undeliveredService($locked);
+
+            if ($undelivered !== null) {
                 /*
                  * Skipped rather than refused. The subscription is perfectly
                  * renewable in its own terms — active, auto-renewing, due —
@@ -80,6 +83,13 @@ final readonly class RenewSubscription
                  * machinery, when the machinery is working and the service is
                  * the problem.
                  */
+                Log::info('A renewal was skipped: the service it pays for was never delivered.', [
+                    'subscription_id' => (string) $locked->getKey(),
+                    'customer_id' => (string) $locked->customer_id,
+                    'service_id' => (string) $undelivered->getKey(),
+                    'reason' => ((array) $undelivered->resources)['placement_blocked_reason'] ?? null,
+                ]);
+
                 return null;
             }
 
@@ -193,7 +203,7 @@ final readonly class RenewSubscription
      * @throws SubscriptionNotRenewableException
      */
     /**
-     * Whether this subscription pays for something that never arrived.
+     * The service this subscription pays for, when it never arrived.
      *
      * Deliberately one narrow condition rather than a rule about service
      * states in general: PENDING *and* carrying a placement-blocked reason.
@@ -209,18 +219,18 @@ final readonly class RenewSubscription
      * be retried, refunded or terminated by an operator — and inventing a
      * renewal policy for it here would be inventing product.
      */
-    private function wasNeverDelivered(Subscription $subscription): bool
+    private function undeliveredService(Subscription $subscription): ?Service
     {
         /** @var Service|null $service */
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
 
         if ($service === null || $service->status !== ServiceStatus::Pending) {
-            return false;
+            return null;
         }
 
         $resources = (array) $service->resources;
 
-        return ($resources['placement_blocked_reason'] ?? null) !== null;
+        return ($resources['placement_blocked_reason'] ?? null) !== null ? $service : null;
     }
 
     private function assertRenewable(Subscription $subscription): void
