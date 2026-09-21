@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
-use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -98,7 +97,7 @@ final readonly class ReconcileBackup
     public function __construct(
         private BackupProviderFactory $providers,
         private SecretRedactor $redactor,
-        private NotifyCustomer $notify,
+        private BackupAnnouncements $announcements,
     ) {}
 
     public function execute(Backup $backup): Backup
@@ -334,22 +333,7 @@ final readonly class ReconcileBackup
             return $backup;
         }
 
-        /** @var ?Service $service */
-        $service = $backup->service()->first();
-        $label = $service?->label;
-
-        $this->notify->execute(
-            customerId: $backup->customer_id,
-            type: $type,
-            idempotencyKey: $key,
-            subject: $backup,
-            data: [
-                'service' => is_string($label) && $label !== ''
-                    ? $label
-                    : (string) ($service?->getKey() ?? $backup->service_id),
-            ],
-            link: '/backups',
-        );
+        $this->announcements->raise($backup, $type, $key);
 
         return $backup;
     }

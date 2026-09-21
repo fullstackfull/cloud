@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\DTOs\RemoteBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
@@ -11,12 +12,10 @@ use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
-use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Provisioning\Application\Actions\RecordDrift;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftSeverity;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 
 /**
  * Compares what the platform believes about a datastore with what is on it.
@@ -62,7 +61,7 @@ final readonly class ReconcileBackupInventory
     public function __construct(
         private BackupProviderFactory $providers,
         private RecordDrift $drift,
-        private NotifyCustomer $notify,
+        private BackupAnnouncements $announcements,
     ) {}
 
     /**
@@ -213,21 +212,10 @@ final readonly class ReconcileBackupInventory
 
     private function announceUnreadable(Backup $row): void
     {
-        /** @var ?Service $service */
-        $service = $row->service()->first();
-        $label = $service?->label;
-
-        $this->notify->execute(
-            customerId: $row->customer_id,
-            type: NotificationType::BackupVerificationFailed,
-            idempotencyKey: BackupNotificationKey::verificationFailed((string) $row->getKey()),
-            subject: $row,
-            data: [
-                'service' => is_string($label) && $label !== ''
-                    ? $label
-                    : (string) ($service?->getKey() ?? $row->service_id),
-            ],
-            link: '/backups',
+        $this->announcements->raise(
+            $row,
+            NotificationType::BackupVerificationFailed,
+            BackupNotificationKey::verificationFailed((string) $row->getKey()),
         );
     }
 

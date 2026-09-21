@@ -7,6 +7,7 @@ namespace Tests\Feature\Backups;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileBackup;
 use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
+use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupNotConfiguredException;
@@ -18,7 +19,6 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
-use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
@@ -122,10 +122,10 @@ final class BackupLifecycleTest extends TestCase
             $this->factory(),
             $this->app->make(SecretRedactor::class),
             // Built by the container rather than stubbed, for the same reason
-            // reconcile() is: a request that stops without an answer now tells
-            // the customer, and a double here would let this file keep passing
+            // reconcile() is: a request that ends badly now tells the customer
+            // either way, and a double here would let this file keep passing
             // while nobody was ever told anything.
-            $this->app->make(NotifyCustomer::class),
+            $this->app->make(BackupAnnouncements::class),
         );
     }
 
@@ -137,7 +137,7 @@ final class BackupLifecycleTest extends TestCase
             // Built by the container rather than stubbed: settling a task now
             // also tells the customer, and a double here would let this file
             // keep passing while nobody was ever told anything.
-            $this->app->make(NotifyCustomer::class),
+            $this->app->make(BackupAnnouncements::class),
         );
     }
 

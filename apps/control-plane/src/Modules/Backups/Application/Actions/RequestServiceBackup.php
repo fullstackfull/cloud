@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Backups\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\DTOs\BackupRequest;
 use Lynomia\Modules\Backups\Domain\Enums\BackupMode;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
@@ -16,9 +17,7 @@ use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
-use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -56,7 +55,7 @@ final readonly class RequestServiceBackup
     public function __construct(
         private BackupProviderFactory $providers,
         private SecretRedactor $redactor,
-        private NotifyCustomer $notify,
+        private BackupAnnouncements $announcements,
     ) {}
 
     /**
@@ -157,7 +156,7 @@ final readonly class RequestServiceBackup
                 ],
             );
 
-            return $this->announceIfUnaccountable($backup->refresh());
+            return $this->announceStartOutcome($backup->refresh());
         }
 
         $backup->transitionTo(BackupState::Running, [
@@ -169,41 +168,45 @@ final readonly class RequestServiceBackup
     }
 
     /**
-     * Say so when a backup request stops without an answer.
+     * Say which of the two ways this request ended badly.
      *
-     * The poller cannot reach this row: an indeterminate start leaves no task
-     * id, so `isAwaitingProvider()` is false and no sweep will ever pick it
-     * up. If it is not announced here it is never announced at all, and the
-     * customer is left believing a backup they asked for is running.
+     * The poller cannot do either. A row that stops here has no task id, so
+     * `isAwaitingProvider()` is false and no sweep will ever pick it up: if it
+     * is not announced here it is never announced at all.
      *
-     * Only the indeterminate half. A provider that refused outright lands the
-     * row in `Failed`, which is a settled outcome and a different sentence —
-     * and one this action deliberately does not raise, because it is not this
-     * change's to add. That remains a gap: a backup refused at the door tells
-     * the customer nothing, while one that fails later does.
+     * The two halves are not interchangeable, and the whole catch block exists
+     * to keep them apart. A provider that refused said no, in as many words —
+     * there is no archive, and taking another backup is the right thing to do.
+     * A provider that stopped answering said nothing, and a backup may be
+     * running right now; telling that customer it failed sends them to start a
+     * second one on top of it.
+     *
+     * The refusal uses `backup:{id}:failed`, which is the same key the
+     * reconciler announces a task failure under. One row's failure is one
+     * customer event however the platform came to know about it, and a key
+     * qualified by which route noticed would make two.
      */
-    private function announceIfUnaccountable(Backup $backup): Backup
+    private function announceStartOutcome(Backup $backup): Backup
     {
-        if ($backup->state !== BackupState::NeedsReview) {
+        $id = (string) $backup->getKey();
+
+        [$type, $key] = match ($backup->state) {
+            BackupState::NeedsReview => [
+                NotificationType::BackupNeedsReview,
+                BackupNotificationKey::needsReview($id),
+            ],
+            BackupState::Failed => [
+                NotificationType::BackupFailed,
+                BackupNotificationKey::backup($id, 'failed'),
+            ],
+            default => [null, null],
+        };
+
+        if ($type === null || $key === null) {
             return $backup;
         }
 
-        /** @var ?Service $service */
-        $service = $backup->service()->first();
-        $label = $service?->label;
-
-        $this->notify->execute(
-            customerId: $backup->customer_id,
-            type: NotificationType::BackupNeedsReview,
-            idempotencyKey: BackupNotificationKey::needsReview((string) $backup->getKey()),
-            subject: $backup,
-            data: [
-                'service' => is_string($label) && $label !== ''
-                    ? $label
-                    : (string) ($service?->getKey() ?? $backup->service_id),
-            ],
-            link: '/backups',
-        );
+        $this->announcements->raise($backup, $type, $key);
 
         return $backup;
     }
