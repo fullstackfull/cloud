@@ -18,6 +18,7 @@ use Lynomia\Modules\Catalog\Http\Controllers\OperatorCatalogueController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\InventoryController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\PreflightController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
@@ -31,6 +32,8 @@ use Lynomia\Modules\Providers\Http\Controllers\LicenceController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderCatalogueController;
 use Lynomia\Modules\Providers\Http\Controllers\ProviderController;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\Rbac\Http\Controllers\OperatorController;
+use Lynomia\Modules\Rbac\Http\Controllers\RoleController;
 use Lynomia\Modules\SharedHosting\Http\Controllers\OperatorHostingPackageController;
 use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 
@@ -322,6 +325,17 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.datacenters.index');
 
+    /*
+     * The top of the estate. Every other inventory row hangs off a region
+     * through a datacenter, and RegisterDatacenter used to begin by finding a
+     * region nothing could create — so on a fresh deployment the chain was
+     * unreachable from its first link, and the only ways in were a SQL client,
+     * an edited seeder or the reference topology.
+     */
+    Route::post('infrastructure/regions', [SiteController::class, 'storeRegion'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.regions.store');
+
     Route::post('infrastructure/datacenters', [SiteController::class, 'storeDatacenter'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.datacenters.store');
@@ -429,6 +443,116 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::delete('infrastructure/templates/{template}', [VmTemplateController::class, 'destroy'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.templates.withdraw');
+
+    /*
+    |--------------------------------------------------------------------------
+    | The rest of the estate
+    |--------------------------------------------------------------------------
+    |
+    | Clusters, networks, address pools, subnets, panel servers, dedicated
+    | stock and BMC endpoints. All of these could be read and none of them
+    | could be written, which is what made a fresh deployment unconfigurable
+    | without a SQL client.
+    |
+    | The permissions follow the domain rather than the URL prefix: addressing
+    | is IPAM's, panel servers are shared hosting's, chassis and their
+    | controllers are dedicated's. `network-engineer` already holds the IPAM
+    | pair and `infrastructure-admin` holds all of them, so these routes give
+    | four permissions that had no route their first one.
+    |
+    | Nothing behind these contacts anything. A row here is an operator saying
+    | a thing exists; whether it answers is a reconciler's question.
+    */
+    Route::get('infrastructure/clusters', [InventoryController::class, 'clusters'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.clusters.index');
+
+    Route::post('infrastructure/clusters', [InventoryController::class, 'storeCluster'])
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.clusters.store');
+
+    /*
+     * Corrections. Every one of these is a PUT that changes only the fields it
+     * was sent, carries an optional `version` precondition so that two
+     * operators on one row cannot silently overwrite each other, and refuses
+     * to take something out of service while a customer is still living on it.
+     *
+     * There is no DELETE anywhere in this block, deliberately. Each of these
+     * rows is pointed at by something a customer paid for — machines,
+     * addresses, accounts, chassis — so the lifecycle is the one the models
+     * already have: stop accepting new work, drain, retire. Deleting would
+     * either orphan those rows or cascade through them.
+     */
+    Route::put('infrastructure/regions/{region}', [InventoryController::class, 'updateRegion'])
+        ->whereUlid('region')
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.regions.update');
+
+    Route::put('infrastructure/clusters/{cluster}', [InventoryController::class, 'updateCluster'])
+        ->whereUlid('cluster')
+        ->middleware('permission:'.Permission::InfrastructureManage->value)
+        ->name('infrastructure.clusters.update');
+
+    Route::put('infrastructure/networks/{network}', [InventoryController::class, 'updateNetwork'])
+        ->whereUlid('network')
+        ->middleware('permission:'.Permission::NetworkManage->value)
+        ->name('infrastructure.networks.update');
+
+    Route::put('infrastructure/ip-pools/{pool}', [InventoryController::class, 'updateIpPool'])
+        ->whereUlid('pool')
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.ip_pools.update');
+
+    Route::put('infrastructure/hosting-nodes/{node}', [InventoryController::class, 'updateHostingNode'])
+        ->whereUlid('node')
+        ->middleware('permission:'.Permission::HostingNodeManage->value)
+        ->name('infrastructure.hosting_nodes.update');
+
+    Route::get('infrastructure/networks', [InventoryController::class, 'networks'])
+        ->middleware('permission:'.Permission::IpamView->value)
+        ->name('infrastructure.networks.index');
+
+    Route::post('infrastructure/networks', [InventoryController::class, 'storeNetwork'])
+        ->middleware('permission:'.Permission::NetworkManage->value)
+        ->name('infrastructure.networks.store');
+
+    Route::post('infrastructure/ip-pools', [InventoryController::class, 'storeIpPool'])
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.ip_pools.store');
+
+    Route::get('infrastructure/ip-pools/{pool}/subnets', [InventoryController::class, 'subnets'])
+        ->whereUlid('pool')
+        ->middleware('permission:'.Permission::IpamView->value)
+        ->name('infrastructure.subnets.index');
+
+    Route::post('infrastructure/ip-pools/{pool}/subnets', [InventoryController::class, 'storeSubnet'])
+        ->whereUlid('pool')
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.subnets.store');
+
+    Route::post('infrastructure/hosting-nodes', [InventoryController::class, 'storeHostingNode'])
+        ->middleware('permission:'.Permission::HostingNodeManage->value)
+        ->name('infrastructure.hosting_nodes.store');
+
+    Route::post('infrastructure/dedicated', [InventoryController::class, 'storeDedicatedServer'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('infrastructure.dedicated.store');
+
+    Route::get('infrastructure/dedicated/{server}/bmc', [InventoryController::class, 'bmcEndpoint'])
+        ->whereUlid('server')
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.dedicated.bmc.show');
+
+    /*
+     * Recording where a machine's controller is, which is configuration, and
+     * deliberately not `bmc.access`, which is the authority to use one. The
+     * address goes through the same outbound policy the connection testers
+     * use, at the moment it is written rather than only when it is dialled.
+     */
+    Route::post('infrastructure/dedicated/{server}/bmc', [InventoryController::class, 'storeBmcEndpoint'])
+        ->whereUlid('server')
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('infrastructure.dedicated.bmc.store');
 
     Route::get('infrastructure/profiles', [SoftwareProfileController::class, 'index'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
@@ -713,6 +837,54 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)
         ->name('audit.index');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Who may operate the platform
+    |--------------------------------------------------------------------------
+    |
+    | `role.manage` was declared in the permission catalogue and referenced by
+    | no route, which made it a power nobody could exercise and eleven
+    | permissions nobody could be granted. These are that permission's routes.
+    |
+    | One permission for all of them, deliberately. Reading who has authority
+    | and changing who has authority look like the usual view/manage pair, and
+    | are not: a list of operators, their roles and which of them is privileged
+    | is a map of how to escalate, and the only people who should be reading it
+    | are the people who may change it.
+    |
+    | The refusals — your own account, a role you do not hold, the last
+    | administrator — live in the actions, because each needs the actor, the
+    | target and the state of everybody else at once.
+    */
+    Route::get('operators', [OperatorController::class, 'index'])
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('operators.index');
+
+    Route::post('operators', [OperatorController::class, 'store'])
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('operators.store');
+
+    Route::put('operators/{operator}/roles', [OperatorController::class, 'updateRoles'])
+        ->whereUlid('operator')
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('operators.roles');
+
+    Route::get('roles', [RoleController::class, 'index'])
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('roles.index');
+
+    Route::get('permissions', [RoleController::class, 'permissions'])
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('permissions.index');
+
+    Route::get('roles/{role}', [RoleController::class, 'show'])
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('roles.show');
+
+    Route::put('roles/{role}/permissions', [RoleController::class, 'updatePermissions'])
+        ->middleware('permission:'.Permission::RoleManage->value)
+        ->name('roles.permissions');
 });
 
 /*

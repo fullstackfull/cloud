@@ -182,6 +182,24 @@ enum AuditAction: string
     case OwnershipTransferred = 'membership.ownership_transferred';
 
     /*
+     * Who may operate the platform, and who decided that.
+     *
+     * These sit on the list for the reason everything else does — they
+     * overwrite something that cannot be recovered by looking at the result.
+     * A permission granted and used leaves the same rows behind as a
+     * permission that was always held, so "when did this account become able
+     * to do that, and who said so" is answerable here or nowhere.
+     *
+     * OperatorBootstrapped is the one act on this list with no operator
+     * behind it: it is the establishment of the first one, from the console,
+     * and it is recorded as `system` for exactly that reason.
+     */
+    case OperatorBootstrapped = 'operator.bootstrapped';
+    case OperatorInvited = 'operator.invited';
+    case OperatorRolesChanged = 'operator.roles_changed';
+    case RolePermissionsChanged = 'role.permissions_changed';
+
+    /*
      * DNS. Zone-level acts are audited and record-level acts are audited, and
      * that is not duplication: giving a domain up takes every name under it
      * with it, and an operator asked "when did mail stop working" needs to see
@@ -265,6 +283,29 @@ enum AuditAction: string
     case ServerReimageCleared = 'infrastructure.server.reimage_cleared';
     case ServerReimageClearanceRevoked = 'infrastructure.server.reimage_clearance_revoked';
     case ServerDiscovered = 'infrastructure.server.discovered';
+    /*
+     * The estate as the platform understands it.
+     *
+     * None of these touches a hypervisor, a panel or a BMC: they record what
+     * an operator says exists, which is the thing every provisioning decision
+     * is then made from. That is exactly why they are audited — a cluster that
+     * appeared with nobody's name on it is a cluster nobody can ask about, and
+     * an address pool whose scope changed is the difference between customer
+     * capacity and the management network.
+     */
+    case RegionRegistered = 'infrastructure.region.registered';
+    case RegionUpdated = 'infrastructure.region.updated';
+    case ComputeClusterRegistered = 'infrastructure.cluster.registered';
+    case ComputeClusterUpdated = 'infrastructure.cluster.updated';
+    case NetworkRegistered = 'infrastructure.network.registered';
+    case NetworkUpdated = 'infrastructure.network.updated';
+    case IpPoolRegistered = 'infrastructure.ip_pool.registered';
+    case IpPoolUpdated = 'infrastructure.ip_pool.updated';
+    case SubnetRegistered = 'infrastructure.subnet.registered';
+    case HostingNodeRegistered = 'infrastructure.hosting_node.registered';
+    case HostingNodeUpdated = 'infrastructure.hosting_node.updated';
+    case DedicatedServerRegistered = 'infrastructure.dedicated_server.registered';
+    case BmcEndpointRecorded = 'infrastructure.bmc_endpoint.recorded';
     case DatacenterRegistered = 'infrastructure.datacenter.registered';
     case RackRegistered = 'infrastructure.rack.registered';
     case GpuDeviceRegistered = 'infrastructure.gpu.registered';
