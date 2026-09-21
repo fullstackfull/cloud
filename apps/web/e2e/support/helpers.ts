@@ -344,3 +344,48 @@ export async function expectOperationNoLongerReported(page: Page, action: string
     operationsChannel(page).getByText(everyLifecycleMessageFor(action)),
   ).toHaveCount(0)
 }
+
+/**
+ * Takes the estate the fresh-deployment journey registers back out of service.
+ *
+ * The journey has to create real inventory — a browser proof that reads rows
+ * somebody else wrote proves nothing — and real inventory is exactly what the
+ * rest of the suite buys against. An active compute cluster and an active
+ * customer address pool are placement candidates, and the platform refuses to
+ * place a plan when there are two of either: that refusal is correct and is
+ * the subject of its own tests, but it means a journey that registers a second
+ * one leaves every later catalogue price, quote and order with nothing to
+ * resolve. The seeder's estate and this journey's estate cannot both be the
+ * one the platform chooses.
+ *
+ * So the rehearsal estate is retired the moment the journey is done with it.
+ * Retired, not deleted: the rows stay, the audit trail of their registration
+ * stays, and what changes is the same thing an operator would change — a
+ * cluster into maintenance, a pool switched off. The region, datacenter and
+ * network it also created are left alone, because neither is a candidate for
+ * anything and both are worth seeing in the list afterwards.
+ *
+ * Done from here rather than through the screens for the reason the other
+ * teardowns in this file are: a journey that fails halfway would otherwise
+ * leave the estate ambiguous for every spec that follows, and the failure
+ * reported would be theirs rather than its.
+ */
+export function retireTheRehearsalEstate(): void {
+  execFileSync(
+    'php',
+    [
+      'artisan',
+      'tinker',
+      '--execute',
+      '\\Illuminate\\Support\\Facades\\DB::table("compute_clusters")' +
+        '->where("slug", "like", "e2e-browser-%")->update(["status" => "maintenance"]);' +
+        '\\Illuminate\\Support\\Facades\\DB::table("ip_pools")' +
+        '->where("slug", "like", "e2e-browser-%")->update(["is_active" => false]);',
+    ],
+    {
+      cwd: path.resolve(import.meta.dirname, '../../../control-plane'),
+      stdio: 'ignore',
+      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e' },
+    },
+  )
+}

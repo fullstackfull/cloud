@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { signIn, users } from './support/helpers'
+import { retireTheRehearsalEstate, signIn, users } from './support/helpers'
 
 /*
  * The journey a new deployment's first operator actually makes.
@@ -27,6 +27,16 @@ const CLUSTER = 'e2e-browser-cluster'
 const POOL = 'e2e-browser-pool'
 
 test.describe('a first operator configuring a deployment', () => {
+  /*
+   * What this journey registers is real, and an active cluster or customer
+   * pool is something the platform places against — so it is stood down as
+   * soon as the journey has finished with it. {@see retireTheRehearsalEstate}
+   * says why that has to happen here rather than in a final step of the test.
+   */
+  test.afterAll(() => {
+    retireTheRehearsalEstate()
+  })
+
   test('registers a region, a datacenter, a cluster and an address pool, and sees them persist', async ({ page }) => {
     await signIn(page, users.operator)
 
