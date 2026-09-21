@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Orders;
 
+use Carbon\CarbonImmutable;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
+use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -21,10 +23,13 @@ use Lynomia\Modules\Payments\Application\Actions\RecordPaymentCapture;
 use Lynomia\Modules\Payments\Application\Actions\StartInvoicePayment;
 use Lynomia\Modules\Payments\Domain\DTOs\ProviderEvent;
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
+use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 
 /**
@@ -199,14 +204,55 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
         $ledger = app(WalletLedger::class);
         $before = $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits();
 
+        // A redelivered webhook, five times.
         for ($i = 0; $i < 5; $i++) {
             $this->capture($customer, $invoice);
+        }
+
+        /*
+         * And then the part the loop above cannot reach.
+         *
+         * RecordPaymentCapture converges on one transaction per provider
+         * reference, so replaying the webhook never gets as far as the
+         * compensation a second time — a proof that stopped there would be
+         * proving *that* dedup and saying nothing about this one. The listener
+         * is queued with tries=5, so the case that actually repeats the credit
+         * is the job being retried with the same event: a settlement that
+         * failed after the wallet was credited, a worker killed mid-handle, a
+         * redelivery the queue could not confirm.
+         */
+        /** @var Transaction $capture */
+        $capture = Transaction::query()->where('provider_reference', self::REFERENCE)->sole();
+
+        $event = new PaymentCaptured(
+            transactionId: (string) $capture->getKey(),
+            customerId: (string) $customer->getKey(),
+            invoiceId: (string) $invoice->getKey(),
+            provider: 'fake',
+            providerReference: self::REFERENCE,
+            amount: Money::ofMinor($invoice->total_minor, $invoice->currency),
+            capturedAt: CarbonImmutable::now(),
+        );
+
+        for ($i = 0; $i < 3; $i++) {
+            app(SettleInvoiceOnPaymentCaptured::class)->handle($event);
         }
 
         $this->assertSame(
             $before + $invoice->total_minor,
             $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
-            'A redelivered webhook is one payment, so it is one compensation.',
+            'One payment is one compensation, however many times the webhook or its job is replayed.',
+        );
+
+        // The positive control on the balance: exactly one credit exists, so
+        // the figure above is one compensation rather than several that
+        // happen to cancel out.
+        $this->assertSame(
+            1,
+            WalletTransaction::query()
+                ->whereIn('wallet_id', Wallet::query()->where('customer_id', $customer->getKey())->select('id'))
+                ->count(),
+            'The compensation was written more than once; its idempotency key is not holding.',
         );
     }
 
