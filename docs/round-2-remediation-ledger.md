@@ -530,6 +530,53 @@ this program introduced them.
 | **NAT64 is an unanswered topology question, not a footnote.** An IPv6-only management network reaching IPv4-only BMCs through NAT64 cannot register those BMCs by their translated addresses, because `::/8` refuses them. The dotted-tail spelling was already refused and `64:ff9b::a9fe:a9fe` is the attack the refusal exists for, so widening `::/8` is the wrong answer; the right one is a configured NAT64 prefix whose embedded IPv4 address is judged by these same rules — a feature, not a repair. | `EndpointPolicy`'s `::/8` rationale; `docs/security.md` | F-29 (adjacent) | No — but it bounds which estates can be onboarded |
 | `parse_url`'s rewrite set on PHP 8.4.19 is exactly `\x00–\x1F` ∪ `\x7F`, measured across all 256 byte values rather than assumed. Space and backslash are carried into the host verbatim, which is why a "host is a substring of the original" test is not sufficient and why F-29's fix needed two independent rules. Worth keeping because two rounds reasoned about this set from memory and both were wrong. | F-29 implementer's 256-byte fuzz | F-29 (mechanism) | No |
 
+## The container restart, and exactly what it cost
+
+The session's container was restarted with thirteen agents running. All thirteen
+died. This section records what survived, what did not, and what I did about it,
+because a programme whose ledger is silent about its own outage is not a record.
+
+**Structurally, everything survived.** The repository, all thirteen worktrees,
+every `lynomia_test_*` database and the provisioning scripts were intact.
+PostgreSQL and Redis were down and I restarted both.
+
+**Two reworks had committed and are safe:**
+
+| Branch | Head | What landed |
+|---|---|---|
+| `remediation/f08` | `c5c98e0` | *"check the plan Horizon runs, and the worker an operator types"* — both blockers addressed |
+| `remediation/f19` | `0c648ed` | *"A purchase is what was bought, and it ends where an operator can reach it"* |
+
+**Seven reworks and four verifications were lost.** F-04, F-11, F-14, F-15,
+F-26, F-29 and F-31 had uncommitted working trees; F-12, F-13, F-18 and F-35 had
+verifications in flight, and a verification produces no commit at all, so those
+are lost entire.
+
+**The uncommitted trees were discarded rather than salvaged, and that is the
+important decision here.** Every one of those agents was running an enumerated
+mutation sweep. An agent killed mid-sweep leaves a tree that holds *either* a fix
+*or* an applied mutation, with nothing to say which — and this programme has
+already been burned four separate times by exactly that ambiguity, under the
+heading of `git checkout` not restoring untracked files. A tree that might carry
+a mutation and might carry a repair, indistinguishably, is worth less than no
+tree at all.
+
+So every diff was first saved to `scratchpad/crash-salvage/` — 495KB across
+eleven branches, tracked patches and untracked files both — and then every
+worktree was reset to its branch head and cleaned, with `.env` and `.env.testing`
+preserved because they are untracked and `git clean` would have taken them. The
+salvage is offered to the re-dispatched agents as **untrusted** material they may
+read for ideas and must not build on.
+
+**What this says about the programme's design.** The isolation scheme was built
+to stop agents corrupting each other, and it did its job — nothing cross-
+contaminated. What it does not do is bound the loss when the host goes away, and
+the shape of that loss is lopsided: an implementer's work is durable the moment
+it commits, and a verifier's work is durable only when it is reported. Four
+verifications died with nothing to show, having done the full measurement.
+Verifiers are now asked to report interim findings rather than hold everything
+for a final hand-back.
+
 ## History
 
 | Date | Event |
