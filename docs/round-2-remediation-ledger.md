@@ -75,7 +75,7 @@ The database override works because `phpunit.xml` pins `DB_DATABASE` without
 depends on the defect it is going to repair; when F-41 closes, this script must
 change with it.
 
-### Three isolation defects this program had to find the hard way
+### Five isolation defects this program had to find the hard way
 
 1. **The shared autoloader.** `vendor/` was first symlinked whole. Composer's
    autoloader hard-codes an absolute `$baseDir` computed from `__DIR__`, and
@@ -151,6 +151,31 @@ change with it.
    before measuring and to report `skipped=0` beside any figure from those
    two suites. A count that cannot be shown to have had `skipped=0` is not
    evidence.
+
+5. **Two test runs against one database, which `CLAUDE.md` already forbade.**
+   F-29's implementer backgrounded one band and ran another in the foreground
+   against the same `lynomia_test_f29`, and got five errors — four
+   `relation "permissions" does not exist` and one migration deadlock — in a
+   band that had nothing to do with its change. It caught this itself, re-ran
+   strictly serially, and **reported the bad run alongside the good one**
+   rather than only the figures that flattered it. That disclosure is the
+   reason this entry can be written accurately, and it is the standard.
+
+   This one is not a hole in the isolation scheme: `CLAUDE.md` says never to
+   run two `php artisan test` invocations at once against the same database,
+   and the scheme gives every agent a database precisely so that *different*
+   agents cannot collide. The failure was an agent colliding with itself.
+   Every brief now says it in the agent's own instructions, because a
+   same-database collision is indistinguishable, from the inside, from a real
+   failure in the change under test.
+
+   A related mechanical change: `mkworktree.sh` now **re-attaches to an
+   existing `remediation/<slug>` branch** instead of refusing. Redis indexes
+   are the scarce resource — fourteen for the whole programme — so a
+   worktree whose implementer has finished is retired to free its index while
+   its independent verification runs, and comes back at its own head if the
+   verification finds something. The script ignores the base argument in that
+   case and says so, so a branch can never be silently moved.
 
 Only the coordinator writes to `claude/relaxed-turing-nh8ybf`.
 
@@ -234,12 +259,12 @@ independent reviewer's verdict, which is never the implementer's.
 | ID | Sev | Class | Status | Notes |
 |---|---|---|---|---|
 | F-11 | High | DATA_INTEGRITY + TEST_GAP | `OPEN` — in rework | The eighth door is genuinely closed — the verifier reproduced both shapes itself and confirmed they move. It proved the *"strictly finer within a listing"* claim exhaustively: 460,320 pairs, and every apparent merge was a pair sharing an identifier, impossible inside one listing. **Held open because the load-bearing sentence is false**: `ReconcileZones::find()` *is* a fourth comparison that disagrees with the new key — correctly, because noticing that the record under a known id has changed is reconciliation's whole job — but nothing says so, and doing the one-line "unification" the commit message invites leaves **465 tests green** while turning a customer's hijacked record from two drifts into zero. A ninth door held shut by nothing. Also: the 27-site inventory exists only in a report and not in the repository, which is the same failure mode as the docblock that hid the eighth door. |
-| F-26 | Medium | — | `OPEN` | Reserved-zone guard protects the name and its parents but not its children; empty default. |
-| F-28 | Medium | — | `OPEN` | Console socket TLS sourced from the global key while every sibling is per-cluster. |
+| F-26 | Medium | DATA_INTEGRITY | `OPEN` — in implementation | Reserved-zone guard protects the name and its parents but not its children, against three documents saying otherwise, and ships with an empty default. The finding is one sentence in the audit's Medium section and is not a specification: the brief requires the implementer to locate the guard, locate the three documents, decide which of the three is right, and reproduce the containment defect through the real surface before touching anything. The empty default is the half that makes a fresh install protect nothing, and the decision between a non-empty default and a refusal to boot without one is the implementer's to argue. |
+| F-28 | Medium | SECURITY | `OPEN` — in implementation | Console socket TLS sourced from the global key while every sibling is per-cluster, and the socket carries the API token. Briefed against all three of this repository's secret rules rather than only the one the finding names — no plaintext in Git, logs or the database; credentials held by reference through the secret resolver; provider messages through `SecretRedactor`. A one-cluster fixture cannot distinguish a per-cluster lookup from a global one, so the oracle must be a two-cluster estate with different material. Adjacent and explicitly not this branch's to close: `ConsoleUpstream::socketAddress()` opens a raw `ssl://host:port` to an address derived from `compute_clusters.api_endpoint` with no endpoint-policy check at use — see the discovered table. |
 | F-29 | Medium | SECURITY | `OPEN` — in verification | All seven families confirmed and refused; the round-one loosening closed with one `::/8` entry. Round two remains the most rigorous verification of this programme — subsumption re-derived as *forced* rather than empirical, 16,000 random addresses probed for over-strictness, the whole IANA IPv6 special-purpose registry transcribed by hand, 19 of 19 mutations killed — and it still returned **UPHELD WITH RESERVATIONS**, closing *"I would not close F-29 while 2 and 3 are open."* The rework closed both, and **neither fix is the one I prescribed**. For the `parse_url` rewrite I offered two candidate rules; the implementer fuzzed all 256 byte values in the host position and found each misses a case — refusing `/[\x00-\x20\x7F]/` misses the backslash, and the substring test misses both space and backslash and, run after the raw check, fires on nothing at all. So it split the defect in two: `\n` is a *rewrite*, the backslash is a *disagreement about where the host starts* (PHP reads `\169.254.169.254` as the host; WHATWG reads `\` as `/`, making the authority empty). Two independent rules, with `_` deliberately left legal so neither can catch the other's case and both stay falsifiable. It also found a **third write road I had not named** — `PUT /api/admin/infrastructure/hosting-nodes/{id}` with only `hostname` returned 200 with `169.254.169.254` — and **corrected the previous verifier's own finding**: the machine-address road refuses `\n` and `\t` but *not* the backslash, measured at 201 on the audited parent, which is why the fix had to be in two places. Rows written across the eight poisoned hostnames: 8 → 0. **It declines to declare F-29 closed**, and publishes a 24-row call-path inventory showing why: the class docblock's claim *"checked at registration and again at use"* was **false** for hosting nodes and compute clusters — seven paths dial with a credential attached and no second check. It corrected the docblock and `docs/security.md` rather than closing the gap, on the ground that a second check puts a DNS round trip inside provider construction. That gap, the AAAA blind spot and the NAT64 topology question are the verifier's to adjudicate. 20 mutations, 19 killed; the survivor (`$` vs `\z`) is argued unpinnable and said so in place. 1455 tests / 25785 assertions / skipped=0. |
 | F-31 | Medium | SECURITY | `OPEN` — in rework, **four verification rounds** | `env()` resolved before the environment loads, so the setting never took effect. Round two established the mechanism nobody had pinned: **how the variable is delivered decides whether the bug bites** — an early `env()` still sees a value already in the process environment, and fails only for one living in the `.env` file, which is the production case under `clear_env = yes`. Round four verified the implementer's *"no code behaviour changed"* claim **mechanically rather than by reading** — `php -w` token hashes identical on both sides (`5df66366786dc2cb6ec191c55afc60b4`) — reproduced the file-versus-ambient asymmetry itself, re-derived the 14-row sub-count privilege by privilege (9 catch-alls + 1 matching nothing + 4 unevaluable), and swept **46 legitimate entry forms finding 0 wrongly refused**. **UPHELD WITH RESERVATIONS**, seven of them. Six are oracle or prose gaps; the seventh is a behaviour the code gets wrong, and it is why this stays open: `matchesEveryCaller()`'s `catch (Throwable) { return true; }` also catches the `\RuntimeException` `IpUtils::checkIp6()` throws on a PHP build without IPv6. That throw happens before any per-entry validation, the IPv6 canary is probed for **every** entry, and `checkIp()` dispatches on the *request* IP — so on such a build it fires for every entry including a valid `10.0.0.7`, every entry is refused, `proxies()` returns `[]`, and F-31 returns in full, silently, with nothing 500ing. The verifier: *"it converts a runtime property into a total collapse of the trusted list."* The class docblock asserts the opposite — that this throw site is unreachable and would be covered anyway — so the comment is a defect in its own right. Also held: a claimed sixth header that is a bitmask alias for headers already enabled (`HEADER_X_FORWARDED_AWS_ELB` = `0b0011010` = `FOR|PROTO|PORT`), and positive rows that make `0.0.0.0/1` and `128.0.0.0/1` *mandatory* to honour, so a future legitimate tightening would go red for a good change. |
 | F-33 | Medium | DATA_INTEGRITY | `OPEN` | Overlapping subnets accepted; same address issuable to two customers. No longer latent — F-02 made subnet creation reachable. |
-| F-35 | Medium | — | `OPEN` | Preflight's address check unreachable whenever a template exists. |
+| F-35 | Medium | OPERABILITY | `OPEN` — in implementation | Preflight's address check is unreachable whenever a template exists, so an estate with no IP pools reports all mapping checks green. This is the most dangerous class in the programme — a false green on the operator's readiness surface, telling an operator an estate is ready when it cannot provision — and its oracle must therefore be a **reachability** oracle: a test asserting the check refuses a pool-less estate can pass while the check stays unreachable, so the assertion is on the command's own report, with a template present, because a template being present is the condition that hides the check. The brief also requires the full inventory of preflight's checks and the estate shape under which each actually runs, **committed to the repository** rather than reported to me — a prior finding's 27-site inventory existed only in a message and was useless to the next reader. |
 
 ### Wave 4 — customer-facing correctness
 
