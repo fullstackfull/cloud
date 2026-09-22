@@ -106,13 +106,26 @@ change with it.
    number taken before it. At integration, no Queue or Simulation figure from
    a branch that lacks `0a3bc09` may be treated as evidence.
 
-4. **A missing Redis makes the worker proofs vanish silently.**
-   `WorkerHarness::setUp()` calls `markTestSkipped()` on every real-worker
-   test when Redis is unreachable, so a `tests/Feature/Queue` or
-   `tests/Feature/Simulation` run with Redis down reports a plausible
-   passing count with the proofs entirely absent. Postgres failing in this
-   container is loud; Redis failing is not. One agent took its first
-   figures in exactly that state and caught it only by stopping to look.
+4. **A missing Redis makes the worker proofs vanish, and the headline
+   still says `passed`.** `WorkerHarness::setUp()` calls
+   `markTestSkipped()` on every real-worker test when Redis is
+   unreachable. Postgres failing in this container is loud; Redis failing
+   is not. One agent took its first figures in exactly that state.
+
+   **The precise shape, measured rather than assumed**, because two agents
+   reported it differently and the difference decides whether this
+   programme's back-catalogue of figures is sound. The JSON reporter emits
+   `"skipped":n` when anything skipped and omits the key entirely when
+   nothing did:
+
+       with a skip  {"result":"passed","tests":2,"passed":1,"skipped":1}
+       with none    {"result":"passed","tests":2,"passed":2}
+
+   So `result` reads `passed` either way — that is the trap, and it is
+   real. But `tests == passed` with no `skipped` key **is** sound proof of
+   `skipped=0`. Every figure in this programme reported in that form was
+   therefore genuinely skip-free, and does not need re-running. A figure
+   quoted as a bare "green" or as `result: passed` proves nothing.
 
    The harness is not wrong — it already calls `$this->fail()` instead of
    skipping when `getenv('CI')` is set, which is the right behaviour for a
