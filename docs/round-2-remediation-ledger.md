@@ -242,7 +242,7 @@ independent reviewer's verdict, which is never the implementer's.
 |---|---|---|---|---|
 | F-04 | Critical | CODE_GAP | `OPEN` — in rework | Password, contact-email and domain limbs closed and mutation-verified. The user settled the escalated decision — **the customer is asked for the domain at checkout** — and the uniqueness hole that fix opened is now closed by a **partial unique index over live accounts**. Round three returned **UPHELD WITH RESERVATIONS**: *"Both round-two gaps are genuinely closed."* The verifier's method is worth recording — it attacked the constraint three ways and **noticed that two of its three attacks proved less than they looked**, because a node row lock serialised both transactions so the index never fired; it then isolated the index with two raw `psql` sessions overlapping on an uncommitted tuple and got the real violation. It read the predicate from `pg_indexes` rather than the source, and checked the ownership section by reading every cited source, finding **no invented verification flow**. Eight reservations, two reachable: an idempotency digest that hashes the raw domain rather than the canonical one, so a retry differing only in case or a trailing dot is refused as a conflict that does not exist; and a re-arm path outside the catch that classifies the index's refusal as retryable — the exact classification the commit argues it must never be. |
 | F-13 | High | CODE_GAP | `OPEN` — in rework | Privilege map derived from the calls the adapter makes, bounded by the platform's own Ansible role. Round three **re-derived the twenty-privilege accounting independently**, privilege by privilege against the adapter's actual calls, and confirms it: 13 demanded + 6 omitted + 1 outside. On the question I said would decide the finding — whether removing an assertion was a test rewritten to fit — it returned **stronger, and proved it three ways**, including tracing the assertion's history to establish it was **authored by the very commit that introduced the defect**, so it was never a pre-existing invariant. It accepted both judgement calls, and corroborated the implementer's tooling-incident disclosure by hashing its leftover backups against the real git objects. **Held open for a fail-open the repair itself created**: `Sys.Audit` — the privilege moved *out* of the map to make the arithmetic close — is pinned by nothing, and deleting its check entirely survives 1209 tests while letting VPS be declared ready on a token holding no audit privilege at all. |
-| F-14 | High | CODE_GAP | `OPEN` — in verification, **rejected four times** | Six rounds. The fifth was rejected on my adjudication over the verifier's own UPHELD WITH RESERVATIONS, for a tenth door: `parse_str` keeps only the last occurrence of a repeated scalar key, so a body whose panel had just called the licence expired sold the node, and which way it fell was purely positional. The rework accepted that without argument and closed it **at the transformation rather than in a rule** — a gate comparing what the panel *sent* against what the platform can *see*. Building the inventory then found **five further sell-the-node defects nobody had named**, all live: percent-encoded key aliases, key-mangling collisions, `max_input_vars` truncation (not a repeat, so the repeat gate alone would not have caught it), relative-time expiries sold on every sync for ever, and `d/m/Y` read as `m/d/Y` selling an already-expired licence. It **declines to claim exhaustion** and names three live discards it did not close, with what owns each. |
+| F-14 | High | CODE_GAP | `OPEN` — in rework, **rejected five times** | Seven rounds. Round six **rejected `3b29308`**, and the nine defect classes the round closed are not in dispute: the verifier reproduced every one live at `d823eba` and refused at `3b29308`, re-derived the 28-of-109 revert figure **exactly**, confirmed the implementer's narrowing of my literal repeat rule was evidence-led (the literal rule refuses `list[]=alice&list[]=bob`, i.e. every DirectAdmin account listing in the fleet), and endorsed the perpetual-word list and the `0` exclusion on its own measurements. The rejection is for **one door inside a rule this commit wrote**: `isAmbiguousSlashDate()` matches `/` only, and the identical defect is live for `-` and `.`. I verified the mechanism on the installed PHP rather than taking it on trust — `01/12/2026` parses to 12 January, `01-12-2026` and `01.12.2026` to 1 December, because the separator decides the field order (`/` American, `-` and `.` European). A panel writing `01-12-2026` and meaning 12 January 2026, already expired, is read as 1 December and the node is recorded licensed and schedulable for paid orders — F-14's headline outcome verbatim. What makes this a rejection rather than a reservation is that the round's **own new test-data comment asserts the opposite in writing** — *"Accepted. Unambiguous however it is punctuated"* against `31.12.2099`, which is unambiguous only because 31 > 12 — so dash and dot dates are not among the three gaps the implementer names but are affirmatively declared closed. The verifier's own standard for why this is not a demand for exhaustion: *"D1 is not a named gap and is not adjacent to one — it is inside a rule this commit wrote, on a case its own test comment says is covered."* Also held: `error=0&status=active`, the most ordinary minimal licence answer there is, is **refused** with a reason that is false (the command *was* understood), against a docblock calling that rule belt-and-braces; the `error=1` throw site contradicts its own commit claim and tells an operator *"the node could not be asked"* about a node that answered on HTTP 200; and the round's central claim — that the gate belongs in `parse()` rather than in `licenceStatus()` — **has no oracle at all**: restricting either gate to `CMD_API_LICENSE` leaves 109/109 green. |
 
 ### Wave 2 — concurrency, lifecycle, authorization
 
@@ -520,6 +520,45 @@ deliverable I asked for alongside it is an inventory of **every
 transformation the raw body passes through before a rule sees it** —
 `parse_str` was upstream of everything anybody had examined for five rounds,
 and an eleventh door is likelier than not without one.
+
+### F-14, round six — verifier REJECTED, and handed one call up to me
+
+The verifier rejected on D1 by itself and explicitly declined to rest the
+verdict on D7, stating the standard it needed from me rather than guessing it:
+
+> *"Leading-NUL keys destroy the value **and** the gate's own naming of it,
+> and sell. **This one turns on a standard only you can set.** If 'destroyed
+> vs. merely unread' is the line the new gate owns — which is the
+> implementer's own framing — it falls on the gate's side and is door eleven.
+> If the test is 'a key spelling the platform would never read anyway', it is
+> T10's owned family."*
+
+That is the right way to hand a call up: the question, both answers, what
+each implies, and a statement of which one it would not rest a verdict on.
+
+**Ruling: D7 is IN, on the implementer's own criterion.** The line the gate
+draws is *destroyed* versus *merely unread*. `%00status=expired` parses to
+`[]` — the pair vanishes whole, and the gate's own naming derivation vanishes
+with it, so `named['status'] = 1`, `held = 1`, and no loss is reported. The
+panel said "expired" and the platform never learns it said anything. That is
+not T10's family: T10's value survives in `$fields` and the platform simply
+reads a fixed set of key spellings, which is an owned whitelist limit with the
+evidence still on the row. Here the evidence is gone.
+
+Two things made the ruling easy rather than close. First, the asymmetry: a NUL
+*suffix* is already caught and a NUL *prefix* is not, so the gate is not
+drawing a principled line here — it is blind in one direction and does not
+know it. Second, **the mechanism that catches it is already in the file**. The
+`max_input_vars` guard counts `substr_count($body,'&')+1`; a dropped pair makes
+pairs-sent exceed pairs-parsed, and that comparison catches every whole-pair
+drop including spellings neither of us has thought of. The verifier notes that
+the pair count's unique contribution today is "mostly suppressing PHP's
+warning". This is how it earns its place.
+
+I told the implementer the route but not the implementation, and said why: a
+rule keyed on the literal spelling `%00` is a rule that will be wrong for the
+next spelling, and this implementer has already been right once to prefer a
+transformation-level gate over a spelling-level one.
 
 ## Findings closed by another finding's branch
 
