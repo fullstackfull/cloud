@@ -106,26 +106,41 @@ change with it.
    number taken before it. At integration, no Queue or Simulation figure from
    a branch that lacks `0a3bc09` may be treated as evidence.
 
-4. **A missing Redis makes the worker proofs vanish, and the headline
-   still says `passed`.** `WorkerHarness::setUp()` calls
-   `markTestSkipped()` on every real-worker test when Redis is
-   unreachable. Postgres failing in this container is loud; Redis failing
-   is not. One agent took its first figures in exactly that state.
+4. **A missing Redis, and what it actually looks like.**
+   `WorkerHarness::setUp()` calls `markTestSkipped()` on every real-worker
+   test when Redis is unreachable. This entry has been rewritten twice,
+   because the first two versions were written from an agent's impression
+   rather than from a measurement, and each overstated the danger in a
+   different way. What follows was measured three ways.
 
-   **The precise shape, measured rather than assumed**, because two agents
-   reported it differently and the difference decides whether this
-   programme's back-catalogue of figures is sound. The JSON reporter emits
-   `"skipped":n` when anything skipped and omits the key entirely when
-   nothing did:
+   The reporter emits `"skipped":n` when anything skipped and omits the key
+   when nothing did, but `result` reads `"passed"` either way:
 
        with a skip  {"result":"passed","tests":2,"passed":1,"skipped":1}
        with none    {"result":"passed","tests":2,"passed":2}
 
-   So `result` reads `passed` either way — that is the trap, and it is
-   real. But `tests == passed` with no `skipped` key **is** sound proof of
-   `skipped=0`. Every figure in this programme reported in that form was
-   therefore genuinely skip-free, and does not need re-running. A figure
-   quoted as a bare "green" or as `result: passed` proves nothing.
+   And a genuinely dead Redis does not produce a clean skip at all. Pointed
+   at a dead port, one real-worker file gave:
+
+       CI unset  tests=10 passed=0 skipped=5 errors=5 risky=5
+       CI=1      tests=5  passed=0 failed=5
+                 "CI must run the queue proofs, and Redis is not reachable."
+
+   The skips arrive with errors on the sibling tests (`Database connection
+   [queue_test] not configured`), so the run does not read as green. The
+   agent that raised this had in fact seen `tests 195, passed 107, errors
+   44` and described it from memory as a plausible green when it was
+   nothing of the kind.
+
+   **The conclusion is narrower than the alarm.** No figure in this
+   programme was a silent lie; `tests == passed` with no `skipped` key is
+   sound proof of `skipped=0`, and every figure reported in that form
+   stands. What `CI=1` buys is turning an ambiguous signal into an
+   unambiguous one — worth having, now the default, and a smaller claim
+   than the one made twice above it. What remains genuinely unsafe is
+   quoting a run as a bare "green", or as `result: passed`, without its
+   counts: that proves nothing, and it is the habit this entry exists to
+   kill.
 
    The harness is not wrong — it already calls `$this->fail()` instead of
    skipping when `getenv('CI')` is set, which is the right behaviour for a
