@@ -294,12 +294,37 @@ over: F-18's verification at 137,561 and F-33's 3,932 / 138,671 were **pathed**
 runs, and the ~144,000 figures they were held against were **unpathed** ones.
 Nobody was miscounting.
 
-**I have not established the mechanism and I am not going to guess at it.** A
-second pair of runs is in flight with `--log-junit` on both sides so the
-per-test assertion counts can be diffed and the difference attributed to named
-tests rather than to a story. Until that lands, the honest statement is: the
-count is invocation-dependent by about 3.8%, the cause is unknown, and no
-argument may rest on comparing across invocations.
+**The mechanism is now established, and it is one test.** The second pair of
+runs carried `--log-junit` on both sides. Parsing them and diffing per-test
+assertion counts:
+
+    unpathed testcases: 3905    pathed: 3905    only-in-one: 0
+    differing common testcases: 1     net: 5436
+
+    +5436  Tests\Architecture\EveryPreparedCategoryHasAContractTest
+             ::no_prepared_contract_has_an_implementation_that_claims_to_be_real
+
+    unpathed  assertions=14670   pathed  assertions=9234
+
+Every other one of the 3,904 tests reports the identical count in both runs.
+The whole gap is that test, and its body says why:
+
+    foreach ([CdnProvider, ObjectStorageProvider, EmailHostingProvider] as $contract) {
+        foreach (get_declared_classes() as $class) {
+            $this->assertFalse(is_subclass_of($class, $contract), ...);
+        }
+    }
+
+`get_declared_classes()` returns whatever has been **autoloaded so far**, which
+is a property of the run rather than of the code: 4,890 classes unpathed
+against 3,078 pathed, times three contracts, is 14,670 against 9,234 — a
+difference of exactly 5,436, which is the whole-suite gap to the assertion.
+
+So the invocation rule stands and its reason is now narrow: **an assertion
+total is comparable only with one produced by the same invocation, because one
+test counts the classes that happen to be loaded.** A band sum is still not
+comparable with an unpathed figure, but for the ordinary reason that it omits
+tests — not for this one.
 
 What does **not** change: the test count is reproducible and is the fingerprint;
 the assertion total is not, drifting by single digits between identical runs on
@@ -1371,6 +1396,7 @@ this program introduced them.
 | **`SeedSubnetAddresses` guards on the `cidr` string and writes the `ip_version` column, and nothing ties the two.** Its v6 refusal reads `$subnet->block()->version()` — derived from the cidr text — while the rows it writes take `'ip_version' => $subnet->ip_version->value`. `subnets` has no CHECK relating the two. A row whose `ip_version` says 6 while its `cidr` is v4 would pass the v6 guard, receive real address rows, then be excluded by `subnetIdsFor()`'s **pool** branch while staying allocatable through its **subnet** branch — F-35's V4 asymmetry reached **without hand-writing a row**. `RegisterSubnet` forecloses it by deriving `ip_version` from the block, and `SubnetFactory::forBlock()` keeps them consistent by design; the one writer that does not derive it is `LoadReferenceTopologyForSimulation`, which takes both verbatim from `resources/reference-topology/topology.php`. So today it is closed by the contents of a resource file rather than by a constraint. | F-35's fourth verification, traced statically across every writer | F-33, F-35 | No — latent, and the CHECK that would close it belongs with F-33's realm work if that round finds it falls out; I am not widening F-33 to reach it |
 | **No test in this repository can exercise `DetectStaleJobs`'s selection end to end.** `scopeStale` compares `started_at` against Postgres `now()`, which is **frozen at the start of the test transaction** under `RefreshDatabase`, while `started_at` is written from PHP — so the selector can never match inside a test. F-15's verifier had to drive `moveToReview()` directly. This is how **both halves of F-15's tenth door stayed invisible**: a scheduled sweep that no test reaches is a place defects live. | F-15's rework verification, reasoned from the frozen-clock semantics and confirmed by the selector never matching | F-15, F-41, F-44 | No — but F-15's round three is asked to decide whether making the selector testable is in its scope, and my view is that it is, because the door runs straight through it |
 | **The review screen publishes `error_code` but not `metadata.reason`, while the runbook keys three rows on `reason`.** `ProvisioningController::needingReview()` omits it, and the same docblock records that the screen truncates `last_error` — the only other place the reason appears. **So the operator is sent to a runbook row they cannot select.** | F-15's rework verification | F-15 | No — handed to F-15's round three, which is asked to fix it or say why not |
+| **The architecture suite's single largest assertion producer is blind to the case it exists to catch.** `EveryPreparedCategoryHasAContractTest::no_prepared_contract_has_an_implementation_that_claims_to_be_real` loops `get_declared_classes()` against three Prepared contracts and asserts `is_subclass_of` is false for each — **14,670 assertions in one invocation and 9,234 in another**, because `get_declared_classes()` returns what has been autoloaded so far and nothing more. Its guard is against *"an adapter written from documentation"* — an implementation that exists and that nothing yet uses — and **an unreferenced class is never autoloaded, so it is never in the list, so it is never checked**. The test's apparent thoroughness is the artefact: thousands of assertions, none of them about the class that would actually falsify it. The fix is to enumerate candidates from the filesystem or the composer classmap, as the repository's other architecture tests already do. | My own pathed-vs-unpathed calibration pair, diffed per test from `--log-junit`: 3,905 testcases each, identical sets, **exactly one** differing, +5,436 — the whole-suite gap to the assertion | F-23, F-24, F-25 | No — but it is the one that explains a bookkeeping discrepancy this ledger carried for weeks, and whichever finding owns the architecture suite should take it |
 
 ## The container restart, and exactly what it cost
 
