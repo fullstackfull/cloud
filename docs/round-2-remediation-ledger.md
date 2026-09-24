@@ -1297,6 +1297,77 @@ terminations. Concurrency concentrates a shared failure as efficiently as it
 distributes work, and the programme had no staggering of any kind.
 
 
+## The final re-audit's charter, written before it has any findings
+
+I am writing this now, while the round is still running, for one reason: if I
+write it after the last closure I will write it knowing what I want it to
+conclude. Everything below is a constraint on a re-audit whose results I do not
+yet have.
+
+**1. It re-derives; it does not read.** Every mutation matrix quoted in this
+ledger exists only in an agent's hand-back. Not one is in the repository, by my
+own deliberate choice — a committed matrix is a claim like any other and a
+reader who trusts it is doing the thing this programme exists to stop. So no
+closure may be sustained by a matrix, a figure or a sentence quoted here,
+including the ones I wrote. The ledger is a record of what was claimed and by
+whom, not evidence.
+
+**2. A green suite means one thing only: nothing already pinned has moved.** Of
+the closures so far, the decisive measurement was taken outside the test suite
+in most of them — a 16-cell permission table driven through real routes, a
+463,108-row parser sweep, a token-level diff, a probe of what the reporter emits.
+A re-audit that reads suite colour has verified the suite, not the work.
+
+**3. Both skip proofs, every time.** The arithmetic one (`result=passed`,
+`tests==passed`, no `failed`/`errors` key) and the JUnit one. They agree today —
+I measured that — and if they ever disagree, the disagreement is the finding.
+
+**4. Figures.** The test count is reproducible. **The assertion total is not**:
+it drifts by single digits in both directions between runs of identical code,
+and a pre-registered experiment that came out consistent with a rule I had
+retracted did not restore it, because a counterexample stands. No argument may
+rest on a small assertion delta in either direction, *including one that points
+the way the arguer expects*. Unpathed runs land between 144,377 and 144,967;
+band sums land near 138,000; the ~6,800 gap is structural and a band sum may
+never be quoted against an unpathed figure, nor may one summing to the other be
+treated as evidence.
+
+**5. One CI gate has never executed.** PHPStan cannot be run in this container
+and no round has run it. Every closure in this programme is therefore a closure
+with one static gate unrun, and the re-audit says so plainly rather than
+describing any of them as fully gated.
+
+**6. The quantifier rule is a finding-generator, not a style note.** Eight
+sentences of the form *only / exactly / nothing else / never / cannot* have been
+falsified by independent measurement, and **in every single case the code
+beneath was right**. The re-audit greps for them across everything this
+programme added and measures each. It should expect to find more, and it should
+expect the code beneath to be right again — which is precisely why the sentences
+matter: they are the part of the work that was never tested.
+
+**7. Closure requires an independent verifier, and no finding agent closed its
+own finding.** The re-audit's job is not to re-run the verifiers but to ask
+whether any closure rests on something the verifier took on trust.
+
+**8. Nothing in this programme may move the external-truth statuses.**
+`SOFTWARE_CODE_COMPLETE = NO`, `30B.0-E = NOT READY`, `REAL_INFRA_VERIFIED`,
+`REAL_PAYMENT_VERIFIED`, `REAL_REGISTRAR_VERIFIED`, `REAL_HOSTING_VERIFIED`,
+`READY_TO_SELL` = `NONE`. No local test, simulator, inventory row, UI page or
+fake provider is evidence about a real provider, a real payment, a real
+registrar or real hosting. A re-audit that closes every finding still cannot
+move those; the most it can do is establish what would remain once someone runs
+the real thing.
+
+**9. What "SOFTWARE_CODE_COMPLETE = YES" would require**, stated now so it
+cannot be assembled to fit later: every F-01..F-47 finding CLOSED by an
+independent verifier or NOT_APPLICABLE_WITH_PROOF; the integration merge done
+with the overlap matrix's dangerous pairs re-measured rather than re-read; the
+five colliding migrations renumbered and a clean `migrate:fresh` / rollback /
+re-apply proved; the full suite green on the integrated tree with both skip
+proofs; and the re-audit itself finding nothing blocking. Anything less is
+PARTIAL, and PARTIAL is an honest answer.
+
+
 ## History
 
 | Date | Event |
