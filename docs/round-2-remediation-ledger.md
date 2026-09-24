@@ -263,7 +263,7 @@ full-suite runs reported by five different agents on five different trees:
 | F-26 | 3,928 | 144,103 |
 | F-31 | 3,952 | 144,288 |
 | F-18 | 3,931 | 144,377 |
-| F-08 | 3,961 | 144,408 |
+| F-08 | High | CONCURRENCY | `OPEN` — **upheld with reservations**, one blocking, in round four | **F-08's literal sentence is now false of the code** and the verification established it on the real path rather than in a fixture: every supervisor is strictly under its connection's clock, and the original defect reproduces on the parent with **real OS workers** — *"One dispatch became 3 executions: the queue gave a running job to a second worker"* — against 19/19 at the tip. It also corrected the audit **upward**: there are **seven** listeners on `payments`, not six. **The round-three blocker fix is confirmed with no false positive, three ways, none of them the implementer's.** It dumped the 30 spawned command strings from the real plan and fed them through the **real** listener in a booted app using Symfony's own `StringInput` — a stricter parser than the test's — getting `checked=30 accepted=30 refused=0` with two live controls refused **in the same process**; ran five **real OS processes** with deployed parameters, all exit 0; and tried 20 further shapes across five environments including one with no Horizon block at all. It could not break it. That matters because a false positive here takes the platform's queues down on deploy. **The blocker is a fourth way in, against a docblock that enumerates three.** Laravel prefers a **job's own** `$timeout` over the worker's `--timeout` and over anything a supervisor says (`Worker::timeoutForJob()` = `$job->timeout() ?? $options->timeout`), and `QueueRetryClocks` reads `horizon.defaults`, `horizon.environments` and the command line but **never a job class** — nor does any test in the repository. Measured with real workers at the branch's own scaling: as shipped, 2 starts and **0 finished**, no overlap; with **one line added** (`public int $timeout = 600;`), **4 starts, 4 finished**, a measured 9.8-second overlap between two live executions of one dispatch. Both config files untouched, `configurationViolations()` silent, boot guard accepting, all 49 rule tests green. **My ruling: build the fourth reading, do not narrow the sentence.** The verifier offered either. Narrowing is the wrong half: the tree is safe only because no class happens to declare a high `$timeout` today, and one added property on a `payments` listener re-opens F-08's exact mechanism with every guard silent. **A guard advertised as complete that a one-line change defeats is worse than no guard, because the next engineer reads the enumeration and stops checking.** The finder is already in the tree. Four non-blocking items ride along, including `queue:listen` being unpinned in both constants — `grep -rn "queue:listen" tests/` returns nothing — and a "up from 30" that is really 34. |
 | F-29 | 4,029 | 144,517 |
 
 Every unpathed run in this programme lands within about 400 assertions of
@@ -297,6 +297,32 @@ for `skipped`, found **one** occurrence, checked what it was, and reported that
 it was its own `echo` line rather than phpunit's — because a bare "1 occurrence"
 would have read as a skip. Most agents would not have looked twice at a number
 that agreed with the conclusion they wanted.
+
+### Two measurement facts every remaining round should know
+
+**Assertion counts vary by about three between runs of identical code.** Two
+verifiers have now hit it independently and both stopped to check: F-29's saw
+144,517 against 144,514 on the same tree, and F-08's saw 144,411 against a
+reported 144,408. Tests match exactly in both cases; only assertions move. It is
+data-dependent counting in some row, not a behaviour change, and nobody should
+spend another hour on a delta of three. **A difference of three is noise. A
+difference of thousands is a band sum being compared with a full-suite figure**
+(see the rule above). Anything in between is worth investigating.
+
+**Every mutation matrix in this programme is report-only.** F-08's verifier went
+looking for the implementer's "39 mutations, 38 caught" and found no breakage
+matrix anywhere in the tree — `git diff --name-only` over the whole branch
+touches nothing outside `apps/` and `scripts/`. So that claim, and every claim
+like it in every hand-back, is **unverifiable from the repository**. It ran 19
+mutations of its own instead, which is the right response.
+
+I am deliberately **not** requiring matrices to be committed. A matrix in a
+document is a claim like any other, and a reader who trusts it is doing exactly
+what this programme exists to stop. The real check is an independent sweep by
+someone who did not write the code. What follows from this is a constraint on
+the **final re-audit**: it must re-derive rather than read. No closure may rest
+on a mutation table that exists only in a hand-back report, including the tables
+quoted in this ledger.
 
 ## Dependency graph and wave order
 
