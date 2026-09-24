@@ -628,6 +628,36 @@ So the standing instruction to every remaining round, applied to itself: **the
 first thing to do with a new check is to make it fail on purpose.** Not the
 thing it checks — the check.
 
+#### And the way I applied the fix broke somebody's run
+
+F-32's round two reported, as a toolchain note rather than a finding, that
+`artisan-test.sh` changed under it mid-run: its band emitted the JSON and then
+died at `line 137: a: command not found` before reaching the exit line. It
+re-ran that band in full and took its figures from the re-run, and noted that
+its earlier bands had run under the old script so their `EXIT=0` lines are still
+valid proofs. Careful, and correct.
+
+The cause is mine and is worth writing down because it is not obvious. **Bash
+reads a script lazily, by byte offset, while executing it.** I rewrote the file
+in place — truncate and write, which is what `open(path, 'w')` does — so the
+running shell resumed reading at an offset that no longer meant what it had
+meant, landing in the middle of a word. `a: command not found` is the tail of
+some longer token, cut where my insertion had shifted the file.
+
+The fix costs nothing and I should have used it from the start: **write the new
+version to a temporary file and `mv` it into place.** A rename swaps the
+directory entry and leaves the running process's open inode intact, so every
+in-flight run finishes against the script it started with and the next run picks
+up the new one. Anything editing a script that thirteen agents invoke must do it
+that way.
+
+Two general things follow. A shared instrument cannot be patched the way a
+source file is patched, because its readers are mid-sentence. And the failure
+mode is *silent in the direction that matters*: the run emitted a well-formed
+JSON summary before dying, so a less careful reader would have banked the figure
+and never seen the missing exit line — the same shape as the defect the fix was
+for.
+
 ### `result: "passed"` is not a proof of `skipped=0`, and one agent established why
 
 Every brief in this programme asks for `skipped=0` to be *proved*, because the
