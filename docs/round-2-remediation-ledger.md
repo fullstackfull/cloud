@@ -650,6 +650,40 @@ CI-gated check that no round has run. It is not a reason to hold a finding open
 when one gate has never executed. Where a round's change is small and its types
 are provable by reading, say that; where it is not, say that too.
 
+**Two things F-11's round seven added, one of which is a correction of mine.**
+
+The repository *documents the whole of this already*, in
+`apps/control-plane/tools/phpstan/README.md`, and no one in this programme —
+including me — had read it. It says why the analyser has its own composer root:
+Larastan pins a range of `illuminate/*`, so sharing a root would let a
+static-analysis upgrade move a framework component the application runs on. And
+it says why the install here is partial: `phpstan/phpstan` is distributed as an
+**archive only**, it has no git source in the lock, and both archive endpoints —
+`api.github.com/.../zipball` and `codeload.github.com` — answer **403 through
+this sandbox's egress proxy**. So it is not that somebody forgot to install it.
+Plain `composer install` cannot complete this one package in this container even
+if the rule against running composer were lifted; every other package installs
+and this one cannot. CI installs it in its own job and runs it with `-c`, and
+the workflow carries a comment explaining that flag.
+
+So the honest sentence is narrower than "unavailable": **the gate is configured,
+CI runs it, and it is unrunnable in this container for a documented reason
+outside this programme's control.** `phpstan.neon` is level 6, Larastan plus
+`phpstan/phpstan-deprecation-rules`, four paths (`src`, `app`, `database`,
+`routes` — note `tests/` is not analysed), `parseModelCastsMethod: true`, and
+**no `ignoreErrors` block**, with a comment saying that pre-emptively silencing
+categories nobody has seen is how a static analyser becomes decoration.
+
+**And the correction.** In the brief I wrote for F-27's second verification I
+told it PHPStan was *"not merely unavailable but unconfigured — no `phpstan.neon`
+anywhere, not in `require-dev`"*. That is false, and **this section already said
+so**: it describes the install as partial and names the packages that are there.
+So I did not carry a false claim from the tree into a brief; I carried one *past*
+my own ledger, which had the right answer written down. That is the same failure
+as a commit message pointing at a correction this file does not contain, running
+the other way, and it is worth recording in the same place: the ledger is only
+worth keeping if the person writing the briefs reads it.
+
 ### A brief of mine that told an agent to do something the tooling does not do
 
 `mkworktree.sh <slug> <base>` creates the worktree on a **new branch named after
