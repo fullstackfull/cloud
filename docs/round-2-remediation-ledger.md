@@ -262,7 +262,51 @@ Verified by deliberate collision: a second invocation against a database with a
 live run exits 3 and prints the holder. It is wired into `mkworktree.sh`, so
 every worktree provisioned from now on is told to prefer it.
 
-## A bookkeeping rule I had to be shown: two kinds of total are not comparable
+## A bookkeeping rule I had to be shown, and then had to correct myself
+
+**The rule was right and my explanation of it was wrong.** I recorded for weeks
+that the ~6,800 gap between figures near 138,000 and figures near 144,300 was
+"a band sum being compared with a full-suite figure". It is not. I measured it.
+
+One worktree, one tree, one database, two runs back to back, the second
+differing from the first only in that the whole test directory was named as a
+path:
+
+| invocation | tests | assertions |
+|---|---|---|
+| `artisan-test.sh` (no path) | **3,905** | **144,006** |
+| `artisan-test.sh tests` | **3,905** | **138,567** |
+
+**Identical test count. 5,439 assertions apart.** And `--list-tests` discovers
+exactly 3,905 either way, so it is not a difference in which tests are selected:
+the same tests run, and report a different number of assertions depending on how
+PHPUnit was invoked.
+
+So the operative rule is not about band sums at all. It is:
+
+> **An assertion total is comparable only with a total produced by the same
+> invocation.** A "band" is simply a pathed run, which is why band sums never
+> reconciled with unpathed figures — not because they cover less, but because
+> naming a path changes the count on the same tests.
+
+That also explains, retrospectively, several figures this programme puzzled
+over: F-18's verification at 137,561 and F-33's 3,932 / 138,671 were **pathed**
+runs, and the ~144,000 figures they were held against were **unpathed** ones.
+Nobody was miscounting.
+
+**I have not established the mechanism and I am not going to guess at it.** A
+second pair of runs is in flight with `--log-junit` on both sides so the
+per-test assertion counts can be diffed and the difference attributed to named
+tests rather than to a story. Until that lands, the honest statement is: the
+count is invocation-dependent by about 3.8%, the cause is unknown, and no
+argument may rest on comparing across invocations.
+
+What does **not** change: the test count is reproducible and is the fingerprint;
+the assertion total is not, drifting by single digits between identical runs on
+top of this much larger invocation effect.
+
+## The original note, kept because the reasoning that got there is still worth reading
+
 
 F-18's cleanup reported its full suite as **3,931 tests / 144,377 assertions**
 and then, rather than banking a green figure, said plainly that the assertion
