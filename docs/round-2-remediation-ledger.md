@@ -684,6 +684,36 @@ evidence of nothing. Before integration, every pair of branches touching one
 customer-visible or operator-visible path must be checked against each other,
 not merely merged.
 
+## Corrections owed but not yet in the tree
+
+Small, agreed, and lost or deferred for a mechanical reason rather than a
+judgement. Each names the exact text so it cannot evaporate.
+
+### F-19 — `EvidenceOfABuild`'s class docblock
+
+Written by the implementer after its wide band came back green, uncommitted when
+**I destroyed the worktree** (see the ninth isolation defect). Not re-appliable
+by its author — there was no worktree left — and I am not applying it to
+`remediation/f19` while `v19e` verifies that exact tip.
+
+Current text, which is the defect:
+
+    *    Reading the absent row as "never built" turns the one failure the engine
+    *    refuses to retry — because retrying it builds a second machine — into the
+    *    one failure an operator may close with a single click.
+
+*"the engine refuses to retry"* is true **only of the automatic path**, and that
+is the identical elision that turned `TerminateVpsService`'s docblock into the
+false sentence which became this finding's Block 2. The replacement must insert
+**AUTOMATICALLY**, name `FailureClass::isAutomaticallyRetryable()` as the
+exclusion, and state that `RetryProvisioningJob` — the operator's button — does
+not read the failure class at all. Two lines, no behaviour.
+
+**Apply in F-19's next round if its verification opens one, otherwise at
+integration.** It is recorded here because a correction that exists only in a
+hand-back is a correction that will be lost, which this programme has now
+demonstrated twice.
+
 ## Migrations awaiting integration review
 
 Two parallel agents may not independently add migrations touching the same table
