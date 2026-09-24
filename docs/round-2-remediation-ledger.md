@@ -797,6 +797,49 @@ distinguishes them" is a fact about the suite. "Nothing could distinguish them"
 is the claim being made. They are different sentences and only one of them
 closes a mutant.
 
+### A green mutation line can also mean the mutation never landed
+
+The companion to the section above, found by F-12's round six in its own
+harness and caught before it became a published figure.
+
+Its scripted mutation asserted a unique match before substituting. The string
+it was looking for — an evidence validation rule — occurs **twice** in
+`ServiceController`, in `returnToStock()` and in `retire()`. The uniqueness
+assertion failed, so the substitution did not happen; and the harness **ran the
+band anyway**, against an unmodified tree, and wrote a green line into the
+results file.
+
+That line is indistinguishable, in the output, from a survivor. Same shape,
+same counts, same conclusion available to anybody reading the table: *the
+mutant survived, so the clause is inert*. The truth was the opposite — the
+clause is held, and nothing had been mutated to find out.
+
+So a mutation sweep has two silent failure modes that both present as green,
+and they are not the same mistake:
+
+- **The fixture cannot discriminate.** The mutation landed; the tests could
+  never have seen it. (The section above.)
+- **The mutation did not land.** The tests were never asked.
+
+Neither is visible in the result line, which is why a sweep has to prove the
+mutation happened rather than assume it. Cheapest sufficient discipline, and
+what every remaining round should do:
+
+1. **Assert the substitution, not just the match** — diff the file after
+   mutating and fail loudly if the diff is empty. A uniqueness assertion that
+   fails must stop the harness, not skip to the run.
+2. **Take a red reading first where one is available.** A mutant that cannot be
+   shown to turn *something* red somewhere has not been shown to exist.
+3. **Restore from a pristine copy and verify it**, with a content hash rather
+   than `git checkout`, so the next mutation starts from the tree you think it
+   does.
+
+F-12's round did all three after the fact and re-ran the mutation against
+`retire()` alone, where it was killed. It also left the bogus line in its
+results file, marked, rather than deleting it — which is the right instinct: a
+published figure that was wrong is evidence about the instrument, and deleting
+it hides the one thing the next round needs to know.
+
 ## Dependency graph and wave order
 
 The Round-1 report's recommended sequence ran F-17+F-16 → F-01 → F-09+F-10 →
