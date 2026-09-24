@@ -244,6 +244,60 @@ Verified by deliberate collision: a second invocation against a database with a
 live run exits 3 and prints the holder. It is wired into `mkworktree.sh`, so
 every worktree provisioned from now on is told to prefer it.
 
+## A bookkeeping rule I had to be shown: two kinds of total are not comparable
+
+F-18's cleanup reported its full suite as **3,931 tests / 144,377 assertions**
+and then, rather than banking a green figure, said plainly that the assertion
+total did not reconcile with the **137,561** its verification had recorded — a
+gap of about 6,800 that its own change could not account for. It ruled out its
+test file (+51, measured at both ends), the source change (zero executable
+lines), and any hidden failure or skip, guessed that the cause was measurement
+scope, labelled the guess as a guess, and offered to settle it with a
+seventeen-minute A/B rather than assert it.
+
+The guess is right, and the programme already held the evidence. Unpathed
+full-suite runs reported by five different agents on five different trees:
+
+| branch | tests | assertions |
+|---|---|---|
+| F-26 | 3,928 | 144,103 |
+| F-31 | 3,952 | 144,288 |
+| F-18 | 3,931 | 144,377 |
+| F-08 | 3,961 | 144,408 |
+| F-29 | 4,029 | 144,517 |
+
+Every unpathed run in this programme lands within about 400 assertions of
+144,300. Every **sum of path-scoped bands** lands around 137,500–138,100. A gap
+that appears identically on five branches cannot have been introduced by six
+docblock-prose commits on one of them, so it is a measurement-mode difference
+and not a regression. The decisive detail is the cleanup's own reconciliation of
+the *test* count — 3,930 settled + 1 new = 3,931, predicted and measured
+agreeing exactly. **Same tests, more assertions**, which rules out a coverage
+gap in either direction.
+
+**The defect this exposed is mine.** I have been recording unpathed totals and
+band-sum totals side by side in these tables as though they were the same kind
+of figure. That is precisely how a future reader — or the final re-audit —
+would "discover" a 6,816-assertion regression in a commit that changed no
+executable line, and spend a day on it. The rule, now standing:
+
+> **An assertion total is comparable only to another taken the same way. A sum
+> of path-scoped bands is not a full-suite figure and must never be subtracted
+> from one.** Every figure recorded here carries the command that produced it,
+> and band sums are labelled as band sums.
+
+Band splitting is not going away — it exists because a single unpathed run has
+twice hit an agent's tool timeout under load from sibling agents, and because
+twelve bands localise a failure that one number hides. So the two kinds of
+total will keep appearing side by side, and the labelling is the whole of the
+defence.
+
+One smaller practice from the same message, worth copying: it grepped its output
+for `skipped`, found **one** occurrence, checked what it was, and reported that
+it was its own `echo` line rather than phpunit's — because a bare "1 occurrence"
+would have read as a skip. Most agents would not have looked twice at a number
+that agreed with the conclusion they wanted.
+
 ## Dependency graph and wave order
 
 The Round-1 report's recommended sequence ran F-17+F-16 → F-01 → F-09+F-10 →
