@@ -43,7 +43,14 @@ final class BackupResource extends JsonResource
             // What a customer actually asks: is it done, can I restore from
             // it, and does somebody need to look at it.
             'is_in_flight' => $this->state->isInFlight(),
-            'is_restorable' => $this->state->isRestorable(),
+            /*
+             * Read off the row and not off the state, because a confirmed
+             * read-back failure is a fact about the archive rather than about
+             * where the row has got to. The two used to be the same answer,
+             * which put a Restore button next to an archive the datastore had
+             * already said it could not read.
+             */
+            'is_restorable' => $this->resource->isRestorable(),
             'needs_attention' => $this->state->needsAttention(),
 
             'size_bytes' => $this->size_bytes,

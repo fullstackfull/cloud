@@ -99,7 +99,21 @@ final class CatalogueSeeder extends Seeder
                     'backup_manual_allowance' => 2 + $i,
                     'backup_scheduled_allowance' => 30,
                 ],
-                placementConstraints: ['storage_class' => 'nvme'],
+                /*
+                 * The image is named because the estate stages several and
+                 * checkout will not guess between them: a plan that says
+                 * nothing is a plan whose customer's operating system would
+                 * be decided by row order, and that refusal is the point of
+                 * the placement rule. Which OS a tier ships with is a
+                 * catalogue decision, and this is the catalogue.
+                 *
+                 * The address pool is deliberately *not* named. The reference
+                 * estate holds one customer-allocatable IPv4 pool beside a
+                 * management one, and the rule already excludes management
+                 * addresses — so the answer is unambiguous without the
+                 * catalogue having to repeat it.
+                 */
+                placementConstraints: ['storage_class' => 'nvme', 'template_slug' => 'ubuntu-lts'],
             );
 
             // Monthly and yearly, the latter at ten months for twelve, which is

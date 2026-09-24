@@ -9,18 +9,21 @@ use Illuminate\Http\Request;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\Region;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\Rack;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Infrastructure\Application\Actions\RegisterDatacenter;
 use Lynomia\Modules\Infrastructure\Application\Actions\RegisterRack;
+use Lynomia\Modules\Infrastructure\Application\Actions\RegisterRegion;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\DeploymentRefused;
 use Lynomia\Modules\Infrastructure\Http\Requests\RegisterDatacenterRequest;
 use Lynomia\Modules\Infrastructure\Http\Requests\RegisterRackRequest;
+use Lynomia\Modules\Infrastructure\Http\Requests\RegisterRegionRequest;
 use Lynomia\Modules\Infrastructure\Http\Resources\DatacenterResource;
 use Lynomia\Modules\Infrastructure\Http\Resources\RackResource;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Where machines are: regions (read), datacenters and racks.
+ * Where machines are: regions, datacenters and racks.
  */
 final class SiteController
 {
@@ -33,6 +36,45 @@ final class SiteController
                 'name' => $region->nameFor('en'),
             ])->all(),
         ]);
+    }
+
+    /**
+     * The row every other row in the estate hangs off, and the one that had no
+     * writer.
+     *
+     * RegisterDatacenter began with `Region::findOrFail` and nothing could put
+     * a region there, so the whole chain was unreachable from its first link on
+     * a fresh deployment.
+     */
+    public function storeRegion(RegisterRegionRequest $request, RegisterRegion $register): JsonResponse
+    {
+        $region = $register->execute(
+            $request->string('slug')->value(),
+            $request->translatedName(),
+            $request->string('country')->value(),
+            $request->input('city'),
+            $this->operator($request),
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => (string) $region->getKey(),
+                'slug' => $region->slug,
+                'name' => $region->nameFor('en'),
+                'country' => $region->country,
+                'city' => $region->city,
+                'is_active' => $region->is_active,
+                'accepts_new_services' => $region->accepts_new_services,
+            ],
+        ], Response::HTTP_CREATED);
+    }
+
+    private function operator(Request $request): User
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        return $user;
     }
 
     public function datacenters(Request $request): JsonResponse

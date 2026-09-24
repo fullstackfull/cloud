@@ -7,6 +7,7 @@ namespace Tests\Feature\Backups;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileBackup;
 use Lynomia\Modules\Backups\Application\Actions\RequestServiceBackup;
+use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupNotConfiguredException;
@@ -117,12 +118,27 @@ final class BackupLifecycleTest extends TestCase
 
     private function request(): RequestServiceBackup
     {
-        return new RequestServiceBackup($this->factory(), $this->app->make(SecretRedactor::class));
+        return new RequestServiceBackup(
+            $this->factory(),
+            $this->app->make(SecretRedactor::class),
+            // Built by the container rather than stubbed, for the same reason
+            // reconcile() is: a request that ends badly now tells the customer
+            // either way, and a double here would let this file keep passing
+            // while nobody was ever told anything.
+            $this->app->make(BackupAnnouncements::class),
+        );
     }
 
     private function reconcile(): ReconcileBackup
     {
-        return new ReconcileBackup($this->factory(), $this->app->make(SecretRedactor::class));
+        return new ReconcileBackup(
+            $this->factory(),
+            $this->app->make(SecretRedactor::class),
+            // Built by the container rather than stubbed: settling a task now
+            // also tells the customer, and a double here would let this file
+            // keep passing while nobody was ever told anything.
+            $this->app->make(BackupAnnouncements::class),
+        );
     }
 
     #[Test]

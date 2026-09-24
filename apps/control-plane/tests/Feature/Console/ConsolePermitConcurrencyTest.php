@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Vps\Application\Services\ConsoleSessionStore;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Feature\Queue\WorkerHarness;
 use Tests\TestCase;
 
 /**
@@ -33,8 +34,20 @@ final class ConsolePermitConcurrencyTest extends TestCase
 {
     use RefreshDatabase;
 
-    /** Its own database, so a suite run cannot disturb development data. */
+    /**
+     * Its own database, so a suite run cannot disturb development data — and
+     * overridable, so two checkouts running this at once cannot disturb each
+     * other's. The default matches {@see WorkerHarness}
+     * and `REDIS_DB` is the variable `config/database.php` already reads.
+     */
     private const int REDIS_DATABASE = 15;
+
+    private static function redisDatabase(): int
+    {
+        $configured = env('REDIS_DB');
+
+        return is_numeric($configured) ? (int) $configured : self::REDIS_DATABASE;
+    }
 
     /**
      * The cache's connection, which is not the default one.
@@ -51,7 +64,7 @@ final class ConsolePermitConcurrencyTest extends TestCase
     {
         parent::setUp();
 
-        config()->set('database.redis.'.self::CACHE_CONNECTION.'.database', self::REDIS_DATABASE);
+        config()->set('database.redis.'.self::CACHE_CONNECTION.'.database', self::redisDatabase());
         config()->set('cache.default', 'redis');
 
         $this->app->forgetInstance('redis');

@@ -373,10 +373,6 @@ final class TheFailureMatrixTest extends GoldenPathHarness
          */
         $estate = $this->committedVpsEstate();
 
-        $this->outsideTheTransaction(fn (): VmTemplate => VmTemplate::factory()->create([
-            'cluster_id' => $estate['cluster']->getKey(),
-        ]));
-
         $plan = $this->committedPlan(ProductKind::Vps, monthlyMinor: 9_000, placement: [
             'cluster_id' => (string) $estate['cluster']->getKey(),
             'ip_pool_id' => (string) $estate['pool']->getKey(),
@@ -385,6 +381,16 @@ final class TheFailureMatrixTest extends GoldenPathHarness
         $customer = $this->committedCustomer();
 
         [, $invoice] = $this->orderAndInvoice($customer, $plan, 'matrix-image-ambiguous');
+
+        /*
+         * The second image is staged after the order, because checkout asks
+         * the same question and would refuse a plan whose image cannot be
+         * resolved. An operator staging an image between a payment and a
+         * build is the window that gate cannot close, and it is this one.
+         */
+        $this->outsideTheTransaction(fn (): VmTemplate => VmTemplate::factory()->create([
+            'cluster_id' => $estate['cluster']->getKey(),
+        ]));
 
         $this->payThroughTheProvider($invoice, $customer, 'pi_matrix_image_ambiguous');
 

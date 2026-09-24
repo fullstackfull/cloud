@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Orders\Application\Actions\AssertOrderIsStillDeliverable;
+use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Payments\Application\DTOs\StartedPayment;
 use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentRequest;
 use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentResult;
@@ -57,6 +59,7 @@ final readonly class StartInvoicePayment
 {
     public function __construct(
         private PaymentProviderManager $providers,
+        private AssertOrderIsStillDeliverable $deliverable,
     ) {}
 
     /**
@@ -73,6 +76,17 @@ final readonly class StartInvoicePayment
      */
     public function execute(Invoice $invoice, ?string $returnUrl = null): StartedPayment
     {
+        /*
+         * Asked before anything else, because everything else costs something.
+         *
+         * An order accepted at 10:00 can have had the configuration it needs
+         * removed by 10:05, and the customer presses Pay at 10:10 against an
+         * invoice that is still perfectly collectible. Opening an intent then
+         * puts a real authorisation on a real card for something the platform
+         * already knows it cannot place.
+         */
+        $this->assertTheOrderCanStillBeDelivered($invoice);
+
         $provider = $this->providers->default();
 
         [$attempt, $amount] = $this->reserveAttempt($invoice);
@@ -109,6 +123,30 @@ final readonly class StartInvoicePayment
             attempt: $attempt->refresh(),
             intent: $result,
         );
+    }
+
+    /**
+     * Re-asks the feasibility question this invoice's order was accepted on.
+     *
+     * Only for an invoice that belongs to an order. A renewal or a proration
+     * invoice bills a service that already exists, and refusing to take money
+     * for a machine the customer is already running — because the catalogue
+     * has moved on since they bought it — would be a worse answer than the
+     * problem it solves.
+     */
+    private function assertTheOrderCanStillBeDelivered(Invoice $invoice): void
+    {
+        if ($invoice->order_id === null) {
+            return;
+        }
+
+        $order = Order::query()->find($invoice->order_id);
+
+        if ($order === null) {
+            return;
+        }
+
+        $this->deliverable->execute($order);
     }
 
     /**

@@ -18,6 +18,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Application\Services\OrderPricing;
+use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
@@ -60,6 +61,7 @@ final readonly class PlaceOrder
         private CouponValidator $coupons,
         private OrderNumberAllocator $numbers,
         private TransitionOrder $transition,
+        private PlanCapacity $capacity,
     ) {}
 
     /**
@@ -145,6 +147,27 @@ final readonly class PlaceOrder
     }
 
     /**
+     * What this basket is about to consume, per plan.
+     *
+     * Aggregated, because one basket may name the same plan on more than one
+     * line and the limit is on the plan rather than on the line. Two lines of
+     * one each against a stock of one is an oversell by a basket racing only
+     * itself.
+     *
+     * @return array<string, int>
+     */
+    private function quantitiesPerPlan(CheckoutRequest $request): array
+    {
+        $wanted = [];
+
+        foreach ($request->lines as $line) {
+            $wanted[$line->planId] = ($wanted[$line->planId] ?? 0) + $line->quantity;
+        }
+
+        return $wanted;
+    }
+
+    /**
      * @param  Collection<string, Plan>  $plans
      * @param  list<PricingLine>  $pricingLines
      */
@@ -164,6 +187,25 @@ final readonly class PlaceOrder
                 if ($coupon !== null) {
                     $this->assertCouponHasUnspentCapacity($customer, $coupon);
                 }
+
+                /*
+                 * The claim on finite plan capacity, taken here and not in the
+                 * pricing above.
+                 *
+                 * The pricing read is a courtesy that tells a customer the
+                 * plan is gone before they reach a card form. It locks
+                 * nothing, so under concurrency every checkout reads the same
+                 * remaining capacity and every one of them passes: eight
+                 * processes racing for a single unit sold five of it, and
+                 * eight tabs of one customer against a limit of one bought
+                 * four.
+                 *
+                 * This is the authority. It locks each affected plan row in a
+                 * stable order, re-reads the live counts with those locks
+                 * held, and refuses before a single item row is written — the
+                 * same shape the coupon hold above has always had.
+                 */
+                $this->capacity->claim($customer, $this->quantitiesPerPlan($request));
 
                 $order = Order::create([
                     'customer_id' => $customer->getKey(),

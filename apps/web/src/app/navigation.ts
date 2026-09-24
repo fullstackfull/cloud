@@ -167,6 +167,7 @@ export const OPERATOR_NAV: readonly NavItem[] = [
 export const CONTROL_CENTER_NAV: readonly NavItem[] = [
   { to: '/admin/control-center', labelKey: 'admin.nav.overview', end: true },
   { to: '/admin/control-center/sites', labelKey: 'admin.nav.sites' },
+  { to: '/admin/control-center/networking', labelKey: 'admin.nav.networking' },
   { to: '/admin/control-center/machines', labelKey: 'admin.nav.machines' },
   { to: '/admin/control-center/providers', labelKey: 'admin.nav.providers' },
   { to: '/admin/control-center/discovery', labelKey: 'admin.nav.discovery' },
@@ -175,6 +176,8 @@ export const CONTROL_CENTER_NAV: readonly NavItem[] = [
   { to: '/admin/control-center/readiness', labelKey: 'admin.nav.readiness' },
   { to: '/admin/control-center/credentials', labelKey: 'admin.nav.credentials' },
   { to: '/admin/control-center/licences', labelKey: 'admin.nav.licences' },
+  { to: '/admin/control-center/catalogue', labelKey: 'admin.nav.catalogue' },
+  { to: '/admin/control-center/operators', labelKey: 'admin.nav.operators' },
 ]
 
 /**

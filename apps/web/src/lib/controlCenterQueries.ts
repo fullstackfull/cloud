@@ -1052,3 +1052,504 @@ export function useRegisterRack() {
     onSuccess: () => { invalidateSiteViews(queryClient) },
   })
 }
+
+/*
+ * The catalogue: what this deployment sells, and for how much.
+ *
+ * These are the operator views, not the customer ones. They show the rows a
+ * customer never sees — withdrawn products, unlisted plans, a price that is
+ * configured and switched off — because "why is this not being offered" is
+ * the question the screen exists to answer.
+ */
+
+export type ProductKind = 'vps' | 'dedicated' | 'shared_hosting'
+
+export const PRODUCT_KINDS: ProductKind[] = ['vps', 'dedicated', 'shared_hosting']
+
+export const BILLING_PERIODS = ['hourly', 'daily', 'monthly', 'quarterly', 'yearly'] as const
+
+export type BillingPeriod = (typeof BILLING_PERIODS)[number]
+
+export interface OperatorProduct {
+  id: string
+  kind: ProductKind
+  slug: string
+  name: Record<string, string>
+  description: Record<string, string> | null
+  is_active: boolean
+  is_public: boolean
+  sort_order: number
+  plans_count?: number
+}
+
+export interface OperatorPrice {
+  id: string
+  currency: string
+  billing_period: BillingPeriod
+  recurring_amount_minor: number
+  setup_amount_minor: number
+  is_active: boolean
+  available_from: string | null
+  available_until: string | null
+}
+
+export interface OperatorPlan {
+  id: string
+  product_id: string
+  slug: string
+  name: Record<string, string>
+  description: Record<string, string> | null
+  resources: Record<string, unknown>
+  placement_constraints: Record<string, unknown> | null
+  stock_limit: number | null
+  per_customer_limit: number | null
+  is_active: boolean
+  is_public: boolean
+  sort_order: number
+  prices?: OperatorPrice[]
+  priced_in?: string[]
+}
+
+export interface OperatorHostingPackage {
+  id: string
+  slug: string
+  panel_package_name: string
+  plan_id: string | null
+  is_active: boolean
+  mapped: boolean
+  disk_quota_mib: number | null
+  bandwidth_quota_mib: number | null
+  max_addon_domains: number | null
+  max_subdomains: number | null
+  max_databases: number | null
+  max_email_accounts: number | null
+  cpu_limit_percent: number | null
+  memory_limit_mib: number | null
+  io_limit_kbps: number | null
+  process_limit: number | null
+  entry_process_limit: number | null
+}
+
+interface Counted<T> {
+  data: T[]
+  meta: Record<string, number>
+}
+
+function invalidateCatalogue(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'catalogue'] })
+}
+
+export function useOperatorProducts() {
+  return useQuery({
+    queryKey: ['admin', 'catalogue', 'products'],
+    queryFn: () => admin.get<Counted<OperatorProduct>>('/catalogue/products'),
+  })
+}
+
+export interface RecordProductInput {
+  kind: ProductKind
+  slug: string
+  name: Record<string, string>
+  description?: Record<string, string>
+  is_active: boolean
+  is_public: boolean
+  sort_order?: number
+}
+
+export function useRecordOperatorProduct() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RecordProductInput) => admin.post<Envelope<OperatorProduct>>('/catalogue/products', input),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawOperatorProduct() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<OperatorProduct>>(`/catalogue/products/${encodeURIComponent(id)}`),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useOperatorPlans(productId?: string) {
+  return useQuery({
+    queryKey: ['admin', 'catalogue', 'plans', productId],
+    queryFn: () => admin.get<Counted<OperatorPlan>>('/catalogue/plans', { product: productId }),
+  })
+}
+
+export interface RecordPlanInput {
+  product_id: string
+  slug: string
+  name: Record<string, string>
+  resources: Record<string, unknown>
+  is_active: boolean
+  is_public: boolean
+}
+
+export function useRecordOperatorPlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: RecordPlanInput) => admin.post<Envelope<OperatorPlan>>('/catalogue/plans', input),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawOperatorPlan() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<OperatorPlan>>(`/catalogue/plans/${encodeURIComponent(id)}`),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export interface SetPriceInput {
+  planId: string
+  currency: string
+  billing_period: BillingPeriod
+  /** Whole minor units. The form converts; nothing downstream sees a decimal. */
+  recurring_amount_minor: number
+  setup_amount_minor: number
+  is_active: boolean
+}
+
+export function useSetPlanPrice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ planId, ...body }: SetPriceInput) =>
+      admin.post<Envelope<OperatorPlan>>(
+        ['/catalogue/plans', encodeURIComponent(planId), 'prices'].join('/'),
+        body,
+      ),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawPlanPrice() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ planId, priceId }: { planId: string; priceId: string }) =>
+      /*
+       * Joined rather than interpolated, because `prices/` inside a template
+       * reads as division to the gate that keeps money arithmetic out of the
+       * browser. The gate is blunt on purpose and it is right to be, so the
+       * path is built in parts instead of the rule being loosened.
+       */
+      admin.delete<Envelope<OperatorPlan>>(
+        ['/catalogue/plans', encodeURIComponent(planId), 'prices', encodeURIComponent(priceId)].join('/'),
+      ),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useHostingPackages() {
+  return useQuery({
+    queryKey: ['admin', 'catalogue', 'hosting-packages'],
+    queryFn: () => admin.get<Counted<OperatorHostingPackage>>('/catalogue/hosting-packages'),
+  })
+}
+
+export interface MapHostingPackageInput {
+  slug: string
+  panel_package_name: string
+  plan_id?: string
+  disk_quota_mib?: number
+  is_active: boolean
+}
+
+export function useMapHostingPackage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: MapHostingPackageInput) =>
+      admin.post<Envelope<OperatorHostingPackage>>('/catalogue/hosting-packages', input),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+export function useWithdrawHostingPackage() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      admin.delete<Envelope<OperatorHostingPackage>>(`/catalogue/hosting-packages/${encodeURIComponent(id)}`),
+    onSuccess: () => { invalidateCatalogue(queryClient) },
+  })
+}
+
+/* --------------------------------------------------------------------------
+ | The rest of the estate
+ |
+ | Regions, clusters, networks, address pools and subnets. None of these had a
+ | write path at all: four could be listed and not created, and the writers
+ | that existed each began by finding a parent nothing could create — so a new
+ | deployment could only be configured with a SQL client.
+ |
+ | The mutations invalidate the site views as well as their own, because the
+ | overview counts what these create.
+ */
+
+export interface AdminRegionRow {
+  id: string
+  slug: string
+  name: Record<string, string> | string
+  country: string | null
+  city: string | null
+  is_active: boolean
+  accepts_new_services: boolean
+  datacenters?: number
+  version?: string
+}
+
+export interface ComputeClusterRow {
+  id: string
+  slug: string
+  name: string
+  driver: string
+  status: string
+  datacenter: string | null
+  datacenter_id: string | null
+  api_endpoint: string | null
+  verify_tls: boolean
+  credentials_reference: string | null
+  accepts_placement: boolean
+  /** Null until a reconciler has actually spoken to it: configured is not verified. */
+  last_synced_at: string | null
+  nodes: number
+  templates: number
+  version: string
+}
+
+export interface NetworkRow {
+  id: string
+  slug: string
+  name: string | null
+  purpose: string
+  vlan_id: number | null
+  bridge: string | null
+  is_customer_facing: boolean
+  is_active: boolean
+  datacenter: string | null
+}
+
+export interface IpPoolRow {
+  id: string
+  slug: string
+  name: string | null
+  scope: string
+  ip_version: number
+  /** False for a management pool, whatever else the row says. */
+  customer_allocatable?: boolean
+  is_active?: boolean
+}
+
+export interface SubnetRow {
+  id: string
+  cidr: string
+  gateway: string | null
+  ip_version: number
+  prefix_length: number
+  is_active: boolean
+  network_id: string | null
+}
+
+export function useRegisterRegion() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: {
+      slug: string
+      name: Record<string, string>
+      country: string
+      city?: string
+    }) => admin.post<Envelope<AdminRegionRow>>('/infrastructure/regions', input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
+  })
+}
+
+export function useComputeClusters(datacenterId?: string) {
+  return useQuery({
+    queryKey: ['admin', 'sites', 'clusters', datacenterId],
+    queryFn: () => admin.get<{ data: ComputeClusterRow[] }>('/infrastructure/clusters', { datacenter: datacenterId }),
+  })
+}
+
+export function useRegisterComputeCluster() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: {
+      datacenter_id: string
+      slug: string
+      name: string
+      driver: string
+      api_endpoint?: string
+      verify_tls?: boolean
+      credentials_reference?: string
+    }) => admin.post<Envelope<ComputeClusterRow>>('/infrastructure/clusters', input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
+  })
+}
+
+export function useNetworks(datacenterId?: string) {
+  return useQuery({
+    queryKey: ['admin', 'sites', 'networks', datacenterId],
+    queryFn: () => admin.get<{ data: NetworkRow[] }>('/infrastructure/networks', { datacenter: datacenterId }),
+  })
+}
+
+export function useRegisterNetwork() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: {
+      datacenter_id: string
+      slug: string
+      name: string
+      purpose: string
+      vlan_id?: number
+      bridge?: string
+      is_customer_facing?: boolean
+    }) => admin.post<Envelope<NetworkRow>>('/infrastructure/networks', input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
+  })
+}
+
+export function useIpPools() {
+  return useQuery({
+    queryKey: ['admin', 'sites', 'ip-pools'],
+    queryFn: () => admin.get<{ data: IpPoolRow[] }>('/infrastructure/ip-pools'),
+  })
+}
+
+export function useRegisterIpPool() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: {
+      datacenter_id: string
+      slug: string
+      name: string
+      ip_version: number
+      scope: string
+      quarantine_days?: number
+    }) => admin.post<Envelope<IpPoolRow>>('/infrastructure/ip-pools', input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
+  })
+}
+
+export function useSubnets(poolId: string | undefined) {
+  return useQuery({
+    queryKey: ['admin', 'sites', 'subnets', poolId],
+    enabled: poolId !== undefined && poolId !== '',
+    queryFn: () => admin.get<{ data: SubnetRow[] }>(`/infrastructure/ip-pools/${poolId ?? ''}/subnets`),
+  })
+}
+
+export function useRegisterSubnet(poolId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { cidr: string; gateway?: string; network_id?: string }) =>
+      admin.post<Envelope<SubnetRow>>(`/infrastructure/ip-pools/${poolId}/subnets`, input),
+    onSuccess: () => { invalidateSiteViews(queryClient) },
+  })
+}
+
+/* --------------------------------------------------------------------------
+ | Who may operate the platform
+ |
+ | `role.manage` had no route, so a deployment had exactly as many operators as
+ | it was born with — and a production deployment was born with none.
+ */
+
+export interface OperatorRow {
+  id: string
+  name: string
+  email: string
+  roles: string[]
+  is_privileged: boolean
+  /** False for somebody invited who has not followed their one-time link yet. */
+  has_signed_in: boolean
+  two_factor_enabled: boolean
+  created_at: string | null
+}
+
+export interface RoleRow {
+  name: string
+  label: string
+  is_staff_role: boolean
+  /** False for Super Admin: its authority is a bypass, not this list. */
+  permissions_are_editable: boolean
+  grants_everything: boolean
+  permissions: string[]
+  operators: number
+}
+
+export interface PermissionRow {
+  name: string
+  group: string
+  held_by_default_roles: string[]
+}
+
+function invalidateOperatorViews(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'operators'] })
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'roles'] })
+}
+
+export function useOperators(search?: string) {
+  return useQuery({
+    queryKey: ['admin', 'operators', search],
+    queryFn: () => admin.get<Paginated<OperatorRow>>('/operators', { q: search }),
+  })
+}
+
+export function useRoles() {
+  return useQuery({ queryKey: ['admin', 'roles'], queryFn: () => admin.get<{ data: RoleRow[] }>('/roles') })
+}
+
+export function usePermissionCatalogue() {
+  return useQuery({
+    queryKey: ['admin', 'roles', 'permissions'],
+    queryFn: () => admin.get<{ data: PermissionRow[] }>('/permissions'),
+  })
+}
+
+export function useInviteOperator() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { email: string; name: string; roles: string[] }) =>
+      admin.post<Envelope<OperatorRow>>('/operators', input),
+    onSuccess: () => { invalidateOperatorViews(queryClient) },
+  })
+}
+
+export function useChangeOperatorRoles(operatorId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { roles: string[] }) =>
+      admin.put<Envelope<OperatorRow>>(`/operators/${operatorId}/roles`, input),
+    onSuccess: () => { invalidateOperatorViews(queryClient) },
+  })
+}
+
+export function useSetRolePermissions(role: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (input: { permissions: string[] }) =>
+      admin.put<Envelope<RoleRow>>(`/roles/${role}/permissions`, input),
+    onSuccess: () => { invalidateOperatorViews(queryClient) },
+  })
+}

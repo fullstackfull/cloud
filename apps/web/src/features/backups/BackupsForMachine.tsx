@@ -71,7 +71,30 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
       header: t('backups.taken'),
       cell: (b) => formatDate(b.finished_at ?? b.created_at, locale),
     },
-    { key: 'state', header: t('backups.state'), cell: (b) => <StatusBadge status={b.state} /> },
+    {
+      key: 'state',
+      header: t('backups.state'),
+      /*
+       * The badge, and the reason when there is one.
+       *
+       * A restore that failed leaves the archive intact, so the row goes back
+       * to `succeeded` — which is true about the backup and, on its own, a lie
+       * about what the customer just asked for. The badge said "Succeeded" and
+       * the table showed nothing else, so a restore that did not happen was
+       * indistinguishable from one that was never attempted.
+       *
+       * Suppressed for a row needing attention, which has its own treatment:
+       * the same rule the WordPress operations list follows.
+       */
+      cell: (b) => (
+        <div className="flex flex-col gap-0.5">
+          <StatusBadge status={b.state} />
+          {b.failure_reason === null || b.needs_attention ? null : (
+            <span className="text-xs text-[var(--danger-text)]">{b.failure_reason}</span>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'size',
       header: t('backups.size'),
@@ -91,9 +114,25 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
          * backup that completed and a backup that has been proven restorable
          * are different facts, and the platform must not let the first read
          * as the second.
+         *
+         * Three values, three sentences. This used to ask `=== true` and send
+         * everything else to "Not tested", which told a customer whose archive
+         * the datastore had read and failed that nobody had looked at it yet —
+         * the worst answer wearing the neutral one's words. Null is still
+         * "Not tested", because that is what null means.
          */
-        <span className="text-xs text-[var(--text-muted)]">
-          {b.verified === true ? t('backups.verifiedYes') : t('backups.verifiedNo')}
+        <span
+          className={
+            b.verified === false
+              ? 'text-xs font-medium text-[var(--danger-text)]'
+              : 'text-xs text-[var(--text-muted)]'
+          }
+        >
+          {b.verified === true
+            ? t('backups.verifiedYes')
+            : b.verified === false
+              ? t('backups.verifiedFailed')
+              : t('backups.verifiedNo')}
         </span>
       ),
     },
@@ -141,10 +180,19 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
             {t('backups.files')}
           </Button>
 
+          {/*
+            * `is_restorable` now carries the read-back verdict as well as the
+            * state, so an archive the datastore could not read arrives here
+            * already disabled. The title says which of the two it is, because
+            * a greyed-out button beside an archive that looks finished is a
+            * support ticket otherwise. The server refuses it as well: this is
+            * the convenience, not the control.
+            */}
           <Button
             size="sm"
             variant="ghost"
             disabled={!b.is_restorable}
+            title={b.verified === false ? t('backups.restoreUnreadable') : undefined}
             onClick={() => { setRestoring(b); }}
           >
             {t('backups.restore')}
@@ -332,7 +380,11 @@ export function BackupsForMachine({ vm }: { vm: VirtualMachine }) {
                 </p>
                 <p>
                   {t('backups.verified')}:{' '}
-                  {deleting.verified === true ? t('backups.verifiedYes') : t('backups.verifiedNo')}
+                  {deleting.verified === true
+                    ? t('backups.verifiedYes')
+                    : deleting.verified === false
+                      ? t('backups.verifiedFailed')
+                      : t('backups.verifiedNo')}
                 </p>
               </div>
             </div>

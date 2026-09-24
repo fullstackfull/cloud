@@ -4,23 +4,20 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Provisioning\Application\Actions;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
-use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
-use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
+use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
-use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -66,6 +63,7 @@ final readonly class ProvisionOrderedService
 {
     public function __construct(
         private CreateProvisioningJob $createJob,
+        private LocalPlacementFeasibility $placement,
     ) {}
 
     public function execute(Order $order, OrderItem $item, ?Subscription $subscription = null): ?Service
@@ -166,6 +164,16 @@ final readonly class ProvisionOrderedService
     }
 
     /**
+     * The placement this line will be built with, or null when the platform
+     * cannot describe one.
+     *
+     * The rules themselves live in {@see LocalPlacementFeasibility}, because
+     * checkout has to ask the same question before it takes any money and two
+     * copies of "can this be placed" would drift — with the copy that drifts
+     * being the one that charges the card. What stays here is what only this
+     * action knows: the service's own resources, and a hostname that cannot
+     * exist until the service row does.
+     *
      * @return array<string, mixed>|null null when the platform cannot decide
      *                                   where this belongs
      */
@@ -173,166 +181,36 @@ final readonly class ProvisionOrderedService
     {
         /** @var array<string, mixed> $resources */
         $resources = $service->resources;
-        /** @var array<string, mixed> $constraints */
-        $constraints = $plan->placement_constraints ?? [];
 
-        if ($plan->product?->kind === ProductKind::SharedHosting) {
+        $placement = $this->placement->resolve($plan);
+
+        if (! $placement->isFeasible()) {
             /*
-             * The node is chosen by the hosting scheduler inside the handler,
-             * but the package is not: it is the catalogue's own mapping from a
-             * plan to the quota a panel enforces, and the handler refuses a
-             * job that does not name one.
-             *
-             * Until this was resolved here, every shared hosting order queued
-             * a job with no package in it: the customer paid, the worker
-             * answered "no hosting package exists with the id ''", and the
-             * account was never created. The refusal below is the same shape
-             * the compute path uses for a missing cluster — the service waits
-             * for an operator rather than failing at a worker.
+             * Reachable even though checkout refuses this, because
+             * configuration can be removed between the payment and the build.
+             * The service is kept and marked rather than failed: the customer
+             * has paid, and a row an operator can find is the only honest
+             * outcome.
              */
-            $package = HostingPackage::query()->where('plan_id', $plan->getKey())->first();
+            $this->cannotPlace($service, (string) $placement->blockedReason);
 
-            if ($package === null) {
-                $this->cannotPlace($service, 'the plan names no hosting package, so no panel quota can be applied');
-
-                return null;
-            }
-
-            return array_merge($resources, ['hosting_package_id' => (string) $package->getKey()]);
+            return null;
         }
 
-        if ($plan->product?->kind !== ProductKind::Vps) {
+        if ($placement->values === []) {
             // A dedicated server resolves its own target inside its handler: a
             // chassis is reserved from inventory, so the line's resources are
             // the whole payload.
             return $resources;
         }
 
-        $cluster = $this->soleTarget(
-            $constraints['cluster_id'] ?? null,
-            static fn (): ?string => self::soleId(ComputeCluster::query()->where('status', 'active')),
-        );
+        $payload = array_merge($resources, $placement->values);
 
-        if ($cluster === null) {
-            $this->cannotPlace($service, 'no single active compute cluster, and the plan names none');
-
-            return null;
+        if (array_key_exists('cluster_id', $placement->values)) {
+            $payload['hostname'] = $this->hostnameFor($service);
         }
 
-        $pool = $this->soleTarget(
-            $constraints['ip_pool_id'] ?? null,
-            static fn (): ?string => self::soleId(IpPool::query()->where('is_active', true)->where('ip_version', 4)),
-        );
-
-        if ($pool === null) {
-            $this->cannotPlace($service, 'no single IP pool, and the plan names none');
-
-            return null;
-        }
-
-        $template = $this->templateFor($cluster, $constraints['template_slug'] ?? null);
-
-        if ($template === null) {
-            $this->cannotPlace(
-                $service,
-                'the plan names no installable OS image, and the cluster offers no single one',
-            );
-
-            return null;
-        }
-
-        return array_merge($resources, [
-            'cluster_id' => $cluster,
-            'ip_pool_id' => $pool,
-            'storage_class' => $constraints['storage_class'] ?? 'nvme',
-            'hostname' => $this->hostnameFor($service),
-            /*
-             * Resolved here, at the purchase, and carried as three durable
-             * values rather than re-derived in the worker.
-             *
-             * The id is the audit trail: which catalogue row this machine was
-             * promised. The reference is what the hypervisor is given. The
-             * family and the architecture are what the platform reasons with —
-             * the scheduler refuses a node of the wrong architecture, and the
-             * guest agent and cloud-init behaviour differ by family.
-             *
-             * Re-querying the estate in the worker would be a different
-             * decision made later: an operator who stages a second image
-             * between payment and build would change what a paid-for order
-             * delivers, and a retry could deliver a different OS than the
-             * first attempt.
-             */
-            'template_id' => (string) $template->getKey(),
-            'template_reference' => (string) $template->provider_reference,
-            'os_family' => $template->os_family->value,
-            'architecture' => $template->architecture->value,
-        ]);
-    }
-
-    /**
-     * The image this plan is sold with, on this cluster.
-     *
-     * Two sources, in the order the rest of this method uses for every other
-     * placement decision: what the plan says, then the estate's own answer
-     * when the plan says nothing and there is exactly one answer to give.
-     *
-     * The purchase screens offer no OS choice — a customer picks an image when
-     * they reinstall, not when they buy — so the plan is where the decision
-     * belongs, and `placement_constraints` is where a plan already keeps its
-     * cluster, its pool and its storage class.
-     *
-     * "Exactly one" is the same rule as {@see soleId()} and for the same
-     * reason: with two staged images the platform has no basis for choosing,
-     * and taking the first would install an operating system by row order.
-     */
-    private function templateFor(string $clusterId, mixed $declaredSlug): ?VmTemplate
-    {
-        $query = fn (): Builder => VmTemplate::query()
-            ->installable()
-            ->where(fn (Builder $scope) => $scope
-                ->whereNull('cluster_id')
-                ->orWhere('cluster_id', $clusterId));
-
-        if (is_string($declaredSlug) && $declaredSlug !== '') {
-            /** @var VmTemplate|null $named */
-            $named = $query()->where('slug', $declaredSlug)->first();
-
-            return $named;
-        }
-
-        /** @var list<VmTemplate> $candidates */
-        $candidates = $query()->limit(2)->get()->all();
-
-        return count($candidates) === 1 ? $candidates[0] : null;
-    }
-
-    /**
-     * @param  callable(): ?string  $fallback
-     */
-    private function soleTarget(mixed $declared, callable $fallback): ?string
-    {
-        if (is_string($declared) && $declared !== '') {
-            return $declared;
-        }
-
-        return $fallback();
-    }
-
-    /**
-     * The id of the only row a query returns, or null when there is not exactly
-     * one.
-     *
-     * "Exactly one" is the whole point: with two clusters the platform has no
-     * basis for choosing, and picking the first would place a customer's
-     * machine by row order.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<*>  $query
-     */
-    private static function soleId(mixed $query): ?string
-    {
-        $ids = $query->limit(2)->pluck('id')->all();
-
-        return count($ids) === 1 ? (string) $ids[0] : null;
+        return $payload;
     }
 
     private function cannotPlace(Service $service, string $reason): void

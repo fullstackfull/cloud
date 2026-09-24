@@ -12,6 +12,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -23,6 +24,7 @@ use Tests\TestCase;
  */
 abstract class OrdersApiTestCase extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     /**
@@ -60,6 +62,10 @@ abstract class OrdersApiTestCase extends TestCase
      */
     protected function publishedPlan(int $monthlyMinor = 9000, int $setupMinor = 0): Plan
     {
+        // Checkout refuses a plan this platform cannot say where to build,
+        // so "actually sellable" now includes an estate to build it on.
+        $this->estateThatCanPlaceAVps();
+
         $product = Product::factory()->create();
         $plan = Plan::factory()->create(['product_id' => $product->id]);
 

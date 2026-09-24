@@ -6,7 +6,9 @@ namespace Lynomia\Modules\Billing\Application\Listeners;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Billing\Application\Actions\CompensateUncollectableCapture;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleableCaptureException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
@@ -48,6 +50,7 @@ final class SettleInvoiceOnPaymentCaptured implements ShouldQueue
 
     public function __construct(
         private readonly SettleInvoice $settle,
+        private readonly CompensateUncollectableCapture $compensate,
     ) {}
 
     public function handle(PaymentCaptured $event): void
@@ -81,6 +84,24 @@ final class SettleInvoiceOnPaymentCaptured implements ShouldQueue
             ]);
 
             throw UnsettleableCaptureException::forCapture($event->transactionId, $event->invoiceId);
+        }
+
+        if ($invoice->status === InvoiceStatus::Void) {
+            /*
+             * The document was withdrawn while this payment was in flight —
+             * the customer cancelled their order after opening the payment
+             * page, and the provider captured anyway.
+             *
+             * SettleInvoice refuses a void invoice, and it should: applying
+             * money to a document the platform says never applied would be a
+             * worse lie than the one being fixed. But refusing is not an
+             * answer on its own, because the provider has the money either
+             * way. It goes to the customer, through the same mechanism this
+             * module already uses for a payment an invoice cannot absorb.
+             */
+            $this->compensate->execute($invoice, $transaction);
+
+            return;
         }
 
         $this->settle->execute($invoice, $transaction);

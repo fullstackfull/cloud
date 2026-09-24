@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Orders\Application\Services;
 
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricedOrder;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
@@ -18,10 +18,10 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Application\DTOs\PricedCheckout;
-use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\ProductReadiness\Application\Actions\AssertProductMaySell;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
+use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -57,6 +57,8 @@ final readonly class OrderPricing
         private TaxResolver $taxResolver,
         private CouponValidator $coupons,
         private AssertProductMaySell $sellable,
+        private PlanCapacity $capacity,
+        private LocalPlacementFeasibility $placement,
     ) {}
 
     /**
@@ -230,6 +232,7 @@ final readonly class OrderPricing
             $claimedInThisBasket[$line->planId] = ($claimedInThisBasket[$line->planId] ?? 0) + $line->quantity;
 
             $this->assertStock($customer, $plan, $claimedInThisBasket[$line->planId]);
+            $this->assertDeliverable($plan);
 
             $lines[] = new PricingLine(
                 description: $plan->nameFor($customer->users()->first()->locale ?? (string) config('app.locale')),
@@ -246,52 +249,69 @@ final readonly class OrderPricing
         return $lines;
     }
 
+    /**
+     * Refuses what this platform already knows it cannot place.
+     *
+     * Local configuration only — a hosting package, a cluster, an IP pool, an
+     * OS image — and every one of those answers is a row already held, so it
+     * can be asked before a customer is charged. Nothing here contacts a
+     * provider or claims a machine can actually be built.
+     *
+     * The rule is {@see LocalPlacementFeasibility}, which is also what the
+     * provisioning path resolves through. That is the point of it being one
+     * class: the alternative is two implementations of "can this be placed",
+     * and the one that drifts is the one that takes the money.
+     *
+     * The reason goes to the log and not to the customer. It names a cluster,
+     * an IP pool or a panel package, and a DomainException's context is
+     * published as `error.details` — so carrying it on the exception would
+     * hand the shape of the estate to anybody who can reach the checkout
+     * endpoint. The operator's copy is here; the customer's is a sentence
+     * saying it is not available right now and nothing was charged.
+     */
+    private function assertDeliverable(Plan $plan): void
+    {
+        $placement = $this->placement->resolve($plan);
+
+        if ($placement->isFeasible()) {
+            return;
+        }
+
+        Log::warning('A checkout was refused because the platform cannot place the plan.', [
+            'plan_id' => (string) $plan->getKey(),
+            'reason' => (string) $placement->blockedReason,
+        ]);
+
+        throw CheckoutRejectedException::becauseItCannotBeDelivered((string) $plan->getKey());
+    }
+
     private function assertStock(Customer $customer, Plan $plan, int $quantity): void
     {
         /*
-         * Checked at order time as well as at provisioning time. An order that
-         * fails at provisioning has already taken the customer's money and
-         * costs a refund plus the support conversation; an order that is never
-         * accepted costs neither.
+         * A courtesy, and explicitly not the guarantee.
          *
-         * This is a pre-check, not a reservation — the authoritative claim
-         * happens when the paid order reserves capacity.
+         * Telling a customer the plan is gone before they fill in a card form
+         * is worth doing, and this read does it. What it cannot do is stop an
+         * oversell: nothing is locked here, so every checkout in flight reads
+         * the same remaining capacity and every one of them likes the answer.
+         *
+         * This comment used to say the authoritative claim happened later,
+         * "when the paid order reserves capacity". There was no such code. The
+         * claim now exists, it is {@see PlanCapacity::claim()}, and it runs
+         * inside the transaction that writes the order.
          */
-        if ($plan->stock_limit !== null) {
-            $sold = $this->soldCount($plan);
-
-            if ($sold + $quantity > $plan->stock_limit) {
-                throw CheckoutRejectedException::becausePlanIsOutOfStock((string) $plan->getKey());
-            }
+        if ($plan->stock_limit !== null
+            && $this->capacity->claimed((string) $plan->getKey()) + $quantity > $plan->stock_limit) {
+            throw CheckoutRejectedException::becausePlanIsOutOfStock((string) $plan->getKey());
         }
 
-        if ($plan->per_customer_limit !== null) {
-            $owned = $this->soldCount($plan, $customer);
-
-            if ($owned + $quantity > $plan->per_customer_limit) {
-                throw CheckoutRejectedException::becausePerCustomerLimitReached(
-                    (string) $plan->getKey(),
-                    $plan->per_customer_limit,
-                );
-            }
+        if ($plan->per_customer_limit !== null
+            && $this->capacity->claimed((string) $plan->getKey(), $customer) + $quantity > $plan->per_customer_limit) {
+            throw CheckoutRejectedException::becausePerCustomerLimitReached(
+                (string) $plan->getKey(),
+                $plan->per_customer_limit,
+            );
         }
-    }
-
-    private function soldCount(Plan $plan, ?Customer $customer = null): int
-    {
-        return (int) DB::table('order_items')
-            ->join('orders', 'orders.id', '=', 'order_items.order_id')
-            ->where('order_items.plan_id', $plan->getKey())
-            // Cancelled and refunded orders release their stock; everything
-            // else still holds it, including orders awaiting payment, so a
-            // basket cannot oversell while the customer is at the card form.
-            ->whereNotIn('orders.status', [
-                OrderStatus::Cancelled->value,
-                OrderStatus::Refunded->value,
-                OrderStatus::Terminated->value,
-            ])
-            ->when($customer !== null, fn ($q) => $q->where('orders.customer_id', $customer->getKey()))
-            ->sum('order_items.quantity');
     }
 
     /**

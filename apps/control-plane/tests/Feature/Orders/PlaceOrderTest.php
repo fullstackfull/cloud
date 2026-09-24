@@ -19,10 +19,12 @@ use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 final class PlaceOrderTest extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private PlaceOrder $placeOrder;
@@ -38,6 +40,10 @@ final class PlaceOrderTest extends TestCase
 
     private function plan(int $monthlyMinor = 9000, int $setupMinor = 0): Plan
     {
+        // A VPS plan is only sellable where the platform can say what it
+        // would be built on; checkout refuses one that names nothing.
+        $this->estateThatCanPlaceAVps();
+
         $product = Product::factory()->create();
         $plan = Plan::factory()->create(['product_id' => $product->id]);
 

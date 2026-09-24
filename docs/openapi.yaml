@@ -179,6 +179,832 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/hosting-packages":
+    get:
+      operationId: "api_admin_catalogue_hosting_packages_index"
+      tags:
+        - "Operator"
+      summary: "The panel packages hosting plans map to"
+      description: |-
+        `meta.orderable` counts the mappings an account could actually be created under: active, and pointing at a plan.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/OperatorHostingPackage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_catalogue_hosting_packages_map"
+      tags:
+        - "Operator"
+      summary: "Map a plan to a panel package"
+      description: |-
+        Records the name this platform will ask cPanel or DirectAdmin for.
+        Nothing here contacts a panel, so the mapping is CONFIGURED and never
+        VERIFIED: whether a package by that name exists is a question for real
+        provider discovery, which has not run.
+
+        Only a shared hosting plan may be mapped. A package behind a VPS plan
+        would sit there looking configured while the build went to a
+        hypervisor the panel never sees.
+
+        The plan may be omitted: a package recorded before its plan exists is
+        a half-finished configuration an operator can see and finish.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                panel_package_name:
+                  description: "See the endpoint description; validated server-side."
+                plan_id:
+                  description: "See the endpoint description; validated server-side."
+                disk_quota_mib:
+                  description: "See the endpoint description; validated server-side."
+                bandwidth_quota_mib:
+                  description: "See the endpoint description; validated server-side."
+                max_addon_domains:
+                  description: "See the endpoint description; validated server-side."
+                max_subdomains:
+                  description: "See the endpoint description; validated server-side."
+                max_databases:
+                  description: "See the endpoint description; validated server-side."
+                max_email_accounts:
+                  description: "See the endpoint description; validated server-side."
+                cpu_limit_percent:
+                  description: "See the endpoint description; validated server-side."
+                memory_limit_mib:
+                  description: "See the endpoint description; validated server-side."
+                io_limit_kbps:
+                  description: "See the endpoint description; validated server-side."
+                process_limit:
+                  description: "See the endpoint description; validated server-side."
+                entry_process_limit:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorHostingPackageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/hosting-packages/{package}":
+    delete:
+      operationId: "api_admin_catalogue_hosting_packages_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop offering a panel package mapping"
+      description: |-
+        Deactivated, never deleted: hosting accounts already created point at the package they were built under.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - name: "package"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorHostingPackageResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans":
+    get:
+      operationId: "api_admin_catalogue_plans_index"
+      tags:
+        - "Operator"
+      summary: "The plans this deployment sells"
+      description: |-
+        `meta.unpriced` counts listed plans with no active price — purchasable by nobody, and indistinguishable from a working plan in a list that shows only the two switches.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/OperatorPlan"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_catalogue_plans_record"
+      tags:
+        - "Operator"
+      summary: "Record a plan"
+      description: |-
+        `resources` is free-form because the three kinds describe different
+        things, but two of them are checked against the product's kind, and
+        both refusals exist because the failure is otherwise silent.
+
+        A VPS plan must carry `vcpu`, `memory_mib` and `disk_gib`: the build
+        reads those with defaults behind them, so a plan without them would
+        not fail — it would quietly build the smallest machine and invoice
+        whatever the price said.
+
+        A dedicated plan must carry `hardware_profile`: without one the
+        reservation looks for a machine matching nothing and reports no
+        capacity, which is retried rather than refused, so the order waits on
+        a rack that was never the problem.
+
+        A second call for the same slug is a correction and answers 200.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                product_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                description:
+                  description: "See the endpoint description; validated server-side."
+                resources:
+                  description: "See the endpoint description; validated server-side."
+                placement_constraints:
+                  description: "See the endpoint description; validated server-side."
+                stock_limit:
+                  description: "See the endpoint description; validated server-side."
+                per_customer_limit:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                is_public:
+                  description: "See the endpoint description; validated server-side."
+                sort_order:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans/{plan}":
+    delete:
+      operationId: "api_admin_catalogue_plans_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop selling a plan"
+      description: |-
+        Stops future sales and nothing else. It does not suspend, terminate or reprice a service somebody is already using: those are lifecycle decisions with their own actions and their own notifications, and an operator tidying a price list must not be able to end a customer's server.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans/{plan}/prices":
+    post:
+      operationId: "api_admin_catalogue_prices_set"
+      tags:
+        - "Operator"
+      summary: "Set what a plan costs"
+      description: |-
+        Amounts are whole minor units as integers — 9.000 KWD is 9000 — and a
+        decimal is refused rather than rounded. The currency must be one the
+        platform is configured to bill in.
+
+        One price exists per plan, currency and billing period; the database
+        enforces it, so a customer request can never find two answers. A second
+        call for the same three is therefore an operator changing the price,
+        and answers 200.
+
+        It changes nothing that was already sold. `order_items` snapshots the
+        unit amounts, the name, the period and the resources at the moment of
+        sale, so an invoice raised at the old price still says what was
+        charged.
+
+        Requires the `pricing.manage` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                currency:
+                  description: "See the endpoint description; validated server-side."
+                billing_period:
+                  description: "See the endpoint description; validated server-side."
+                recurring_amount_minor:
+                  description: "See the endpoint description; validated server-side."
+                setup_amount_minor:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                available_from:
+                  description: "See the endpoint description; validated server-side."
+                available_until:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/plans/{plan}/prices/{price}":
+    delete:
+      operationId: "api_admin_catalogue_prices_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop selling a plan in one currency"
+      description: |-
+        Deactivated, never deleted. An invoice raised at this price has to stay explainable, and "what was this priced at" is the first question when a customer disputes one.
+
+        Requires the `pricing.manage` permission.
+      parameters:
+        - name: "plan"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - name: "price"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorPlanResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/products":
+    get:
+      operationId: "api_admin_catalogue_products_index"
+      tags:
+        - "Operator"
+      summary: "The products this deployment sells"
+      description: |-
+        The operator view: withdrawn and unlisted rows included, both languages, because "why is this not being offered" is what this answers. Requires `catalog.manage` rather than `catalog.view`, which is the permission a plain customer holds.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/OperatorProduct"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_catalogue_products_record"
+      tags:
+        - "Operator"
+      summary: "Record a product"
+      description: |-
+        The kind is one of three — vps, dedicated, shared_hosting — and an
+        operator may not add a fourth. That is the software rather than a
+        setting: a kind with no build path behind it is an order nobody can
+        fulfil, which is why WordPress and Domains have readiness rows and no
+        catalogue kind.
+
+        A second call for the same slug is a correction, not a conflict, and
+        answers 200 rather than 201. It also re-lists a withdrawn product, so
+        withdrawing one is never a one-way door.
+
+        Recording a product does not make it sellable. That is decided by the
+        readiness engine, which reads the software state and the readiness row
+        and has never read a catalogue row.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                kind:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                description:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                is_public:
+                  description: "See the endpoint description; validated server-side."
+                sort_order:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorProductResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/catalogue/products/{product}":
+    delete:
+      operationId: "api_admin_catalogue_products_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop selling a product"
+      description: |-
+        Deactivated, never deleted: orders and subscriptions point at what was sold, and destroying the row turns a support question into archaeology. Its plans and prices are left exactly as they were.
+
+        Requires the `catalog.manage` permission.
+      parameters:
+        - name: "product"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/OperatorProductResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/credentials":
     get:
       operationId: "api_admin_credentials_index"
@@ -1464,6 +2290,238 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/clusters":
+    get:
+      operationId: "api_admin_infrastructure_clusters_index"
+      tags:
+        - "Operator"
+      summary: "Hypervisor clusters"
+      description: |-
+        Every cluster the platform knows about, with what it would be reached at and whether it accepts placement. `last_synced_at` null means nothing has ever spoken to it.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - name: "datacenter"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AdminComputeCluster"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_clusters_store"
+      tags:
+        - "Operator"
+      summary: "Register a hypervisor cluster"
+      description: |-
+        The row VmTemplateController used to look for and never find. The endpoint is checked by the platform's outbound policy at the moment it is written: private addressing is expected on our own management network, loopback and the cloud metadata services are refused, and a credential in the URL is refused. The credential itself is a reference the secret resolver looks up; no field here accepts a secret. Nothing is dialled — the cluster is recorded, not contacted.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                datacenter_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                driver:
+                  description: "See the endpoint description; validated server-side."
+                api_endpoint:
+                  description: "See the endpoint description; validated server-side."
+                verify_tls:
+                  description: "See the endpoint description; validated server-side."
+                credentials_reference:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminComputeClusterResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/clusters/{cluster}":
+    put:
+      operationId: "api_admin_infrastructure_clusters_update"
+      tags:
+        - "Operator"
+      summary: "Correct a cluster"
+      description: |-
+        Name, endpoint, TLS verification, credential reference and status. Taking a cluster to maintenance stops placement and disturbs nothing already running on it, which is the supported way to wind one down.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "cluster"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                api_endpoint:
+                  description: "See the endpoint description; validated server-side."
+                verify_tls:
+                  description: "See the endpoint description; validated server-side."
+                credentials_reference:
+                  description: "See the endpoint description; validated server-side."
+                status:
+                  description: "See the endpoint description; validated server-side."
+                version:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminComputeClusterResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/clusters/{cluster}/reconcile":
     post:
       operationId: "api_admin_infrastructure_reconcile"
@@ -1693,6 +2751,233 @@ paths:
                 "$ref": "#/components/schemas/Error"
         403:
           description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_dedicated_store"
+      tags:
+        - "Operator"
+      summary: "Add a machine to dedicated stock"
+      description: |-
+        The one piece of inventory that has to be carried into a building by a person, so nothing can discover it. It arrives available, owned by nobody, with its power state unknown rather than off.
+
+        Requires the `dedicated.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                datacenter_id:
+                  description: "See the endpoint description; validated server-side."
+                rack_id:
+                  description: "See the endpoint description; validated server-side."
+                manufacturer:
+                  description: "See the endpoint description; validated server-side."
+                model:
+                  description: "See the endpoint description; validated server-side."
+                serial:
+                  description: "See the endpoint description; validated server-side."
+                asset_tag:
+                  description: "See the endpoint description; validated server-side."
+                rack_unit:
+                  description: "See the endpoint description; validated server-side."
+                height_units:
+                  description: "See the endpoint description; validated server-side."
+                hardware_profile:
+                  description: "See the endpoint description; validated server-side."
+                notes:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminDedicatedStockResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/dedicated/{server}/bmc":
+    get:
+      operationId: "api_admin_infrastructure_dedicated_bmc_show"
+      tags:
+        - "Operator"
+      summary: "Where a machine's controller is"
+      description: "Requires the `infrastructure.view` permission."
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminBmcEndpointResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_dedicated_bmc_store"
+      tags:
+        - "Operator"
+      summary: "Record a machine's controller"
+      description: |-
+        Configuration, behind `dedicated.manage` rather than `bmc.access`: recording where a controller is and being allowed to use one are different authorities. The address is checked by the outbound policy when it is written rather than only when it is dialled, and nothing here accepts a password — the credential is a reference. One controller per machine; a second call corrects the first.
+
+        Requires the `dedicated.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                protocol:
+                  description: "See the endpoint description; validated server-side."
+                address:
+                  description: "See the endpoint description; validated server-side."
+                port:
+                  description: "See the endpoint description; validated server-side."
+                username:
+                  description: "See the endpoint description; validated server-side."
+                verify_tls:
+                  description: "See the endpoint description; validated server-side."
+                credentials_reference:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminBmcEndpointResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -2039,6 +3324,178 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_hosting_nodes_store"
+      tags:
+        - "Operator"
+      summary: "Register a panel server"
+      description: |-
+        Created claiming nothing: no licence state, no usage, no accounts. Those are statements only the panel can make and the reconciler is what asks it. The endpoint goes through the same outbound policy a cluster's does.
+
+        Requires the `hosting_node.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                datacenter_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                hostname:
+                  description: "See the endpoint description; validated server-side."
+                panel:
+                  description: "See the endpoint description; validated server-side."
+                api_endpoint:
+                  description: "See the endpoint description; validated server-side."
+                verify_tls:
+                  description: "See the endpoint description; validated server-side."
+                credentials_reference:
+                  description: "See the endpoint description; validated server-side."
+                max_accounts:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminHostingNodeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/hosting-nodes/{node}":
+    put:
+      operationId: "api_admin_infrastructure_hosting_nodes_update"
+      tags:
+        - "Operator"
+      summary: "Correct a panel server"
+      description: |-
+        Taking a node offline is refused while accounts are still on it. Draining — `accepts_new_accounts: false` — is the supported way to wind one down and is never refused.
+
+        Requires the `hosting_node.manage` permission.
+      parameters:
+        - name: "node"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                hostname:
+                  description: "See the endpoint description; validated server-side."
+                api_endpoint:
+                  description: "See the endpoint description; validated server-side."
+                verify_tls:
+                  description: "See the endpoint description; validated server-side."
+                credentials_reference:
+                  description: "See the endpoint description; validated server-side."
+                max_accounts:
+                  description: "See the endpoint description; validated server-side."
+                accepts_new_accounts:
+                  description: "See the endpoint description; validated server-side."
+                status:
+                  description: "See the endpoint description; validated server-side."
+                version:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminHostingNodeResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/ip-pools":
     get:
       operationId: "api_admin_infrastructure_ip_pools"
@@ -2073,6 +3530,534 @@ paths:
                 "$ref": "#/components/schemas/Error"
         403:
           description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_ip_pools_store"
+      tags:
+        - "Operator"
+      summary: "Register an address pool"
+      description: |-
+        The scope is the security-relevant field and is fixed at creation. `management` reaches the hypervisor and BMC control planes: the allocator refuses to give one to a customer service and placement refuses to count one as capacity. A pool of the other kind is a new pool, never an edit — reclassifying would move addresses already allocated between the control plane and the customer estate.
+
+        Requires the `ipam.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                datacenter_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                ip_version:
+                  description: "See the endpoint description; validated server-side."
+                scope:
+                  description: "See the endpoint description; validated server-side."
+                quarantine_days:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminIpPoolResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/ip-pools/{pool}":
+    put:
+      operationId: "api_admin_infrastructure_ip_pools_update"
+      tags:
+        - "Operator"
+      summary: "Correct an address pool"
+      description: |-
+        Name, quarantine window and whether it is active. Sending `scope` or `ip_version` is refused rather than ignored. Deactivating is refused while any address in it is anything other than available.
+
+        Requires the `ipam.manage` permission.
+      parameters:
+        - name: "pool"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                quarantine_days:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                version:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminIpPoolResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/ip-pools/{pool}/subnets":
+    get:
+      operationId: "api_admin_infrastructure_subnets_index"
+      tags:
+        - "Operator"
+      summary: "The blocks under a pool"
+      description: "Requires the `ipam.view` permission."
+      parameters:
+        - name: "pool"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AdminSubnet"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_subnets_store"
+      tags:
+        - "Operator"
+      summary: "Add a block to a pool"
+      description: |-
+        The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool.
+
+        Requires the `ipam.manage` permission.
+      parameters:
+        - name: "pool"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                cidr:
+                  description: "See the endpoint description; validated server-side."
+                gateway:
+                  description: "See the endpoint description; validated server-side."
+                network_id:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminSubnetResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/networks":
+    get:
+      operationId: "api_admin_infrastructure_networks_index"
+      tags:
+        - "Operator"
+      summary: "Network segments"
+      description: "Requires the `ipam.view` permission."
+      parameters:
+        - name: "datacenter"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AdminNetwork"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_networks_store"
+      tags:
+        - "Operator"
+      summary: "Register a network segment"
+      description: |-
+        `is_customer_facing` is accepted and then decided: management and cluster-interconnect segments never carry customer workloads whatever the request says, because that is the rule the allocator and the placement path depend on rather than a display preference.
+
+        Requires the `network.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                datacenter_id:
+                  description: "See the endpoint description; validated server-side."
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                purpose:
+                  description: "See the endpoint description; validated server-side."
+                vlan_id:
+                  description: "See the endpoint description; validated server-side."
+                bridge:
+                  description: "See the endpoint description; validated server-side."
+                is_customer_facing:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminNetworkResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/networks/{network}":
+    put:
+      operationId: "api_admin_infrastructure_networks_update"
+      tags:
+        - "Operator"
+      summary: "Correct a network segment"
+      description: |-
+        Deactivating one is refused while active subnets still sit on it.
+
+        Requires the `network.manage` permission.
+      parameters:
+        - name: "network"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                vlan_id:
+                  description: "See the endpoint description; validated server-side."
+                bridge:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                version:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminNetworkResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -2700,6 +4685,164 @@ paths:
                 "$ref": "#/components/schemas/Error"
         403:
           description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_regions_store"
+      tags:
+        - "Operator"
+      summary: "Register a region"
+      description: |-
+        The top of the chain, and the row every other one hangs off through a datacenter. A region is created accepting new services; the two flags stay separate so that winding one down refuses new orders without disturbing the customers already there.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                country:
+                  description: "See the endpoint description; validated server-side."
+                city:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRegionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/regions/{region}":
+    put:
+      operationId: "api_admin_infrastructure_regions_update"
+      tags:
+        - "Operator"
+      summary: "Correct a region"
+      description: |-
+        Display name, city and the two flags. Never the slug: a plan's placement constraints and an order weeks old name this row by it. Switching a region off is refused while clusters still sit in it; refusing new services never is. Send the `version` from a read as an If-Match-style precondition — a stale one answers 409 rather than overwriting somebody.
+
+        Requires the `infrastructure.manage` permission.
+      parameters:
+        - name: "region"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                name:
+                  description: "See the endpoint description; validated server-side."
+                city:
+                  description: "See the endpoint description; validated server-side."
+                is_active:
+                  description: "See the endpoint description; validated server-side."
+                accepts_new_services:
+                  description: "See the endpoint description; validated server-side."
+                version:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRegionResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
           content:
             "application/json":
               schema:
@@ -5026,6 +7169,276 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/operators":
+    get:
+      operationId: "api_admin_operators_index"
+      tags:
+        - "Operator"
+      summary: "The people who operate the platform"
+      description: |-
+        Staff only — a customer login holds the baseline customer role and never appears here.
+
+        Requires the `role.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "q"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminOperatorPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_operators_store"
+      tags:
+        - "Operator"
+      summary: "Add an operator"
+      description: |-
+        No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.
+
+        Requires the `role.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                email:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                roles:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminOperatorResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/operators/{operator}/roles":
+    put:
+      operationId: "api_admin_operators_roles"
+      tags:
+        - "Operator"
+      summary: "Change what an operator may do"
+      description: |-
+        Three refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant, and the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back.
+
+        Requires the `role.manage` permission.
+      parameters:
+        - name: "operator"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                roles:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminOperatorResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/permissions":
+    get:
+      operationId: "api_admin_permissions_index"
+      tags:
+        - "Operator"
+      summary: "The permission catalogue"
+      description: |-
+        Every permission the platform defines, grouped, with the default roles that hold each. A permission held by no default role is reachable only through the super-admin bypass until somebody grants it — which, until this surface existed, nobody could.
+
+        Requires the `role.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AdminPermission"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/providers":
     get:
       operationId: "api_admin_providers_index"
@@ -6507,6 +8920,266 @@ paths:
                 "$ref": "#/components/schemas/Error"
         422:
           description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/roles":
+    get:
+      operationId: "api_admin_roles_index"
+      tags:
+        - "Operator"
+      summary: "Roles and what each may do"
+      description: "Requires the `role.manage` permission."
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AdminRole"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/roles/{role}":
+    get:
+      operationId: "api_admin_roles_show"
+      tags:
+        - "Operator"
+      summary: "One role"
+      description: "Requires the `role.manage` permission."
+      parameters:
+        - name: "role"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRoleResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/roles/{role}/permissions":
+    put:
+      operationId: "api_admin_roles_permissions"
+      tags:
+        - "Operator"
+      summary: "Set what a role may do"
+      description: |-
+        Super Admin is refused: its authority comes from a bypass and not from the rows attached to it, so editing that list would change nothing while looking like it had. An operator cannot grant through a role a permission they could not grant directly, or `role.manage` on its own would quietly be every permission the platform has.
+
+        Requires the `role.manage` permission.
+      parameters:
+        - name: "role"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                permissions:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRoleResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/services":
+    get:
+      operationId: "api_admin_services_index"
+      tags:
+        - "Operator"
+      summary: "Every service, and why the stuck ones are stuck"
+      description: |-
+        Newest first. `blocked=1` narrows it to the services the platform could not place — the list an operator actually wants, because a placement-blocked service is one a customer has paid for and nobody is building. Checkout refuses what the platform already knows it cannot place, so this should be short; it is not always empty, because configuration can be removed between a payment and a build. `status` and `customer_id` filter as usual. Operator-only: the reason names internal topology and is deliberately absent from the customer-facing service document.
+
+        Requires the `service.view_any` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - name: "blocked"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "status"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "customer_id"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminServicePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
           content:
             "application/json":
               schema:
@@ -16475,6 +19148,99 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminAdoptedJob"
+    AdminBmcEndpoint:
+      type: "object"
+      additionalProperties: false
+      description: "Where a machine's baseboard controller is. The address goes through the platform's outbound policy when it is written, not only when it is dialled. `username` is an account name; the password is a credential reference and no field here accepts a value. `last_contacted_at` is null until something actually talks to it."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        dedicated_server_id:
+          type: "string"
+        protocol:
+          type: "string"
+        address:
+          type: "string"
+        port:
+          type:
+            - "integer"
+            - "null"
+        username:
+          type:
+            - "string"
+            - "null"
+        verify_tls:
+          type: "boolean"
+        credentials_reference:
+          type:
+            - "string"
+            - "null"
+        last_contacted_at:
+          "$ref": "#/components/schemas/Timestamp"
+    AdminBmcEndpointResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminBmcEndpoint"
+    AdminComputeCluster:
+      type: "object"
+      additionalProperties: false
+      description: "A hypervisor cluster as the platform understands it. Recording one contacts nothing: `last_synced_at` stays null until a reconciler has actually spoken to it, which is the difference between configured and verified. The credential is a reference the secret resolver looks up, never a value."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type: "string"
+        driver:
+          type: "string"
+        status:
+          type: "string"
+        datacenter:
+          type:
+            - "string"
+            - "null"
+        datacenter_id:
+          type:
+            - "string"
+            - "null"
+        api_endpoint:
+          type:
+            - "string"
+            - "null"
+        verify_tls:
+          type: "boolean"
+        credentials_reference:
+          type:
+            - "string"
+            - "null"
+          description: "The name of an entry in the credential centre. Never a secret."
+        accepts_placement:
+          type: "boolean"
+        last_synced_at:
+          "$ref": "#/components/schemas/Timestamp"
+        nodes:
+          type:
+            - "integer"
+            - "null"
+        templates:
+          type:
+            - "integer"
+            - "null"
+        version:
+          type:
+            - "string"
+            - "null"
+    AdminComputeClusterResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminComputeCluster"
     AdminCountryCurrencyChange:
       type: "object"
       additionalProperties: false
@@ -16665,6 +19431,28 @@ components:
             "$ref": "#/components/schemas/AdminDedicatedServer"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    AdminDedicatedStock:
+      type: "object"
+      additionalProperties: false
+      description: "A physical machine added to stock. Owned by nobody, and its power state unknown rather than off — nothing has asked the controller anything."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        serial:
+          type: "string"
+        model:
+          type: "string"
+        status:
+          type: "string"
+        power_state:
+          type: "string"
+    AdminDedicatedStockResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminDedicatedStock"
     AdminDomain:
       type: "object"
       additionalProperties: false
@@ -16901,60 +19689,28 @@ components:
     AdminHostingNode:
       type: "object"
       additionalProperties: false
-      description: "Names no api_endpoint and no credentials reference. An operator screen has no use for either, and a support tool that displays them puts them in a screenshot."
+      description: "A panel server, written down. It arrives claiming nothing: no licence state, no usage, no accounts. Every one of those is a statement only the panel can make, and the reconciler is what asks."
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
         slug:
-          type:
-            - "string"
-            - "null"
+          type: "string"
         hostname:
-          type:
-            - "string"
-            - "null"
+          type: "string"
         panel:
-          type:
-            - "string"
-            - "null"
-        panel_version:
-          type:
-            - "string"
-            - "null"
+          type: "string"
         status:
-          type:
-            - "string"
-            - "null"
-        accepts_new_accounts:
-          type: "boolean"
+          type: "string"
         panel_licensed:
           type: "boolean"
-        licence_status:
+        accepts_new_accounts:
+          type:
+            - "boolean"
+            - "null"
+        version:
           type:
             - "string"
             - "null"
-        account_count:
-          type:
-            - "integer"
-            - "null"
-        max_accounts:
-          type:
-            - "integer"
-            - "null"
-        disk_used_mib:
-          type:
-            - "integer"
-            - "null"
-        disk_total_mib:
-          type:
-            - "integer"
-            - "null"
-        load_average:
-          type:
-            - "string"
-            - "null"
-        last_synced_at:
-          "$ref": "#/components/schemas/Timestamp"
     AdminHostingNodePage:
       type: "object"
       required:
@@ -16967,6 +19723,13 @@ components:
             "$ref": "#/components/schemas/AdminHostingNode"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    AdminHostingNodeResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminHostingNode"
     AdminInvoice:
       type: "object"
       additionalProperties: false
@@ -17016,39 +19779,30 @@ components:
     AdminIpPool:
       type: "object"
       additionalProperties: false
+      description: "A block of addresses and the scope that decides who may be given one. `management` reaches the hypervisor and BMC control planes; the allocator refuses to hand one to a customer service and placement refuses to count one as capacity. The scope is fixed at creation for that reason — reclassifying a pool would move addresses between the control plane and the customer estate retrospectively."
       properties:
         id:
           "$ref": "#/components/schemas/Ulid"
         slug:
-          type:
-            - "string"
-            - "null"
+          type: "string"
         name:
           type:
             - "string"
             - "null"
-        ip_version:
-          type:
-            - "integer"
-            - "null"
         scope:
-          type:
-            - "string"
-            - "null"
-        datacenter:
-          type:
-            - "string"
-            - "null"
-        subnets_count:
-          type:
-            - "integer"
-            - "null"
-        quarantine_days:
-          type:
-            - "integer"
-            - "null"
-        is_active:
+          type: "string"
+        ip_version:
+          type: "integer"
+        customer_allocatable:
           type: "boolean"
+        is_active:
+          type:
+            - "boolean"
+            - "null"
+        version:
+          type:
+            - "string"
+            - "null"
     AdminIpPoolPage:
       type: "object"
       required:
@@ -17061,6 +19815,55 @@ components:
             "$ref": "#/components/schemas/AdminIpPool"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    AdminIpPoolResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminIpPool"
+    AdminNetwork:
+      type: "object"
+      additionalProperties: false
+      description: "A layer-2 segment in a building. `is_customer_facing` is decided by the platform rather than taken from the request for management and interconnect purposes: control-plane addressing never carries a customer workload, whatever a form says."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type:
+            - "string"
+            - "null"
+        purpose:
+          type: "string"
+        vlan_id:
+          type:
+            - "integer"
+            - "null"
+        bridge:
+          type:
+            - "string"
+            - "null"
+        is_customer_facing:
+          type: "boolean"
+        is_active:
+          type: "boolean"
+        datacenter:
+          type:
+            - "string"
+            - "null"
+        version:
+          type:
+            - "string"
+            - "null"
+    AdminNetworkResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminNetwork"
     AdminNode:
       type: "object"
       additionalProperties: false
@@ -17123,6 +19926,62 @@ components:
             "$ref": "#/components/schemas/AdminNode"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    AdminOperator:
+      type: "object"
+      additionalProperties: false
+      description: "Somebody who may operate the platform. Staff only: a customer login holds the baseline customer role and never appears here. No password state and no two-factor secret — whether two-factor is enabled is published, what it is is not."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        name:
+          type: "string"
+        email:
+          type: "string"
+        roles:
+          type: "array"
+          items:
+            type: "string"
+        is_privileged:
+          type: "boolean"
+        has_signed_in:
+          type: "boolean"
+          description: "False for an invited operator who has not followed their one-time link yet."
+        two_factor_enabled:
+          type: "boolean"
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+    AdminOperatorPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminOperator"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    AdminOperatorResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminOperator"
+    AdminPermission:
+      type: "object"
+      additionalProperties: false
+      description: "One permission in the catalogue, with the group it belongs to and the default roles that hold it. A permission held by no default role is reachable only through the super-admin bypass until somebody grants it."
+      properties:
+        name:
+          type: "string"
+        group:
+          type: "string"
+        held_by_default_roles:
+          type: "array"
+          items:
+            type: "string"
     AdminProvisioningJob:
       type: "object"
       additionalProperties: false
@@ -17227,6 +20086,50 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminRefund"
+    AdminRegion:
+      type: "object"
+      additionalProperties: false
+      description: "A geography the platform sells capacity in, and the top of the inventory chain: every other object hangs off one through a datacenter. The two flags are separate because winding a region down means refusing new orders while the customers already there keep running."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type:
+            - "object"
+            - "string"
+          additionalProperties: true
+          description: "Translated display name."
+        country:
+          type:
+            - "string"
+            - "null"
+          description: "ISO 3166-1 alpha-2."
+        city:
+          type:
+            - "string"
+            - "null"
+        is_active:
+          type: "boolean"
+        accepts_new_services:
+          type: "boolean"
+        datacenters:
+          type:
+            - "integer"
+            - "null"
+        version:
+          type:
+            - "string"
+            - "null"
+          description: "Send this back on an update as an If-Match-style precondition; a stale one answers 409."
+    AdminRegionResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminRegion"
     AdminReinstallHistory:
       type: "object"
       additionalProperties: false
@@ -17395,6 +20298,131 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminReturnedServer"
+    AdminRole:
+      type: "object"
+      additionalProperties: false
+      description: "A role and what it may do. Super Admin's authority comes from a bypass rather than from the permissions attached to it, so its list is empty and `permissions_are_editable` is false — editing it would change nothing while looking like it had."
+      properties:
+        name:
+          type: "string"
+        label:
+          type: "string"
+        is_staff_role:
+          type: "boolean"
+        permissions_are_editable:
+          type: "boolean"
+        grants_everything:
+          type: "boolean"
+        permissions:
+          type: "array"
+          items:
+            type: "string"
+        operators:
+          type:
+            - "integer"
+            - "null"
+    AdminRoleResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminRole"
+    AdminService:
+      type: "object"
+      additionalProperties: false
+      description: "One service, as an operator sees it. `placement_blocked_reason` is the whole point of this list: it is written when the platform cannot decide where a purchased service goes, and until this endpoint existed it could only be read with a SQL client. It names a cluster, an address pool or a panel package, which is why it appears here and never on the customer's own copy of the same row."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        customer_id:
+          type:
+            - "string"
+            - "null"
+        order_id:
+          type:
+            - "string"
+            - "null"
+        order_item_id:
+          type:
+            - "string"
+            - "null"
+        subscription_id:
+          type:
+            - "string"
+            - "null"
+        plan_id:
+          type:
+            - "string"
+            - "null"
+        kind:
+          type:
+            - "string"
+            - "null"
+        label:
+          type:
+            - "string"
+            - "null"
+        status:
+          type:
+            - "string"
+            - "null"
+        needs_attention:
+          type: "boolean"
+          description: "Whether this status is one a person has to look at."
+        placement_blocked_reason:
+          type:
+            - "string"
+            - "null"
+          description: "Why the platform could not decide where this service goes. Null for everything it could place."
+        created_at:
+          "$ref": "#/components/schemas/Timestamp"
+        updated_at:
+          "$ref": "#/components/schemas/Timestamp"
+    AdminServicePage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminService"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
+    AdminSubnet:
+      type: "object"
+      additionalProperties: false
+      description: "The addresses themselves. The block is parsed by the same value object the allocator reads it with, so the version and prefix length are derived rather than asked for."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        cidr:
+          type: "string"
+        gateway:
+          type:
+            - "string"
+            - "null"
+        ip_version:
+          type: "integer"
+        prefix_length:
+          type: "integer"
+        is_active:
+          type:
+            - "boolean"
+            - "null"
+        network_id:
+          type:
+            - "string"
+            - "null"
+    AdminSubnetResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminSubnet"
     AdminTerminatedService:
       type: "object"
       additionalProperties: false
@@ -17629,6 +20657,7 @@ components:
           type: "boolean"
         is_restorable:
           type: "boolean"
+          description: "Whether a restore can actually be started from this archive. Carries the read-back verdict as well as the state: an archive the datastore read and could not return is false here, and the restore endpoint refuses it, whatever the screen offered."
         needs_attention:
           type: "boolean"
         size_bytes:
@@ -17636,7 +20665,10 @@ components:
             - "integer"
             - "null"
         verified:
-          type: "boolean"
+          type:
+            - "boolean"
+            - "null"
+          description: "true: the datastore read this archive back cleanly. false: it read it and it did not come back. null: nobody has checked yet. Never fold null into false — an unchecked backup is not a broken one."
         verified_at:
           "$ref": "#/components/schemas/Timestamp"
         retention_days:
@@ -19974,6 +23006,204 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/NotificationsMarkedRead"
+    OperatorHostingPackage:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        panel_package_name:
+          type: "string"
+          description: "What this platform will ask cPanel or DirectAdmin for. Recorded, never verified: no panel has been contacted."
+        plan_id:
+          type:
+            - "string"
+            - "null"
+        is_active:
+          type: "boolean"
+        mapped:
+          type: "boolean"
+          description: "Whether a plan points at it. A package with no plan is configuration nobody can order under."
+        disk_quota_mib:
+          type:
+            - "integer"
+            - "null"
+          description: "Null is unlimited, never zero."
+        bandwidth_quota_mib:
+          type:
+            - "integer"
+            - "null"
+        max_addon_domains:
+          type:
+            - "integer"
+            - "null"
+        max_subdomains:
+          type:
+            - "integer"
+            - "null"
+        max_databases:
+          type:
+            - "integer"
+            - "null"
+        max_email_accounts:
+          type:
+            - "integer"
+            - "null"
+        cpu_limit_percent:
+          type:
+            - "integer"
+            - "null"
+          description: "CloudLinux. Recorded whether or not CloudLinux is licensed on the node."
+        memory_limit_mib:
+          type:
+            - "integer"
+            - "null"
+        io_limit_kbps:
+          type:
+            - "integer"
+            - "null"
+        process_limit:
+          type:
+            - "integer"
+            - "null"
+        entry_process_limit:
+          type:
+            - "integer"
+            - "null"
+    OperatorHostingPackageResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/OperatorHostingPackage"
+    OperatorPlan:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        product_id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type: "object"
+          additionalProperties:
+            type: "string"
+        description:
+          type:
+            - "object"
+            - "null"
+          additionalProperties:
+            type: "string"
+        resources:
+          type: "object"
+          description: "What the plan sells. A document rather than columns because the three kinds describe different things: a VPS plan carries vcpu, memory_mib and disk_gib, a dedicated plan carries hardware_profile, a hosting plan carries panel quota."
+        placement_constraints:
+          type:
+            - "object"
+            - "null"
+        stock_limit:
+          type:
+            - "integer"
+            - "null"
+        per_customer_limit:
+          type:
+            - "integer"
+            - "null"
+        is_active:
+          type: "boolean"
+        is_public:
+          type: "boolean"
+        sort_order:
+          type: "integer"
+        prices:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OperatorPrice"
+        priced_in:
+          type: "array"
+          items:
+            type: "string"
+          description: "Currencies with an active price. Empty means nobody can buy this plan, however listed it looks."
+    OperatorPlanResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/OperatorPlan"
+    OperatorPrice:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        currency:
+          type: "string"
+          description: "ISO 4217, and one the platform is configured to bill in."
+        billing_period:
+          type: "string"
+          description: "hourly, daily, monthly, quarterly or yearly."
+        recurring_amount_minor:
+          type: "integer"
+          description: "Whole minor units. 9.000 KWD is 9000. Never a decimal: a decimal is a rounding decision taken by whichever layer parses it last."
+        setup_amount_minor:
+          type: "integer"
+          description: "Whole minor units, charged once."
+        is_active:
+          type: "boolean"
+        available_from:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+        available_until:
+          type:
+            - "string"
+            - "null"
+          format: "date-time"
+    OperatorProduct:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        kind:
+          type: "string"
+          description: "vps, dedicated or shared_hosting. The three this platform has a build path for; a fourth is software rather than a setting."
+        slug:
+          type: "string"
+        name:
+          type: "object"
+          additionalProperties:
+            type: "string"
+          description: "Display names by locale. Both languages are required."
+        description:
+          type:
+            - "object"
+            - "null"
+          additionalProperties:
+            type: "string"
+        is_active:
+          type: "boolean"
+          description: "Whether it is offered. Withdrawing sets this false and never deletes the row."
+        is_public:
+          type: "boolean"
+        sort_order:
+          type: "integer"
+        plans_count:
+          type: "integer"
+    OperatorProductResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/OperatorProduct"
     OperatorTicket:
       type: "object"
       additionalProperties: false
@@ -20421,6 +23651,31 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         period_end:
           "$ref": "#/components/schemas/Timestamp"
+        invoice:
+          "$ref": "#/components/schemas/PlanChangeInvoice"
+        awaits_payment:
+          type: "boolean"
+        resize:
+          "$ref": "#/components/schemas/PlanChangeResize"
+        awaits_infrastructure:
+          type: "boolean"
+    PlanChangeInvoice:
+      type:
+        - "object"
+        - "null"
+      additionalProperties: false
+      description: "The proration invoice an upgrade leaves behind. Null when the change owes nothing."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        number:
+          type:
+            - "string"
+            - "null"
+        status:
+          type: "string"
+        total:
+          "$ref": "#/components/schemas/Money"
     PlanChangeQuote:
       type: "object"
       additionalProperties: false
@@ -20481,6 +23736,19 @@ components:
             "$ref": "#/components/schemas/PlanChangeQuote"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    PlanChangeResize:
+      type:
+        - "object"
+        - "null"
+      additionalProperties: false
+      description: "The queued provider job, once there is one. Null while an upgrade is still unpaid."
+      properties:
+        job_id:
+          type: "string"
+        status:
+          type:
+            - "string"
+            - "null"
     PlanChangeResponse:
       type: "object"
       required:

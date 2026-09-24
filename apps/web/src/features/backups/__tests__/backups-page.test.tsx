@@ -40,7 +40,7 @@ const BACKUP = {
   is_restorable: true,
   needs_attention: false,
   size_bytes: 2 * 1024 ** 3,
-  verified: false,
+  verified: null,
   verified_at: null,
   retention_days: 7,
   expires_at: null,

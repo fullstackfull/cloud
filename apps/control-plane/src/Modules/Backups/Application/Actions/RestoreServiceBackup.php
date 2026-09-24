@@ -7,10 +7,14 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Domain\Exceptions\RestoreRefusedException;
+use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -61,6 +65,7 @@ final readonly class RestoreServiceBackup
     public function __construct(
         private BackupProviderFactory $providers,
         private SecretRedactor $redactor,
+        private NotifyCustomer $notify,
     ) {}
 
     /**
@@ -134,7 +139,7 @@ final readonly class RestoreServiceBackup
                 ],
             );
 
-            return $backup->refresh();
+            return $this->announce($backup->refresh());
         }
 
         /*
@@ -152,6 +157,53 @@ final readonly class RestoreServiceBackup
         $backup->forceFill(['restore_task_id' => $operation->taskId])->save();
 
         return $backup->refresh();
+    }
+
+    /**
+     * Say what became of a restore that never got as far as a provider task.
+     *
+     * The poller cannot do this one. A row that stops here is either back at
+     * `Succeeded` — the provider refused outright, nothing was started, and
+     * the customer can simply try again — or at `NeedsReview`, which nothing
+     * transitions out of and which no sweep will ever pick up, because
+     * `isAwaitingProvider()` is false without a task.
+     *
+     * That second case is the most dangerous outcome this module produces and
+     * was its quietest: the call did not answer, so the restore may be writing
+     * to the customer's disks right now, and until this existed they were told
+     * nothing and had no reason not to press the button again.
+     *
+     * A refusal announces nothing. Nothing happened to the machine, and the
+     * refusal is already on the response the customer is reading.
+     */
+    private function announce(Backup $backup): Backup
+    {
+        if ($backup->state !== BackupState::NeedsReview) {
+            return $backup;
+        }
+
+        /** @var ?Service $service */
+        $service = $backup->service()->first();
+        $label = $service?->label;
+
+        $this->notify->execute(
+            customerId: $backup->customer_id,
+            type: NotificationType::RestoreNeedsReview,
+            idempotencyKey: BackupNotificationKey::restore(
+                (string) $backup->getKey(),
+                $backup->restore_task_id,
+                'needs_review',
+            ),
+            subject: $backup,
+            data: [
+                'service' => is_string($label) && $label !== ''
+                    ? $label
+                    : (string) ($service?->getKey() ?? $backup->service_id),
+            ],
+            link: '/backups',
+        );
+
+        return $backup;
     }
 
     /**
@@ -175,6 +227,26 @@ final readonly class RestoreServiceBackup
             throw RestoreRefusedException::notRestorable(
                 (string) $backup->getKey(),
                 sprintf('its state is %s, and only a completed backup can be restored', $backup->state->value),
+            );
+        }
+
+        if ($backup->verified === false) {
+            /*
+             * The datastore read this archive back and it did not come back.
+             *
+             * Refused here and not only in the portal, because the portal is
+             * not a security boundary and this is the one refusal where being
+             * bypassed destroys data: restoring an archive known to be
+             * unreadable writes it over a machine that is currently working.
+             *
+             * Only `false` refuses. `null` is not a verdict — see
+             * {@see Backup::isRestorable()} — and folding the two together
+             * would refuse most archives on the one provider that can run in
+             * production, which verifies on its own schedule.
+             */
+            throw RestoreRefusedException::notRestorable(
+                (string) $backup->getKey(),
+                'the datastore read this archive back and it did not come back; restoring it would write an unreadable image over a working machine',
             );
         }
 

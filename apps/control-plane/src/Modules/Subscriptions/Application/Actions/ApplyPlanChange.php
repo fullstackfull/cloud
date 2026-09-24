@@ -6,23 +6,23 @@ namespace Lynomia\Modules\Subscriptions\Application\Actions;
 
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
-use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
+use Lynomia\Modules\Billing\Application\Actions\IssueInvoice;
+use Lynomia\Modules\Billing\Application\DTOs\InvoiceLineDraft;
+use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Catalog\Domain\Services\TaxResolver;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
-use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
-use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
-use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
-use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
-use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
-use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
-use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeOutcome;
-use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
+use Lynomia\Modules\Subscriptions\Application\DTOs\ProrationPlan;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\PlanChangeRefusedException;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 
 /**
  * Move a subscription onto another plan, and make the machine match.
@@ -36,13 +36,26 @@ use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
  * infrastructure half is neither. A machine grows when a hypervisor says it
  * has, minutes later, and it can fail.
  *
- * So this action does the money, then queues the resize, and says which of
- * those happened. What it deliberately does not do is write the new shape onto
- * the service as though the machine already had it: the customer's dashboard
- * would show four vCPU on a machine running two, and the platform's own
- * capacity accounting would believe a node had handed out memory it has not.
+ * So this action does the money first and says what it did. What it
+ * deliberately does not do is write the new shape onto the service as though
+ * the machine already had it: the customer's dashboard would show four vCPU on
+ * a machine running two, and the platform's own capacity accounting would
+ * believe a node had handed out memory it has not.
  * {@see ResizeVpsHandler} writes the
  * shape, after the provider confirms it.
+ *
+ * ---------------------------------------------------------------------------
+ * Nothing is handed over against an open invoice
+ * ---------------------------------------------------------------------------
+ *
+ * An upgrade is a purchase, and the platform's rule everywhere else is that a
+ * purchase is delivered on settlement. This action therefore queues the resize
+ * only when the change owes nothing — a downgrade, or a move between equally
+ * priced plans. An upgrade leaves an invoice behind and the resize is queued
+ * by {@see ResizeOnPlanChangeSettlement}
+ * when that invoice is paid. Before this, the bigger machine was handed over
+ * at the moment confirm was pressed and the difference was never collected at
+ * all.
  *
  * ---------------------------------------------------------------------------
  * The quote is the gate
@@ -60,8 +73,12 @@ final readonly class ApplyPlanChange
     public function __construct(
         private QuotePlanChange $quotes,
         private ChangeSubscriptionPlan $changePlan,
-        private CreateProvisioningJob $createJob,
+        private QueuePlanChangeAtProvider $queueAtProvider,
         private RecordAuditEntry $audit,
+        private IssueInvoice $issueInvoice,
+        private PricingEngine $pricing,
+        private TaxResolver $taxResolver,
+        private WalletLedger $wallet,
     ) {}
 
     /**
@@ -73,6 +90,7 @@ final readonly class ApplyPlanChange
         PlanPrice $price,
         ?int $units = null,
         ?string $idempotencyKey = null,
+        ?User $actor = null,
     ): PlanChangeOutcome {
         $quote = $this->quotes->execute($subscription, $plan, $price);
 
@@ -93,10 +111,17 @@ final readonly class ApplyPlanChange
             units: $units,
         );
 
-        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+        /*
+         * The money, made durable, before anything is handed over.
+         *
+         * An upgrade is invoiced and the machine is left alone until that
+         * invoice settles; a downgrade credits the wallet and goes through at
+         * once. Both halves used to be computed and dropped on the floor.
+         */
+        $invoice = $this->settleTheDifference($subscription, $proration, $actor);
 
-        $resizeJob = $quote->changesInfrastructure
-            ? $this->queueTheChangeAtTheProvider($subscription, $service, $quote, $idempotencyKey)
+        $resizeJob = $quote->changesInfrastructure && ! $proration->net()->isPositive()
+            ? $this->queueAtProvider->execute($subscription, $quote->planId, $quote->newResources, $idempotencyKey)
             : null;
 
         $this->audit->execute(
@@ -109,6 +134,7 @@ final readonly class ApplyPlanChange
                 'amount_due_now_minor' => $quote->amountDueNow->minorUnits(),
                 'currency' => $quote->currentRecurring->currency(),
                 'resize_job_id' => $resizeJob === null ? null : (string) $resizeJob->getKey(),
+                'proration_invoice_id' => $invoice === null ? null : (string) $invoice->getKey(),
             ],
         );
 
@@ -116,133 +142,137 @@ final readonly class ApplyPlanChange
             proration: $proration,
             quote: $quote,
             resizeJob: $resizeJob,
+            invoice: $invoice,
         );
     }
 
     /**
-     * Ask the engine to make the product what the customer now pays for.
+     * Turn the proration into something that survives the request.
      *
-     * Two shapes, because the two products are changed in different places: a
-     * machine is resized at the hypervisor, and a hosting account is moved
-     * onto another package at the control panel. Both are queued for the same
-     * reason — each is a provider call that can fail, and a plan change whose
-     * provider half is not tracked is a customer charged for something they
-     * did not get.
+     * Everything below reuses primitives that already existed: the same
+     * IssueInvoice a renewal uses, the same PricingEngine, the same
+     * TaxResolver, and the wallet ledger's own idempotent credit. Nothing new
+     * was modelled, because nothing new was missing — only the wiring.
      *
-     * A dedicated server has neither. It cannot be resized at all: a customer
-     * moving between dedicated plans is moving between machines, which is a
-     * different operation with a different price.
+     * Which of the two happens is decided by the sign of the net, and the two
+     * are deliberately not symmetrical:
+     *
+     *  - **Owed to us** becomes an invoice, carrying both halves as separate
+     *    lines so the document says what was taken off and what was charged.
+     *    The customer is not given the larger machine until it settles; that
+     *    is the same rule an order follows, where nothing is provisioned
+     *    against an open invoice.
+     *  - **Owed to them** becomes wallet credit, not a refund to the card.
+     *    This domain already separates the two — WalletLedger for balance a
+     *    later invoice can consume, IssueRefund for money returned through the
+     *    payment provider — and a downgrade is not a request for money back.
+     *    Choosing the refund here would be inventing a policy nobody set.
+     *  - **Exactly nothing** writes neither. A change between two equally
+     *    priced plans is a real change, and billing it would be an invention.
      */
-    private function queueTheChangeAtTheProvider(
+    private function settleTheDifference(
         Subscription $subscription,
-        ?Service $service,
-        PlanChangeQuote $quote,
-        ?string $idempotencyKey,
-    ): ?ProvisioningJob {
-        if ($service === null) {
+        ProrationPlan $proration,
+        ?User $actor,
+    ): ?Invoice {
+        $net = $proration->net();
+
+        if ($net->isZero()) {
             return null;
         }
 
-        if ($service->kind === ProductKind::SharedHosting->value) {
-            return $this->queuePackageChange($subscription, $service, $quote, $idempotencyKey);
-        }
+        /** @var Customer $customer */
+        $customer = $subscription->customer()->firstOrFail();
 
-        if ($service->kind !== ProductKind::Vps->value) {
+        if ($net->isNegative()) {
+            $this->creditTheCustomer($customer, $subscription, $proration, $actor);
+
             return null;
         }
 
-        $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
+        return $this->invoiceTheDifference($customer, $subscription, $proration);
+    }
 
-        if ($machine === null) {
-            return null;
+    private function invoiceTheDifference(
+        Customer $customer,
+        Subscription $subscription,
+        ProrationPlan $proration,
+    ): Invoice {
+        // The rate that applies at the moment of the change, as a renewal does
+        // it: a VAT change takes effect on the documents issued after it.
+        $taxRate = $this->taxResolver->forCustomer($customer, $proration->changeAt);
+
+        $lines = $proration->pricingLines();
+        $priced = $this->pricing->price(lines: $lines, taxRate: $taxRate);
+
+        /*
+         * Zipped by hand rather than through InvoiceLineDraft::zip(), which
+         * fixes one kind for every line. A proration carries two different
+         * kinds — what came off the old plan and what went on the new one —
+         * and collapsing them would make the invoice unreadable.
+         */
+        $drafts = [];
+        foreach ($proration->lines as $index => $line) {
+            $drafts[] = InvoiceLineDraft::fromPricing(
+                $lines[$index],
+                $priced->lines[$index],
+                $line->kind,
+                $proration->changeAt,
+                $proration->periodEnd,
+                $proration->subscriptionId,
+            );
         }
 
-        $job = $this->createJob->execute(new ProvisioningJobRequest(
-            kind: ProvisioningJobKind::Resize,
-            /*
-             * Keyed on the subscription and the target plan rather than on a
-             * client-supplied value alone. A customer double-clicking confirm
-             * must not resize their machine twice — the second press finds the
-             * job the first one made.
-             */
-            idempotencyKey: sprintf(
-                'plan-change:%s:%s:%s',
-                $subscription->getKey(),
-                $quote->planId,
-                $idempotencyKey ?? 'default',
-            ),
-            provider: (string) ($machine->cluster()->first()?->driver->value ?? 'unknown'),
-            serviceId: (string) $service->getKey(),
-            customerId: $subscription->customer_id,
-            payload: [
-                'virtual_machine_id' => (string) $machine->getKey(),
-                'subscription_id' => (string) $subscription->getKey(),
-                'plan_id' => $quote->planId,
-                // The target shape, absolute. The handler turns the disk into
-                // a growth against what the machine actually has, which is the
-                // only form the provider contract accepts.
-                'vcpu' => $quote->newResources->vcpu,
-                'memory_mib' => $quote->newResources->memoryMib,
-                'disk_gib' => $quote->newResources->diskGib,
-            ],
-        ));
-
-        if ($job->wasRecentlyCreated) {
-            RunProvisioningJob::dispatch((string) $job->getKey());
-        }
-
-        return $job;
+        return $this->issueInvoice->execute(
+            customer: $customer,
+            lines: $drafts,
+            subscriptionId: (string) $subscription->getKey(),
+        );
     }
 
     /**
-     * The hosting half: the account moves onto the package the new plan names.
+     * The unused remainder of the plan they left, returned as balance.
      *
-     * A plan with no package behind it queues nothing rather than guessing.
-     * Choosing "some package on the right node" would put a customer on a
-     * quota nobody sold them, and the alternative — a plan change that says so
-     * — is a support ticket rather than a silent wrong answer.
+     * Keyed on the subscription, the plan and the instant of the change, so a
+     * retried request credits once. The ledger refuses a second entry under a
+     * key it has already posted.
+     *
+     * Posted as an Adjustment, which the ledger will not accept without a
+     * named user behind it. That rule is right and is honoured rather than
+     * worked around: the entry is the consequence of a person choosing a
+     * smaller plan, and that person is who it is attributed to. The two
+     * neighbouring kinds were both rejected. Refund means money returned
+     * through the channel it arrived by, against a transaction that was
+     * actually reversed — there is none here, and claiming one would overstate
+     * what the platform has paid out. Topup means value the customer handed
+     * over, which they did not.
      */
-    private function queuePackageChange(
+    private function creditTheCustomer(
+        Customer $customer,
         Subscription $subscription,
-        Service $service,
-        PlanChangeQuote $quote,
-        ?string $idempotencyKey,
-    ): ?ProvisioningJob {
-        $account = HostingAccount::query()->where('service_id', $service->getKey())->first();
+        ProrationPlan $proration,
+        ?User $actor,
+    ): void {
+        $amount = $proration->net()->absolute();
+        $wallet = $this->wallet->walletFor($customer, $proration->currency);
 
-        if ($account === null) {
-            return null;
-        }
-
-        $package = HostingPackage::query()->where('plan_id', $quote->planId)->first();
-
-        if ($package === null) {
-            return null;
-        }
-
-        $job = $this->createJob->execute(new ProvisioningJobRequest(
-            kind: ProvisioningJobKind::ChangeHostingPackage,
-            idempotencyKey: sprintf(
-                'plan-change:%s:%s:%s',
-                $subscription->getKey(),
-                $quote->planId,
-                $idempotencyKey ?? 'default',
-            ),
-            provider: $account->node()->first()?->panel->value ?? 'unknown',
-            serviceId: (string) $service->getKey(),
-            customerId: $subscription->customer_id,
-            payload: [
-                'hosting_account_id' => (string) $account->getKey(),
-                'hosting_package_id' => (string) $package->getKey(),
+        $this->wallet->credit(
+            wallet: $wallet,
+            amount: $amount,
+            kind: WalletTransactionKind::Adjustment,
+            description: 'Unused time after moving plan',
+            actor: $actor,
+            metadata: [
                 'subscription_id' => (string) $subscription->getKey(),
-                'plan_id' => $quote->planId,
+                'credit_minor' => $proration->credit->minorUnits(),
+                'charge_minor' => $proration->charge->minorUnits(),
             ],
-        ));
-
-        if ($job->wasRecentlyCreated) {
-            RunProvisioningJob::dispatch((string) $job->getKey());
-        }
-
-        return $job;
+            idempotencyKey: sprintf(
+                'plan-change-credit:%s:%s:%s',
+                $subscription->getKey(),
+                $subscription->plan_id,
+                $proration->changeAt->getTimestamp(),
+            ),
+        );
     }
 }

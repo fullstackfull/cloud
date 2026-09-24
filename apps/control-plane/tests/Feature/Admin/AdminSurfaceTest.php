@@ -6,6 +6,7 @@ namespace Tests\Feature\Admin;
 
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
@@ -109,6 +110,22 @@ final class AdminSurfaceTest extends TestCase
     #[Test]
     public function a_verified_customer_is_refused_on_every_administrative_route(): void
     {
+        /*
+         * The throttle is stood down for this loop, and only this loop.
+         *
+         * It sweeps every administrative route in the application, which is
+         * now more than the per-minute allowance — so without this the test
+         * stops being about authorisation partway through and starts
+         * reporting 429 for the rest, which is a refusal for the wrong
+         * reason and would hide a route that answered 200.
+         *
+         * Nothing is lost by doing it here: that every authenticated route
+         * carries a limiter is its own gate, in
+         * EveryAuthenticatedRouteIsThrottledTest, and this one is about who
+         * may reach them.
+         */
+        $this->withoutMiddleware(ThrottleRequests::class);
+
         $customer = User::factory()->create();
         $customer->syncRoles([Role::Customer->value]);
 

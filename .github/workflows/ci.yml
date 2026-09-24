@@ -389,6 +389,16 @@ jobs:
       - name: The inventory validator still rejects what it claims to reject
         run: python3 infrastructure/scripts/test_validate_inventory.py
 
+      # check-runner-trust.py decides whether a host can be believed about
+      # where it just connected. It is an operator tool, run on a candidate
+      # trusted runner and never here — this runner is not that host, and a
+      # verdict from it would mean nothing. What CI can check is the one
+      # distinction the tool exists to make: a verified certificate for a name
+      # that cannot exist is a forgery, and an untrusted one for that same name
+      # is not. Get that backwards and the tool clears an intercepted host.
+      - name: The runner trust check still tells a forgery from a refusal
+        run: python3 infrastructure/scripts/test_check_runner_trust.py
+
       # A classification the role does not enforce is an assertion, not a gate.
       # This runs safety_gate against a throwaway inventory pointing at
       # localhost, once per class-and-action pair, and checks the play reaches

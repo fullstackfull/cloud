@@ -230,7 +230,7 @@ final class TheNewSweepsRunOutsideThisProcessTest extends WorkerHarness
             [
                 'APP_ENV' => 'testing',
                 'QUEUE_CONNECTION' => 'redis',
-                'REDIS_DB' => (string) self::REDIS_DATABASE,
+                'REDIS_DB' => (string) self::redisDatabase(),
                 'DB_DATABASE' => config('database.connections.pgsql.database'),
                 'DB_PASSWORD' => config('database.connections.pgsql.password'),
                 'MAIL_MAILER' => 'array',

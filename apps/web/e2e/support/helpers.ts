@@ -308,18 +308,18 @@ export function operationsChannel(page: Page) {
  * at one — a helper that accepted six of the seven would be the same race in
  * a different place.
  */
+function everyLifecycleMessageFor(action: string): RegExp {
+  return new RegExp(
+    `${action} (requested|completed|did not finish` +
+      `|stopped and we are looking at it|cancelled|is taking longer than usual)` +
+      `|We could not confirm the result of ${action}`,
+  )
+}
+
 export async function expectOperationReported(page: Page, action: string): Promise<void> {
   const channel = operationsChannel(page)
 
-  await expect(
-    channel.getByText(
-      new RegExp(
-        `${action} (requested|completed|did not finish` +
-          `|stopped and we are looking at it|cancelled|is taking longer than usual)` +
-          `|We could not confirm the result of ${action}`,
-      ),
-    ),
-  ).toBeVisible()
+  await expect(channel.getByText(everyLifecycleMessageFor(action))).toBeVisible()
 
   /*
    * And never the word that would be a claim rather than a report. This part
@@ -327,4 +327,65 @@ export async function expectOperationReported(page: Page, action: string): Promi
    * a count of zero is true at every moment rather than only at one.
    */
   await expect(channel.getByText(/^Success/)).toHaveCount(0)
+}
+
+/**
+ * Waits until the channel reports this action no longer, whatever it said.
+ *
+ * The companion to {@see expectOperationReported}, and it has to use the same
+ * pattern for the same reason. A dismissal asserted against one of the seven
+ * messages — "Reboot requested", say — passes without the dismiss button doing
+ * anything at all, on every run where the operation had already reached its
+ * outcome and the channel was showing "Reboot completed" instead. That is the
+ * race the positive assertion had, mirrored, and it is worse: it fails open.
+ */
+export async function expectOperationNoLongerReported(page: Page, action: string): Promise<void> {
+  await expect(
+    operationsChannel(page).getByText(everyLifecycleMessageFor(action)),
+  ).toHaveCount(0)
+}
+
+/**
+ * Takes the estate the fresh-deployment journey registers back out of service.
+ *
+ * The journey has to create real inventory — a browser proof that reads rows
+ * somebody else wrote proves nothing — and real inventory is exactly what the
+ * rest of the suite buys against. An active compute cluster and an active
+ * customer address pool are placement candidates, and the platform refuses to
+ * place a plan when there are two of either: that refusal is correct and is
+ * the subject of its own tests, but it means a journey that registers a second
+ * one leaves every later catalogue price, quote and order with nothing to
+ * resolve. The seeder's estate and this journey's estate cannot both be the
+ * one the platform chooses.
+ *
+ * So the rehearsal estate is retired the moment the journey is done with it.
+ * Retired, not deleted: the rows stay, the audit trail of their registration
+ * stays, and what changes is the same thing an operator would change — a
+ * cluster into maintenance, a pool switched off. The region, datacenter and
+ * network it also created are left alone, because neither is a candidate for
+ * anything and both are worth seeing in the list afterwards.
+ *
+ * Done from here rather than through the screens for the reason the other
+ * teardowns in this file are: a journey that fails halfway would otherwise
+ * leave the estate ambiguous for every spec that follows, and the failure
+ * reported would be theirs rather than its.
+ */
+export function retireTheRehearsalEstate(): void {
+  execFileSync(
+    'php',
+    [
+      'artisan',
+      'tinker',
+      '--execute',
+      '\\Illuminate\\Support\\Facades\\DB::table("compute_clusters")' +
+        '->where("slug", "like", "e2e-browser-%")->update(["status" => "maintenance"]);' +
+        '\\Illuminate\\Support\\Facades\\DB::table("ip_pools")' +
+        '->where("slug", "like", "e2e-browser-%")->update(["is_active" => false]);',
+    ],
+    {
+      cwd: path.resolve(import.meta.dirname, '../../../control-plane'),
+      stdio: 'ignore',
+      env: { ...process.env, APP_ENV: 'local', DB_DATABASE: process.env.E2E_DB_DATABASE ?? 'lynomia_e2e' },
+    },
+  )
 }

@@ -77,10 +77,27 @@ return [
             'trigger' => ['type' => ['string', 'null']],
             'mode' => ['type' => ['string', 'null']],
             'is_in_flight' => ['type' => 'boolean'],
-            'is_restorable' => ['type' => 'boolean'],
+            'is_restorable' => [
+                'type' => 'boolean',
+                'description' => 'Whether a restore can actually be started from this archive. Carries the read-back verdict as well as the state: an archive the datastore read and could not return is false here, and the restore endpoint refuses it, whatever the screen offered.',
+            ],
             'needs_attention' => ['type' => 'boolean'],
             'size_bytes' => ['type' => ['integer', 'null']],
-            'verified' => ['type' => 'boolean'],
+            /*
+             * Three-valued, and the schema said boolean.
+             *
+             * The resource has always returned null for an archive nobody has
+             * read back, and its docblock is explicit that null and false are
+             * not interchangeable. A client generated from the old schema had
+             * two options for the null it was going to receive: reject the
+             * response, or coerce it to false — which reports an unchecked
+             * backup as a broken one, the exact collapse this field exists to
+             * prevent.
+             */
+            'verified' => [
+                'type' => ['boolean', 'null'],
+                'description' => 'true: the datastore read this archive back cleanly. false: it read it and it did not come back. null: nobody has checked yet. Never fold null into false — an unchecked backup is not a broken one.',
+            ],
             'verified_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'retention_days' => ['type' => ['integer', 'null']],
             'is_being_deleted' => ['type' => 'boolean', 'description' => 'True from the moment a deletion is asked for until the provider is seen to have done it. A screen showing "deleted" for an archive still on a datastore would be the same false claim as one showing "available" for one that has gone.'],
@@ -1313,6 +1330,78 @@ return [
      * — an entry with no provider reference is a commercial intention rather
      * than something a machine can be built from, and placement refuses it.
      */
+    'OperatorProduct' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'kind' => ['type' => 'string', 'description' => 'vps, dedicated or shared_hosting. The three this platform has a build path for; a fourth is software rather than a setting.'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'], 'description' => 'Display names by locale. Both languages are required.'],
+            'description' => ['type' => ['object', 'null'], 'additionalProperties' => ['type' => 'string']],
+            'is_active' => ['type' => 'boolean', 'description' => 'Whether it is offered. Withdrawing sets this false and never deletes the row.'],
+            'is_public' => ['type' => 'boolean'],
+            'sort_order' => ['type' => 'integer'],
+            'plans_count' => ['type' => 'integer'],
+        ],
+    ],
+    'OperatorPrice' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'currency' => ['type' => 'string', 'description' => 'ISO 4217, and one the platform is configured to bill in.'],
+            'billing_period' => ['type' => 'string', 'description' => 'hourly, daily, monthly, quarterly or yearly.'],
+            'recurring_amount_minor' => ['type' => 'integer', 'description' => 'Whole minor units. 9.000 KWD is 9000. Never a decimal: a decimal is a rounding decision taken by whichever layer parses it last.'],
+            'setup_amount_minor' => ['type' => 'integer', 'description' => 'Whole minor units, charged once.'],
+            'is_active' => ['type' => 'boolean'],
+            'available_from' => ['type' => ['string', 'null'], 'format' => 'date-time'],
+            'available_until' => ['type' => ['string', 'null'], 'format' => 'date-time'],
+        ],
+    ],
+    'OperatorPlan' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'product_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            'description' => ['type' => ['object', 'null'], 'additionalProperties' => ['type' => 'string']],
+            'resources' => ['type' => 'object', 'description' => 'What the plan sells. A document rather than columns because the three kinds describe different things: a VPS plan carries vcpu, memory_mib and disk_gib, a dedicated plan carries hardware_profile, a hosting plan carries panel quota.'],
+            'placement_constraints' => ['type' => ['object', 'null']],
+            'stock_limit' => ['type' => ['integer', 'null']],
+            'per_customer_limit' => ['type' => ['integer', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'is_public' => ['type' => 'boolean'],
+            'sort_order' => ['type' => 'integer'],
+            'prices' => ['type' => 'array', 'items' => ['$ref' => '#/components/schemas/OperatorPrice']],
+            'priced_in' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Currencies with an active price. Empty means nobody can buy this plan, however listed it looks.'],
+        ],
+    ],
+    'OperatorHostingPackage' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'panel_package_name' => ['type' => 'string', 'description' => 'What this platform will ask cPanel or DirectAdmin for. Recorded, never verified: no panel has been contacted.'],
+            'plan_id' => ['type' => ['string', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'mapped' => ['type' => 'boolean', 'description' => 'Whether a plan points at it. A package with no plan is configuration nobody can order under.'],
+            'disk_quota_mib' => ['type' => ['integer', 'null'], 'description' => 'Null is unlimited, never zero.'],
+            'bandwidth_quota_mib' => ['type' => ['integer', 'null']],
+            'max_addon_domains' => ['type' => ['integer', 'null']],
+            'max_subdomains' => ['type' => ['integer', 'null']],
+            'max_databases' => ['type' => ['integer', 'null']],
+            'max_email_accounts' => ['type' => ['integer', 'null']],
+            'cpu_limit_percent' => ['type' => ['integer', 'null'], 'description' => 'CloudLinux. Recorded whether or not CloudLinux is licensed on the node.'],
+            'memory_limit_mib' => ['type' => ['integer', 'null']],
+            'io_limit_kbps' => ['type' => ['integer', 'null']],
+            'process_limit' => ['type' => ['integer', 'null']],
+            'entry_process_limit' => ['type' => ['integer', 'null']],
+        ],
+    ],
     'VmTemplate' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -2180,6 +2269,192 @@ return [
             'last_synced_at' => ['$ref' => '#/components/schemas/Timestamp'],
         ],
     ],
+    'AdminService' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => "One service, as an operator sees it. `placement_blocked_reason` is the whole point of this list: it is written when the platform cannot decide where a purchased service goes, and until this endpoint existed it could only be read with a SQL client. It names a cluster, an address pool or a panel package, which is why it appears here and never on the customer's own copy of the same row.",
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'customer_id' => ['type' => ['string', 'null']],
+            'order_id' => ['type' => ['string', 'null']],
+            'order_item_id' => ['type' => ['string', 'null']],
+            'subscription_id' => ['type' => ['string', 'null']],
+            'plan_id' => ['type' => ['string', 'null']],
+            'kind' => ['type' => ['string', 'null']],
+            'label' => ['type' => ['string', 'null']],
+            'status' => ['type' => ['string', 'null']],
+            'needs_attention' => ['type' => 'boolean', 'description' => 'Whether this status is one a person has to look at.'],
+            'placement_blocked_reason' => ['type' => ['string', 'null'], 'description' => 'Why the platform could not decide where this service goes. Null for everything it could place.'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'updated_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'AdminRegion' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A geography the platform sells capacity in, and the top of the inventory chain: every other object hangs off one through a datacenter. The two flags are separate because winding a region down means refusing new orders while the customers already there keep running.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => ['object', 'string'], 'additionalProperties' => true, 'description' => 'Translated display name.'],
+            'country' => ['type' => ['string', 'null'], 'description' => 'ISO 3166-1 alpha-2.'],
+            'city' => ['type' => ['string', 'null']],
+            'is_active' => ['type' => 'boolean'],
+            'accepts_new_services' => ['type' => 'boolean'],
+            'datacenters' => ['type' => ['integer', 'null']],
+            'version' => ['type' => ['string', 'null'], 'description' => 'Send this back on an update as an If-Match-style precondition; a stale one answers 409.'],
+        ],
+    ],
+    'AdminComputeCluster' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A hypervisor cluster as the platform understands it. Recording one contacts nothing: `last_synced_at` stays null until a reconciler has actually spoken to it, which is the difference between configured and verified. The credential is a reference the secret resolver looks up, never a value.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'string'],
+            'driver' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'datacenter' => ['type' => ['string', 'null']],
+            'datacenter_id' => ['type' => ['string', 'null']],
+            'api_endpoint' => ['type' => ['string', 'null']],
+            'verify_tls' => ['type' => 'boolean'],
+            'credentials_reference' => ['type' => ['string', 'null'], 'description' => 'The name of an entry in the credential centre. Never a secret.'],
+            'accepts_placement' => ['type' => 'boolean'],
+            'last_synced_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'nodes' => ['type' => ['integer', 'null']],
+            'templates' => ['type' => ['integer', 'null']],
+            'version' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminNetwork' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A layer-2 segment in a building. `is_customer_facing` is decided by the platform rather than taken from the request for management and interconnect purposes: control-plane addressing never carries a customer workload, whatever a form says.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => ['string', 'null']],
+            'purpose' => ['type' => 'string'],
+            'vlan_id' => ['type' => ['integer', 'null']],
+            'bridge' => ['type' => ['string', 'null']],
+            'is_customer_facing' => ['type' => 'boolean'],
+            'is_active' => ['type' => 'boolean'],
+            'datacenter' => ['type' => ['string', 'null']],
+            'version' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminIpPool' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A block of addresses and the scope that decides who may be given one. `management` reaches the hypervisor and BMC control planes; the allocator refuses to hand one to a customer service and placement refuses to count one as capacity. The scope is fixed at creation for that reason — reclassifying a pool would move addresses between the control plane and the customer estate retrospectively.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => ['string', 'null']],
+            'scope' => ['type' => 'string'],
+            'ip_version' => ['type' => 'integer'],
+            'customer_allocatable' => ['type' => 'boolean'],
+            'is_active' => ['type' => ['boolean', 'null']],
+            'version' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminSubnet' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'The addresses themselves. The block is parsed by the same value object the allocator reads it with, so the version and prefix length are derived rather than asked for.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'cidr' => ['type' => 'string'],
+            'gateway' => ['type' => ['string', 'null']],
+            'ip_version' => ['type' => 'integer'],
+            'prefix_length' => ['type' => 'integer'],
+            'is_active' => ['type' => ['boolean', 'null']],
+            'network_id' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminHostingNode' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A panel server, written down. It arrives claiming nothing: no licence state, no usage, no accounts. Every one of those is a statement only the panel can make, and the reconciler is what asks.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'hostname' => ['type' => 'string'],
+            'panel' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'panel_licensed' => ['type' => 'boolean'],
+            'accepts_new_accounts' => ['type' => ['boolean', 'null']],
+            'version' => ['type' => ['string', 'null']],
+        ],
+    ],
+    'AdminDedicatedStock' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A physical machine added to stock. Owned by nobody, and its power state unknown rather than off — nothing has asked the controller anything.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'serial' => ['type' => 'string'],
+            'model' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'power_state' => ['type' => 'string'],
+        ],
+    ],
+    'AdminBmcEndpoint' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'Where a machine\'s baseboard controller is. The address goes through the platform\'s outbound policy when it is written, not only when it is dialled. `username` is an account name; the password is a credential reference and no field here accepts a value. `last_contacted_at` is null until something actually talks to it.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'dedicated_server_id' => ['type' => 'string'],
+            'protocol' => ['type' => 'string'],
+            'address' => ['type' => 'string'],
+            'port' => ['type' => ['integer', 'null']],
+            'username' => ['type' => ['string', 'null']],
+            'verify_tls' => ['type' => 'boolean'],
+            'credentials_reference' => ['type' => ['string', 'null']],
+            'last_contacted_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'AdminOperator' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'Somebody who may operate the platform. Staff only: a customer login holds the baseline customer role and never appears here. No password state and no two-factor secret — whether two-factor is enabled is published, what it is is not.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'name' => ['type' => 'string'],
+            'email' => ['type' => 'string'],
+            'roles' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'is_privileged' => ['type' => 'boolean'],
+            'has_signed_in' => ['type' => 'boolean', 'description' => 'False for an invited operator who has not followed their one-time link yet.'],
+            'two_factor_enabled' => ['type' => 'boolean'],
+            'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'AdminRole' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A role and what it may do. Super Admin\'s authority comes from a bypass rather than from the permissions attached to it, so its list is empty and `permissions_are_editable` is false — editing it would change nothing while looking like it had.',
+        'properties' => [
+            'name' => ['type' => 'string'],
+            'label' => ['type' => 'string'],
+            'is_staff_role' => ['type' => 'boolean'],
+            'permissions_are_editable' => ['type' => 'boolean'],
+            'grants_everything' => ['type' => 'boolean'],
+            'permissions' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'operators' => ['type' => ['integer', 'null']],
+        ],
+    ],
+    'AdminPermission' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'One permission in the catalogue, with the group it belongs to and the default roles that hold it. A permission held by no default role is reachable only through the super-admin bypass until somebody grants it.',
+        'properties' => [
+            'name' => ['type' => 'string'],
+            'group' => ['type' => 'string'],
+            'held_by_default_roles' => ['type' => 'array', 'items' => ['type' => 'string']],
+        ],
+    ],
     'AdminDrift' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -2419,6 +2694,43 @@ return [
             'net' => ['$ref' => '#/components/schemas/Money'],
             'effective_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'period_end' => ['$ref' => '#/components/schemas/Timestamp'],
+
+            /*
+             * The two halves that finish after the response does. An upgrade
+             * owes money, so it leaves an invoice and its machine is not
+             * touched until that invoice is paid; a downgrade owes nothing and
+             * its resize is queued at once. A client that read only the money
+             * above would report both as finished.
+             *
+             * `resize` and `awaits_infrastructure` were already being returned
+             * and were missing from here. With additionalProperties false this
+             * schema is an exhaustive list, so documenting the new pair and
+             * not the old one would have left it just as wrong.
+             */
+            'invoice' => ['$ref' => '#/components/schemas/PlanChangeInvoice'],
+            'awaits_payment' => ['type' => 'boolean'],
+            'resize' => ['$ref' => '#/components/schemas/PlanChangeResize'],
+            'awaits_infrastructure' => ['type' => 'boolean'],
+        ],
+    ],
+    'PlanChangeInvoice' => [
+        'type' => ['object', 'null'],
+        'additionalProperties' => false,
+        'description' => 'The proration invoice an upgrade leaves behind. Null when the change owes nothing.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'number' => ['type' => ['string', 'null']],
+            'status' => ['type' => 'string'],
+            'total' => ['$ref' => '#/components/schemas/Money'],
+        ],
+    ],
+    'PlanChangeResize' => [
+        'type' => ['object', 'null'],
+        'additionalProperties' => false,
+        'description' => 'The queued provider job, once there is one. Null while an upgrade is still unpaid.',
+        'properties' => [
+            'job_id' => ['type' => 'string'],
+            'status' => ['type' => ['string', 'null']],
         ],
     ],
     'AdminAdoptedJob' => [

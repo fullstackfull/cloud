@@ -186,14 +186,30 @@ final class TheHostingGoldenPathTest extends GoldenPathHarness
          * platform says so where somebody can fix it. No job is created at
          * all — a job with no package would reach a worker, be refused by the
          * panel, and read to a customer as an outage.
+         *
+         * The plan is sold with a package and loses it after the order. It has
+         * to be: checkout now refuses a hosting plan that names no package, so
+         * this order could never be placed in that state — which is the better
+         * answer, and is proved elsewhere. What is left is the window that
+         * rule cannot close, an operator retiring a package between a payment
+         * and a build, and the platform's behaviour in it is unchanged.
          */
         $this->committedHostingNode();
 
         $plan = $this->committedPlan(ProductKind::SharedHosting, monthlyMinor: 4_500);
 
+        $this->outsideTheTransaction(fn (): HostingPackage => HostingPackage::factory()->create([
+            'plan_id' => $plan->getKey(),
+            'panel_package_name' => 'lyn_golden_withdrawn',
+        ]));
+
         $customer = $this->committedCustomer();
 
         [, $invoice] = $this->orderAndInvoice($customer, $plan, 'golden-hosting-nopackage');
+
+        $this->outsideTheTransaction(
+            fn (): int => HostingPackage::query()->where('plan_id', $plan->getKey())->delete(),
+        );
 
         $this->payThroughTheProvider($invoice, $customer, 'pi_golden_hosting_nopackage');
 

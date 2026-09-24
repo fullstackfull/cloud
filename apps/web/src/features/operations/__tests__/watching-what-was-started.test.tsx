@@ -13,16 +13,26 @@ import type { AcceptedOperation, CustomerOperation, CustomerOperationState } fro
  * What the customer is told after they press a button, and for how long the
  * portal keeps asking.
  *
- * AR-12, AT-3, §51-56. The four claims asserted here are the four the wave
- * makes about asynchronous work:
+ * AR-12, AT-3, §51-56. The claims asserted here are the ones the wave makes
+ * about asynchronous work:
  *
  *  - the acknowledgement says what happened — "Reboot requested" — and not
  *    "Success", which is a claim about a machine nobody has heard from;
+ *  - whichever order the lifecycle arrives in — acknowledgement first and
+ *    outcome later, or an outcome that was already true before the first read
+ *    — the channel ends up saying the same one thing about the operation;
+ *  - a terminal failure is reported as a failure, never as the success
+ *    sentence;
  *  - the portal keeps asking while the work is unfinished and stops the moment
  *    the server calls it terminal;
  *  - `needs_review` and `indeterminate` are never reported as failures, and
  *    they point at support rather than at a retry;
  *  - a read that fails does not overwrite the last state the server gave.
+ *
+ * The second of those is the home of the race the browser suite carried as a
+ * known flake from Gap 6 to Gap 8: a browser cannot choose which ordering it
+ * gets, so the ordering is asserted here, where the read is a controlled fake
+ * and the clock belongs to the test.
  */
 
 /** The 202 a power action returns, in the shape the API actually sends. */
@@ -162,6 +172,100 @@ describe('watching what was started', () => {
      */
     expect(screen.getByText('Reboot requested')).toBeInTheDocument()
     expect(screen.queryByText(/success/i)).not.toBeInTheDocument()
+  })
+
+  it('replaces the acknowledgement with the outcome when the work finishes later', async () => {
+    /*
+     * The other ordering, and the reason the pair has to be written down.
+     *
+     * Here the reads come back unfinished twice before they come back
+     * terminal, so the acknowledgement is observed and then superseded. The
+     * test below it starts terminal, so the acknowledgement is never observed
+     * at all. Neither ordering is a defect and the browser cannot choose
+     * between them, which is exactly why the browser must not assert either
+     * one: what both orderings owe the customer is the same single message
+     * saying where this operation stands, and that is what is asserted twice
+     * here rather than once.
+     */
+    const fetchMock = serveReads([
+      operation('processing', 3_000),
+      operation('processing', 3_000),
+      operation('succeeded', null),
+    ])
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    mount()
+    pressStart()
+
+    // Before any read has landed, the only honest thing to say is that the
+    // platform has the request.
+    expect(screen.getByText('Reboot requested')).toBeInTheDocument()
+    expect(screen.queryByText('Reboot completed')).not.toBeInTheDocument()
+
+    await pass(10_000)
+
+    /*
+     * And now the outcome, in place of the acknowledgement rather than beside
+     * it. `getByText` is the assertion that there is one of them: two messages
+     * for one press would be two truths about one machine.
+     */
+    expect(screen.getByText('Reboot completed')).toBeInTheDocument()
+    expect(screen.queryByText('Reboot requested')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Success/)).not.toBeInTheDocument()
+  })
+
+  it('reports the outcome when the work is already over before the first read', async () => {
+    /*
+     * The shape of the browser race that was carried as a known flake since
+     * Gap 6, made deterministic.
+     *
+     * The acknowledgement is announced under the operation's id, and the
+     * watcher replaces it under that same id the moment its first read comes
+     * back terminal. One id, one message — which is the right design, because
+     * two toasts for one reboot is worse. But it means that when the work is
+     * already finished, the words "Reboot requested" may never be observed at
+     * all.
+     *
+     * That is correct behaviour, and the contract is not that the
+     * acknowledgement is visible. It is that the channel always says where
+     * this operation stands, in the lifecycle's own words. A browser cannot
+     * assert which of the two it caught without racing the server; this can,
+     * because the read is a controlled fake and the timing is the test's own.
+     */
+    vi.stubGlobal('fetch', serveReads([operation('succeeded', null)]))
+
+    mount()
+    pressStart()
+    await pass(5_000)
+
+    expect(screen.getByText('Reboot completed')).toBeInTheDocument()
+
+    // Never a bare claim about a machine, at either end of the lifecycle.
+    expect(screen.queryByText(/^Success/)).not.toBeInTheDocument()
+
+    // And exactly one message for one press: the terminal state replaced the
+    // acknowledgement rather than joining it.
+    expect(screen.queryByText('Reboot requested')).not.toBeInTheDocument()
+  })
+
+  it('reports a terminal failure as a failure, not as a generic success', async () => {
+    /*
+     * "Reboot did not finish" was asserted in four places and always in the
+     * negative — never once positively — so nothing proved the portal can say
+     * it at all. A failure quietly rendered as the success sentence is the
+     * worst outcome in this whole channel: the customer believes a machine
+     * came back that did not.
+     */
+    vi.stubGlobal('fetch', serveReads([operation('failed', null)]))
+
+    mount()
+    pressStart()
+    await pass(5_000)
+
+    expect(screen.getByText('Reboot did not finish')).toBeInTheDocument()
+    expect(screen.queryByText('Reboot completed')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Success/)).not.toBeInTheDocument()
   })
 
   it('keeps asking while the work is unfinished and stops when it is over', async () => {

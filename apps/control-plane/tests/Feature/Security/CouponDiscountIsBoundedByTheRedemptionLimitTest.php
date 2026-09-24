@@ -29,6 +29,7 @@ use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -52,6 +53,7 @@ use Tests\TestCase;
  */
 final class CouponDiscountIsBoundedByTheRedemptionLimitTest extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private FakePaymentProvider $provider;
@@ -59,6 +61,11 @@ final class CouponDiscountIsBoundedByTheRedemptionLimitTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Checkout refuses a plan the platform cannot say where to build.
+        // These tests are about something else, so they are given an
+        // estate to be placeable on rather than an exemption.
+        $this->estateThatCanPlaceAVps();
 
         /** @var FakePaymentProvider $provider */
         $provider = app(PaymentProviderRegistry::class)->get('fake');

@@ -28,6 +28,7 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\PlaceableEstate;
 use Tests\TestCase;
 
 /**
@@ -48,6 +49,7 @@ use Tests\TestCase;
  */
 final class IdempotencyKeyContractTest extends TestCase
 {
+    use PlaceableEstate;
     use RefreshDatabase;
 
     private ?ComputeNode $node = null;
@@ -55,6 +57,11 @@ final class IdempotencyKeyContractTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Checkout refuses a plan the platform cannot say where to build.
+        // These tests are about something else, so they are given an
+        // estate to be placeable on rather than an exemption.
+        $this->estateThatCanPlaceAVps();
 
         Queue::fake([RunProvisioningJob::class]);
         $this->freezeTime();
@@ -227,12 +234,21 @@ final class IdempotencyKeyContractTest extends TestCase
 
         $this->actingAs($user)->withHeader('Idempotency-Key', 'upgrade-0001')->postJson($url, $body)->assertSuccessful();
         $this->assertSame($large->getKey(), $subscription->fresh()?->plan_id);
-        $resizes = ProvisioningJob::query()->count();
-        $this->assertSame(1, $resizes);
 
-        // The same key again: no second resize is queued.
+        /*
+         * What an upgrade leaves behind is its proration invoice, not a resize
+         * job: the machine is not touched until that invoice is paid. So the
+         * invoice is what a replay must not duplicate.
+         */
+        $invoices = fn (): int => Invoice::query()->where('subscription_id', $subscription->getKey())->count();
+
+        $this->assertSame(1, $invoices());
+        $this->assertSame(0, ProvisioningJob::query()->count());
+
+        // The same key again: nothing is billed a second time.
         $this->actingAs($user)->withHeader('Idempotency-Key', 'upgrade-0001')->postJson($url, $body);
-        $this->assertSame(1, ProvisioningJob::query()->count());
+        $this->assertSame(1, $invoices());
+        $this->assertSame(0, ProvisioningJob::query()->count());
     }
 
     #[Test]

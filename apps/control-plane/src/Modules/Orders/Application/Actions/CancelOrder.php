@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Orders\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Actions\CompensateUncollectableCapture;
+use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\OrderCannotBeCancelledException;
@@ -26,10 +30,37 @@ use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
  * a human, and letting the account under review close the case from the outside
  * is not the customer's call to make.
  *
- * Nothing is released by hand. Plan stock and an unredeemed coupon hold are both
- * counted from live orders and both exclude CANCELLED, so they come back the
- * moment the status changes — there is no compensating write here that could
- * fail halfway and leave the two disagreeing.
+ * Capacity is released by arithmetic rather than by hand. Plan stock and an
+ * unredeemed coupon hold are both counted from live orders and both exclude
+ * CANCELLED, so they come back the moment the status changes — there is no
+ * compensating write for either that could fail halfway and leave the two
+ * disagreeing.
+ *
+ * ---------------------------------------------------------------------------
+ * The invoice is not released by arithmetic, and used not to be released at all
+ * ---------------------------------------------------------------------------
+ *
+ * That sentence above was once written about everything, and it was wrong
+ * about the one thing that is a row rather than a count. The order went to
+ * CANCELLED and its invoice stayed OPEN — and OPEN is the only collectible
+ * status, so the customer's pay button went on working for an order they had
+ * just withdrawn.
+ *
+ * What followed was worse than a stale button. CANCELLED is terminal, so a
+ * capture that landed afterwards settled the invoice, announced the order
+ * settled, and fulfilment tried to move a cancelled order to PAID — which the
+ * state machine refuses. Inside a queued job that is five retries and a
+ * permanent failure: money captured, invoice paid, nothing delivered, nothing
+ * given back.
+ *
+ * So the document is withdrawn in the same transaction as the order. Not
+ * afterwards: a crash between the two would leave exactly the state this
+ * exists to prevent, and the pair either both happen or neither does.
+ *
+ * A capture that was already in flight when cancellation won is a different
+ * problem and is not solved here — it is solved by
+ * {@see CompensateUncollectableCapture},
+ * because by then the money exists and refusing it would not un-take it.
  */
 final readonly class CancelOrder
 {
@@ -42,6 +73,7 @@ final readonly class CancelOrder
 
     public function __construct(
         private TransitionOrder $transition,
+        private VoidInvoice $voidInvoice,
     ) {}
 
     /**
@@ -107,12 +139,49 @@ final readonly class CancelOrder
             );
         }
 
-        return $this->transition->execute(
-            $order,
-            OrderStatus::Cancelled,
-            actorType: $actor !== null ? 'user' : 'system',
-            actor: $actor,
-            reason: $reason ?? 'cancelled by the customer',
-        );
+        $why = $reason ?? 'cancelled by the customer';
+
+        return DB::transaction(function () use ($order, $actor, $why): Order {
+            $cancelled = $this->transition->execute(
+                $order,
+                OrderStatus::Cancelled,
+                actorType: $actor !== null ? 'user' : 'system',
+                actor: $actor,
+                reason: $why,
+            );
+
+            $this->withdrawTheInvoice($cancelled, $why);
+
+            return $cancelled;
+        });
+    }
+
+    /**
+     * Stops the order's invoice being collectible.
+     *
+     * Only a collectible one is touched. An invoice that has already taken
+     * money cannot be voided — VoidInvoice refuses it, and rightly, because
+     * voiding a document a payment was applied to would say that payment never
+     * happened — but an order in that position never reaches here either: the
+     * paid_at and status refusals above have already turned it away.
+     *
+     * The reason is written onto the invoice as well as onto the order's
+     * transition, so an operator reading the document alone can see why a
+     * number in their series was withdrawn without joining back to the order.
+     */
+    private function withdrawTheInvoice(Order $order, string $reason): void
+    {
+        $invoices = Invoice::query()
+            ->where('order_id', $order->getKey())
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($invoices as $invoice) {
+            if (! $invoice->status->isCollectible()) {
+                continue;
+            }
+
+            $this->voidInvoice->execute($invoice, sprintf('order %s was cancelled: %s', $order->number, $reason));
+        }
     }
 }
