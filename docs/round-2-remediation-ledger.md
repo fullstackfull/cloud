@@ -584,6 +584,68 @@ verifications died with nothing to show, having done the full measurement.
 Verifiers are now asked to report interim findings rather than hold everything
 for a final hand-back.
 
+## The weekly limit, and what a second stoppage taught that the first did not
+
+On 24 September the programme stopped again, and this time not because the host
+went away. All twelve running agents were terminated inside about ninety seconds
+of each other by an **account-wide weekly rate limit** (HTTP 429), mid-turn,
+with no warning and no opportunity to flush. It is worth recording separately
+from the container restart because the failure is a different shape and it
+falsifies part of what I concluded from the first one.
+
+What it cost, measured rather than estimated:
+
+| Agent | State when killed | Survived as | Lost |
+|---|---|---|---|
+| F-08 rework | *"Waiting for the final suite."* | 6 commits, clean tree | the final suite figure only |
+| F-19 rework | *"Now the deliberate breakage sweep."* | 4 commits, 2 uncommitted files | the sweep, not yet begun |
+| F-14 round ten | *"Now I'll write the fix."* | 6 commits, 1 uncommitted file | a partially written fix |
+| F-29 verification | *"Full suite baseline: 4029/4029, 144517 assertions, no `skipped` key. Now the mutation sweep."* | that one banked sentence | the sweep, not yet begun |
+| F-13, F-18, F-12 verifications | first tool calls | nothing | a few minutes each |
+| F-04, F-11, F-15, F-26, F-31 reworks | first tool calls | nothing | a few minutes each |
+
+Three lessons, one of which corrects me.
+
+**The interim-reporting rule worked, and it is the only thing that worked.**
+After the container restart I asked every verifier to report findings as it went
+rather than hold them for a final hand-back. F-29's verifier had done exactly
+that one sentence before it died, so its full-suite baseline — the most
+expensive single measurement in a verification, and the one everything else is
+compared against — is banked and did not have to be re-run. That one sentence is
+the whole of what eleven agent-hours left behind. Every other agent that was
+past its first tool call left commits or nothing.
+
+**My conclusion that "an implementer's work is durable the moment it commits"
+was too comfortable.** It is true, and it is not sufficient: two of the three
+implementers had uncommitted work in the tree at the moment of the kill, and one
+of those was a half-written fix to a production file. Durability is a property
+of the *habit*, not of the mechanism. Commit-as-you-go is now stated in every
+brief as a first instruction rather than a closing one, and I snapshot every
+dirty tree myself before resuming an agent, because an agent resuming into a
+tree it half-edited cannot always tell its own unfinished work from the
+finished work beside it.
+
+**A snapshot is not a diagnosis, and this one carried a trap.** F-29's verifier
+had a modified `SystemHostResolver.php` in its tree. If that was a mutation it
+had applied when the kill landed, then its banked baseline was taken *before*
+the mutation and describes a tree that no longer exists — and a verifier that
+resumes and sweeps against a stale baseline produces a report that is wrong in
+a way nobody downstream can see. It was told to establish which case it is
+before touching anything, and to revert and restate rather than carry the
+number forward. The general rule: **a banked measurement is only banked
+together with the tree state it was taken against.**
+
+**What I did differently on resumption.** The agents were resumed from their own
+transcripts rather than re-dispatched cold, so the four furthest along kept
+everything they knew; a cold re-dispatch would have thrown away the same work a
+second time for no reason. And I resumed four rather than twelve. The
+twelve-agent cap was set on measured evidence about wall-clock and worker
+contention, and it is still right for those reasons — but it is now also the
+thing that converted one account-wide limit into twelve simultaneous
+terminations. Concurrency concentrates a shared failure as efficiently as it
+distributes work, and the programme had no staggering of any kind.
+
+
 ## History
 
 | Date | Event |
