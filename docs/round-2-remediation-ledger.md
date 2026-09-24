@@ -205,6 +205,24 @@ change with it.
 
 Only the coordinator writes to `claude/relaxed-turing-nh8ybf`.
 
+### The eighth and ninth: both mine, and the second destroyed a live measurement
+
+**Eighth — a slug's remembered Redis index reissued while another worktree held it.** `f29` and `v35c` both ran on index 4. My allocator looked up a returning slug's previous index and handed it back **without checking whether it had since been reassigned** — the one door that looks like a cache hit rather than an allocation. Caught by a routine reconciliation of slots against live worktrees, not by anything going wrong, which is luck. Fixed: a remembered index is reused only if no live worktree holds it, and the slot file no longer accumulates two lines for one slug. The fix proved itself minutes later by refusing `f19`'s stale index 7 and allocating a fresh one. The affected agent was told which bands to discard; none of its figures touched Redis.
+
+**Ninth — I removed a worktree while its agent was still working.** I reclaimed `f19` after its hand-back, having checked for live `php artisan test` processes and found none. But a hand-back is not the end of an agent: I had *prodded that agent for its report*, it delivered, and it then kept working — applying a comment-only docblock tweak it had not yet committed. I deleted the directory underneath it.
+
+Three consequences, in ascending order of how much they should worry the next coordinator:
+
+* The uncommitted tweak was lost. It turned out to be two lines of prose that no claim depended on, and the implementer had the text, so nothing was actually destroyed. **That is luck, not process** — a forced removal discards whatever it finds, and I did not capture the diff first.
+* **A live run was executing in that directory and produced 45 errors** — every one `Failed opening required '.../bootstrap/app.php'`. A run with no application under it. Its log and JUnit are void, and they look exactly like a catastrophic regression to anyone who opens them without provenance.
+* I then briefed the verifier that the lost diff was unrecoverable and that `EvidenceOfABuild.php` should be treated as suspect. **That was wrong and I had to retract it mid-verification.** An error of mine had become an instruction to doubt an implementer's work.
+
+The rule, now mine to follow rather than an agent's:
+
+> **A hand-back is not a lock release.** Before reclaiming a worktree, check that no agent is live in it — not merely that no test is running. An agent that has reported may still be committing, tidying, or answering a prod.
+
+And the smaller one that would have contained all of it: **capture the diff before any forced removal.** `git diff > <scratch>/reclaimed.patch` costs nothing and would have turned this entry into a footnote.
+
 ### The seventh isolation defect, and the first one fixed with a guard rather than a sentence
 
 Three separate agents have now corrupted their own measurements the same way:
