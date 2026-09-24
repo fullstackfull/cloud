@@ -748,6 +748,55 @@ Fixed, and proved rather than asserted:
 Both a readability test and an explicit `|| true`, because the race between them
 is real and neither alone closes it.
 
+### A mutant can survive because the fixture is degenerate, and that reads exactly like equivalence
+
+F-32's verifier found a surviving mutant inside the round's own mutation class,
+and the reason it survived is worth naming as a category rather than as one
+bug, because every round in this programme runs a mutation sweep and every one
+of them could make this mistake.
+
+The resolver ends by asking whether the plan has any package at all, so that it
+can tell "never mapped" from "all withdrawn":
+
+    $withdrawn = HostingPackage::query()
+        ->where('plan_id', $planId)
+        ->exists();
+
+Delete the `->where('plan_id', $planId)` and the question becomes *does any
+package exist anywhere*. The round's own test file stays **10 of 10 green**.
+
+It stays green because every `NAMES_NONE` case in it runs against a
+`hosting_packages` table with no rows at all — and on an empty table the two
+questions have the same answer. So the mutant is not equivalent; it is
+**unobservable in the fixtures that exist**. A never-mapped plan in any
+realistic estate, where some *other* plan has a package, is reported as *"every
+hosting package mapped to this plan has been withdrawn"*, which is the opposite
+of true and sends the operator to the wrong screen.
+
+The two states the class docblock calls *"different things for the operator to
+go and fix"* were the two its tests could not tell apart.
+
+What makes this hard to catch from the inside is that a degenerate fixture and
+a genuinely equivalent mutation present **identically**: you apply the mutant,
+the band stays green, and the honest-looking conclusion is "equivalent, argued".
+The round did argue three of its survivors and was right about all three. It was
+wrong about this one in the same voice.
+
+The discriminator is not the mutant, it is the fixture. Before calling a
+survivor equivalent, ask what the test *data* looks like in the branch the
+mutation changes — and specifically whether the mutated predicate could
+distinguish anything at all on that data. A `where` clause cannot be shown to
+matter on a table with one row, or none. An `is_active` filter cannot be shown
+to matter where every row is active. An ordering cannot be shown to matter on a
+single result.
+
+So the rule, for every remaining round: **an equivalence argument must name the
+input that would separate the two versions, and then show that input cannot
+occur** — not merely that the current suite does not contain it. "No test
+distinguishes them" is a fact about the suite. "Nothing could distinguish them"
+is the claim being made. They are different sentences and only one of them
+closes a mutant.
+
 ## Dependency graph and wave order
 
 The Round-1 report's recommended sequence ran F-17+F-16 → F-01 → F-09+F-10 →
