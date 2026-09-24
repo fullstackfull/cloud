@@ -950,6 +950,39 @@ A behaviour change that appears in no commit message, no comment and no test is
 one that can only be caught by someone re-deriving it from scratch. That is what
 happened, and it is luck rather than process.
 
+### The six closed branches, test-merged rather than predicted
+
+With six findings closed, I stopped predicting the integration and measured it.
+Every closed branch was merged against the integration tip in memory
+(`git merge-tree --write-tree`, no worktree, no state change), and then every
+pair of them against each other — fifteen pairs.
+
+**Each of the six merges cleanly onto the tip on its own. Of the fifteen pairs,
+exactly one conflicts:**
+
+    f18 × f19    apps/control-plane/lang/ar/errors.php
+                 apps/control-plane/lang/en/errors.php
+                 …/SharedHosting/Application/Actions/TerminateHostingAccount.php
+
+And all three are the mechanical kind. The two locale files are the registry
+union this section already anticipated. The third looked like the dangerous one
+— it is the file the F-18 × F-19 hazard is named for — and it is not: the
+conflict is an **import block**, F-18 adding `use Carbon\CarbonImmutable;` where
+F-19 adds two of its own. Union resolves it.
+
+A sequential accumulation confirms the same thing in the order integration
+would actually take: `f18` merges onto the tip, and `f19` then conflicts on
+exactly those three paths and nothing else.
+
+**What this does and does not settle.** It settles that the closed half of this
+programme carries almost no textual merge risk, and that the one collision is
+twenty seconds of work. It settles nothing about the hazard that opened this
+section, which is the opposite kind: **F-18 and F-19 change one behaviour
+through different files, and that merges cleanly and interacts anyway.** A
+green `merge-tree` is evidence about text. The obligation to re-run a closed
+finding's own measurement after any merge that touches its behaviour is
+unchanged, and F-19's 16-cell permission table is the measurement in question.
+
 ### F-26 × F-27 — a CLOSED finding's assertion that the other branch will turn red
 
 F-27's implementer found this and declined to resolve it unilaterally, which was
