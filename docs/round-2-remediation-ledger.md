@@ -579,6 +579,55 @@ than read. And the general shape is worth naming: **I specified two proofs, both
 of which answer "did anything fail *in a way I named*", and neither answers
 "did this run succeed".** The exit code was the only thing in the room that did.
 
+#### And then the third proof did not exist on the run it was built for
+
+F-29's eighth verification found that the fix above shipped with the same hole
+it was closing, and found it in four words. The wrapper opens with
+`set -euo pipefail`, and the tail I wrote was:
+
+    php artisan test "$@"
+    status=$?
+    echo "ARTISAN-TEST EXIT=$status"
+
+Under `set -e` a failing command **aborts the script there**. So the line
+printed on every green run and on no red one:
+
+    $ bash -c 'set -euo pipefail; false; status=$?; echo X'
+    (nothing)                                                    rc=1
+
+The verification observed it empirically first — every one of its `rc=0` runs
+printed the line, every `rc=1` run printed nothing — and then reduced it to that
+one-liner. **The proof added because the other two are silent on a warning-only
+run was itself silent on exactly that run**, which is the only kind of run it
+exists for: JSON `"passed"`, every JUnit attribute zero, exit 1, and now no line
+either. A caller following my own standard would have read two greens and no
+third proof, and had no way to tell that from a green run whose line it had
+simply not looked for.
+
+Fixed, and verified in both directions rather than asserted:
+
+    status=0
+    php artisan test "$@" || status=$?
+    echo "ARTISAN-TEST EXIT=$status"
+    exit "$status"
+
+A command on the left of `||` is exempt from `set -e`. Measured: failure prints
+`ARTISAN-TEST EXIT=1` and exits 1; success prints `ARTISAN-TEST EXIT=0` and
+exits 0. Every live agent picks it up on its next run, because they all invoke
+the one path.
+
+**This is the second defect in this instrument, and both were mine.** The first
+made the guard turn a run into a non-run; this one made the guard against a
+silent hole have the same hole. The pattern connecting them is worth more than
+either fix: I wrote each guard and then reasoned about whether it would work,
+instead of running it in the failing condition. A guard nobody has watched fail
+is not a guard — a line I have put in brief after brief, about other people's
+tests, while shipping two of my own that nobody had watched fail.
+
+So the standing instruction to every remaining round, applied to itself: **the
+first thing to do with a new check is to make it fail on purpose.** Not the
+thing it checks — the check.
+
 ### `result: "passed"` is not a proof of `skipped=0`, and one agent established why
 
 Every brief in this programme asks for `skipped=0` to be *proved*, because the
