@@ -2429,6 +2429,52 @@ message of the form *"as recorded in the ledger"* that was written from inside
 a worktree is unverified by construction, and the re-audit should treat that
 phrase as a flag rather than a citation.
 
+### And the same class again, in the provisioning banner itself
+
+Found ten minutes later, while provisioning the next worktree, and worth
+recording beside the first because it is the identical failure with a
+different mechanism.
+
+`mkworktree.sh` prints its banner with `cat <<EOF` — unquoted, because it
+interpolates `$WT`, `$BRANCH`, `$DB` and `$SLUG`. In an unquoted heredoc,
+**backticks are command substitution.** Four backtick pairs in the banner's
+prose were never escaped, so on every worktree creation bash ran them as
+commands and **substituted their output — nothing — into the text it printed.**
+
+What the banner has actually been printing, to every agent, for the whole
+programme:
+
+> It refuses, loudly and by naming the holder's pid and worktree, if another
+>  is already pointed at your database. THREE separate agents have corrupted
+> their own measurements by running two at once: RefreshDatabase runs  at the
+> start of a run, so the second drops the schema under the first, and the
+> damage surfaces as  or  in files unrelated to the change under test…
+
+The four things deleted are `php artisan test`, `migrate:fresh`,
+`relation "wallets" does not exist`, and
+`null is identical to an object of class ...`. That is: **the single most
+operationally useful warning in the script — the one naming the exact error
+strings an agent will see when two runs share a database — has been printed
+with the error strings blanked out.** Three agents had already corrupted their
+measurements that way; the paragraph written to stop the fourth was missing
+precisely the symptoms it existed to name. It also, harmlessly, ran
+`php artisan test` in the repository root on every provisioning, which is
+where the stray `Could not open input file: artisan` came from.
+
+Fixed by escaping all four, and verified by rendering the banner with dummy
+variables and reading it — which is the check that should have been made the
+first time and was not, because the script was inspected by `sed`-ing the
+source rather than by looking at its output.
+
+**The lesson the two share, and it is one lesson.** Twice in one hour, guidance
+I believed I was giving turned out never to have reached the agent: once
+because the file they read was frozen, once because the text was eaten by the
+shell before it was printed. In both cases I had verified the *source* and
+never the *delivery*. The measurement standard this programme enforces on
+everyone else says the same thing in different words: do not report what you
+believe the code does, report what you observed it do. The coordinator was
+exempt from his own rule and it cost twice.
+
 ## History
 
 | Date | Event |
