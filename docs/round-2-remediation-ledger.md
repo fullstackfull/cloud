@@ -1672,6 +1672,47 @@ terminations. Concurrency concentrates a shared failure as efficiently as it
 distributes work, and the programme had no staggering of any kind.
 
 
+## The repository was still declaring YES, and nobody had noticed
+
+I checked the immutable statuses against the tree rather than against my own
+memory of them, and found that `docs/phase-30b-sim-gap-8-final-software-closure.md`
+carries **two live `SOFTWARE_CODE_COMPLETE = YES` declarations**, at §38 and
+§41.8, for exactly the five-product scope the Round-1 audit reopened.
+
+There is no contradiction in how that happened. The audit's own header says it
+was *"read-only. No application code, migration, configuration or status was
+changed"*, and its verdict is **E — SOFTWARE CLOSURE REOPENED — MULTIPLE
+BLOCKING CLASSES**, on an executive summary that begins: *"This audit set out to
+disprove the claim that the codebase can be frozen as software-complete for the
+approved five-product launch scope … It could not be upheld."* The audit did
+exactly what it was chartered to do and deliberately changed nothing. The
+correction it could not make was nobody's, and so it was not made.
+
+**So for the whole of this remediation programme, the repository's own answer to
+the question the programme exists to settle has been YES.** Every brief I have
+written says the status is NO; the tree said otherwise, and the tree is what a
+reader gets.
+
+I have not rewritten the verdicts — they are the record of what was concluded
+then, and deleting them would lose that. Both blocks are kept verbatim, each
+preceded by a marker, under a banner at the top of the document stating that the
+current status is `NO` and naming the audit, the verdict letter and the ledger.
+No test reads that file (checked), so nothing else moves.
+
+Two things worth keeping from this beyond the fix:
+
+* **The five external-truth statuses in that document were correct all along** —
+  `REAL_INFRA_VERIFIED`, `REAL_PAYMENT_VERIFIED`, `REAL_REGISTRAR_VERIFIED`,
+  `REAL_HOSTING_VERIFIED` and `READY_TO_SELL` all read `NONE`. The one status
+  that had drifted from the truth is the one about *our own work*, which is the
+  direction this programme should expect.
+* **I audit branches for false sentences and had not audited the tree for this
+  one.** Every round here is required to grep its own diff for claims of the
+  form *only / every / never*. A status declaration is the same kind of sentence
+  with more riding on it, and it sat outside every diff, which is exactly why it
+  survived. The re-audit should start from the repository's status claims and
+  work inward, not the other way round.
+
 ## The final re-audit's charter, written before it has any findings
 
 I am writing this now, while the round is still running, for one reason: if I

@@ -1,5 +1,23 @@
 # Phase 30B-SIM · Gap 8 — Final software closure
 
+> **SUPERSEDED — READ THIS FIRST.** The verdicts in §38 and §41.8 below read
+> `SOFTWARE_CODE_COMPLETE = YES`. **That is no longer the repository's answer.**
+> `docs/final-independent-multi-agent-audit-round-1.md` audited exactly this
+> claim for exactly this scope and returned **verdict E — SOFTWARE CLOSURE
+> REOPENED — MULTIPLE BLOCKING CLASSES**, on 47 findings including Critical
+> code gaps. That audit was read-only by design and changed no status, so this
+> document was left standing; this banner is the correction it could not make.
+>
+> **The current status is `SOFTWARE_CODE_COMPLETE = NO`**, and remains so until
+> the round-2 re-audit (`docs/final-independent-re-audit-after-round-2.md`)
+> says otherwise on its own evidence. The remediation in flight is tracked in
+> `docs/round-2-remediation-ledger.md`.
+>
+> Everything below is kept verbatim as the record of what was concluded then.
+> The five external-truth statuses in it — `REAL_INFRA_VERIFIED`,
+> `REAL_PAYMENT_VERIFIED`, `REAL_REGISTRAR_VERIFIED`, `REAL_HOSTING_VERIFIED`,
+> `READY_TO_SELL`, all `NONE` — are unchanged and remain correct.
+
 **Approved software scope is code-complete and locally runtime-verified against
 controlled providers. Real infrastructure/provider validation has not begun.**
 
@@ -924,6 +942,10 @@ Not code gaps, and deliberately listed apart from them.
 
 ## 38. Final software verdict
 
+**Superseded — see the banner at the top of this document.** Round 1 of the
+final independent audit reopened this verdict; the repository's answer is
+`NO` pending the round-2 re-audit. Kept verbatim as the record.
+
 ```
 SOFTWARE_CODE_COMPLETE = YES
 ```
@@ -1219,6 +1241,10 @@ products above rather than seven, so two products left the scope instead of
 their gaps being closed. That is a smaller claim, and it is the true one.
 
 ### 41.8 The verdict, restated
+
+**Superseded — see the banner at the top of this document.** Round 1 of the
+final independent audit reopened this verdict; the repository's answer is
+`NO` pending the round-2 re-audit. Kept verbatim as the record.
 
 ```
 SOFTWARE_CODE_COMPLETE = YES
