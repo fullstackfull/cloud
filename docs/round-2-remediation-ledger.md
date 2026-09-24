@@ -868,6 +868,16 @@ what every remaining round should do:
    than `git checkout`, so the next mutation starts from the tree you think it
    does.
 
+That third point is not hygiene. F-11's round seven used `git checkout -- <path>`
+to revert its sweep targets, and one target was a file it had **already edited**
+— so the revert silently discarded about seventy lines of its own uncommitted
+work. It caught that only because `git diff --numstat` read 10/4 where it
+expected about 80, and it reapplied the work. Nothing about the sweep's own
+output would have shown it: the mutations all reverted correctly, and the file
+was simply older than the agent believed. So the rule has a second half —
+**exclude your own edited files from the target list, or back them up first** —
+and the check that catches it is a line count you predicted before you looked.
+
 F-12's round did all three after the fact and re-ran the mutation against
 `retire()` alone, where it was killed. It also left the bogus line in its
 results file, marked, rather than deleting it — which is the right instinct: a
