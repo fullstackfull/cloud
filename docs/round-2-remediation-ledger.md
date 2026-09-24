@@ -288,6 +288,35 @@ independently, and it is narrower than what I wrote:
 > they are, and an assertion total should not be carried into this ledger as an
 > exact figure or used as a fingerprint for a tree.
 
+**A briefing hazard this exposed, which is mine.** F-29's second rework was
+dispatched with the *retracted* version of this rule — I told it "your database
+is not fresh, so expect 144,650" in a brief written before F-26's verifier
+broke the first-run theory, and the retraction landed while that agent was
+already working. It then measured **144,660** and, rather than quietly
+reconciling to the number it had been handed, flagged it and decomposed it: its
+new test contributes exactly 7 assertions, measured directly and
+database-independent (pure `preg_match` / `ctype_digit` / value-object
+assertions), leaving a residual of 3 that is not its own.
+
+**Then it did the thing that actually settles it** — it launched a second
+full-suite run on the same tree and named, in advance, what each outcome would
+mean: 144,657 would mean the fresh-database effect is real and the rule holds;
+144,660 again would mean the 3-assertion delta is not a first-run effect and the
+rule needs restating. A pre-registered decisive experiment, on a question I had
+by then taken two positions on.
+
+Two things to keep. **A brief is a snapshot, and mine go stale while agents
+work** — this programme's rules have been revised nine times in a day, and an
+agent acting faithfully on a rule I have since retracted will produce a
+"contradiction" that is my bookkeeping rather than its measurement. Where a
+brief states a rule, it should say what would falsify it, which is what let this
+agent handle the discrepancy correctly without being told.
+
+And **the retraction was right to be conservative.** Had I left the
+deterministic +3 standing, this agent's 144,660 would have read as a defect in
+its own commit rather than as a datum about the harness.
+
+
 What I got wrong is worth more than the number. Three consistent observations of
 a small effect, all in the same direction, is exactly the amount of evidence
 that feels like a law and is not one — and I had been telling every agent in
