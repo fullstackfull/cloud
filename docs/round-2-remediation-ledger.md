@@ -889,17 +889,36 @@ Implementers have been told **not** to rename any of these themselves, because
 a rename on one branch would conflict with the others' history; the coordinator
 does it once, at integration.
 
-Nothing is broken by either collision — every one of these five touches an
-unrelated table, there is no dependency between them, and Laravel orders by
-filename so the sequence is deterministic even when two files claim the same
-instant. But a timestamp is a record of when something was written, and
+**Corrected, by measuring my own sentence.** I wrote here that *"every one of
+these five touches an unrelated table"* and that *"there is no dependency
+between them"*. The first is false and the second is only accidentally true.
+Diffing all five against their merge-bases: they touch **four** tables, not
+five — `order_items` (f04), `subscriptions` (f08), `dns_records` (f11) and
+**`provisioning_jobs` twice, both from `remediation/f15`**, one in each
+collision group. And f15's second names the first's column:
+`->after('reserved_provider_nodes')`.
+
+That reads like a hard dependency and is not one **on this platform**, which I
+checked rather than assumed: `PostgresGrammar`'s modifier list is
+`['Collate', 'Nullable', 'Default', 'VirtualAs', 'StoredAs', 'GeneratedAs',
+'Increment']` — no `After`, and no `modifyAfter` method at all, where MySQL has
+one at `MySqlGrammar.php:1388`. Postgres appends the column and ignores the
+clause. So the renumbering must still preserve f15's two in their existing
+order, because a reader will read `after(...)` as a dependency whether or not
+the grammar does — but nothing breaks if it does not.
+
+Everything else about the collisions stands: all five are `Schema::table`
+alters adding nullable columns, none adds a foreign key or a unique index, and
+Laravel orders by filename so the sequence is deterministic even when two files
+claim the same instant. But a timestamp is a record of when something was written, and
 three files claiming the same instant is a record that is false and that makes
 the history harder to read than it needs to be. All five are renumbered to distinct
 timestamps at integration, preserving the order in which they were verified.
 That is a rename; no content changes.
 
-All three are additive and nullable. Each is checked at integration for a clean
-`migrate:fresh`, a rollback that removes what it added, and a re-apply.
+All five are additive and nullable — verified by reading each one's `up()` and
+`down()`, not by reading this paragraph. Each is checked at integration for a
+clean `migrate:fresh`, a rollback that removes what it added, and a re-apply.
 
 A fourth is expected: F-04's rework has to decide whether two live hosting
 accounts may carry the same primary domain, and a database-level uniqueness
