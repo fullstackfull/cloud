@@ -2150,6 +2150,44 @@ call on cross-branch grounds, and is now on the integration list.
 
 ## Findings closed by another finding's branch
 
+### F-47 — a candidate, checked far enough to be worth writing down and no further
+
+F-47 is *"`DedicatedServerStatus::Retired` — three readers, one of them a race
+argument, against zero production writers; only writer is a test factory."*
+
+`remediation/f12` adds one. Its retire action does
+`$locked->forceFill(['status' => DedicatedServerStatus::Retired])->save()` after
+`assertCanTransition`, behind the row lock, with an audit row
+(`AuditAction::DedicatedServerRetired`) — and F-12's round five then pinned the
+state machine's *absence* of outward edges from `retired` with a test that drives
+both orders through the endpoints.
+
+So the finding's central claim stops being true the moment F-12 merges. **That is
+not the same as F-47 being closed**, and I am recording it as a candidate rather
+than a closure for two reasons: F-12 is itself still in verification, and F-47
+names *three* readers including a race argument that nobody has re-read against
+the new writer. Whoever takes F-47 starts by checking those three readers against
+F-12's writer rather than by looking for a writer — the search is already done.
+
+The general shape is worth naming: **a finding about something that does not
+exist is closed by the branch that makes it exist, and that branch will not
+mention it.** Before starting any remaining CODE_GAP finding, grep the open
+branches for the symbol first.
+
+### F-43 — read far enough to sharpen its brief, not to start it
+
+`ConsoleSessionStore::consume()` (`src/Modules/Vps/Application/Services/`) really
+does never compare `expires_at` with now: it reads the record, checks the token
+hash, wins or loses an `add()` race on a consumed-marker, and returns a
+`ConsoleSession` carrying the stored `expires_at` verbatim. Expiry is enforced
+**only** by the TTL passed to `put()` and `add()`, so the guarantee is the cache
+driver's and not the code's — which is exactly why the finding says the expiry
+tests prove `ArrayStore` rather than the store in production. Its round should
+begin by deciding whether the driver's TTL is an acceptable enforcement point
+(and if so, pinning that claim against the driver the platform actually runs)
+rather than by adding a comparison nobody asked for.
+
+
 A repair aimed at one finding sometimes closes another outright. Recorded here
 so the second is neither dispatched for duplicate work nor left reading `OPEN`
 against code that already closes it. A finding in this table still needs its
