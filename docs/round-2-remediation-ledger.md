@@ -407,6 +407,46 @@ here and only here: the migration is unmerged and has never run outside a test
 database, so a column added and dropped two commits later would be a worse
 record than one column that was always a list.
 
+### What the collisions actually cost, measured rather than assumed
+
+Re-surveyed at the current heads of every `remediation/f*` branch. The picture
+is unchanged in shape — seven added migrations across four branches, five of
+them in the two colliding groups above — and I have now measured the thing
+that decides how much work integration is, which nobody had checked:
+
+**The five colliding migrations touch five different tables, and the only
+same-table pair is on one branch, in date order.**
+
+| timestamp | branch | table |
+|---|---|---|
+| `2026_04_15_000000` | `f04` | `order_items` |
+| `2026_04_15_000000` | `f08` | `subscriptions` |
+| `2026_04_15_000000` | `f15` | `provisioning_jobs` |
+| `2026_04_16_000000` | `f11` | `dns_records` |
+| `2026_04_16_000000` | `f15` | `provisioning_jobs` |
+
+Every one is a `Schema::table` alter — **none creates a table** — so nothing
+depends on another's existence. None declares a foreign key or a cross-table
+constraint; `f08`'s carries an explicit comment saying it deliberately does
+*not* take one, because the column names a row in another module. No two of
+them add a column to the same table. The only repeated table is
+`provisioning_jobs`, both on `f15`, dated a day apart, so their order is fixed
+by their own filenames and by being on one branch.
+
+**Consequence: renumbering is a mechanical rename with no semantic risk.**
+Laravel orders by filename, so with identical prefixes the run order falls out
+of the remainder of the name — and since no two of these five share a table,
+that order cannot change the resulting schema. This section previously read as
+though integration had an ordering problem to solve. It does not. It has a
+naming problem, which is worth fixing so the history is legible and so the next
+parallel branch does not make it a real collision by landing on the same table.
+
+That distinction is worth keeping because the danger it removes is real in the
+general case and would not have been obvious: two same-timestamp migrations on
+one table are an ordering hazard that surfaces only on a fresh install, long
+after the branches have merged and the order that produced the working database
+has been forgotten.
+
 ## Discovered / out of scope
 
 Defects found while repairing a finding, recorded rather than numbered. Repaired
