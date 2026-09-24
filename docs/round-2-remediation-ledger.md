@@ -668,7 +668,33 @@ the workflow carries a comment explaining that flag.
 
 So the honest sentence is narrower than "unavailable": **the gate is configured,
 CI runs it, and it is unrunnable in this container for a documented reason
-outside this programme's control.** `phpstan.neon` is level 6, Larastan plus
+outside this programme's control.** I then measured that reason rather than
+inheriting it from a README dated five days earlier, because the whole point of
+this section is that carried-forward claims rot:
+
+    $ curl -o /dev/null -w '%{http_code}'  https://repo.packagist.org/p2/phpstan/phpstan.json   -> 200
+    $ curl -o /dev/null -w '%{http_code}'  https://api.github.com/repos/phpstan/phpstan         -> 403
+    $ curl -o /dev/null -w '%{http_code}'  https://codeload.github.com/phpstan/phpstan/...      -> 403
+
+and the lock entry itself closes the last door:
+
+    phpstan/phpstan 2.2.13
+      dist   : https://api.github.com/repos/phpstan/phpstan/zipball/9ba9ac76…   (403 today)
+      source : null
+
+**`source` is null**, so composer cannot fall back to a git clone; the one dist
+URL is denied by this environment's network policy. Packagist metadata resolves
+fine, which is why every other package in this toolchain installed.
+
+That changes the standing sentence in a way worth having. The gap is **not** a
+consequence of this programme's own no-composer rule: lifting that rule would
+not run the gate, because the package cannot be fetched at all. So this is a
+*cannot*, not a *chose not to*, and it belongs in the final re-audit's
+limitations in those words. The one thing that would change it is the
+environment's network access being widened to allow `api.github.com` — which is
+a setting on the environment rather than anything in this repository, and not a
+decision any finding's round can take.
+ `phpstan.neon` is level 6, Larastan plus
 `phpstan/phpstan-deprecation-rules`, four paths (`src`, `app`, `database`,
 `routes` — note `tests/` is not analysed), `parseModelCastsMethod: true`, and
 **no `ignoreErrors` block**, with a comment saying that pre-emptively silencing
