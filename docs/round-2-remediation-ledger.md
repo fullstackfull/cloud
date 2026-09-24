@@ -2466,14 +2466,50 @@ variables and reading it — which is the check that should have been made the
 first time and was not, because the script was inspected by `sed`-ing the
 source rather than by looking at its output.
 
-**The lesson the two share, and it is one lesson.** Twice in one hour, guidance
-I believed I was giving turned out never to have reached the agent: once
-because the file they read was frozen, once because the text was eaten by the
-shell before it was printed. In both cases I had verified the *source* and
-never the *delivery*. The measurement standard this programme enforces on
-everyone else says the same thing in different words: do not report what you
-believe the code does, report what you observed it do. The coordinator was
-exempt from his own rule and it cost twice.
+**The lesson the three share, and it is one lesson.** Three times in one hour,
+guidance I believed I was giving turned out never to have reached the agent:
+once because the file they read was frozen, once because the shell ate the text
+before printing it, and once because the tool the text recommended was not
+there. In all three I had verified the *source* and never the *delivery*. The
+measurement standard this programme enforces on everyone else says the same
+thing in different words: do not report what you believe the code does, report
+what you observed it do. The coordinator was exempt from his own rule and it
+cost three times in an hour.
+
+### Third: the wrapper the banner insists on was never installed
+
+The banner says **PREFER the wrapper** and gives the command. `mkworktree.sh`
+never put one in the worktree. Measured across the twelve live worktrees:
+
+| | |
+|---|---|
+| had no `scratchpad/artisan-test.sh` at all | **ten of twelve** |
+| had the canonical copy | one (`v11t`) — its agent had copied it itself |
+| had its own | one (`v04j`) — its agent had **written** one |
+
+So ten agents were running bare `php artisan test`: no database-keyed lock, no
+`/proc` scan for runs started without the wrapper, and no `ARTISAN-TEST EXIT=`
+line — the third of the three proofs I require of everyone. The guard's whole
+reason for existing is the failure three agents' corrupted measurements already
+paid for, and it was absent in precisely the ten places it was needed.
+
+**And I nearly filed a fourth defect that does not exist.** My first pass
+classified `v04j`'s wrapper as *"prints no proof on red — false green on
+failure"*, on the strength of a `grep` for the phrasing **my** script uses. Read
+properly, that agent's script is not merely adequate but better than mine: `set
+-u` rather than `-e`, `EXIT=${PIPESTATUS[0]}` through a `tee`, and the JSON
+summary **derived from the JUnit log** in one run instead of a second run to
+produce it. I had inferred behaviour from a pattern match instead of reading the
+code — which is the exact error I have overruled verifiers for, committed while
+writing up two other instances of committing it.
+
+Fixed: `mkworktree.sh` now installs the wrapper (copied, not symlinked, so an
+edit here can never reach a running agent's tree by surprise) and the banner
+says the resulting `?? apps/control-plane/scratchpad/` is expected and not
+residue; the ten worktrees were backfilled atomically; and all ten agents were
+told, in the same breath, because I had just instructed every one of them to
+treat anything in their tree they could not explain as residue and then put
+something there they could not have explained.
 
 ## History
 
