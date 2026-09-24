@@ -833,6 +833,62 @@ independent reviewer's verdict, which is never the implementer's.
 
 ### Adjudicated at the final re-audit
 
+### F-45 — I traced it myself rather than adjudicating from a summary later
+
+F-45 is deferred to the re-audit, but adjudicating it from the audit's one
+sentence would mean deciding it on the least evidence anyone has had. So I read
+the path. Four files, all measured rather than recalled:
+
+1. `InstallWordPressOnceTheAccountExists.php:135` generates the admin password
+   with `Str::password(24)` and puts it in the provisioning job's **`payload`**.
+2. `ProvisioningJob` casts `payload` through **`RedactedJsonCast`**.
+3. That cast redacts **on write** (`set()` runs `SecretRedactor::redact()` before
+   `json_encode`), and `redacted_keys` holds `'password'`, matched by substring —
+   so `admin_password` is replaced by the placeholder before it reaches the
+   column.
+4. `InstallWordPressHandler.php:171` reads it back as
+   `adminPassword: (string) ($payload['admin_password'] ?? '')`.
+
+So the finding is exactly right: the installer receives the literal
+`[redacted]`.
+
+**The cast is not the defect and must not be touched.** Its docblock argues the
+design deliberately: *"A credential must never be persisted in order to be sent
+to a provider: passwords are generated at execution time and delivered out of
+band. If one is put in the payload anyway, this is where it stops."* That is
+correct, and it is the reason the standing instruction — **never promote
+WordPress merely to eliminate this finding** — is right. Exempting
+`admin_password` from the redactor would fix the symptom by re-introducing the
+thing the cast exists to prevent: a customer's admin password sitting in a
+jsonb column that half the support team can read.
+
+**Two defects, then, and the second is the one nobody has written down.**
+
+The first is the listener: it persists a generated credential, which is exactly
+what the cast's docblock says must never happen.
+
+The second is that **the cast's own safety sentence is false**. It says the
+handler *"receives `[redacted]`, which **fails loudly**"*. Measured: the handler
+does `(string) ($payload['admin_password'] ?? '')` and hands the result to
+`WordPressInstallRequest`, and a repo-wide grep for the placeholder across the
+SharedHosting and Provisioning application layers finds **no guard at all** —
+the only other mention is a docblock in `ProvisioningJobRequest` describing the
+behaviour. It does not fail loudly. It fails silently, and the loudness is the
+whole reason the design was judged safe.
+
+That is the eighteenth sentence of this shape falsified in this programme, and
+the first where the false sentence is what makes a **security** design
+defensible rather than merely tidy.
+
+**The shape of the fix, for whoever takes it:** stop putting the password in the
+payload at all, and make the handler refuse the placeholder rather than install
+with it. Neither touches the redactor. Both are small. The finding stays
+correctly labelled latent — nothing is wired to a real installer today — but
+"latent" is about reachability, not about correctness, and the cast's claim was
+wrong before any installer existed.
+
+
+
 | ID | Sev | Class | Status | Notes |
 |---|---|---|---|---|
 | F-45 | Medium | TEST_GAP | `OPEN` | WordPress admin password redacted before it reaches the installer, which receives the literal `[redacted]`; the guarding test inspects column names, not values. Out of approved launch scope and latent. May not be closed by promoting WordPress. If any change makes WordPress production-complete or sellable, F-45 becomes blocking. |
