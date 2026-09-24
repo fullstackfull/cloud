@@ -447,7 +447,7 @@ independent reviewer's verdict, which is never the implementer's.
 | ID | Sev | Class | Status | Notes |
 |---|---|---|---|---|
 | F-04 | Critical | CODE_GAP | `OPEN` — in rework | **UPHELD WITH RESERVATIONS**, two blocking, from a **partial** sweep — I asked the verifier to bank its findings rather than risk losing them to context exhaustion, and it named exactly which four rules it did not reach, including the one that is F-04's literal failure mode. It isolated the partial index on two raw `psql` sessions with the predicate read from `pg_indexes`, verified `supersededFingerprint()` frozen by SHA-256 **and checked reachability** (no branch carrying the raw-domain digest is reachable from `main`), enumerated **every** write that can enter the index predicate (exactly two, both inside the one `try`), and swept 32 canonicalisation inputs. Blocking: **the rule that makes the index a guarantee about *names* is pinned by nothing** — `PlaceOrder::domainFor()` can return the raw domain with 324/324 green, and raw SQL proves the consequence, two live accounts for `Example.test`/`example.test` with the migration's own collision scan reporting zero because it groups on the same raw column. *"The index is a guarantee about a byte string, not about a name."* And **the operator remedy the code advertises is a no-op in three shapes**, the worst rebuilding F-04's own sentence: the re-arm writes status only, so an operator who corrects the name gets `successful=true` with the account Active serving the name they corrected away from, and the panel handed it. There is **no operator surface** to perform the advertised remedy at all, and the repository **pins the easy half of the claim** — a green test asserts the remedy from the branch where `$existing` is null and it works. I take the verifier's blocking reading, in its words: *"a claim wider than its test, which is the exact pattern the previous three rounds were convened to remove."* |
-| F-13 | Critical | CODE_GAP | `OPEN` — rework delivered at `45bed85`, the blocking bound's premise **overturned**, **in its second verification** | The verification had already closed F-13's headline **on the real deployment path** by reading the Ansible role and finding the token granted at the root of the resource tree with `--privsep 0`. It held one blocker: a token holding everything but `Datastore.Audit` is declared VPS-ready, and the commit's stated reason for leaving it was that inventing a capability would violate `EveryDeclaredCapabilityHasAConsumerTest`. **I told the rework to test that premise before accepting it, and it does not hold.** That test refuses a capability **no product requirement names** — naming one satisfies it outright. *A bound accepted on a reason that is not true is worse than an open bound, because it stops anyone looking again.* It then built the capability properly rather than hanging the privilege on an existing one — which it rejected explicitly, because `listStorages()` is not a call any of those capabilities' operations makes, and a privilege sourced from reasoning rather than from a call is the exact thing the derivation oracle exists to refuse. The consumer chain is traced in `src/`, not argued: `Datastore.Audit` → `listStorages()` → `listNodes()` → `SyncClusterInventory` → `ComputeStorage` rows → `NodeScheduler` → `CreateVpsHandler`. A token short of it fails inventory sync, so no storage rows exist, so every node is excluded and nothing places — *"declared ready, cannot build", one step earlier in the order than the create POST the rest of the map is about.* Required of **VPS alone**, because `NodeScheduler` has one caller and GPU compute is `prepared` with no handler — the over-strictness check the omission list exists for. **`M-D` is the measurement that justifies where the pin lives**: the full revert — capability removed from category, requirement, catalogue and map at once — passes the entire architecture suite **124/124**. The category gate cannot see the exact move the overturned reason invites. 29 pairs swept, **29 killed, 0 survivors**, and again with the oracle weakened to a subset check. Whole suite **3968 tests, 0 failed, 0 skipped**, proven two ways per band. Two findings of its own, both the good kind — a rule that was true inside a sentence that was not: the `resize` backstop is **broader** than its sentence claims because `create` also carries `Datastore.AllocateSpace`, and the parameter rule names **five** rather than three. And it corrected the `O5` record in both directions, pinning the shape that was recorded nowhere. |
+| F-13 | Critical | CODE_GAP | `OPEN` — **upheld with reservations**, two blocking, in round three | **The overturn stands and `M-D` survives independent re-measurement** — the claim I said I would attack first. Deleting `inventory_sync` from all four places leaves `tests/Architecture` at **124/124/8517, byte-identical to baseline**, while the F-13 file breaks: the category gate cannot see both halves removed together, so the pin is in the right place. One correction in the safe direction: **six** tests detect the revert, not five, the sixth **erroring** rather than failing. VPS-alone is right in **both** directions — GpuCompute is `Prepared` with no handler *and* inherits VPS's readiness through `dependsOn()`, so it is not under-strict either. **Both blocks are claims the round made about itself.** The cloud-init pin does not detect what its commit headline says: `reachedConditionally()` consults only the brace stack and **never reads `$pending` at the needle**, so a sibling conditional create with the cloud-init site at plain depth passes the pin **and is Pint-clean** — precisely the regression it exists to catch. And *"the only writer of the `ComputeStorage` rows"*, stated unambiguously in **three** places, is false: `ReserveNodeCapacity`, `ReleaseNodeCapacity` and `LoadReferenceTopologyForSimulation` all write them, the last of which **creates** rows carrying exactly the fields `NodeScheduler` reads. **The conclusion survives both**, which is why neither is a rejection: the two capacity writers reach their row by id and cannot bring one into existence, and the simulation loader refuses production and stamps its rows `development` — so a production cluster short of `Datastore.Audit` still places nothing, and the decision would have been identical had the truth been known. The verifier also **built the control the round had not** for the resize backstop, establishing that the passing test is correct behaviour rather than a hole. |
 | F-14 | Critical | DATA_INTEGRITY | `OPEN` — **REJECTED a tenth time**, in round eleven | **The frame change worked and the rejection is not about it.** The outcome rule is not outflanked by any day-moving token: an independent 453,744-row sweep gives **0 accepted leading and 0 trailing** post-fix against 3,454 and 6,312 pre-fix; over-refusal is **exactly the two** rows I named and nothing else; the 17 fleet formats across 29,585 days are **0 refused, 0 misfiled**; `date_parse` emits **exactly three** distinct warnings over 578,511 inputs, confirming the claim at a wider scope than it was made; the limb division is real; and the unusual `errors=1` first-fail reproduces. **The rejection is that the 9999 ceiling is in the wrong place, on a premise that is false.** It is applied only inside the numeric branch, justified by a docblock saying it is *"the ceiling this method already has everywhere except its numeric branch"*. **I verified the counterexample myself**: `UTC+22099-01-01` gives `err=0 warn=0`, gate year **22099**, and `CarbonImmutable::parse` **agrees exactly** — so limb one sees nothing and limb two is structurally blind, by construction. `ACDT+29999-01-01` → 29999; `UTC+2100000-01-01` → year 2,100,000. A sweep finds **4,028 of 8,076 accepted probes with a year past 9999**: a family, not a freak. End-to-end it licenses a node, and the `+` has to arrive as `%2B` because `parse_str` turns a bare `+` into a space — *which is why a naive probe looks safe*. Pre-existing rather than introduced, but it meets both rejection lines: the code is wrong, and the decision to guard one branch would plainly have been different had the truth been known. The fix is bounded — apply the ceiling on the single return path instead of inside the numeric `if` — and then re-measure over-refusal, because the ceiling will then meet textual values for the first time. |
 
 ### Wave 2 — concurrency, lifecycle, authorization
@@ -1541,6 +1541,45 @@ the paragraph was written to prevent.
 
 Round eleven corrects it. This is the tenth of my claims corrected by an agent
 that measured, and the only one I had put into the code.
+
+### The quantifier is the part that fails, not the claim
+
+Five findings in, the shape of what gets falsified here is now clear enough to
+state as a rule, because it has stopped being a coincidence.
+
+| finding | the sentence that failed |
+|---|---|
+| F-28 | *"cannot be pinned from this surface"* |
+| F-13 | *"would violate `EveryDeclaredCapabilityHasAConsumerTest`"* |
+| F-19 | *"the refusal and the ending **cannot** drift apart again"* |
+| F-13 | *"the **only** writer of the `ComputeStorage` rows"* (in three places) |
+| F-29 | *"a road this pattern has **no equivalent** of"* |
+| F-31 | *"**nothing but** `TrustProxiesOnAPhpBuiltWithoutIpv6` extends this"* |
+
+**In every one of these the code beneath was right.** Not once has a falsified
+claim of this kind turned out to sit on top of a broken repair — the fix worked,
+the reasoning about the fix worked, and the quantifier wrapped around it did not.
+That is why five of the six are bounded rework rather than rejections.
+
+So the rule, now in every brief:
+
+> **A sentence containing "only", "exactly one", "nothing else", "never" or
+> "cannot" is a measurement, not a description.** Either run the grep and cite
+> it, or write the weaker sentence that does not need one.
+
+Two things make this more than a style note.
+
+**These sentences are load-bearing in a way ordinary prose is not.** A wrong
+description misleads one reader. A wrong *"only"* is what the next round's
+scope is derived from — F-13's gap survived three verification rounds because
+everyone read the disclosure and routed around an obstacle that did not exist.
+
+**The good version already exists in the same reports.** F-13's own sole-caller
+chain is the model: four links, each independently checkable by grep, three
+true and one false — and because it was written as a chain of citable claims
+rather than a summary, the false link was found in minutes instead of surviving
+another round. The habit to keep is not "avoid strong claims", it is **make
+strong claims falsifiable and cite the thing that falsifies them.**
 
 ### A pattern worth naming: the bound accepted on a reason that is not true
 
