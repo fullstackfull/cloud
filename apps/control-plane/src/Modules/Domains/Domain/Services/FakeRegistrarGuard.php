@@ -17,17 +17,45 @@ use Lynomia\Modules\Domains\Domain\Exceptions\FakeRegistrarInProductionException
  *
  * Static rather than injected, so there is no seam to swap it out through and
  * no way to build the fake without paying for the check.
+ *
+ * ---------------------------------------------------------------------------
+ * The question, and the refusal
+ * ---------------------------------------------------------------------------
+ *
+ * {@see self::permitsTheFake()} is the predicate the refusal is made of, given
+ * a name so that the one kind of caller that must know the answer *before* it
+ * constructs can ask rather than learn by being thrown at: something that
+ * enumerates every driver the build contains, like `domains:reconcile`'s
+ * orphan scan, which used to throw on every production run because the list
+ * it walked always holds the fake.
+ *
+ * Asking changes nothing about refusing. {@see self::assertNotProduction()}
+ * throws on exactly the inputs it always did, the fake's constructor still
+ * calls it, and nothing is made constructible in production. Whoever asks and
+ * then constructs anyway is refused exactly as before — which is what keeps a
+ * production `domains` row naming the fake loud.
  */
 final class FakeRegistrarGuard
 {
+    /**
+     * Whether the fake registrar may exist in this environment.
+     *
+     * Read-only. Public because its one caller outside this class lives in
+     * another namespace of the module, and PHP offers nothing narrower.
+     */
+    public static function permitsTheFake(?Application $app = null): bool
+    {
+        $app ??= app();
+
+        return ! $app->isProduction();
+    }
+
     /**
      * @throws FakeRegistrarInProductionException
      */
     public static function assertNotProduction(string $providerName, ?Application $app = null): void
     {
-        $app ??= app();
-
-        if ($app->isProduction()) {
+        if (! self::permitsTheFake($app)) {
             throw FakeRegistrarInProductionException::forProvider($providerName);
         }
     }
