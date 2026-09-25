@@ -25,7 +25,19 @@ use Lynomia\Modules\Provisioning\Domain\Events\DriftRecorded;
  *
  * Deliberately not queued. It is one log line; it must not be lost behind a
  * queue that is itself unhealthy, and the reconciler that raises it is already
- * running on a worker.
+ * running on a worker. CriticalDriftReachesAnOperatorTest holds that: the
+ * testing queue is synchronous, so nothing else would notice.
+ *
+ * The line is the evidence, not the alarm. The alarm is `ResourceDriftOpen`
+ * in prometheus/rules/platform.yml, off `lynomia_resource_drift_open`, which
+ * pages until the drift is resolved. This line carries what that series
+ * deliberately does not — the drift id, service id and provider reference,
+ * one series per incident otherwise — so the page has something to point at.
+ * It deliberately does not notify as well: a second alarm for the same fact
+ * from a second system would fire on the edge of the event while the metric
+ * holds the state, and the pair would have to be deduplicated by hand in
+ * Alertmanager for ever. Where this line ends up is the structured channel;
+ * see config/logging.php for whether anything ships it.
  */
 final class AlertOnCriticalDrift
 {
