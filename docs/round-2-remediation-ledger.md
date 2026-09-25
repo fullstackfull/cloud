@@ -5167,3 +5167,91 @@ the coordinator-level version of that mistake four times: a tool named in a
 banner that did not exist, a relative path that resolved elsewhere for an agent,
 a scratchpad shared between agents that handed one of them another's figures,
 and now a paragraph that was accurate and unprintable.
+
+## The migration collisions are resolved, on paper, and the convention was already in the tree
+
+This has sat as "renumber six colliding migrations at integration" for most of
+round two. With nine agents in flight and nothing dispatchable, I worked it out.
+Three corrections and a plan.
+
+**It is seven files, not six, in three groups.** Across all 191 remediation
+branches there are ten migrations that the integration branch does not have.
+Three of them are uncontested — F-32's `2026_04_15_000032_index_hosting_packages_by_plan`
+and F-04's `2026_04_24_000000_one_live_hosting_account_per_domain` and
+`2026_04_26_000000_a_hosting_account_serves_a_canonical_name`. The other seven
+collide:
+
+| timestamp | finding | migration | table |
+|---|---|---|---|
+| `2026_04_15_000000` | F-04 | `record_the_domain_a_hosting_line_was_bought_for` | `order_items` |
+| `2026_04_15_000000` | F-08 | `record_which_payment_failure_the_dunning_counter_counted` | `subscriptions` |
+| `2026_04_15_000000` | F-15 | `reserve_a_provider_identity_before_the_call` | `provisioning_jobs` |
+| `2026_04_16_000000` | F-11 | `record_which_call_left_a_dns_record_unanswered` | `dns_records` |
+| `2026_04_16_000000` | F-15 | `record_which_cluster_an_identity_was_reserved_against` | `provisioning_jobs` |
+| `2026_04_17_000000` | F-11 | `one_live_row_per_provider_record` | `dns_records` |
+| `2026_04_17_000000` | F-15 | `record_every_name_a_reserved_identity_was_called_with` | `provisioning_jobs` |
+
+**Why they all landed on the same day is not carelessness.** The integration
+branch's last migration is `2026_04_14_000000`. Every branch took the next free
+day, independently and correctly, and three of them took it at the same instant
+because nobody can see anybody else's branch. This is the isolation working as
+designed producing a collision as a direct consequence, which is worth saying
+plainly: the collisions are the *price* of §7, not a failure of it.
+
+**Ordering is semantic within two findings and free between all of them.** F-15
+has three migrations and all three alter `provisioning_jobs`; F-11 has two and
+both alter `dns_records`. So each finding's internal order must survive the
+renumbering. Across findings, no two share a table, so their relative order is
+unconstrained.
+
+**The convention already exists, and F-32 invented it.** `2026_04_15_000032` is
+F-32's migration on F-32's day with F-32's number in the time field. Nobody
+wrote that down; it is simply what F-32 did. Following it costs nothing and
+invents nothing:
+
+```
+2026_04_15_000000_record_the_domain_a_hosting_line_was_bought_for   → 2026_04_15_000004_…
+2026_04_15_000000_record_which_payment_failure_the_dunning_counter… → 2026_04_15_000008_…
+2026_04_15_000000_reserve_a_provider_identity_before_the_call       → 2026_04_15_000015_…
+2026_04_16_000000_record_which_call_left_a_dns_record_unanswered    → 2026_04_16_000011_…
+2026_04_16_000000_record_which_cluster_an_identity_was_reserved…    → 2026_04_16_000015_…
+2026_04_17_000000_one_live_row_per_provider_record                  → 2026_04_17_000011_…
+2026_04_17_000000_record_every_name_a_reserved_identity_was_called… → 2026_04_17_000015_…
+```
+
+F-11's pair stays `04_16 < 04_17`; F-15's three stay `04_15 < 04_16 < 04_17`.
+Both orders are preserved by construction rather than by my checking them, which
+is the property to want.
+
+**It is a pure rename.** All seven are `return new class extends Migration`, so
+there is no class name to follow the file, and `git grep -F` on each stem across
+its own branch outside `database/migrations/` returns **zero** references in
+every case. `git mv` and nothing else. The one caveat is that Laravel records
+the *filename* in the `migrations` table, so renaming after a run would re-run
+the migration — irrelevant here, because integration measures against
+`migrate:fresh` databases, but it is the reason this must not be done casually
+against a long-lived database.
+
+### And the check I used to build this table was blind to one of the seven
+
+I derived the table column by grepping each migration for `Schema::create`,
+`Schema::table` and `->on(`. Six of the seven answered. F-11's
+`one_live_row_per_provider_record` came back **empty**, and I nearly recorded it
+as touching nothing.
+
+It touches `dns_records`, through `DB::statement` with a heredoc containing
+`CREATE UNIQUE INDEX dns_records_one_live_provider_record` — a partial unique
+index, which the schema builder cannot express, which is precisely why it is
+written as raw SQL. A migration that needs raw SQL is, by definition, the one
+doing something the ordinary grammar cannot say, and so it is exactly the
+migration most likely to matter and least likely to be seen.
+
+Put that next to the other entries in the sweep-discipline family. This is not a
+scan that failed to land or a filter that matched nothing; it is a scan that
+landed, ran correctly, and returned an honest empty result for a real subject,
+because the subject speaks a second language. The instrument was not broken. It
+was **complete for the grammar it knew**, and its silence about the rest was
+indistinguishable from an absence. Had F-11's raw index been on
+`provisioning_jobs` instead of `dns_records`, my "no two findings share a table,
+so the order is free" conclusion would have been wrong, and it would have been
+wrong for a reason no amount of re-running the same grep could have surfaced.
