@@ -36,7 +36,12 @@ final readonly class RecordInvoiceRefund
     /**
      * @param  Refund|null  $refund  the payment-side row this reduction records, when there is
      *                               one; supplying it makes a redelivered refund webhook record
-     *                               the reduction once
+     *                               the reduction once. **Without it every call books the
+     *                               reduction again** — correct for the callers that must be
+     *                               counted each time (an operator's reconciliation), and wrong
+     *                               for anything a queue can deliver twice, which must pass the
+     *                               row or not call at all (RecordRefundAgainstTheInvoice throws
+     *                               rather than call without it)
      *
      * @throws InvoiceRefundExceedsPaymentException
      * @throws CurrencyMismatchException

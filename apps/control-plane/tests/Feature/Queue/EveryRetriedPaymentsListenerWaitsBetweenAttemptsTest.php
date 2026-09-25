@@ -213,7 +213,7 @@ final class EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest extends TestCas
     public function the_sweep_reaches_the_directory_make_job_writes_to(): void
     {
         $this->planting(
-            "    use \\".Dispatchable::class.', \\'.Queueable::class.";\n\n    public int \$tries = 5;\n\n    public function __construct()\n    {\n        \$this->onQueue('payments');\n    }\n\n    public function handle(): void {}",
+            '    use \\'.Dispatchable::class.', \\'.Queueable::class.";\n\n    public int \$tries = 5;\n\n    public function __construct()\n    {\n        \$this->onQueue('payments');\n    }\n\n    public function handle(): void {}",
             'implements \\'.ShouldQueue::class,
             function (string $class): void {
                 $this->assertContains($class, QueuedClasses::all());

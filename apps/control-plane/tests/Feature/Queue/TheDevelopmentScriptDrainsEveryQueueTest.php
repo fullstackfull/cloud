@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Queue;
 
 use App\Queue\QueueRetryClocks;
+use Illuminate\Contracts\Console\Kernel;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Console\Input\StringInput;
 use Tests\TestCase;
@@ -41,7 +42,7 @@ final class TheDevelopmentScriptDrainsEveryQueueTest extends TestCase
 
         $this->assertNotSame([], $matches[1], 'serve.sh starts no queue worker at all.');
 
-        $definition = $this->app->make(\Illuminate\Contracts\Console\Kernel::class)->all()['queue:work'];
+        $definition = $this->app->make(Kernel::class)->all()['queue:work'];
         $definition->mergeApplicationDefinition();
 
         $workers = [];

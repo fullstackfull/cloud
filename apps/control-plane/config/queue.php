@@ -66,11 +66,59 @@ return [
             'after_commit' => false,
         ],
 
+        /*
+         * Three connections, one Redis and one keyspace, differing only in
+         * `retry_after` (F-08).
+         *
+         * `retry_after` is how long a popped message stays reserved before
+         * the next worker to look hands it out again — while the first worker
+         * may still be running it. It must therefore be longer than the
+         * timeout of every worker that pops from the connection. It was 90 on
+         * the one connection every Horizon supervisor used, under supervisor
+         * timeouts of 120, 1,800 and 5,700 seconds, so any job that ran past
+         * ninety seconds ran again beside itself; one dispatch was measured
+         * producing five executions ninety seconds apart.
+         *
+         * One clock cannot serve all of them: a clock long enough for a
+         * 5,700-second dedicated build would leave a crashed payments worker's
+         * settlement stranded for an hour and a half. So the supervisors are
+         * split by the clock they need, and the message a job is pushed with
+         * on `redis` onto `provisioning` is the same message a worker on
+         * `redis-provisioning` pops — the key is `queues:provisioning` either
+         * way. Jobs keep pushing through the default connection; only the
+         * worker's connection decides the clock.
+         *
+         * Each clock is its supervisor's timeout plus sixty seconds
+         * (config/horizon.php). App\Queue\QueueRetryClocks enforces the
+         * inequality in CI and again when a worker starts, because all three
+         * are overridable from the environment.
+         */
         'redis' => [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            // payments, notifications, default: the longest supervisor is 120.
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 180),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        'redis-provisioning' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => env('REDIS_QUEUE', 'default'),
+            // supervisor-provisioning allows 5,700 seconds.
+            'retry_after' => (int) env('REDIS_PROVISIONING_RETRY_AFTER', 5760),
+            'block_for' => null,
+            'after_commit' => false,
+        ],
+
+        'redis-infrastructure' => [
+            'driver' => 'redis',
+            'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
+            'queue' => env('REDIS_QUEUE', 'default'),
+            // supervisor-infrastructure allows 1,800 seconds.
+            'retry_after' => (int) env('REDIS_INFRASTRUCTURE_RETRY_AFTER', 1860),
             'block_for' => null,
             'after_commit' => false,
         ],

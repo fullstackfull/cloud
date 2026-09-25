@@ -17,6 +17,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
 use Lynomia\Modules\Payments\Domain\Events\RefundIssued;
+use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\AdvanceDunning;
@@ -256,7 +257,7 @@ final class AnIdempotencyGuardIsReadUnderItsOwnLockTest extends TestCase
 
         $invoice->forceFill(['status' => InvoiceStatus::Paid, 'amount_paid_minor' => 9_000])->save();
 
-        $refund = \Lynomia\Modules\Payments\Infrastructure\Models\Refund::factory()->create([
+        $refund = Refund::factory()->create([
             'transaction_id' => $transaction->id,
             'amount_minor' => 3_000,
             'currency' => 'KWD',
