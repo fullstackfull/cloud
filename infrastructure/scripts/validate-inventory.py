@@ -69,6 +69,30 @@ def hosts_in(
     return found
 
 
+def hosts_of(document: dict) -> list[tuple[str, dict, str]]:
+    """Every host an inventory document declares, however it declares it.
+
+    `all` is a group like any other: Ansible places a host listed directly
+    under `all: hosts:` in the inventory exactly as it places one under a child
+    group, and applies `all: vars:` to every host. The walk used to start at
+    `all.children`, so a host under `all: hosts:` was neither counted nor
+    checked -- one carrying `bmc_password` and no safety_class left the file
+    reading `N host(s), ok` -- and nothing set on `all: vars:` reached any
+    host. So it starts at `all` itself. Hosts keep their own group's name in
+    messages; one declared on `all` directly is reported under `all`.
+    """
+    root = document.get("all") or {}
+    if not isinstance(root, dict):
+        return []
+    top = root.get("vars") or {}
+    found: list[tuple[str, dict, str]] = [
+        (name, {**top, **(hostvars or {})}, "all")
+        for name, hostvars in (root.get("hosts") or {}).items()
+    ]
+    found.extend(hosts_in(root.get("children") or {}, "", top))
+    return found
+
+
 def check_host(name: str, hostvars: dict, group: str, where: Path) -> list[str]:
     problems: list[str] = []
     prefix = f"{where}: host '{name}' (group {group})"
@@ -153,10 +177,11 @@ def groups_in(path: Path) -> set[str]:
 
 def check_file(path: Path) -> list[str]:
     document = yaml.safe_load(path.read_text()) or {}
-    root = document.get("all")
-    if root is None:
+    if document.get("all") is None:
         return [f"{path}: no 'all' group"]
-    hosts = hosts_in(root.get("children") or {})
+    if not isinstance(document["all"], dict):
+        return [f"{path}: 'all' is not a group mapping, so no host in it can be read"]
+    hosts = hosts_of(document)
 
     problems: list[str] = []
     for name, hostvars, group in hosts:
@@ -175,7 +200,7 @@ def main(argv: list[str]) -> int:
     for path in files:
         problems = check_file(path)
         document = yaml.safe_load(path.read_text()) or {}
-        hosts = len(hosts_in((document.get("all") or {}).get("children") or {}))
+        hosts = len(hosts_of(document))
         status = "ok" if not problems else f"{len(problems)} problem(s)"
         print(f"{path.relative_to(root)}: {hosts} host(s), {status}")
         failures.extend(problems)

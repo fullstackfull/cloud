@@ -72,11 +72,30 @@ def main(argv: list[str]) -> int:
     # The runbooks live beside the rest of the operator documentation; the
     # playbooks that run artisan on a real host live in the infrastructure tree.
     # Both are read by somebody acting on a live system, so both are checked.
-    targets = (
-        sorted((repo_root / "docs" / "runbooks").rglob("*.md"))
-        + sorted(infra_root.rglob("*.md"))
-        + sorted((infra_root / "ansible").rglob("*.yml"))
+    corpora = (
+        ("docs/runbooks/**/*.md", sorted((repo_root / "docs" / "runbooks").rglob("*.md"))),
+        ("infrastructure/**/*.md", sorted(infra_root.rglob("*.md"))),
+        ("infrastructure/ansible/**/*.yml", sorted((infra_root / "ansible").rglob("*.yml"))),
     )
+
+    # Each corpus is asserted on its own, because a union stays non-empty
+    # while any one of its parts does. With docs/runbooks moved aside this
+    # read the other two, found the infrastructure tree's single invocation,
+    # and printed a clean summary line -- having checked not one runbook, under
+    # a step named for the runbooks. Non-emptiness, not size: a corpus
+    # narrowed to one file still passes, and that is the bar here.
+    empty = [label for label, files in corpora if not files]
+    if empty:
+        for label in empty:
+            print(
+                f"{label} matches no file. This gate reads it as one of its "
+                f"subjects; a subject that has moved or been renamed is not a "
+                f"subject that passed.",
+                file=sys.stderr,
+            )
+        return 1
+
+    targets = [path for _, files in corpora for path in files]
 
     for path in targets:
         for line_no, line in enumerate(path.read_text().splitlines(), start=1):
@@ -97,16 +116,17 @@ def main(argv: list[str]) -> int:
     # The empty `defined` set is already refused above; this is the other
     # direction, and it is the one that has actually happened in this
     # repository before -- a step scanning a directory that had been moved,
-    # printing a green line for years. If docs/runbooks is renamed, or the
-    # invocation regex stops matching the way the runbooks are written, the
-    # subject goes empty and everything downstream of it goes quiet.
+    # printing a green line for years. A moved corpus is refused above, one
+    # corpus at a time; this count alone would not see it, because the
+    # infrastructure tree's own invocation keeps it above zero with every
+    # runbook gone. What reaches here is the files all being present and the
+    # invocation regex no longer matching the way they spell commands.
     if referenced == 0:
         print(
             f"found no `php artisan` invocation anywhere in {len(targets)} "
-            f"documentation file(s). Either the runbooks moved out of "
-            f"docs/runbooks and the infrastructure tree, or they stopped "
-            f"spelling commands in a way this recognises. A gate with no "
-            f"subject is not a pass.",
+            f"documentation file(s). The documentation is there, and either "
+            f"it names no command or it stopped spelling commands in a way "
+            f"this recognises. A gate with no subject is not a pass.",
             file=sys.stderr,
         )
         return 1

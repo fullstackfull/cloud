@@ -2,9 +2,10 @@
 """CI validates infrastructure; a person applies it.
 
 A pipeline that can reimage a node on merge is a pipeline that eventually will,
-on a branch nobody meant to merge. This parses the workflow files and inspects
-what the steps actually run, so it cannot be fooled by — or trip over — a
-pattern that merely appears in a comment or in this check's own configuration.
+on a branch nobody meant to merge. This parses the workflow files -- `.yml` and
+`.yaml` alike, because GitHub Actions runs both -- and inspects what every step
+actually runs, so it cannot be fooled by, or trip over, a pattern that merely
+appears in a comment.
 
 Exit status 0 when no workflow applies infrastructure, 1 otherwise.
 """
@@ -33,8 +34,13 @@ APPLYING = [
     (re.compile(r"ansible-playbook(?![^\n]*--(check|syntax-check))"), "runs a playbook outside check mode"),
 ]
 
-# This script is itself named in the step that runs it. That is not an apply.
-SELF = "check-ci-cannot-apply.py"
+# No step is exempt, including the one that runs this script. It used to be:
+# any step whose body merely CONTAINED this file's name was skipped before it
+# was inspected -- and before comments were stripped -- so a comment naming the
+# gate disarmed it over the apply on the next line, and the skipped step did
+# not even appear in the "N run step(s) inspected" count. The exemption was
+# never load-bearing: the invocation that runs this gate matches none of the
+# patterns above, so it is inspected like every other step and passes.
 
 
 def steps_of(workflow: dict):
@@ -45,7 +51,8 @@ def steps_of(workflow: dict):
 
 def main(argv: list[str]) -> int:
     root = Path(argv[1]) if len(argv) > 1 else Path.cwd()
-    workflows = sorted((root / ".github" / "workflows").glob("*.yml"))
+    directory = root / ".github" / "workflows"
+    workflows = sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
     if not workflows:
         print("no workflow files found", file=sys.stderr)
         return 1
@@ -57,7 +64,7 @@ def main(argv: list[str]) -> int:
         workflow = yaml.safe_load(path.read_text()) or {}
         for job_name, step in steps_of(workflow):
             command = step.get("run")
-            if not command or SELF in command:
+            if not command:
                 continue
             checked += 1
             # Strip comment lines: a comment explaining why we do not apply is
@@ -79,11 +86,12 @@ def main(argv: list[str]) -> int:
     print(f"{len(workflows)} workflow file(s), {checked} run step(s) inspected")
 
     # A gate that inspected nothing is not a gate that found nothing. There are
-    # workflow files here and not one of them has a `run:` step, which means
-    # either the parse produced nothing usable or every step has become a
-    # `uses:` -- and a reusable workflow called by `uses:` is a file this check
-    # never opens, so the applies would have moved somewhere it cannot see
-    # while it went on printing a green line. Refuse, and say which it is.
+    # workflow files here and not one of them has a non-empty `run:` step,
+    # which means either the parse produced nothing usable or every step has
+    # become a `uses:` (or a `run: ""`) -- and a reusable workflow called by
+    # `uses:` is a file this check never opens, so the applies would have moved
+    # somewhere it cannot see while it went on printing a green line. Refuse,
+    # and say which it is.
     if checked == 0:
         print(
             f"inspected no run steps across {len(workflows)} workflow file(s). "
