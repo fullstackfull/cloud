@@ -12,11 +12,11 @@ use RuntimeException;
  *
  * On such a build `IpUtils::checkIp6()` throws a `RuntimeException` before it
  * compares anything. This suite cannot rebuild PHP, and the obvious shortcut —
- * editing `IpUtils.php` in place and restoring it — is not safe here:
- * `vendor/` is shared between checkouts, so the edit is machine-wide for as
- * long as it lasts, and every other suite running in that window sees a PHP
- * without IPv6. So the simulation is a subclass instead, replacing the one
- * seam through which the middleware asks the question.
+ * editing `IpUtils.php` in place and restoring it — is not safe: `vendor/`
+ * can be shared between checkouts, and then every other suite reading that
+ * copy sees a PHP without IPv6 for as long as the edit lasts. So the
+ * simulation is a subclass instead, replacing the one seam through which the
+ * middleware asks the question.
  *
  * It reproduces the real method's shape, not just its failure:
  * `IpUtils::checkIp()` decides which comparison to use from the address, and

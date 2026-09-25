@@ -24,9 +24,10 @@ several of them describe failures that are silent until a customer finds them.
 - [ ] PHP is built with IPv6 support, if any balancer or client may use IPv6
       (`php -r 'var_dump((extension_loaded("sockets") && defined("AF_INET6")) || @inet_pton("::1") !== false);'`
       prints `true` — the same condition Symfony's `IpUtils` checks before comparing an IPv6 address).
-      On a build without it an IPv6 entry in `TRUSTED_PROXIES` is refused, and a caller behind
-      a trusted balancer who sends an IPv6 address in `X-Forwarded-For` gets a 500 on any route
-      that reads the client address. The application does not check this for you.
+      On a build without it an IPv6 entry in `TRUSTED_PROXIES` is refused; and while any balancer
+      is trusted, a request that reaches PHP from an IPv6 address, or arrives through a trusted
+      balancer carrying one in `X-Forwarded-For`, gets a 500 on any route that reads the client
+      address. The application does not check this for you.
 - [ ] `CORS_ALLOWED_ORIGINS` lists exactly the portal origins. Never `*` — it is
       incompatible with credentialed requests for good reason.
 - [ ] `SANCTUM_STATEFUL_DOMAINS` matches those origins.

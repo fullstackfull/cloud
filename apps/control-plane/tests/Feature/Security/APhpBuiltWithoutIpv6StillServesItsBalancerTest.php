@@ -29,8 +29,10 @@ use Tests\TestCase;
  *
  * What stays open, deliberately: on such a build a caller already behind a
  * trusted balancer can put an IPv6 address in `X-Forwarded-For` and reach the
- * same throw through the framework's own chain filter. That is recorded in the
- * middleware's docblock with the reason each per-request repair is worse.
+ * same throw through the framework's own chain filter, and a client connecting
+ * over IPv6 itself reaches it through `Request::isFromTrustedProxy()`. That is
+ * recorded in the middleware's docblock with the reason each per-request
+ * repair is worse.
  *
  * The build is simulated by {@see TrustProxiesOnAPhpBuiltWithoutIpv6}, bound
  * in place of the middleware for each test.

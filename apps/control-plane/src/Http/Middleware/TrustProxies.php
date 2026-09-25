@@ -52,17 +52,20 @@ use Symfony\Component\HttpFoundation\IpUtils;
  *   length valid for its family. That takes out `*`, `**`, `REMOTE_ADDR`
  *   (trust whoever connects) and `PRIVATE_SUBNETS` along with hostnames and
  *   typos.
- * - An entry that alone {@see matchesEveryCaller()} of its range, and then —
- *   because entries that cover a range only together cannot be told apart —
- *   the rest of that family if together they still do. The ranges are all of
- *   IPv4, all of IPv6, and every IPv4 caller as a dual-stack socket reports
- *   it (`::ffff:0:0/96`). The test asks whether the list covers both the
+ * - An entry that on its own trusts every caller in one of three ranges, and
+ *   then — because entries that cover a range only together cannot be told
+ *   apart — every remaining entry of that family if together they still do
+ *   ({@see matchesEveryCaller()}). The ranges are all of IPv4, all of IPv6,
+ *   and every IPv4 caller as a dual-stack socket reports it
+ *   (`::ffff:0:0/96`). The test asks whether the list covers both the
  *   first and last address of the range, measured by {@see covers()} with the
  *   same `IpUtils` the framework will later match callers with, so an entry
  *   spelled oddly (`0.0.0.0/00`) is judged exactly as it will be used. Every
- *   list that covers a whole range covers its two ends; the converse can
- *   refuse a list that reaches both ends without the middle, which no
- *   balancer's addresses do — both ends of each range are reserved.
+ *   list that covers a whole range covers its two ends. The converse is not
+ *   exact — a list could reach both ends without the middle — but no list of
+ *   balancers reaches either end: they are `0.0.0.0`, the broadcast address,
+ *   the unspecified address `::`, a multicast address, and the IPv4-mapped
+ *   forms of the first two, none of which a host is ever given.
  * - An IPv6 entry, on a PHP built without IPv6. `IpUtils` throws rather than
  *   answer there, so whether the entry trusts every caller cannot be known,
  *   and the unknown answer is treated as the dangerous one. The IPv4 entries
@@ -76,9 +79,9 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * Refusal is silent. A per-request warning would log once per request, and
  * it is not this class's to add: a mistyped entry is best caught by a
  * deployment-time check against configuration, which does not exist yet. A
- * refused list collapses the limiters back into the balancer's bucket, which
- * is visible to an operator as sign-ins failing, and never lets a client
- * choose its key.
+ * refused entry leaves its callers keyed on the balancer's address — visible
+ * in sign-in activity, which then records the balancer instead of the
+ * customer — and never lets a client choose its key.
  *
  * ---------------------------------------------------------------------------
  * The framework's fallback, and the method nothing reaches
@@ -87,10 +90,10 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * The inherited `setTrustedProxyIpAddresses()` falls back to
  * `config('trustedproxy.proxies')` when {@see proxies()} returns an empty
  * list, and when THAT is null and the request's Host ends in `.on-forge.com`
- * or `.on-vapor.com` it trusts every caller — the Host header being the
- * caller's to write. `config/trustedproxy.php` pins that key to an empty
- * list, which is never null, so the fallback trusts nobody and
- * `setTrustedProxyIpAddressesToTheCallingIp()` — whose body is
+ * or `.on-vapor.com` (or `laravel_cloud()` says so) it trusts every caller —
+ * the Host header being the caller's to write. `config/trustedproxy.php` pins
+ * that key to an empty list, which is never null, so the fallback trusts
+ * nobody and `setTrustedProxyIpAddressesToTheCallingIp()` — whose body is
  * `setTrustedProxies(['0.0.0.0/0', '::/0'])` — is reached by nothing.
  *
  * ---------------------------------------------------------------------------
@@ -101,21 +104,26 @@ use Symfony\Component\HttpFoundation\IpUtils;
  * put an IPv6 address in `X-Forwarded-For` and get a rendered 500 on any route
  * that reads the client address: `Request::normalizeAndFilterClientIps()`
  * runs `IpUtils::checkIp()` over every forwarded entry, so the same throw
- * arrives by the framework's own door. Every per-request repair is worse than
- * that fault — trusting nobody for the request hands the client the shared
- * bucket on demand; dropping the entry lets the client choose its own key;
- * parsing the chain here duplicates the framework. The right instrument is a
- * deployment-time check that the build can evaluate IPv6, not this class.
+ * arrives by the framework's own door. While any balancer is trusted, a
+ * client connecting over IPv6 itself reaches it too, through
+ * `Request::isFromTrustedProxy()`, which asks the same question of the
+ * connecting address whenever a forwarded header is read. Every per-request
+ * repair is worse than that fault — trusting nobody for the request hands the
+ * client the shared bucket on demand; dropping the entry lets the client
+ * choose its own key; parsing the chain here duplicates the framework. The
+ * right instrument is a deployment-time check that the build can evaluate
+ * IPv6, not this class.
  *
  * ---------------------------------------------------------------------------
  * Why this class is not final
  * ---------------------------------------------------------------------------
  *
  * The test suite simulates a PHP without IPv6 by replacing {@see covers()} in
- * a subclass, because the alternative — editing `IpUtils.php` in place — is
- * machine-wide while it lasts. Nothing outside the test suite extends this
- * class. Which methods a subclass could replace, and that no application
- * class does, is pinned by `TheTrustedProxyMiddlewareIsExtendedOnlyByTestsTest`
+ * a subclass, because the alternative — editing `IpUtils.php` in `vendor/` —
+ * changes the PHP every process sharing that vendor tree sees, for as long
+ * as the edit lasts. Nothing outside the test suite extends this class.
+ * Which methods a subclass could replace, and that no application class
+ * does, is pinned by `TheTrustedProxyMiddlewareIsExtendedOnlyByTestsTest`
  * rather than listed here.
  */
 class TrustProxies extends FrameworkTrustProxies

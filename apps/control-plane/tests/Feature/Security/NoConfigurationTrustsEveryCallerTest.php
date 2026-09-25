@@ -24,10 +24,10 @@ use Tests\TestCase;
  * be keyed on the address it connected from.
  *
  * Refusal is silent, on purpose and for now: a request-path warning would fire
- * once per request, and the ledger ruled that the right instrument is a
- * deployment-time check against configuration. A refused list therefore
- * collapses the limiters back into the balancer's bucket — which is loud to
- * the operator watching sign-ins fail, and never lets a client choose its key.
+ * once per request, and the right instrument is a deployment-time check
+ * against configuration, which does not exist yet. A refused entry leaves its
+ * callers keyed on the balancer's address, which shows in sign-in activity
+ * and never lets a client choose its key.
  */
 final class NoConfigurationTrustsEveryCallerTest extends TestCase
 {
@@ -135,8 +135,10 @@ final class NoConfigurationTrustsEveryCallerTest extends TestCase
      * Illuminate's middleware trusts EVERY caller when it has no list and the
      * request's Host ends in `.on-forge.com` or `.on-vapor.com` — a guess at
      * which platform's balancer is in front. The Host header is the caller's
-     * to write, and nothing in front of this application pins it, so on the
-     * unrepaired tree any caller could send one and choose its own address.
+     * to write, and nothing in this repository pins it (no `trustHosts()`,
+     * and the nginx template declares no default server that would refuse an
+     * unknown name), so on the unrepaired tree any caller could send one and
+     * choose its own address.
      *
      * `config/trustedproxy.php` pins the framework's fallback list to empty,
      * which is never null, so that branch is unreachable.
