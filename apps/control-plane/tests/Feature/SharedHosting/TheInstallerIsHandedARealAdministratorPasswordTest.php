@@ -113,7 +113,11 @@ final class TheInstallerIsHandedARealAdministratorPasswordTest extends TestCase
             $password,
             "the installer was handed the redactor's placeholder as the administrator password",
         );
-        $this->assertSame(InstallWordPressHandler::ADMIN_PASSWORD_LENGTH, strlen($password));
+        $this->assertSame(
+            InstallWordPressHandler::ADMIN_PASSWORD_LENGTH,
+            strlen($password),
+            'the installer was handed no usable administrator password',
+        );
 
         $this->assertTrue($site->fresh()?->installed);
     }

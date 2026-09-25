@@ -18,6 +18,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\SharedHosting\Application\Actions\OrderWordPressSite;
 use Lynomia\Modules\SharedHosting\Application\Actions\VerifyWordPressSites;
+use Lynomia\Modules\SharedHosting\Application\Handlers\InstallWordPressHandler;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\SiteProbe;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
@@ -164,6 +165,14 @@ final class TheWholeLifeOfAWordPressOrderTest extends TestCase
             SecretRedactor::PLACEHOLDER,
             $password,
             "the installer was handed the redactor's placeholder as the administrator password",
+        );
+
+        // And a password at all: an empty string is contained in every value
+        // searched below, and would fail them for the wrong reason.
+        $this->assertSame(
+            InstallWordPressHandler::ADMIN_PASSWORD_LENGTH,
+            strlen($password),
+            'the installer was handed no usable administrator password',
         );
 
         /*
