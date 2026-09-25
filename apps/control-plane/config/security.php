@@ -26,6 +26,25 @@ return [
     )),
 
     /*
+     * The load balancers in front of this application: the only callers whose
+     * X-Forwarded-For is believed, and so the only way two customers behind
+     * one balancer get two limiter buckets instead of one.
+     *
+     * Read here, with every other environment variable, and asked for by
+     * Lynomia\Http\Middleware\TrustProxies when each request arrives. It used
+     * to be read in bootstrap/app.php, which runs before `.env` is loaded and
+     * so never saw it (F-31).
+     *
+     * Parsed only, not judged: the middleware refuses entries that are not an
+     * address or range, and entries that would trust every caller — a
+     * wildcard, whoever connects, a /0 — and keeps the rest.
+     */
+    'trusted_proxies' => array_values(array_filter(
+        array_map('trim', explode(',', (string) env('TRUSTED_PROXIES', ''))),
+        static fn (string $entry): bool => $entry !== '',
+    )),
+
+    /*
      * Keys whose values are replaced with "[redacted]" before anything is
      * written to a log, a job payload dump or a stored provider response.
      */

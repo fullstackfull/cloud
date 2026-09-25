@@ -11,8 +11,22 @@ several of them describe failures that are silent until a customer finds them.
       It decrypts two-factor secrets and provider credentials. Rotating it without
       re-encrypting those columns makes every stored secret unreadable.
 - [ ] `FORCE_HTTPS=true`, so HSTS is sent and session cookies carry `Secure`.
-- [ ] `TRUSTED_PROXIES` names the actual load balancer addresses, never `*`.
-      A wildcard lets any client spoof `X-Forwarded-For` and defeat every rate limit.
+- [ ] `TRUSTED_PROXIES` names the actual load balancer addresses or ranges, comma-separated.
+      Every IP-keyed rate limit keys on the address the balancer forwards, so an empty or
+      wrong list puts every customer in the balancer's one bucket, and one noisy client
+      then denies sign-in to all of them. The value is read through configuration, so it
+      works from `.env` and survives `config:cache`.
+      Entries that are not an address or range, and entries that would trust every caller
+      (`*`, `REMOTE_ADDR`, `0.0.0.0/0`, `::/0`, `::ffff:0:0/96`), are **refused silently** —
+      nothing is logged. After deploying, confirm that sign-in activity records customers'
+      addresses and not the balancer's; if it shows the balancer's, the list is empty or wrong,
+      or an entry in it was refused.
+- [ ] PHP is built with IPv6 support, if any balancer or client may use IPv6
+      (`php -r 'var_dump((extension_loaded("sockets") && defined("AF_INET6")) || @inet_pton("::1") !== false);'`
+      prints `true` — the same condition Symfony's `IpUtils` checks before comparing an IPv6 address).
+      On a build without it an IPv6 entry in `TRUSTED_PROXIES` is refused, and a caller behind
+      a trusted balancer who sends an IPv6 address in `X-Forwarded-For` gets a 500 on any route
+      that reads the client address. The application does not check this for you.
 - [ ] `CORS_ALLOWED_ORIGINS` lists exactly the portal origins. Never `*` — it is
       incompatible with credentialed requests for good reason.
 - [ ] `SANCTUM_STATEFUL_DOMAINS` matches those origins.
