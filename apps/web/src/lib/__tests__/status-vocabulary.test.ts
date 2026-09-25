@@ -34,7 +34,7 @@ describe('status vocabulary', () => {
     // States that need a person, failed, or are over must never look healthy
     // or neutral; states in progress must never look complete.
     for (const key of ['needs_review', 'manual_review', 'under_review']) expect(toneFor(key)).toBe('warning')
-    for (const key of ['payment_failed', 'provisioning_failed', 'failed', 'expired', 'indeterminate', 'refused']) {
+    for (const key of ['payment_failed', 'provisioning_failed', 'failed', 'expired', 'indeterminate', 'refused', 'removed']) {
       expect(toneFor(key)).toBe('danger')
     }
     for (const key of ['processing', 'provisioning', 'queued_for_provisioning', 'pending']) expect(toneFor(key)).toBe('info')

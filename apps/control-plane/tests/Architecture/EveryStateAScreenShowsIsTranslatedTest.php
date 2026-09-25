@@ -63,6 +63,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\DriftStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
 use Lynomia\Modules\Shared\Domain\Enums\CustomerOperationState;
 use Lynomia\Modules\Shared\Domain\Enums\ReadinessState;
@@ -74,6 +75,7 @@ use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationKind;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressOperationState;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressPushScope;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteKind;
+use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
 use Lynomia\Modules\Support\Domain\Enums\TicketPriority;
 use Lynomia\Modules\Support\Domain\Enums\TicketStatus;
 use Lynomia\Modules\Vps\Domain\Enums\ReinstallState;
@@ -129,12 +131,29 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             FileRestoreState::class,
             CountryCurrencyChangeState::class,
             WordPressOperationState::class,
+            /*
+             * A site's own state, on the WordPress list and detail pages.
+             * It was outside this list while three of its cases —
+             * `awaiting_dns`, `awaiting_certificate`, `removed` — had no
+             * string in either language, so a customer whose site was
+             * waiting on DNS read the generic "we have no word for this".
+             */
+            WordPressSiteState::class,
             DnsState::class,
             HostingAccountStatus::class,
             InvoiceStatus::class,
             OrderStatus::class,
             SubscriptionStatus::class,
             ApiTokenStatus::class,
+            /*
+             * The service row's own status. `ServiceResource` publishes
+             * `state`, not `status`, but `VirtualMachineResource` publishes
+             * it as `service_status` and the VPS detail page renders any
+             * value but `active` through this namespace. Every enum a state
+             * machine governs is required here by
+             * EveryStateAMachineCanEnterHasAProducerTest.
+             */
+            ServiceStatus::class,
             DedicatedServerStatus::class,
             PowerState::class,
             ChassisPowerState::class,
