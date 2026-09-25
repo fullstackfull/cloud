@@ -160,8 +160,10 @@ final class TheInstallerIsHandedARealAdministratorPasswordTest extends TestCase
         $result = app(InstallWordPressHandler::class)->execute($job);
 
         /*
-         * RedactedJsonCast promises that a handler receiving "[redacted]"
-         * fails loudly. Before this guard it installed and succeeded.
+         * RedactedJsonCast's docblock used to say a handler receiving
+         * "[redacted]" fails loudly. Nothing made it so: this handler
+         * installed with the placeholder and reported success. The loud
+         * failure is the handler's to supply, and this is it.
          */
         $this->assertTrue($result->isFailure(), 'the handler installed with the placeholder and reported success');
         $this->assertSame('wordpress.credential_in_payload', $result->errorCode);

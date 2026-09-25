@@ -6,7 +6,6 @@ namespace Lynomia\Modules\SharedHosting\Application\Listeners;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
@@ -34,14 +33,28 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
  * search, and is unreachable in the product.
  *
  * ===========================================================================
- * WHY THE PASSWORD IS GENERATED HERE
+ * WHY THE PASSWORD IS NOT IN THE PAYLOAD (F-45)
  * ===========================================================================
  *
- * It has to exist somewhere, and this is the last moment before it is needed
- * and the first moment it is safe: it lives in the job payload, goes to the
- * toolkit, and reaches nothing else. Nothing writes it to the site row. The
- * customer resets it from their own dashboard, which is why keeping no copy
- * costs them nothing.
+ * It was generated here once, and put in the job's payload on the argument
+ * that it would go to the toolkit and reach nothing else. It never reached the
+ * toolkit. The payload column is cast through RedactedJsonCast,
+ * `admin_password` carries `password`, and so the row held the ten characters
+ * `[redacted]` — which is what the installer was handed as the administrator
+ * password, for every site this path installed, while the install reported
+ * success.
+ *
+ * So the payload carries what the install needs except the credential, and
+ * InstallWordPressHandler mints the password when the install runs, the only
+ * moment it is needed. The handler also refuses a payload that carries
+ * `admin_password` at all, so putting one back here fails the job loudly
+ * instead of installing a site with the placeholder.
+ *
+ * This listener keeps no copy because it never has one. The reason given here
+ * before — that the customer resets the password from their own dashboard —
+ * named a dashboard action this build did not have, and is not repeated: how a
+ * customer gets into a site whose password nobody kept is a question for the
+ * portal, and a listener cannot answer it.
  */
 final class InstallWordPressOnceTheAccountExists implements ShouldQueue
 {
@@ -125,15 +138,7 @@ final class InstallWordPressOnceTheAccountExists implements ShouldQueue
                 payload: [
                     'wordpress_site_id' => (string) $site->getKey(),
                     'admin_username' => $site->admin_username,
-
-                    /*
-                     * From the CSPRNG and long enough that guessing is not a
-                     * strategy. Never derived from anything the customer told
-                     * us, which is how a "generated" password ends up being
-                     * the domain name with a number after it.
-                     */
-                    'admin_password' => Str::password(24),
-
+                    // No password: the handler mints it when the install runs.
                     'admin_email' => $site->admin_email,
                     'site_title' => $site->domain,
                     'locale' => $site->locale ?? 'en_US',
