@@ -129,9 +129,53 @@ export function RegisterPage() {
   const displayed = describeError(register.error)
   const fieldErrors = displayed?.fields ?? null
 
-  // Only once the answer is in hand: `undefined` is "not asked yet", which is
-  // not the same as "closed".
-  const registrationClosed = options.data?.legal.registration_permitted === false
+  /*
+   * Whether the server will take a registration, read as three answers and
+   * not two, because the unknown one points in opposite directions for the
+   * two things on this screen that read it:
+   *
+   *  - the "not open yet" warning needs a `false` — saying the platform is
+   *    closed is a claim this screen has no evidence for when it could not
+   *    ask, or when the answer did not say;
+   *  - the Create-account button needs a `true` — not knowing is not
+   *    permission.
+   *
+   * One boolean for both was the defect: `=== false` on an answer that had
+   * not arrived left the button live under a form with no countries in it.
+   *
+   * `legal` is optional-chained although its type says it is always present.
+   * The type is the contract between the portal and the API, and the two
+   * deploy separately; the `?.` describes the wire. Without it a 200 that
+   * omits `legal` throws in render and blanks the whole registration route.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the wire, not the type: see above
+  const permitted: unknown = options.data?.legal?.registration_permitted
+  const registrationPermitted = permitted === true
+  const registrationClosed = permitted === false
+  // An answer arrived and said neither: a portal and an API out of step, not
+  // a closed platform, and not something to be silent about.
+  const registrationUnconfirmed = options.data !== undefined && !registrationPermitted && !registrationClosed
+  // A failed read with nothing earlier to fall back on. A refetch that fails
+  // after a good answer keeps that answer, and the form stays usable on it.
+  const optionsFailure = options.data === undefined ? describeError(options.error) : null
+
+  const askAgain = (
+    <Button
+      // A <button> with no type inside a <form> is a submit button: pressing
+      // it would refetch the options *and* post the half-filled registration,
+      // and it would become the form's default button, so Enter in any field
+      // would post it too.
+      type="button"
+      variant="secondary"
+      size="sm"
+      loading={options.isFetching}
+      onClick={() => {
+        void options.refetch()
+      }}
+    >
+      {t('common.retry')}
+    </Button>
+  )
 
   if (register.isSuccess) {
     /*
@@ -193,11 +237,38 @@ export function RegisterPage() {
         The server refuses the registration either way — that is the
         enforcement, and it does not depend on this — but a visitor who has
         typed a name, an address and a password twice deserves to have been
-        told first. Rendered only once the options have actually loaded, so a
-        slow request does not flash "not open yet" at somebody who can
-        register perfectly well.
+        told first. Three things can stop this form, and each says so:
+
+         - the options could not be read at all, so there are no countries,
+           no currencies and no documents to agree to — an error, because an
+           empty select is exactly what a first render looks like, and
+           without this nothing told a failed page from a slow one;
+         - they were read and did not say whether registration is open — an
+           error too, because the countries, currencies and document links
+           are all on screen and the greyed button would otherwise be the
+           only thing different from a page that works;
+         - the server said registration is not open — a warning, and only
+           then, so a slow or failed request never tells somebody who can
+           register that they cannot.
+
+        A request still on its way says nothing: it is a moment's wait, not a
+        failure, and the button waits with it.
       */}
-      {registrationClosed ? (
+      {optionsFailure !== null ? (
+        <Alert tone="error" title={t('auth.registrationOptionsFailed')} requestId={optionsFailure.requestId}>
+          <span className="flex flex-col items-start gap-2">
+            <span>{optionsFailure.message}</span>
+            {askAgain}
+          </span>
+        </Alert>
+      ) : registrationUnconfirmed ? (
+        <Alert tone="error">
+          <span className="flex flex-col items-start gap-2">
+            <span>{t('auth.registrationUnconfirmed')}</span>
+            {askAgain}
+          </span>
+        </Alert>
+      ) : registrationClosed ? (
         <Alert tone="warning">{t('auth.registrationUnavailable')}</Alert>
       ) : null}
 
@@ -311,10 +382,16 @@ export function RegisterPage() {
         required
       />
 
+      {/*
+        Live on the server's literal `true` and nothing else. Pending, failed,
+        closed, or an answer that does not say: each leaves it disabled, and
+        all but the first say why above. Disabled also stops Enter: implicit
+        submission presses the form's default button, which is this one.
+      */}
       <Button
         type="submit"
         loading={register.isPending}
-        disabled={registrationClosed}
+        disabled={!registrationPermitted}
         className="w-full"
       >
         {t('common.register')}
