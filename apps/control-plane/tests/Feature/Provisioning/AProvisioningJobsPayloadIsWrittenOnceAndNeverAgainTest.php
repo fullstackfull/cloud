@@ -472,6 +472,11 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
 
         $before = $this->rowOf($job);
 
+        // `updated_at` is stored to the second, so a correction made in the
+        // second the job was created leaves it unchanged and the expected
+        // set below would depend on the wall clock. Move the clock instead.
+        $this->travel(1)->minutes();
+
         $this->actingAs($operator)
             ->putJson('/api/admin/provisioning/jobs/'.$job->id.'/hosting-domain', [
                 'domain' => ' Named.Example.Test. ',
