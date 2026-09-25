@@ -3851,6 +3851,79 @@ Two consequences:
    because the ledger does not contain it. That is the correct response to a
    brief that is wrong — not to guess what I meant.
 
+## The seventh stoppage: a container restart with thirteen agents in flight
+
+The container was restarted with the whole pool working. The filesystem survived
+entirely — the repository at `e9607c6`, all thirteen worktrees, the scratchpad —
+and by now the procedure for this is routine. What it produced this time is
+worth recording because the salvage found more than the last two did.
+
+### What survived, measured rather than assumed
+
+| | |
+|---|---|
+| Committed and safe | **F-42 round one** had already landed `b683fb5` — the only round that got a commit out before the restart |
+| Uncommitted work worth keeping | six trees: `f04k`, `f14e`, `f29f`, `f33e`, `f36a`, `f37a` |
+| Nothing started | `f11f`, and the four verifiers `v08h`, `v15i`, `v23a`, `v30a` |
+
+### One live mutant, and it was in the one tree that had committed
+
+`f42a` held `apps/web/src/test-setup.ts` at **0 added, 46 deleted** — a deletion
+of the accessible-name warm-up block that its own commit `b683fb5` had just
+added. That is **step four caught mid-measurement**: the round mutating its own
+fix to show the flake returns, killed before it could restore. Restored, and
+verified by reading the block back rather than by the command's exit status.
+
+This is now the third stoppage in a row to leave a live mutant in a tree, and
+the pattern is stable enough to state as a rule: **the tree most likely to hold
+a live mutant is the tree that has made the most progress**, because step four
+comes after the fix and a round that has not reached step three has nothing to
+mutate. Survey the furthest-along trees first, not the untouched ones.
+
+### And a near-miss of my own, in the opposite direction
+
+`f29f` held a five-line edit to `EndpointPolicy.php`, and `f29f` is the round I
+had explicitly briefed to *plant a split anchor and see the partition row green*.
+Everything about the shape said live mutant. I read it before touching it, and
+it is the **fix**: the numeral "seven" removed from a sentence and replaced with
+a statement that the list is the only place holding the count. Had I restored it
+on the strength of the tree's identity and the diff's size, I would have
+destroyed the round's actual work while congratulating myself on the discipline.
+
+**Reading the diff is the discipline. Recognising the tree is not.**
+
+### The salvage commits, and why they are labelled the way they are
+
+Each of the six is committed to its own branch as a
+`WIP SALVAGE — an interrupted round, NOT a delivered round` commit whose message
+states plainly that no test was run against that state, no first-fail proof is
+claimed, no mutation was performed or restored, and the eight-step protocol is
+incomplete. The risk this guards against is specific: a half-finished round
+sitting on a branch looks exactly like a finished one to the next reader, and
+this ledger's own status cells have already proved that a claim outlives the
+thing it describes. The label is in the commit message because that is the one
+place a future reader cannot fail to see it.
+
+Full diffs and untracked files also went to `scratchpad/crash-salvage-6/` before
+anything was committed, belt and braces, because the commit itself could have
+been the thing that was interrupted.
+
+### What the salvage tells me about the rounds themselves
+
+Two are worth naming, because they show the work was on the right track and the
+re-dispatch should build on it rather than restart it:
+
+- **`f14e` (F-14 round fourteen) had already written the remedy its verifier
+  named.** The rule is renamed `namesAYearBeyondTheOneItsDateAlreadyNames()` —
+  the verifier's own words — the clock regex is corrected so the fractional tail
+  binds to the seconds group (Family C), a five-or-more-digit run is tested
+  (Family B's glued join), and a semantic check compares the parsed year with
+  and without the last numeric field. That is the shape, not a fourth patch.
+- **`f04k` (F-04 round seven) had built the missing clause**: a
+  `ResetHostingAccountPassword` action, its refusal exception, a feature test,
+  and a `PanelThatLosesItsAnswer` double — which is exactly the lost-answer case
+  the blocking item is about.
+
 ## The relaunch, and two live edits waiting in the trees to be committed by somebody else
 
 Eleven agents dispatched after the sixth stoppage, on the user's explicit
