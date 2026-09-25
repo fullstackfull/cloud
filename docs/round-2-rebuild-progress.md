@@ -23,7 +23,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-12 | High | rebuilt — 9+14 new tests red→green; Dedicated+Ipam+Api+Security+Architecture green | `e0aa0ab` |
 | F-15 | High | in progress (round six + round-seven fixes) | |
 | F-17 | High | queued (PARTIAL: control half) | |
-| F-18 | High | in progress | |
+| F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
 | F-19 | High | queued | |
 | F-20 | High | queued | |
 | F-21 | High | queued | |
