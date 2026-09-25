@@ -115,6 +115,32 @@ final class OrderStateMachineTest extends TestCase
     }
 
     #[Test]
+    public function a_declined_payment_does_not_stop_a_later_one_settling_the_order(): void
+    {
+        // F-19: `payment_failed` is written now, and the invoice stays
+        // collectible after it — a later attempt, or the same intent completing
+        // after 3-D Secure, settles it without anybody starting over.
+        $this->assertTrue($this->machine->canTransition(OrderStatus::PaymentFailed, OrderStatus::Paid));
+        $this->assertTrue($this->machine->canTransition(OrderStatus::PaymentFailed, OrderStatus::Cancelled));
+
+        // And still never straight to anything past payment.
+        $this->assertFalse($this->machine->canTransition(OrderStatus::PaymentFailed, OrderStatus::Active));
+    }
+
+    #[Test]
+    public function a_purchase_nothing_was_built_for_can_end(): void
+    {
+        // F-19: a failed or reviewed build whose service is ended with nothing
+        // built reaches `terminated`, which is what gives its plan unit back.
+        $this->assertTrue($this->machine->canTransition(OrderStatus::ProvisioningFailed, OrderStatus::Terminated));
+        $this->assertTrue($this->machine->canTransition(OrderStatus::ManualReview, OrderStatus::Terminated));
+
+        // A build still in flight cannot end: its service cannot either.
+        $this->assertFalse($this->machine->canTransition(OrderStatus::QueuedForProvisioning, OrderStatus::Terminated));
+        $this->assertFalse($this->machine->canTransition(OrderStatus::Provisioning, OrderStatus::Terminated));
+    }
+
+    #[Test]
     public function a_suspended_order_can_be_restored_or_terminated(): void
     {
         $this->assertTrue($this->machine->canTransition(OrderStatus::Suspended, OrderStatus::Active));
