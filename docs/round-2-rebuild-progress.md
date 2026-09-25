@@ -30,7 +30,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-15 | High | rebuilt — round six design + round seven's two blocking fixes; merged with the F-04 × F-15 fix (operator-named domain moved out of the payload) | `8e15efa` |
 | F-17 | High | rebuilt — limiter attachment + ordering fixed (limiter ran before the account was resolved); awaiting verification (ResendInvitation cooldown clause to adjudicate) | `171142b` |
 | F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
-| F-19 | High | in progress | |
+| F-19 | High | rebuilt — order follows its services (all 9 states written), `completed_at` stamped, service-route termination behind F-18's authority (16-cell table driven); merged with F-04/F-23 consequences fixed | `45d53af` |
 | F-20 | High | in progress (rebuild → independent verification) | |
 | F-21 | High | in progress (rebuild → independent verification) | |
 | F-22 | High | rebuilt — drift alert + route pinned by validator (39/39), log path fixed; Architecture+Monitoring green | `bb1c77e` |
