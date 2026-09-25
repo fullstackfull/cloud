@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Http;
 use Lynomia\Modules\Compute\Domain\DTOs\CloudInitConfig;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ReinstallVmRequest;
+use Lynomia\Modules\Compute\Domain\DTOs\RemoteConsoleEndpoint;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\PowerState;
 use Lynomia\Modules\Compute\Domain\Enums\RemoteTaskStatus;
@@ -469,6 +470,61 @@ final class ProxmoxComputeProviderTest extends TestCase
     }
 
     #[Test]
+    public function a_global_config_switch_cannot_waive_verification_on_the_console_socket(): void
+    {
+        /*
+         * F-28. The console endpoint is the one place in this adapter that
+         * hands a certificate policy to a socket somebody else opens — the
+         * console gateway's — rather than to a request built by
+         * ProxmoxConnection::request(). It took that policy from the
+         * fleet-wide key while every other call took the cluster's own, so
+         * one PROXMOX_VERIFY_TLS=false switched verification off on the
+         * console socket of every cluster at once. That socket carries the
+         * same API token, in the same Authorization header, as every other
+         * call — plus a root console for a machine on a node other customers
+         * share.
+         */
+        config()->set('compute.proxmox.verify_tls', false);
+
+        $endpoint = $this->consoleEndpointThrough(
+            new ProxmoxConnection('https://pve.test:8006', self::TOKEN_ID, self::TOKEN_SECRET, verifyTls: true),
+        );
+
+        // What is at stake on this socket, asserted rather than assumed.
+        $this->assertSame(
+            sprintf('PVEAPIToken=%s=%s', self::TOKEN_ID, self::TOKEN_SECRET),
+            $endpoint->headers['Authorization'] ?? null,
+        );
+
+        $this->assertTrue(
+            $endpoint->verifyTls,
+            'A global environment variable disabled certificate verification on the console socket of a cluster that demanded it.',
+        );
+    }
+
+    #[Test]
+    public function a_lab_clusters_waiver_reaches_its_console_socket_whatever_the_fleet_default_says(): void
+    {
+        /*
+         * The other direction, and the one that shows the console was on a
+         * different policy from its siblings rather than merely a stricter
+         * one: a lab cluster whose row waives verification had every API call
+         * succeed and its console refused, because the console alone read the
+         * fleet key.
+         */
+        config()->set('compute.proxmox.verify_tls', true);
+
+        $endpoint = $this->consoleEndpointThrough(
+            new ProxmoxConnection('https://lab.test:8006', self::TOKEN_ID, self::TOKEN_SECRET, verifyTls: false),
+        );
+
+        $this->assertFalse(
+            $endpoint->verifyTls,
+            'The console socket ignored the certificate policy the cluster row set for every other call to the same host.',
+        );
+    }
+
+    #[Test]
     public function a_timeout_is_reported_as_an_unknown_outcome_rather_than_a_failure(): void
     {
         /*
@@ -713,6 +769,23 @@ final class ProxmoxComputeProviderTest extends TestCase
         }
 
         return null;
+    }
+
+    /**
+     * A console endpoint issued by a cluster that answers vncproxy the way
+     * Proxmox does, through the given connection.
+     */
+    private function consoleEndpointThrough(ProxmoxConnection $connection): RemoteConsoleEndpoint
+    {
+        Http::fake([
+            '*/vncproxy' => Http::response(['data' => [
+                'ticket' => 'PVEVNC:65F0A1B2::ticket-body',
+                'port' => '5900',
+                'user' => self::TOKEN_ID,
+            ]]),
+        ]);
+
+        return (new ProxmoxComputeProvider($connection, new SecretRedactor))->consoleEndpoint('pve-01', '101');
     }
 
     private function provider(): ProxmoxComputeProvider
