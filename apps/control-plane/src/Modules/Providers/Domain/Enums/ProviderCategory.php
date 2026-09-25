@@ -77,7 +77,15 @@ enum ProviderCategory: string
     public function capabilities(): array
     {
         return match ($this) {
-            self::Compute => ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'gpu_passthrough'],
+            /*
+             * `inventory_sync` is the scheduled read of nodes and storage
+             * pools. It is a question of its own because a cluster can answer
+             * everything else and still show the platform no pool — and the
+             * scheduler places only on pools the sync recorded, so such a
+             * cluster places nothing. VPS requires it; GPU compute inherits it
+             * through its dependency on VPS.
+             */
+            self::Compute => ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'inventory_sync', 'gpu_passthrough'],
             /*
              * `verify` and `verification_verdict` are two different questions
              * and only the second one is the product's promise.
