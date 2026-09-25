@@ -9,6 +9,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricedOrder;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
+use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponCustomerLimitReachedException;
 use Lynomia\Modules\Catalog\Domain\Exceptions\CouponFullyRedeemedException;
 use Lynomia\Modules\Catalog\Domain\Services\CouponValidator;
@@ -24,6 +25,7 @@ use Lynomia\Modules\Orders\Domain\Events\OrderPlaced;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Services\OrderNumberAllocator;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 
 /**
@@ -33,7 +35,8 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  *
  *  1. **Prices come from the catalogue, never from the client.** A checkout
  *     that trusts a submitted amount is a checkout where the customer sets
- *     their own price. Only plan ids and quantities cross the wire.
+ *     their own price. Only plan ids, quantities and a hosting line's domain
+ *     cross the wire, and none of them is a price.
  *
  *  2. **A repeated submission returns the first order.** The client supplies an
  *     idempotency key and the database has a unique index on
@@ -96,9 +99,12 @@ final readonly class PlaceOrder
          */
         $checkout = $this->pricer->execute($customer, $request);
 
+        $domains = $this->domainsFor($request, $checkout->plans);
+
         return $this->persist(
             $customer,
             $request,
+            $domains,
             $checkout->plans,
             $checkout->pricingLines,
             $checkout->priced,
@@ -168,12 +174,68 @@ final readonly class PlaceOrder
     }
 
     /**
+     * The name each hosting line is bought for, validated and folded once.
+     *
+     * A shared-hosting account is built for a domain and nothing else in the
+     * platform knows which, so a hosting line without one is refused here —
+     * before any money document exists — rather than reaching the panel under
+     * a placeholder, which is what every hosting order did until checkout
+     * asked (F-04). The rule is the platform's own host-name rule, and the
+     * fold is the one the account row's CHECK constraint requires, so what is
+     * recorded here is byte-for-byte what the build will serve.
+     *
+     * Here and not only in the form request, because whether a line needs a
+     * domain depends on the plan's product, and because a caller that is not
+     * the endpoint must be held to it too.
+     *
+     * @param  Collection<string, Plan>  $plans
+     * @return array<int, string|null> the folded domain per line index
+     *
+     * @throws CheckoutRejectedException
+     */
+    private function domainsFor(CheckoutRequest $request, Collection $plans): array
+    {
+        $domains = [];
+
+        foreach ($request->lines as $index => $line) {
+            $plan = $plans->get($line->planId);
+            $submitted = $line->domain === null ? '' : trim($line->domain);
+
+            if ($plan?->product?->kind !== ProductKind::SharedHosting) {
+                if ($submitted !== '') {
+                    throw CheckoutRejectedException::becauseADomainDoesNotApply($line->planId);
+                }
+
+                $domains[$index] = null;
+
+                continue;
+            }
+
+            if ($submitted === '') {
+                throw CheckoutRejectedException::becauseTheDomainIsMissing($line->planId);
+            }
+
+            $problem = DnsName::problemWith($submitted);
+
+            if ($problem !== null) {
+                throw CheckoutRejectedException::becauseTheDomainIsUnusable($line->planId, $submitted, $problem);
+            }
+
+            $domains[$index] = DnsName::canonicalAsSubmitted($submitted);
+        }
+
+        return $domains;
+    }
+
+    /**
+     * @param  array<int, string|null>  $domains
      * @param  Collection<string, Plan>  $plans
      * @param  list<PricingLine>  $pricingLines
      */
     private function persist(
         Customer $customer,
         CheckoutRequest $request,
+        array $domains,
         Collection $plans,
         array $pricingLines,
         PricedOrder $priced,
@@ -182,7 +244,7 @@ final readonly class PlaceOrder
     ): Order {
         try {
             return DB::transaction(function () use (
-                $customer, $request, $plans, $pricingLines, $priced, $coupon, $placedBy
+                $customer, $request, $domains, $plans, $pricingLines, $priced, $coupon, $placedBy
             ): Order {
                 if ($coupon !== null) {
                     $this->assertCouponHasUnspentCapacity($customer, $coupon);
@@ -238,6 +300,7 @@ final readonly class PlaceOrder
                         'name' => $pricingLine->description,
                         'billing_period' => $request->billingPeriod,
                         'resources_snapshot' => $plan->resources,
+                        'domain' => $domains[$index] ?? null,
                         'quantity' => $line->quantity,
                         'unit_recurring_minor' => $pricingLine->unitPrice->minorUnits(),
                         'unit_setup_minor' => $pricingLine->setupFee->minorUnits(),

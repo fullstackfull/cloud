@@ -61,6 +61,17 @@ enum AuditAction: string
     case HostingAccountTerminated = 'hosting_account.terminated';
 
     /**
+     * A new panel password set on a hosting account by an operator.
+     *
+     * Quiet and consequential: it hands whoever holds the result a live login
+     * to a customer's mail, files and databases, and before it there was no
+     * operator path into a customer's panel at all. The record says who, which
+     * account and why — never the password, which is returned once and kept
+     * nowhere.
+     */
+    case HostingAccountPasswordReset = 'hosting_account.password_reset';
+
+    /**
      * A service ended and its machine destroyed.
      *
      * The most irreversible act the platform performs on a customer's data,
@@ -96,6 +107,9 @@ enum AuditAction: string
     // the platform could not verify itself.
     case OrphanAdopted = 'provisioning.orphan_adopted';
     case ProvisioningRetried = 'provisioning.retried';
+    // The domain a stopped hosting build will serve, corrected by a person —
+    // the repair a retry cannot be, recorded before the retry that follows it.
+    case HostingJobDomainNamed = 'provisioning.hosting_domain_named';
     case DriftAcknowledged = 'drift.acknowledged';
     case DriftResolved = 'drift.resolved';
     case ReconciliationRequested = 'infrastructure.reconciliation_requested';

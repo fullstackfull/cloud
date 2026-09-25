@@ -14,6 +14,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Application\Actions\AdoptOrphanResource;
 use Lynomia\Modules\Provisioning\Application\Actions\RetryProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\SharedHosting\Application\Actions\NameTheDomainAHostingJobWillServe;
 
 /**
  * The provisioning queue, which is where an operator looks when a customer
@@ -141,6 +142,56 @@ final class ProvisioningController
                 'attempts' => $requeued->attempts,
                 'max_attempts' => $requeued->max_attempts,
                 'service_id' => $requeued->service_id,
+            ],
+        ]);
+    }
+
+    /**
+     * Correct the domain a stopped hosting build will serve.
+     *
+     * The repair a retry cannot be. A build refused because it names no
+     * domain, or one another live account serves, is refused identically on
+     * every retry; this writes the job's payload and nothing else, and the
+     * operator then retries it through the ordinary path. Behind
+     * provisioning.retry, the permission that already means "change what the
+     * platform believes on the strength of a person's word" — and the evidence
+     * the operator relied on (usually the customer confirming the name) is
+     * required and lands in the audit trail with the name before and after.
+     */
+    public function nameHostingDomain(Request $request, string $job): JsonResponse
+    {
+        $found = ProvisioningJob::query()->findOrFail($job);
+
+        $validated = $request->validate([
+            'domain' => ['required', 'string', 'max:253'],
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        /** @var array{job: ProvisioningJob, previous: string|null, domain: string} $named */
+        $named = app(RecordActAtomically::class)->execute(
+            act: static fn (): array => app(NameTheDomainAHostingJobWillServe::class)->execute(
+                $found,
+                $validated['domain'],
+            ),
+            describe: static fn (array $named): AuditedAct => new AuditedAct(
+                action: AuditAction::HostingJobDomainNamed,
+                subject: $named['job'],
+                customerId: $named['job']->customer_id,
+                context: [
+                    'previous_domain' => $named['previous'],
+                    'primary_domain' => $named['domain'],
+                    'evidence' => $validated['evidence'],
+                    'service_id' => $named['job']->service_id,
+                ],
+            ),
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $named['job']->id,
+                'status' => $named['job']->status->value,
+                'primary_domain' => $named['domain'],
+                'previous_domain' => $named['previous'],
             ],
         ]);
     }

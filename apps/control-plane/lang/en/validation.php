@@ -280,6 +280,7 @@ return [
         'items.*' => 'item',
         'items.*.plan_id' => 'plan',
         'items.*.quantity' => 'quantity',
+        'items.*.domain' => 'domain',
         'kind' => 'kind',
         'locale' => 'language',
         'member_id' => 'member',

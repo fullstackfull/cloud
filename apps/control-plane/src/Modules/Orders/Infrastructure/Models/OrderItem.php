@@ -16,6 +16,13 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  *
  * The name, price and resources are copied rather than referenced so that a
  * later catalogue change cannot silently rewrite what a customer bought.
+ *
+ * `domain` is the name a shared-hosting line was bought for, folded once at
+ * checkout, and null on every other kind of line. Fulfilment hands it to the
+ * build as the account's primary domain; before it existed every hosting
+ * order reached the panel under a `.invalid` placeholder.
+ *
+ * @property ?string $domain
  */
 class OrderItem extends Model
 {

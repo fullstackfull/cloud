@@ -269,7 +269,8 @@ final class TheWholeLifeOfAHostingAccountTest extends TestCase
         $order = app(PlaceOrder::class)->execute(
             $this->customer,
             new CheckoutRequest(
-                lines: [new CheckoutLine((string) $plan->getKey(), 1)],
+                // Bought for a name, as checkout requires of a hosting line.
+                lines: [new CheckoutLine((string) $plan->getKey(), 1, 'whole-life.example.test')],
                 billingPeriod: BillingPeriod::Monthly,
                 couponCode: null,
                 idempotencyKey: null,

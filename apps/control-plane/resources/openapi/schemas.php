@@ -2742,6 +2742,25 @@ return [
             'service_id' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminNamedHostingDomain' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+            'primary_domain' => ['type' => 'string', 'description' => 'The name the build will now serve, folded.'],
+            'previous_domain' => ['type' => ['string', 'null'], 'description' => 'What the job named before, or null when it named nothing.'],
+        ],
+    ],
+    'AdminHostingPasswordReset' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'username' => ['type' => 'string'],
+            'password' => ['type' => 'string', 'description' => 'The panel password now set. Shown here once and stored nowhere; there is no way to read it again.'],
+        ],
+    ],
     'AdminRetriedJob' => [
         'type' => 'object',
         'additionalProperties' => false,

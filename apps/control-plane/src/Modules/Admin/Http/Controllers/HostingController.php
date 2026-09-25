@@ -9,18 +9,21 @@ use Illuminate\Http\Request;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\SharedHosting\Application\Actions\ResetHostingAccountPassword;
 use Lynomia\Modules\SharedHosting\Application\Actions\TerminateHostingAccount;
 use Lynomia\Modules\SharedHosting\Application\Actions\UnsuspendHostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 
 /**
- * The two hosting-account operations only a person should make.
+ * The hosting-account operations only a person should make.
  *
- * Both actions existed and neither had a caller. An account could be suspended
+ * Each action existed and none had a caller. An account could be suspended
  * for non-payment (once the dunning listener was wired) and nothing could put
- * it back by hand; and an account could reach the end of its retention window
+ * it back by hand; an account could reach the end of its retention window
  * and stay on the node for ever, holding a slot the node's capacity counted
- * as spent.
+ * as spent; and an account whose create answer was lost held a panel password
+ * nobody had, with `changePassword` implemented by every adapter and called
+ * by nothing.
  */
 final class HostingController
 {
@@ -58,6 +61,52 @@ final class HostingController
             'data' => [
                 'id' => (string) $restored->getKey(),
                 'status' => $restored->status->value,
+            ],
+        ]);
+    }
+
+    /**
+     * Set a new panel password on an account and hand it back, once.
+     *
+     * The password is minted by the action — no password is accepted from
+     * this body — and it appears in this response and nowhere else: not on the
+     * row, not in the audit entry, not in a log. The route's middleware holds
+     * it to three a minute per operator, as the credential reset it is, and
+     * `api/*` responses are `Cache-Control: no-store`.
+     *
+     * Panel first, then the record. Recording first would write down an act
+     * that may not have happened, on a table whose rows can be neither updated
+     * nor deleted. The cost is the other order's failure: a reset the panel
+     * accepted whose audit write then failed is a reset with no record, and
+     * the operator is shown an error for a password that was in fact set.
+     */
+    public function resetPassword(Request $request, string $account): JsonResponse
+    {
+        $found = HostingAccount::query()->findOrFail($account);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'min:3', 'max:500'],
+        ]);
+
+        $password = app(ResetHostingAccountPassword::class)->execute($found);
+
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::HostingAccountPasswordReset,
+            subject: $found,
+            customerId: $found->customer_id,
+            context: [
+                'reason' => $validated['reason'],
+                'username' => $found->username,
+                'primary_domain' => $found->primary_domain,
+                'status' => $found->status->value,
+            ],
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => (string) $found->getKey(),
+                'username' => $found->username,
+                'password' => $password,
             ],
         ]);
     }

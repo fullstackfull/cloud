@@ -100,6 +100,10 @@ final readonly class ProvisionOrderedService
 
         $payload = $this->payloadFor($plan, $service);
 
+        if ($payload !== null && $plan->product->kind === ProductKind::SharedHosting) {
+            $payload = [...$payload, ...$this->whatAHostingAccountIsFor($order, $item)];
+        }
+
         if ($payload === null) {
             // The reason is already recorded on the service. No job is created,
             // because a job with no placement fails at the provider and looks
@@ -211,6 +215,40 @@ final readonly class ProvisionOrderedService
         }
 
         return $payload;
+    }
+
+    /**
+     * The two things a hosting account needs that the plan cannot supply.
+     *
+     * The domain is the one the customer named at checkout, recorded on the
+     * line and already folded. The contact address is the one the order was
+     * billed to, from the order's own snapshot, so that a later edit to the
+     * account does not change who the panel writes to about a purchase made
+     * before it. A line with no domain — every hosting order placed before
+     * checkout asked for one — carries none, and the build refuses it rather
+     * than inventing one; an operator names it from the provisioning queue.
+     *
+     * No password. The build mints one per attempt: a password written into
+     * this payload would be cast through the redactor and reach the panel as
+     * `[redacted]`, and one that escaped the redactor would sit in the job row.
+     *
+     * @return array<string, string>
+     */
+    private function whatAHostingAccountIsFor(Order $order, OrderItem $item): array
+    {
+        $values = [];
+
+        if (is_string($item->domain) && $item->domain !== '') {
+            $values['primary_domain'] = $item->domain;
+        }
+
+        $billed = $order->billing_snapshot['billing_email'] ?? null;
+
+        if (is_string($billed) && $billed !== '') {
+            $values['contact_email'] = $billed;
+        }
+
+        return $values;
     }
 
     private function cannotPlace(Service $service, string $reason): void
