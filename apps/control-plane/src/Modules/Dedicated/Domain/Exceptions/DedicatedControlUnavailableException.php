@@ -24,20 +24,26 @@ use Throwable;
  * now those exceptions were raised only inside a queue worker, an inventory
  * sync or a console command, where the audience is somebody holding a runbook.
  *
- * The API renderer publishes a DomainException's message and its whole context
- * as `error.message` and `error.details`. So the moment a customer-facing HTTP
- * endpoint let one of them escape, all of it became a response body — a BMC
- * address on the management network and the key its credential is read from,
- * handed to whoever asked a server to power on. That is the exact list of
- * fields the module's server resource is written to keep out of a document —
+ * The API renderer used to publish a DomainException's whole context as
+ * `error.details`. So the moment a customer-facing HTTP endpoint let one of
+ * them escape, all of it became a response body — a BMC address on the
+ * management network and the key its credential is read from, handed to
+ * whoever asked a server to power on. That is the exact list of fields the
+ * module's server resource is written to keep out of a document —
  * deliberately not referenced by class here, because the domain layer does not
  * import the HTTP layer even for a docblock — and it must not arrive through
  * the error path instead.
  *
+ * `details` now carries only what a class declares with `publishing()`, and
+ * those two declare nothing, so the renderer is a second layer here rather
+ * than the only one. This class is still the first: it decides what the
+ * customer is told under one code of its own — that nothing happened, and
+ * whether to ask again — instead of the provider's code and prose.
+ *
  * So the customer surface translates. The original travels as `previous`, so
  * the log, the report and any operator reading it keep every detail; the
- * response carries the machine's own id, the verb the caller sent, and nothing
- * else.
+ * response carries the machine's own id, the verb the caller sent, whether it
+ * is safe to ask again, and nothing else.
  *
  * ---------------------------------------------------------------------------
  * Two statuses, one code
@@ -113,7 +119,8 @@ final class DedicatedControlUnavailableException extends DomainException
 
     /**
      * The whole published context: the caller's own machine and the verb they
-     * sent. Both were already in their hands before the request was made.
+     * sent, both already in their hands before the request was made, and
+     * whether asking again is safe.
      */
     private function describe(string $serverId, DedicatedPowerAction $action, int $status): self
     {
@@ -126,6 +133,6 @@ final class DedicatedControlUnavailableException extends DomainException
             // this one against a 504: here the platform knows nothing was
             // done.
             'safe_to_retry' => true,
-        ]);
+        ])->publishing('dedicated_server_id', 'action', 'safe_to_retry');
     }
 }

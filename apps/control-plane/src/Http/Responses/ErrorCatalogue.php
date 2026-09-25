@@ -28,6 +28,12 @@ use Illuminate\Support\Facades\Lang;
  * sentence names is used, so a context that carries an internal identifier
  * for the log's benefit does not surface unless the catalogue author asked
  * for it.
+ *
+ * The same holds beside the sentence. `error.details` is not the context: it
+ * is `DomainException::publishedContext()`, the keys the exception's class
+ * declared the caller already knows, and empty unless it declared any. The
+ * two halves used to disagree — this sentence kept the log's identifiers out
+ * while `details` published the whole context next to it.
  */
 final class ErrorCatalogue
 {

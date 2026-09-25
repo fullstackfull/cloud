@@ -216,8 +216,7 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
             ->postJson("/api/v1/dedicated/{$server->id}/power", ['action' => 'on'])
             ->assertStatus(502)
             // Not the BMC layer's own code: that exception is written for an
-            // operator and carries an operator's detail, and the renderer
-            // publishes a domain exception's context verbatim.
+            // operator and carries an operator's detail in its context.
             ->assertJsonPath('error.code', 'dedicated.server_control_unavailable')
             // A refusal spoken out loud settles what happened: nothing.
             ->assertJsonPath('error.details.safe_to_retry', true);
@@ -245,12 +244,14 @@ final class DedicatedServerPowerEndpointTest extends DedicatedApiTestCase
         /*
          * The whole point of the translation.
          *
-         * `error.message` and `error.details` are published verbatim from a
-         * domain exception, and the BMC layer's exceptions carry — by design,
-         * for an operator — the management address, the adapter's name, the
-         * internal operation verb and the controller's own prose. Every one of
-         * those is a field DedicatedServerResource is written to withhold; the
-         * error path must not be the way they get out.
+         * A domain exception's own message is sent for any code the customer
+         * catalogue has no entry for, and its context used to be published
+         * verbatim as `error.details` — now only the keys its class declares.
+         * The BMC layer's exceptions carry — by design, for an operator — the
+         * management address, the adapter's name, the internal operation verb
+         * and the controller's own prose. Every one of those is a field
+         * DedicatedServerResource is written to withhold; the error path must
+         * not be the way they get out, whichever layer stops them.
          */
         foreach ([
             $endpoint->address,

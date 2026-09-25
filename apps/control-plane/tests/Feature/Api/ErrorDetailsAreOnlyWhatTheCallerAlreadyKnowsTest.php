@@ -86,6 +86,7 @@ final class ErrorDetailsAreOnlyWhatTheCallerAlreadyKnowsTest extends TestCase
         'Lynomia\Modules\Billing\Domain\Exceptions\SubscriptionAlreadyEndedException' => ['status'],
         'Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedControlUnavailableException' => ['action', 'dedicated_server_id', 'safe_to_retry'],
         'Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedOperationRefusedException' => ['in_flight_kind', 'status'],
+        'Lynomia\Modules\Dedicated\Domain\Exceptions\PowerOperationIndeterminateException' => ['indeterminate', 'safe_to_retry'],
         'Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException' => ['value'],
         'Lynomia\Modules\Identity\Domain\Exceptions\EmailAddressNotVerifiedException' => ['email', 'resend_endpoint'],
         'Lynomia\Modules\Identity\Domain\Exceptions\TwoFactorRequiredException' => ['challenge_token'],
@@ -425,8 +426,11 @@ final class ErrorDetailsAreOnlyWhatTheCallerAlreadyKnowsTest extends TestCase
 
         ksort($declared);
 
+        $reviewed = self::INVENTORY;
+        ksort($reviewed);
+
         $this->assertSame(
-            self::INVENTORY,
+            $reviewed,
             $declared,
             'The keys an exception publishes as error.details changed. A new key is a decision that the caller '
             .'already knows the value — a value they sent, a field on their own form, the state of their own '

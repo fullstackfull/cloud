@@ -77,7 +77,14 @@ Every failure, from every endpoint, has one shape:
 - `code` is stable across releases and is what clients branch on.
 - `message` is for humans and may be reworded or localised at any time. Never parse it.
 - `details` carries structured context; validation failures put field errors under
-  `details.fields`.
+  `details.fields`. On any other refusal it holds only the keys the refusing exception's
+  class declares, each something the caller already knows — a value they sent, a field on
+  their own form, the state of their own resource — and it is absent when there are none.
+  The platform's own names — which provider, driver, node, cluster or configuration key was
+  involved — are kept out of it; they go to the log, and `request_id` finds them there.
+  (Two operator-only refusals in the Control Center, `deployment_refused` and
+  `safety_refused`, are built by hand rather than from an exception, and carry their own
+  `details`.)
 - `request_id` correlates the failure with the platform's logs. Quote it to support.
 
 Validation failures are `422` with `code: "validation.failed"`.

@@ -170,12 +170,19 @@ return Application::configure(basePath: dirname(__DIR__))
                  * message is the engineer's and is only ever sent for a code
                  * the customer catalogue has no entry for — which the parity
                  * test keeps to the operator modules.
+                 *
+                 * The sentence is filled from the whole context; `details` is
+                 * only the part the exception's class declared the caller
+                 * already knows. The rest of the context is for the log: it
+                 * may name a provider, a node or the configuration key a
+                 * credential is read from, and publishing it verbatim is how
+                 * two customer routes answered with exactly that.
                  */
                 $e instanceof DomainException => ApiError::make(
                     $e->errorCode(),
                     ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage()),
                     $e->httpStatus(),
-                    $e->context(),
+                    $e->publishedContext(),
                 ),
 
                 $e instanceof ValidationException => ApiError::make(

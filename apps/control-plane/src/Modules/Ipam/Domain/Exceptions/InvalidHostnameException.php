@@ -21,7 +21,7 @@ final class InvalidHostnameException extends DomainException
     {
         $exception = new self(sprintf('"%s" is not a valid hostname: %s.', $hostname, $reason));
 
-        return $exception->withContext(['hostname' => $hostname, 'reason' => $reason]);
+        return $exception->withContext(['hostname' => $hostname, 'reason' => $reason])->publishing('reason');
     }
 
     public function errorCode(): string

@@ -263,11 +263,11 @@ final readonly class OrderPricing
      * and the one that drifts is the one that takes the money.
      *
      * The reason goes to the log and not to the customer. It names a cluster,
-     * an IP pool or a panel package, and a DomainException's context is
-     * published as `error.details` — so carrying it on the exception would
-     * hand the shape of the estate to anybody who can reach the checkout
-     * endpoint. The operator's copy is here; the customer's is a sentence
-     * saying it is not available right now and nothing was charged.
+     * an IP pool or a panel package, the shape of the estate, which nobody who
+     * can reach the checkout endpoint should be handed; it is kept off the
+     * exception entirely rather than left one `publishing()` away from
+     * `error.details`. The operator's copy is here; the customer's is a
+     * sentence saying it is not available right now and nothing was charged.
      */
     private function assertDeliverable(Plan $plan): void
     {

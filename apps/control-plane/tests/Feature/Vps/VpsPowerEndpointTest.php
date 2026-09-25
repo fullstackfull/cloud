@@ -193,7 +193,10 @@ final class VpsPowerEndpointTest extends VpsApiTestCase
             ->withHeader('Idempotency-Key', 'racing-the-rebuild')
             ->postJson('/api/v1/vps/'.$machine->id.'/power', ['action' => 'stop'])
             ->assertStatus(409)
-            ->assertJsonPath('error.code', 'vps.operation_in_flight');
+            ->assertJsonPath('error.code', 'vps.operation_in_flight')
+            // The caller's own operation, under the key the dedicated surface
+            // answers the same question with.
+            ->assertJsonPath('error.details.in_flight_kind', ProvisioningJobKind::ReinstallVps->value);
 
         Queue::assertNothingPushed();
     }
