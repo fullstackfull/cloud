@@ -324,13 +324,13 @@ final class ConsolePermitDeadlineTest extends TestCase
     {
         /*
          * issue() stores toIso8601String(), which drops the fraction of a
-         * second, so a permit issued at …:00.700 is enforced until …:60 and
-         * not …:60.700: its real lifetime is a little under sixty seconds.
-         * That is harmless only because the resource renders the same
-         * truncated string — the instant the client is told and the instant
-         * the code enforces are one instant. Under `array` at the old code, the
-         * store's own sub-second expiry still held the permit at that instant
-         * and redeemed it.
+         * second, so a permit issued at 10:00:00.700 is enforced until
+         * 10:01:00 and not 10:01:00.700: its real lifetime is a little under
+         * sixty seconds. That is harmless only because the resource renders
+         * the same truncated string — the instant the client is told and the
+         * instant the code enforces are one instant. Before consume()
+         * compared the deadline, the array store's own sub-second expiry
+         * still held the permit at that instant, and it was redeemed.
          */
         $this->travelTo($this->now->addMilliseconds(700));
 
