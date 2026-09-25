@@ -6,6 +6,9 @@ namespace Tests\Architecture;
 
 use BackedEnum;
 use FilesystemIterator;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Shared\Domain\Contracts\StateMachine;
 use PhpToken;
 use PHPUnit\Framework\Attributes\Test;
@@ -166,7 +169,62 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
      *
      * @var array<string, string>
      */
-    private const array UNPRODUCED = [];
+    private const array UNPRODUCED = [
+        /*
+         * Written off after dunning has given up, says the table, and
+         * `uncollectible → paid` and `→ void` are both legal. Nothing gives up:
+         * no action, job or command writes the state, so no invoice reaches it.
+         * It still has a reader that matters — `SettleInvoice::PAYABLE` lists it
+         * as a status that can take money — so a documented money branch is one
+         * no invoice can enter. Building a write-off is new billing capability
+         * outside this programme; whether to build it, delete the case or
+         * declare it prepared belongs to the Billing module's owner.
+         */
+        InvoiceStatus::class.'::Uncollectible' => 'No write-off exists: nothing moves an open invoice to uncollectible, and SettleInvoice::PAYABLE reads it. Billing owns the decision.',
+
+        /*
+         * Nine of OrderStatus's thirteen cases, which is the audit's own
+         * headline (F-19). `TransitionOrder` is the only writer of
+         * `orders.status` and it is called from checkout, settlement and
+         * cancellation, so an order lives inside {draft, pending_payment, paid,
+         * cancelled} while fulfilment happens on the service row and the
+         * order is never told. Readers keyed on these states therefore key on
+         * nothing: `PlanCapacity::RELEASED` (two of its three statuses),
+         * `CancelOrder`'s and `AnalyseCountryCurrencyChange`'s sets, and the
+         * `orders.completed_at` column the customer's OrderResource publishes.
+         * Wiring the order lifecycle to fulfilment is F-19's repair, not this
+         * gate's; each entry goes when F-19 gives the state its writer.
+         */
+        OrderStatus::class.'::PaymentFailed' => 'F-19: a failed payment is recorded on the payment attempt; the order is never moved to payment_failed.',
+        OrderStatus::class.'::QueuedForProvisioning' => 'F-19: fulfilment is queued on the service row; the order is never told.',
+        OrderStatus::class.'::Provisioning' => 'F-19: provisioning is tracked on the service and its job; the order is never told.',
+        OrderStatus::class.'::ProvisioningFailed' => 'F-19: a failed build is recorded on the service and its job; the order is never told.',
+        OrderStatus::class.'::ManualReview' => 'F-19: review happens on the provisioning job; the order is never told.',
+        OrderStatus::class.'::Active' => 'F-19: activation happens on the service row; the order stays paid.',
+        OrderStatus::class.'::Suspended' => 'F-19: suspension happens on the service row; the order stays paid.',
+        OrderStatus::class.'::Terminated' => 'F-19: termination happens on the service row; PlanCapacity::RELEASED keys stock release on a status no order reaches.',
+        OrderStatus::class.'::Refunded' => 'F-19: a refund is recorded against the invoice; PlanCapacity::RELEASED keys stock release on a status no order reaches.',
+
+        /*
+         * The table's own comment calls it "give up": a legal target from
+         * `queued` and from `needs_review`, terminal, read by
+         * `AdoptOrphanResource` as a settled status that blocks adoption, and
+         * written only by tests. Giving up on a provisioning job is an operator
+         * capability the platform describes and does not have; building it is
+         * new capability outside this programme, and the choice between
+         * deleting the case, wiring a cancel action and declaring the state
+         * prepared belongs to the Provisioning module's owner, not to this gate.
+         *
+         * A fifth reader raises the cost of the "just delete the case" option:
+         * `ReapExpiredReservations.php:71` declares TERMINAL_FAILURE_STATUSES =
+         * ['failed', 'cancelled'] and `:104` uses it in a `whereIn` over
+         * `provisioning_jobs` to decide which address reservations to reclaim.
+         * Being strings, it is invisible to this classifier in both directions:
+         * delete the case and a string constant would still name a status the
+         * enum no longer has, and nothing would say so.
+         */
+        ProvisioningJobStatus::class.'::Cancelled' => 'No operator action cancels a provisioning job; AdoptOrphanResource.php:134 and ReapExpiredReservations.php:71 read it. Provisioning owns the decision.',
+    ];
 
     /** @var array<string, list<array{string, int, string}>>|null */
     private static ?array $sites = null;
