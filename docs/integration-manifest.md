@@ -274,3 +274,71 @@ sum of what each side added.**
 | **2** | F-30, F-39 | `docs/runbooks/queue-backlog.md` |
 | **2** | F-38, F-39 | `infrastructure/README.md` |
 
+
+## The dry run: 30 of 37 merge clean, and six need a person
+
+Performed on `integration/round-2-survey`, cut from `dca6d70`, merging the
+manifest in ascending finding order with F-24 moved last (it needs F-04 and
+F-45 present). **This branch is a survey and not a candidate** — it is named
+that way on purpose. Seven findings are missing from it and merging it would
+ship an incomplete remediation.
+
+**F-15 is not in it.** Its round six was rejected mid-merge; the merge was
+three conflicts deep in `operations.php`, `AuditAction.php` and
+`docs/openapi.yaml` when the verdict arrived, and it was aborted. Round seven
+is in flight.
+
+Of the 36 manifest tips, F-15 excluded and F-17/F-46 not yet existing:
+**30 merged clean and six conflicted.** Each conflicting finding was recorded
+and skipped, so the survey measures each finding against *the set merged before
+it*, which is an approximation — the real integration will differ, and by how
+much is itself a fact the survey cannot give.
+
+| finding | files | what it is |
+|---|---|---|
+| **F-19** | 7 | The real one. A structural refactor of `ServiceController` onto `EndOfService`/`HowTheServiceEnded`, against F-12's added `retire()` method and its imports. Plus both `errors.php` registries, `api_admin.php`, `DecommissionDedicatedServer`, `PlaceOrder` and `TerminateHostingAccount`. |
+| F-34 | 3 | `schemas.php`, `AuditAction.php`, `IpAllocator.php` — two registries and one service. |
+| F-38 | 2 | `Makefile`, `check-ci-cannot-apply.py` — **against the coordinator's own work**, see below. |
+| F-39 | 2 | `.github/workflows/ci.yml`, `docs/runbooks/drift.md` — same cause. |
+| F-27 | 1 | `CheckoutRejectedException.php`. |
+| F-41 | 1 | `tests/TestCase.php`. |
+
+### Two of the six are mine, and they were avoidable
+
+F-38's and F-39's conflicts are not between findings. They are between those
+findings and **work I did on the integration branch today**: the three CI
+validator self-tests touched `.github/workflows/ci.yml`, the `Makefile` and
+`check-ci-cannot-apply.py`, and F-38's unmerged tip changes the same three
+files because F-38 *is* the CI-gates finding.
+
+I knew F-38's tip was unmerged. I wrote the self-tests on the integration
+branch anyway, because they were coordinator hygiene and felt separate from any
+finding. They were not separate: they are in F-38's subject matter, in F-38's
+files. **Work in a closed finding's files belongs on top of that finding's
+tip, or after integration — not beside it.** The cost here is small, two
+mechanical conflicts, and the rule is worth more than the cost.
+
+### The union resolution was exercised and it holds
+
+The two `errors.php` registries were resolved by union before F-19 was set
+aside, and the check the ledger prescribes was run rather than assumed:
+**296 keys in `en`, 296 in `ar`, no key in one and not the other.** One
+genuine value conflict surfaced under the union — `provider_request_failed`,
+where F-18 had deliberately rewritten both the English and the Arabic and F-19
+still carried the old wording — and it is exactly the kind a careless union
+resolves wrongly by taking whichever side git printed second.
+
+### What the survey establishes about composition
+
+On the 30-finding tree, with the two colliding migrations renumbered under
+F-32's scheme:
+
+- `./vendor/bin/pint --test` at tree scope: **passed**.
+- `php artisan migrate:fresh` against `lynomia_test_intg`: **clean**, no
+  ordering failure and no duplicate-timestamp ambiguity left.
+- The application database was checked afterwards and still holds its 111
+  tables, because `migrate:fresh` from `apps/control-plane` is the one command
+  in this repository that has already been run against the wrong database once.
+
+So thirty findings compose at the level of syntax, style and schema. Whether
+they compose behaviourally is the suite, and that is a separate measurement.
