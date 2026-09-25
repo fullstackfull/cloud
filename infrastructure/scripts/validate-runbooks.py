@@ -92,6 +92,25 @@ def main(argv: list[str]) -> int:
         f"{len(targets)} file(s), {referenced} artisan invocation(s), "
         f"{len(defined)} command(s) defined by this application"
     )
+
+    # A check with nothing to check is not a check that found nothing wrong.
+    # The empty `defined` set is already refused above; this is the other
+    # direction, and it is the one that has actually happened in this
+    # repository before -- a step scanning a directory that had been moved,
+    # printing a green line for years. If docs/runbooks is renamed, or the
+    # invocation regex stops matching the way the runbooks are written, the
+    # subject goes empty and everything downstream of it goes quiet.
+    if referenced == 0:
+        print(
+            f"found no `php artisan` invocation anywhere in {len(targets)} "
+            f"documentation file(s). Either the runbooks moved out of "
+            f"docs/runbooks and the infrastructure tree, or they stopped "
+            f"spelling commands in a way this recognises. A gate with no "
+            f"subject is not a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
     for problem in problems:
         print(f"  FAIL {problem}", file=sys.stderr)
 

@@ -208,6 +208,24 @@ def main(argv: list[str]) -> int:
         f"{len(exported)} exported by the control plane, "
         f"{len(declared - exported)} declared by a collector contract"
     )
+
+    # The absent rules directory is already refused above. This is the case in
+    # between: files are there, they parse, and not one rule came out of them.
+    # A `groups:` key that has been renamed, or a rules file that is now a
+    # Prometheus `rule_files:` include rather than the rules themselves, gets
+    # exactly this far -- every assertion below iterates an empty list and the
+    # job prints a green line. An alerting configuration with no alerts in it
+    # is not a configuration this check has approved.
+    if total_rules == 0:
+        print(
+            f"{len(rule_files)} rule file(s) declare no rules at all. Every "
+            f"check below this point iterates an empty list, so a green result "
+            f"here would mean nothing was examined rather than nothing was "
+            f"wrong.",
+            file=sys.stderr,
+        )
+        return 1
+
     for name in unimplemented:
         print(
             f"  NOTE the textfile collector for infrastructure/{name} is declared "
