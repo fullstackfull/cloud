@@ -68,7 +68,6 @@ round two and are already in the tree.
 | When | Findings merged | Backend suite | Proofs |
 |---|---|---|---|
 | after F-04 (`2b40b61`) | F-04, F-08, F-11, F-12, F-13, F-14, F-18, F-22, F-23 | 4,279 / 4,279 passed, 154,383 assertions | JSON `tests == passed`; junit 545 testsuites, all `skipped="0"`; exit 0 |
-
 | after F-15 + F-04 × F-15 (`9065968`) | + F-17, F-15 | 4,326 / 4,327 — one timing-dependent failure in the new F-04 × F-15 test (`updated_at` to the second), fixed next commit, 5/5 green after | exit 1 on that run |
 
 Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
