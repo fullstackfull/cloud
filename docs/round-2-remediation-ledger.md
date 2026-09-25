@@ -5660,3 +5660,99 @@ over a real omission for as long as nobody needed the answer.
 
 The integration would have needed the answer. That is the only reason either was
 found now rather than in the middle of merging.
+
+
+## The cross-branch overlap, computed at last: 31 files of 378
+
+Owed since the fifth stoppage and blocked until every closed row named an
+integrating tip, which it now does. Across the **28 closed findings that have
+work to merge** — the other nine being pre-programme and already on the
+integration branch — the union of changed files is **378**, and **31** are
+touched by more than one finding. That is the whole integration read, and it is
+smaller than I expected.
+
+| n | file | findings |
+|---|---|---|
+| 5 | `apps/control-plane/lang/ar/errors.php` | F-04 F-11 F-12 F-18 F-19 |
+| 5 | `apps/control-plane/lang/en/errors.php` | F-04 F-11 F-12 F-18 F-19 |
+| 5 | `apps/control-plane/tests/Feature/Console/ConsolePermitConcurrencyTest.php` | F-04 F-13 F-29 F-31 F-43 |
+| 4 | `apps/control-plane/routes/api_admin.php` | F-04 F-12 F-18 F-19 |
+| 4 | `apps/control-plane/tests/Feature/Queue/TheNewSweepsRunOutsideThisProcessTest.php` | F-04 F-13 F-29 F-31 |
+| 4 | `apps/control-plane/tests/Feature/Queue/WorkerHarness.php` | F-04 F-13 F-29 F-31 |
+| 3 | `apps/control-plane/.env.example` | F-08 F-26 F-37 |
+| 3 | `apps/control-plane/resources/openapi/operations.php` | F-04 F-12 F-26 |
+| 3 | `apps/web/src/i18n/locales/ar.json` | F-04 F-20 F-21 |
+| 3 | `apps/web/src/i18n/locales/en.json` | F-04 F-20 F-21 |
+| 3 | `docs/openapi.yaml` | F-04 F-12 F-26 |
+| 2 | `apps/control-plane/bootstrap/app.php` | F-27 F-31 |
+| 2 | `apps/control-plane/resources/openapi/schemas.php` | F-04 F-12 |
+| 2 | `apps/control-plane/routes/console.php` | F-36 F-37 |
+| 2 | `apps/control-plane/src/Modules/Admin/Http/Controllers/HostingController.php` | F-04 F-18 |
+| 2 | `apps/control-plane/src/Modules/Admin/Http/Controllers/ServiceController.php` | F-12 F-19 |
+| 2 | `apps/control-plane/src/Modules/Audit/Domain/Enums/AuditAction.php` | F-04 F-12 |
+| 2 | `apps/control-plane/src/Modules/Dedicated/Application/Actions/DecommissionDedicatedServer.php` | F-12 F-19 |
+| 2 | `apps/control-plane/src/Modules/Dedicated/Domain/Exceptions/DecommissionRefusedException.php` | F-12 F-19 |
+| 2 | `apps/control-plane/src/Modules/Orders/Application/Actions/PlaceOrder.php` | F-04 F-19 |
+| 2 | `apps/control-plane/src/Modules/Orders/Domain/Exceptions/CheckoutRejectedException.php` | F-04 F-27 |
+| 2 | `apps/control-plane/src/Modules/SharedHosting/Application/Actions/TerminateHostingAccount.php` | F-18 F-19 |
+| 2 | `apps/control-plane/src/Modules/Subscriptions/Application/Listeners/StartDunningOnFailedPayment.php` | F-08 F-19 |
+| 2 | `apps/control-plane/tests/Architecture/LayeringTest.php` | F-19 F-40 |
+| 2 | `apps/control-plane/tests/Feature/Simulation/AControlledDriverThatSaysItDidSomethingDidItTest.php` | F-11 F-24 |
+| 2 | `apps/control-plane/tests/Feature/Simulation/TheVpsGoldenPathTest.php` | F-19 F-35 |
+| 2 | `docs/dns.md` | F-11 F-26 |
+| 2 | `docs/monitoring.md` | F-22 F-37 |
+| 2 | `docs/production-checklist.md` | F-22 F-31 |
+| 2 | `docs/runbooks/drift.md` | F-22 F-39 |
+| 2 | `docs/runbooks/queue-backlog.md` | F-30 F-39 |
+
+**The eight still-open findings are not in this table** and will add to it. The
+figures are re-derivable from the ledger itself: take each `CLOSED` row's
+integrating tip, diff it against its merge-base with the integration branch, and
+union the paths.
+
+### What the contended files need, which is not the same answer for each
+
+**Three groups need no merge judgement at all, and two of them must not get one.**
+
+- **`docs/openapi.yaml` (F-04, F-12, F-26) is generated.** Merging it textually
+  is the wrong operation whatever the conflict looks like; it is regenerated
+  with `php artisan openapi:generate` after the sources merge, and
+  `--check` is the gate that says the regeneration landed. Its source,
+  `resources/openapi/operations.php`, is hand-written and is a real merge.
+- **The two `errors.php` catalogues (five findings each) and the two locale
+  JSONs (three each)** are key/value catalogues where the expected conflict is
+  additive. The risk is not the merge, it is a **duplicate key** or two findings
+  rewording one shared message, neither of which a clean merge would report.
+  Check keys as a set afterwards, in both languages, and diff the message text
+  for keys more than one finding touched.
+- **`.env.example` (F-08, F-26, F-37)** is where this programme has already made
+  an arithmetic error about line distance. Additive; verify against
+  `.env.testing.example`, which CI copies.
+
+**Three are load-bearing infrastructure and want a real read.**
+`tests/Feature/Queue/WorkerHarness.php` (F-04, F-13, F-29, F-31) is the harness
+the entire thirteen-worktree pool runs through, and a bad merge there produces
+failures in every finding at once, attributed to none of them.
+`ConsolePermitConcurrencyTest.php` is touched by **five**.
+`tests/Architecture/LayeringTest.php` (F-19, F-40) holds the rules everything
+else is measured against.
+
+**And one is already understood.** `docs/runbooks/drift.md` (F-22, F-39) is the
+conflict I performed rather than predicted, written up above: the two findings
+fixed one defect in opposite directions, the resolution is F-22's side plus a
+`--write` plus one deleted register row, and my standing warning about that row
+was wrong.
+
+### The count is the reassuring part and the pattern is not
+
+Eight percent contention across twenty-eight branches developed in isolation is
+a good outcome for §7, and it is the strongest evidence I have that the
+worktree-per-finding discipline paid for its considerable cost.
+
+But look at *which* files they are. The top six are a translation catalogue, a
+test harness, a route file, an OpenAPI source and two locale bundles — **shared
+registries, not shared logic.** Almost nothing in `src/` is contended: the
+module boundaries held. What findings collide over is the handful of
+repository-wide lists that every feature has to add a line to, and those are
+exactly the files where a clean textual merge is least informative about whether
+the result is correct.
