@@ -167,10 +167,90 @@ all:
 """,
         "only REIMAGE_ALLOWED may be wiped",
     ),
+    # F-38. Ansible puts a host listed directly under `all: hosts:` in the
+    # inventory exactly as it puts one under a child group, and applies
+    # `all: vars:` to every host. The walk used to start at `all.children`, so
+    # such a host -- whatever it carried -- was not in the count and not
+    # checked, and the file printed `N host(s), ok` over it.
+    (
+        "a host declared directly under all: with no safety_class is refused",
+        """
+all:
+  hosts:
+    stray-1:
+      ansible_host: 198.51.100.20
+""",
+        "does not declare safety_class",
+    ),
+    (
+        "a host declared directly under all: is checked for secrets too",
+        """
+all:
+  hosts:
+    stray-1:
+      ansible_host: 198.51.100.20
+      safety_class: DISCOVERY_ONLY
+      bmc_password: hunter2
+""",
+        "reads as a secret",
+    ),
+    (
+        "a well-formed host declared directly under all: passes",
+        """
+all:
+  hosts:
+    stray-1:
+      ansible_host: 198.51.100.20
+      safety_class: DISCOVERY_ONLY
+""",
+        None,
+    ),
+    (
+        "a class set once on all: vars covers every host in the inventory",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  children:
+    group:
+      hosts:
+        host-1:
+          ansible_host: 198.51.100.1
+""",
+        None,
+    ),
+    (
+        "a secret-named variable in all: vars is caught on the hosts it reaches",
+        """
+all:
+  vars:
+    vault_token: s.abcdef
+  children:
+    group:
+      hosts:
+        host-1:
+          ansible_host: 198.51.100.1
+          safety_class: DISCOVERY_ONLY
+""",
+        "reads as a secret",
+    ),
 ]
+
+# The table above is this self-test's subject; emptied, it would print
+# `0/0 passed` and exit 0 under a step named "still rejects what it claims to
+# reject". The count is literal source in this file, maintained by whoever
+# edits the table, so adding or removing a case is a deliberate edit of this
+# number too.
+EXPECTED_CASES = 20
 
 
 def main() -> int:
+    if len(CASES) != EXPECTED_CASES:
+        print(
+            f"the case table holds {len(CASES)} case(s) and this file says "
+            f"{EXPECTED_CASES}; change both together or neither"
+        )
+        return 1
     failures = 0
     for name, document, expected in CASES:
         problems = run(document)

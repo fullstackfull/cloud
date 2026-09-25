@@ -83,7 +83,7 @@ def step(run_body: str) -> str:
 """
 
 
-CASES: list[tuple[str, dict[str, str] | None, str | None]] = [
+CASES: list[tuple[str, dict[str, str] | None, str | tuple[str, ...] | None]] = [
     ("a workflow that only validates passes", {"ci.yml": GOOD}, None),
     (
         "`tofu apply` is caught",
@@ -174,6 +174,77 @@ CASES: list[tuple[str, dict[str, str] | None, str | None]] = [
         {"ci.yml": step("python3 infrastructure/scripts/check-ci-cannot-apply.py .")},
         None,
     ),
+    # F-38. The gate used to skip, before inspecting anything, every step whose
+    # body merely CONTAINED its own file name -- and it did so before stripping
+    # comments, so a comment was enough. The four cases below each went green
+    # over an apply while the exemption stood.
+    (
+        "a comment naming this gate does not exempt the apply below it",
+        {
+            "ci.yml": GOOD
+            + """      - name: the step under test
+        run: |
+          # guarded by check-ci-cannot-apply.py elsewhere
+          tofu apply -auto-approve
+"""
+        },
+        "applies OpenTofu",
+    ),
+    (
+        "a real command that mentions this gate is still inspected",
+        {"ci.yml": step("python3 infrastructure/scripts/check-ci-cannot-apply.py . && tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "two applies that each mention this gate are both caught",
+        {
+            "ci.yml": """
+name: ci
+on: [push]
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: first apply
+        run: |
+          # check-ci-cannot-apply.py has approved this workflow
+          tofu apply -auto-approve
+      - name: second apply
+        run: python3 check-ci-cannot-apply.py . ; terraform apply
+"""
+        },
+        ("step 'first apply' applies OpenTofu", "step 'second apply' applies OpenTofu"),
+    ),
+    (
+        "a step whose `run:` is empty reaches the empty-subject refusal",
+        {
+            "ci.yml": """
+name: ci
+on: [push]
+jobs:
+  hollow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: nothing to run
+        run: ""
+"""
+        },
+        "inspected no run steps",
+    ),
+    # F-38. Actions runs `.yaml` exactly as it runs `.yml`, and the gate used
+    # to glob only the latter: a `deploy.yaml` that applied infrastructure was
+    # a file this check never opened, beside a `ci.yml` it passed.
+    (
+        "an apply in a `.yaml` workflow is caught",
+        {"ci.yml": GOOD, "deploy.yaml": step("tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a tree whose only workflow is `.yaml` is inspected, not refused as empty",
+        {"ci.yaml": GOOD},
+        None,
+    ),
     (
         "a `uses:` step with no `run:` is skipped rather than crashed on",
         {
@@ -196,14 +267,29 @@ jobs:
 ]
 
 
+# The table above is this self-test's subject, and a self-test over an emptied
+# table prints `0/0 passed` and exits 0 -- the very shape the gate it proves
+# exists to refuse. The count is literal source in this file, maintained by
+# whoever edits the table, so adding or removing a case is a deliberate edit
+# of this number too.
+EXPECTED_CASES = 21
+
+
 def main() -> int:
+    if len(CASES) != EXPECTED_CASES:
+        print(
+            f"the case table holds {len(CASES)} case(s) and this file says "
+            f"{EXPECTED_CASES}; change both together or neither"
+        )
+        return 1
     failures = 0
     for name, workflows, expected in CASES:
         code, err = bare() if workflows is None else run(workflows)
         if expected is None:
             ok = code == 0 and not err.strip()
         else:
-            ok = code == 1 and expected in err
+            wanted = (expected,) if isinstance(expected, str) else expected
+            ok = code == 1 and all(each in err for each in wanted)
         print(f"{'PASS' if ok else 'FAIL'}  {name}")
         if not ok:
             failures += 1
