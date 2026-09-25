@@ -145,6 +145,29 @@ CASES: list[tuple[str, dict, str | None]] = [
         None,
     ),
     (
+        "a cell naming two statuses is refused",
+        {"rows": "| F-14 | High | GAP | `OPEN` \u2014 **`CLOSED`** \u2014 round one (`REAL_SHA`) | Round one at `REAL_SHA`. |\n"},
+        "names 2 statuses",
+    ),
+    (
+        "and it is refused even though it would otherwise pass as CLOSED",
+        # The point of the check. This cell's sha resolves and its narrative
+        # names it, so both other halves are satisfied -- and the completeness
+        # half would never have run, because it anchors on the first word.
+        {"rows": "| F-15 | High | GAP | `PARTIAL` \u2014 **`CLOSED`** \u2014 (`REAL_SHA`) | Round one at `REAL_SHA`. |\n"},
+        "names 2 statuses",
+    ),
+    (
+        "a cell naming no status at all is refused",
+        {"rows": "| F-16 | High | GAP | round one landed | Round one landed. |\n"},
+        "names none of the five allowed statuses",
+    ),
+    (
+        "the word closed in a sentence is not a second status",
+        {"rows": "| F-17 | High | GAP | **`CLOSED`** \u2014 (`REAL_SHA`), both limbs closed | Round one at `REAL_SHA` closed both. |\n"},
+        None,
+    ),
+    (
         "a table whose shape has changed is refused rather than passed",
         {"rows": "F-11 | High | GAP | CLOSED | no pipes at the ends\n"},
         "matched no rows at all",

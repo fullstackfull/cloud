@@ -49,6 +49,20 @@ look like success.
 Slugs are deliberately NOT accepted here. A slug names a worktree, not a
 commit, and the whole point of the failure above is that the two can disagree.
 
+EXACTLY ONE STATUS. A status cell must name one of the five allowed statuses
+and no more. This was added after F-45's cell was found reading
+
+    `OPEN` -- **`CLOSED`** -- round one (`6f03478`) ...
+
+which is what an in-place edit leaves when the old status is not removed. It
+had been there for days, and the cost was not cosmetic: the completeness check
+above anchors at the START of the cell, so a row that leads with the wrong word
+is not recognised as CLOSED and is never asked for a sha. A row can therefore
+DISPLAY as closed and be exempt from every check that applies to a closed row
+-- and a reader skimming the table sees "OPEN" on a finding that is done. One
+defect produced a wrong answer in both directions at once, which is the
+argument for checking the shape of the cell and not only its first word.
+
 A finding closed BEFORE the branch-per-finding regime has nothing to integrate,
 and must say so in the words "already on the integration branch" rather than by
 saying nothing. That is not an escape hatch: the phrase is only accepted when
@@ -75,6 +89,11 @@ ROW = re.compile(r"^\| (F-\d\d) \| ([^|]*)\| ([^|]*)\| ([^|]*)\| (.*)\|\s*$")
 CLOSED = re.compile(r"\**`?CLOSED`?")
 SHA_SHAPED = re.compile(r"[0-9a-f]{7,40}")
 ALREADY = re.compile(r"already on the integration branch")
+# The five statuses the programme allows, matched case-sensitively so that the
+# word "closed" in a sentence is not one. A cell must contain exactly one.
+STATUSES = re.compile(
+    r"\b(CLOSED|OPEN|PARTIAL|BLOCKED_BY_EXISTING_FINDING|NOT_APPLICABLE_WITH_PROOF)\b"
+)
 
 
 def has_branch(finding: str) -> bool:
@@ -104,6 +123,7 @@ def main(argv: list[str]) -> int:
     failures: list[tuple[str, list[str]]] = []
     shaless: list[str] = []
     claimed_but_branched: list[str] = []
+    ambiguous: list[tuple[str, list[str]]] = []
 
     for line in path.read_text(encoding="utf-8").splitlines():
         match = ROW.match(line)
@@ -111,6 +131,13 @@ def main(argv: list[str]) -> int:
             continue
         rows += 1
         finding, _sev, _cls, status, narrative = match.groups()
+
+        # Exactly one status, checked BEFORE the completeness half, because
+        # the completeness half anchors at the start of the cell and would
+        # quietly skip a row whose statuses are in the wrong order.
+        named = sorted(set(STATUSES.findall(status)))
+        if len(named) != 1:
+            ambiguous.append((finding, named))
 
         # Completeness: a CLOSED row has to name a commit somebody can check
         # out. `git cat-file -e` rather than a regex, because a plausible-
@@ -149,6 +176,19 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
 
+    for finding, named in ambiguous:
+        if named:
+            print(
+                f"{finding}: status cell names {len(named)} statuses "
+                f"({', '.join(named)}) -- a row has one status",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"{finding}: status cell names none of the five allowed statuses",
+                file=sys.stderr,
+            )
+
     for finding in shaless:
         print(
             f"{finding}: status is CLOSED and names no sha that resolves to a commit "
@@ -163,7 +203,12 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
 
-    if failures or shaless or claimed_but_branched:
+    if failures or shaless or claimed_but_branched or ambiguous:
+        if ambiguous:
+            print(
+                f"\n{len(ambiguous)} of {rows} rows do not name exactly one status.",
+                file=sys.stderr,
+            )
         if failures:
             print(
                 f"\n{len(failures)} of {rows} rows advertise a round their narrative never records.",
@@ -183,8 +228,9 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(
-        f"validate-ledger-rows: {rows} rows, every status token present in its own "
-        f"narrative, every CLOSED row naming a resolvable commit"
+        f"validate-ledger-rows: {rows} rows, each naming exactly one status, every "
+        f"status token present in its own narrative, every CLOSED row naming a "
+        f"resolvable commit"
     )
     return 0
 
