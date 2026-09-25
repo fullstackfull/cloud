@@ -2,7 +2,18 @@
 
 ## What you are seeing
 
-`ProviderTasksIndeterminate`, or an operation sitting in `indeterminate`.
+One of the two alerts that send you here, or an operation sitting in
+`indeterminate` on the operator portal:
+
+- **`ProvisioningJobsAwaitingReview`** — at least one provisioning job has been
+  in `needs_review` for 30 minutes.
+- **`OrdersInManualReview`** — at least one order has been held in manual review
+  for two hours.
+
+Not every operation of unknown outcome raises either. Registrations, renewals
+and transfers do not (see `registrar-timeout.md`), and neither does a provider
+task behind a job the platform has already called a success:
+`lynomia_provider_task_total` is exported, and no rule reads it.
 
 ## What it means
 

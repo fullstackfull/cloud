@@ -2,7 +2,21 @@
 
 ## What you are seeing
 
-`QueueBacklog`, `QueueStalled` or `FailedJobsRising`.
+One of three alerts, or a queue you can see is not moving:
+
+- **`QueueBacklogGrowing`** (warning, platform channel) — a queue has held more
+  than 250 jobs and kept growing for 15 minutes.
+- **`QueueBacklogSevere`** (critical, pages) — a queue has held more than 2,000
+  jobs for 10 minutes. While it fires, it silences `QueueBacklogGrowing` for the
+  same queue.
+- **`FailedJobsAppearing`** (warning, platform channel) — more than five jobs
+  moved to `failed_jobs` in 15 minutes.
+
+No alert watches for a stalled queue as such — case 2 below, no workers and
+nothing completing. `lynomia_queue_depth` shows it only as a depth that stops
+falling; it pages once enough new work piles up behind it to trip
+`QueueBacklogGrowing`, and not before. Nothing the control plane exports says
+whether a worker is alive.
 
 ## What it means
 
