@@ -7,6 +7,8 @@ namespace Tests\Feature\Orders;
 use Carbon\CarbonImmutable;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SettlementBasis;
@@ -28,11 +30,20 @@ use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Payments\Domain\Events\PaymentFailed;
+use Lynomia\Modules\Provisioning\Application\Actions\CompensateFailedJob;
+use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
+use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
+use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobStarted;
+use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
+use Lynomia\Modules\Provisioning\Domain\StateMachines\ProvisioningJobStateMachine;
+use Lynomia\Modules\Provisioning\Domain\StateMachines\ServiceStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\Subscriptions\Application\Actions\TransitionSubscription;
@@ -112,6 +123,63 @@ final class AnOrderFollowsWhatItBoughtTest extends TestCase
 
         $this->assertSame(OrderStatus::ManualReview, $order->refresh()->status);
         $this->assertNull($order->completed_at);
+    }
+
+    #[Test]
+    public function the_order_says_its_build_has_begun_when_a_worker_claims_it(): void
+    {
+        /*
+         * An ordered service is `provisioning` from the moment its build is
+         * asked for, so the claim is the one step of a build that moves no
+         * service status — and the only thing that can tell the order its
+         * build has actually begun. One attempt, run by hand: no node has
+         * room, so it is requeued for a later try, and nothing else moves.
+         */
+        $this->estateThatCanPlaceAVps();
+        Queue::fake([RunProvisioningJob::class]);
+
+        $order = $this->buy($this->customer(), $this->vpsPlan());
+
+        $this->assertSame(OrderStatus::QueuedForProvisioning, $order->status);
+
+        $job = ProvisioningJob::query()->where('order_id', $order->getKey())->sole();
+
+        (new RunProvisioningJob((string) $job->getKey()))->handle(
+            app(HandlerRegistry::class),
+            app(CompensateFailedJob::class),
+            app(TransitionService::class),
+            app(ServiceStateMachine::class),
+            app(ProvisioningJobStateMachine::class),
+            app(SecretRedactor::class),
+        );
+
+        $this->assertSame(ProvisioningJobStatus::Queued, $job->fresh()?->status);
+        $this->assertSame(1, $job->fresh()?->attempts);
+        $this->assertSame(ServiceStatus::Provisioning, $this->serviceOf($order)->status);
+
+        $this->assertSame(OrderStatus::Provisioning, $order->refresh()->status);
+    }
+
+    #[Test]
+    public function a_missed_wake_up_is_caught_up_along_the_road_the_purchase_travelled(): void
+    {
+        /*
+         * The order's listener swallows its own failures, so a wake-up can be
+         * lost. The next one reads the facts afresh and walks the order there
+         * through the states the purchase really passed, rather than jumping —
+         * `paid → active` is not a move the table has.
+         */
+        Event::fake([ServiceStatusChanged::class, ProvisioningJobStarted::class]);
+
+        $order = $this->buySharedHosting($this->customer(), $this->sharedHostingPlan());
+
+        // Nothing announced; fulfilment's own last look caught the order up.
+        Event::assertDispatched(ServiceStatusChanged::class);
+        $this->assertSame(OrderStatus::Active, $order->status);
+        $this->assertSame(
+            ['pending_payment', 'paid', 'queued_for_provisioning', 'provisioning', 'active'],
+            $this->trailOf($order),
+        );
     }
 
     #[Test]
