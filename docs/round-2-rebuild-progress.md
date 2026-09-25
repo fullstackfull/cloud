@@ -20,14 +20,14 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-14 | Critical | rebuilt — 91 new tests (71 red→green), SharedHosting+Architecture green | `b2f33d1` |
 | F-08 | High | rebuilt — 12 of 47 new tests red→green; Queue+Billing+Architecture green | `f24548a` |
 | F-11 | High | rebuilt — new contract tests red→green; Dns+Simulation+Security+Architecture green; closes F-24 DNS limb | `d69856a` |
-| F-12 | High | queued | |
-| F-15 | High | queued (round seven outstanding) | |
+| F-12 | High | rebuilt — 9+14 new tests red→green; Dedicated+Ipam+Api+Security+Architecture green | `e0aa0ab` |
+| F-15 | High | in progress (round six + round-seven fixes) | |
 | F-17 | High | queued (PARTIAL: control half) | |
-| F-18 | High | queued | |
+| F-18 | High | in progress | |
 | F-19 | High | queued | |
 | F-20 | High | queued | |
 | F-21 | High | queued | |
-| F-22 | High | queued | |
+| F-22 | High | in progress | |
 | F-23 | High | queued | |
 | F-24 | High | queued | |
 | F-41 | High | queued (last: changes the test harness) | |
