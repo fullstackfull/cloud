@@ -6,10 +6,12 @@ namespace Lynomia\Modules\Dns\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Dns\Application\Jobs\PublishZone;
+use Lynomia\Modules\Dns\Application\Services\ConfiguredReservedZones;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsRefusedException;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DomainName;
+use Lynomia\Modules\Dns\Domain\ValueObjects\ReservedZones;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -45,6 +47,7 @@ final readonly class ClaimZone
 {
     public function __construct(
         private DnsProviderFactory $providers,
+        private ConfiguredReservedZones $reserved,
     ) {}
 
     /**
@@ -115,26 +118,21 @@ final readonly class ClaimZone
     }
 
     /**
+     * The platform's own names, every parent of one and everything beneath one.
+     *
+     * What is reserved, and why all three directions, is written once, on
+     * {@see ReservedZones}; this is where it is enforced. The list is the one
+     * the estate preflight reports on, read from the same place, so an
+     * operator who is told what is held is told what this refuses.
+     *
      * @throws DnsRefusedException
+     * @throws InvalidDomainNameException when a configured entry is not a name. Every claim is
+     *                                    refused until it is corrected, and the preflight says so.
      */
     private function assertNotReserved(DomainName $domain): void
     {
-        /** @var list<string> $reserved */
-        $reserved = (array) config('dns.reserved_zones', []);
-
-        foreach ($reserved as $name) {
-            $held = DomainName::fromString($name);
-
-            /*
-             * Both directions. Claiming the platform's own zone is the obvious
-             * attack; claiming a *parent* of it is the same attack one step
-             * out, and it is the one that gets missed — an account holding
-             * `example.com` can serve `panel.example.com` whatever the platform
-             * thinks it owns.
-             */
-            if ($domain->equals($held) || $held->isWithin($domain)) {
-                throw DnsRefusedException::zoneIsReserved($domain->value());
-            }
+        if ($this->reserved->read()->protects($domain)) {
+            throw DnsRefusedException::zoneIsReserved($domain->value());
         }
     }
 

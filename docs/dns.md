@@ -48,7 +48,7 @@ Three names are refused outright:
 
 | Refused | Why |
 | --- | --- |
-| The platform's own zones, and any parent of one | An account holding `lynomia.com` can serve `panel.lynomia.com` whatever this platform thinks it owns. Configured in `dns.reserved_zones`. |
+| The platform's own zones, any parent of one, and anything beneath one | An account holding `lynomia.com` can serve `panel.lynomia.com` whatever this platform thinks it owns; an account holding `db.panel.lynomia.com` holds a piece of the platform's name space, in the provider account the platform publishes from. The names are those listed in `dns.reserved_zones` plus the hosts of `APP_URL` and `FRONTEND_URL` — see [Reserved zones](#reserved-zones). |
 | Anything under `in-addr.arpa` or `ip6.arpa` | Reverse zones follow the address block. Set per address in the IPAM surface. |
 | Anything that is not a domain name | ASCII only (internationalised names must arrive as punycode — converting them here would mean this platform deciding what `münchen.de` means, and homograph attacks are exactly a disagreement about that), at least two labels, no empty labels, no leading or trailing hyphen, and no all-numeric final label. |
 
@@ -246,7 +246,7 @@ how a monitoring system is taken down from inside.
 | --- | --- | --- |
 | `dns.zones_per_customer` | 50 | Zones one account may hold |
 | `dns.records_per_zone` | 250 | Records in one zone |
-| `dns.reserved_zones` | empty | Names no account may claim, and their children |
+| `dns.reserved_zones` | empty | Names no account may claim, with their parents and their children, added to the hosts of `APP_URL` and `FRONTEND_URL` — see below |
 | `dns.reconcile_after_hours` | 6 | How stale a zone's picture may be |
 | `dns.reconcile_batch` | 50 | Zones looked at per run |
 
@@ -255,3 +255,45 @@ factory reads: an operator who has configured Cloudflare has configured
 Cloudflare, and two keys would let one deployment hold a forward provider and a
 reverse provider talking to different accounts. They remain two contracts,
 because the capabilities are genuinely different.
+
+### Reserved zones
+
+`DNS_RESERVED_ZONES` ships empty; the reservation does not. The host of
+`APP_URL` and the host of `FRONTEND_URL` are reserved as well, whenever they
+are domain names. An estate that has put the control plane and
+the portal on their real names is covered without saying so twice.
+
+A host contributes itself, not its registrable domain — the registrable domain
+of `panel.example.co.uk` cannot be worked out without a public-suffix list, and
+guessing would reserve `co.uk`. Holding the host still refuses every parent of
+it, so the registrable domain cannot be claimed either; what it does not cover
+is a sibling. **List the registrable domain in `DNS_RESERVED_ZONES`** and every
+name beneath it is covered, siblings included.
+
+A host that is not a domain name — an address, or a single label such as the
+one a development machine answers on — contributes nothing, and nothing is lost
+by that: the name rules refuse the same host as a zone before any reservation
+is read, so no account can claim it either.
+
+An entry in `DNS_RESERVED_ZONES` that is not a domain name refuses **every**
+claim, by every account, until it is corrected. The whole list is read before
+any claim is compared with it; skipping a bad entry would protect less than was
+asked for and say nothing.
+
+The estate preflight (`php artisan infra:preflight --mode=…`, or the Control
+Center) carries one finding about all of this, `dns.reserved_zones`:
+
+| Status | When |
+| --- | --- |
+| `fail` | An entry in `DNS_RESERVED_ZONES` is not a domain name. The only blocking state. |
+| `warning` | Nothing is reserved at all, or `APP_URL` or `FRONTEND_URL` contributed no name. |
+| `pass` | Otherwise: a count of the entries held and the variables they came from. |
+
+It names variables and counts entries. It never quotes a reserved name or a
+configured value. The count is of entries, so a name and a host beneath it are
+two although the first covers the second.
+
+A change to the reservation applies to the next claim. It does not reach back
+to zones already held: nothing re-checks existing zones when the reservation
+changes, so a name that became reserved after an account claimed it stays with
+that account until an operator acts on it.
