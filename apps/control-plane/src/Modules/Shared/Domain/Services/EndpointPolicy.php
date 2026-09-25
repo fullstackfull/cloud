@@ -19,9 +19,8 @@ use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
  * credential attached. This is the one place that says no.
  *
  *   - Loopback, link-local, unspecified, multicast, the cloud metadata
- *     addresses and the IANA special-purpose blocks no machine of ours lives
- *     in are refused everywhere, by literal and by what a hostname resolves
- *     to.
+ *     addresses and the IANA special-purpose blocks in `RESERVED_RANGES` are
+ *     refused everywhere, by literal and by what a hostname resolves to.
  *   - A provider that is somebody else's service (DNS, registrar, payment,
  *     email) is refused a private-range address: it is not on the
  *     management network and a private address for it is a mistake or an
@@ -59,7 +58,9 @@ use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
  *     covering blocks are refused whole — `::/8`, `2001::/23`, `2002::/16` —
  *     rather than enumerated inside, because an enumeration inside a block
  *     is a list waiting for the member it lacks.
- *   - IANA special-purpose blocks PHP's filter flags do not know about.
+ *   - IANA special-purpose blocks PHP's filter flags do not know about:
+ *     benchmarking, the IETF protocol assignments, the retired 6to4 relay
+ *     and site-local blocks, discard-only.
  *   - Zone identifiers (`fe80::1%eth0`), which name an interface on this
  *     host.
  *   - The root label (`169.254.169.254.`) and the separators UTS-46 maps to
@@ -142,9 +143,9 @@ use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
  * rebuilds this class with each anchor turned into `$` and records which row
  * notices. How many there are of each kind is deliberately not written down
  * here. What that row reads, and what it cannot see, is in its docblock, and
- * the guards it runs are why this file concatenates nothing, passes every
- * pattern to PCRE as one literal or one constant, imports no function, and
- * has no parent, interface or trait.
+ * the guards it runs are why this file concatenates nothing, hands PCRE each
+ * pattern as one literal or one constant wherever the function is called by
+ * its name, imports no function, and has no parent, interface or trait.
  */
 final readonly class EndpointPolicy
 {
@@ -216,8 +217,8 @@ final readonly class EndpointPolicy
      * with one of the rules elsewhere in the platform that judge a host and
      * are anchored with `$` would tell them apart — but it would assert a
      * relationship between rules nobody keeps in step, which is not a pin. It
-     * is `\z` for the same reason as every other anchor in this class: so that
-     * nobody has to work out whether it matters.
+     * is `\z` anyway, so that whether it matters never depends on the
+     * control-character refusal staying where it is.
      */
     private const string HOST_CHARACTERS = '/^[a-z0-9._:-]+\z/';
 
@@ -398,7 +399,7 @@ final readonly class EndpointPolicy
     {
         /*
          * The character-class refusals. Each asks whether a character is
-         * present anywhere in the host, so neither has an end to anchor to.
+         * present anywhere in the host, so none has an end to anchor to.
          */
         if (preg_match('/[\x00-\x1f\x7f]/', $host) === 1) {
             throw EndpointRefused::because($original, 'the host contains a control character.');

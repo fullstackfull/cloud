@@ -21,10 +21,10 @@ use PHPUnit\Framework\Attributes\Test;
  *
  * The refusal names the address, which is right for an operator and wrong for
  * a customer: a power request is a customer route, and the address of a
- * machine on the management network is exactly what every dedicated resource
- * is written to withhold. So the refusal travels to the customer three layers
- * deep in translation — the factory raises the module's own "cannot build a
- * connection" exception naming only the endpoint id, the power action turns
+ * machine on the management network is what the dedicated resources are
+ * written to withhold. So the refusal is translated before it reaches the
+ * customer — the factory raises the module's own "cannot build a connection"
+ * exception naming the endpoint id and not the address, the power action turns
  * that into the customer's own server id and verb, and the address stays on
  * the original, which is kept as `previous` for the log.
  */

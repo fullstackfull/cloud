@@ -556,9 +556,9 @@ final class EverySpellingOfARefusedAddressIsStillThatAddressTest extends TestCas
      * Why this is derived rather than written
      * ---------------------------------------------------------------------
      *
-     * How many of the policy's anchors a test can see used to be stated in
-     * prose, in several places, and every correction of the number left one
-     * of the places behind. So nothing states it. This row reads the policy's
+     * A count of the policy's anchors that a test can see, stated in prose,
+     * goes stale the first time a pin moves and one of the places saying it
+     * is missed. So nothing states it. This row reads the policy's
      * source, finds each anchor, rebuilds the class with that one anchor
      * turned into `$`, runs the pinning rows' helpers against the copy, and
      * compares what failed with `PARTITION` by name — a diff names the anchor
@@ -573,8 +573,9 @@ final class EverySpellingOfARefusedAddressIsStillThatAddressTest extends TestCas
      * The walk sees a `\z` written as two contiguous characters inside one
      * single-quoted `T_CONSTANT_ENCAPSED_STRING`, and no other spelling. It is
      * a reading of the text standing in for a property of the execution, so
-     * every way of holding a pattern the walk would not see is refused by a
-     * guard over a property with one source, rather than by a list:
+     * where one property closes a way of holding a pattern the walk would not
+     * see, that way is refused by a guard over the property rather than by a
+     * list of spellings:
      *
      *   - No concatenation anywhere in the file. PHP has two concatenation
      *     operators, the binary `.` and `.=`, and a `\z` split across two
@@ -698,8 +699,9 @@ final class EverySpellingOfARefusedAddressIsStillThatAddressTest extends TestCas
      * `HOST_LABEL` against the Dns module's label rule, over every label of one
      * and two bytes and every `a<byte>a`.
      *
-     * The two rules are expected to differ in exactly two ways, and the row
-     * says which way each goes rather than counting them:
+     * The two rules are expected to differ only in the ways listed here — a
+     * difference of any other kind fails the row — and the row says which way
+     * each goes rather than counting them:
      *
      *   - an underscore: a host label may carry one, and a DNS record name the
      *     platform writes may not. Deliberate.
@@ -745,7 +747,7 @@ final class EverySpellingOfARefusedAddressIsStillThatAddressTest extends TestCas
             }
         }
 
-        self::assertSame([], $unexplained, 'The host label rule and the Dns module disagree about these labels, and neither difference this row declares explains them.');
+        self::assertSame([], $unexplained, 'The host label rule and the Dns module disagree about these labels, and no difference this row declares explains them.');
         self::assertSame([], $newlineAccepted, 'HOST_LABEL accepted a label that ends in a newline, which is what a `$` anchor does.');
         self::assertNotSame([], $underscore, 'No underscore label separates the two rules any more; the policy has stopped accepting underscores, and its docblock says it accepts them.');
 

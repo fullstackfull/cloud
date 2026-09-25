@@ -140,8 +140,9 @@ One policy, `EndpointPolicy` in the Shared module, decides where the platform ma
 connection. The Control Center asks it when a provider endpoint, compute cluster, hosting node,
 managed server or BMC is registered, and when a cluster or hosting node is edited; some roads
 ask again at use (below). It refuses loopback, link-local, multicast, the unspecified address,
-the cloud metadata services and the IANA special-purpose blocks for everybody, and private
-addresses for a provider that is not on our own hardware.
+the cloud metadata services and a named set of IANA special-purpose blocks (benchmarking, the
+IETF protocol assignments, the retired 6to4 relay and site-local blocks, discard-only) for
+everybody, and private addresses for a provider that is not on our own hardware.
 
 It judges **the address, not a spelling of it**. `0x7f000001`, `2130706433`, `0177.0.0.1` and
 `127.1` are all `127.0.0.1` to a resolver, and are refused as numbers before anything resolves
@@ -179,8 +180,10 @@ Two limits, named so nobody reads the policy as closing them:
 - **An AAAA record that exists only in `/etc/hosts`** (or another non-DNS `nsswitch` source) is
   invisible: the A lookup goes through the C library and sees it but reports only IPv4, and the
   AAAA lookup asks DNS alone. Seeing it properly needs `getaddrinfo`, which PHP exposes only
-  through ext-sockets, and this project does not declare that extension. Because an invisible
-  answer is a refusal rather than a pass, the gap cannot let a name through.
+  through ext-sockets, and this project does not declare that extension. A name with no address
+  the lookups can see is refused, so on its own an invisible answer is a refusal rather than a
+  pass. A name that also has a visible address is judged by the visible one only — arranging
+  that takes editing the control plane host's own `/etc/hosts` or name-service configuration.
 - **NAT64 is a topology question.** An IPv6-only management network that reaches IPv4-only
   BMCs through NAT64 cannot register them by their translated addresses, because the whole of
   `::/8` — which holds both NAT64 prefixes — is refused, and `64:ff9b::a9fe:a9fe` is exactly

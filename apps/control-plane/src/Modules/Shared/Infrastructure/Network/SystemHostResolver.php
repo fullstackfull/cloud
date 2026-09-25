@@ -24,14 +24,16 @@ use Lynomia\Modules\Shared\Domain\Contracts\HostResolver;
  * union. Closing that properly needs `getaddrinfo`, which PHP exposes only
  * through ext-sockets; composer.json does not declare that extension, and
  * relying on one a deployment is not required to have — or declaring it — is
- * a decision rather than a side effect. What keeps the residual from being a
- * way in is the policy
- * refusing a name it can see no address for: an invisible answer is a refusal,
- * not a pass.
+ * a decision rather than a side effect. Where that leaves a name with no
+ * address this union can see, the policy refuses it, so an invisible answer
+ * is a refusal rather than a pass. Where the name also has an address the
+ * union can see, that one is judged and the invisible one is not; arranging
+ * that takes editing this host's own `/etc/hosts` or name-service
+ * configuration.
  *
- * Not memoised here. The callers that dial repeatedly already hold what they
- * built per endpoint, and a cache in this class would outlive the record it
- * was answering for.
+ * Not memoised here: a cache in this class would outlive the record it was
+ * answering for. The dedicated provider factory, which asks on each power
+ * request, holds what it built per endpoint instead.
  */
 final readonly class SystemHostResolver implements HostResolver
 {

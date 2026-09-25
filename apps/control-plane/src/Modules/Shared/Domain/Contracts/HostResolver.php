@@ -17,11 +17,11 @@ namespace Lynomia\Modules\Shared\Domain\Contracts;
  * nothing a test suite can arrange. Behind a contract, a test says what the
  * name resolves to and watches the policy judge it.
  *
- * The second is that the suite must not make real lookups. Every test resolves
- * through a double bound in `Tests\TestCase`, so a name in a fixture is never
- * sent to a real resolver by the policy. That is a statement about this seam,
- * not about the suite: anything that resolves names without going through here
- * is outside it.
+ * The second is that the suite must not make real lookups. Tests answer names
+ * from a table instead: `Tests\TestCase` binds one for every test that extends
+ * it, and a test that builds the policy by hand passes one in. That is a
+ * statement about this seam, not about the suite: anything that resolves names
+ * without going through here is outside it.
  *
  * An implementation returns every address it can see — IPv4 and IPv6 — and an
  * empty list when it can see none. It does not throw for a name that does not
