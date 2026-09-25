@@ -9,7 +9,12 @@ use Illuminate\Cache\Repository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
+use Lynomia\Modules\Dedicated\Domain\Enums\PowerOperationOutcome;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedPowerOperation;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
@@ -286,6 +291,32 @@ final class MetricsQueryBudgetTest extends TestCase
             $pool = IpPool::factory()->create();
             $subnet = Subnet::factory()->for($pool, 'ipPool')->create();
             IpAddress::factory()->count(4)->for($subnet)->create();
+        }
+
+        /*
+         * Dedicated power operations, so the dedicated collector reads rows
+         * rather than an empty table. Without them its query count is the same
+         * at both measurements whatever it does internally, and a per-row loop
+         * in it would pass the N+1 assertion above — the assertion this budget
+         * leans on — without being seen.
+         *
+         * Four rows per pool, cycling three actions against four outcomes.
+         * `Claimed` is the first outcome, so every fourth row is a claim, and
+         * every row is a day old — past any lease — so the abandoned-claims
+         * count is exercised rather than always answering zero.
+         */
+        $server = DedicatedServer::factory()->create();
+        $actions = DedicatedPowerAction::cases();
+        $outcomes = PowerOperationOutcome::cases();
+
+        for ($i = 0; $i < $pools * 4; $i++) {
+            DedicatedPowerOperation::query()->create([
+                'dedicated_server_id' => $server->getKey(),
+                'action' => $actions[$i % count($actions)],
+                'idempotency_key' => 'dedicated:'.$server->getKey().':power:'.Str::ulid(),
+                'outcome' => $outcomes[$i % count($outcomes)],
+                'requested_at' => now()->subDay(),
+            ]);
         }
 
         DB::table('jobs')->insert([

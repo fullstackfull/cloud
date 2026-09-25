@@ -61,6 +61,10 @@ final class TheApplicationActuallyRegistersItsCollectorsTest extends TestCase
         'lynomia_backup_last_success_timestamp_seconds',
         'lynomia_backup_unverified_snapshots',
         'lynomia_backup_verify_last_run_timestamp_seconds',
+        // The dedicated power path: a reset the platform may have sent and
+        // cannot vouch for, and a claim whose worker is gone.
+        'lynomia_dedicated_power_operation_total',
+        'lynomia_dedicated_power_claims_abandoned',
     ];
 
     #[Test]
