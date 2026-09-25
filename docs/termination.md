@@ -104,7 +104,8 @@ virtual machine. It asks `EndOfService::authorityOver()` for every permission
 the kind needs, whether or not `force` is sent — for shared hosting that is
 `service.terminate` **and** `hosting_account.manage`, so it never asks less
 than `DELETE /api/admin/hosting-accounts/{account}` asks for the same account.
-`force` skips the retention window and nothing else.
+`force` skips each kind's suspension-and-window guard — so a service that is
+not suspended at all may be ended — and changes no permission.
 
 A service with no machine, server or account behind it used to be refused by
 every kind, so a purchase whose build failed could never end. It now ends with

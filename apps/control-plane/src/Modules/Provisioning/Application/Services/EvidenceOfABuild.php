@@ -25,8 +25,9 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * belonged to could never end and never gave its plan unit or coupon hold
  * back. The tempting repair is to read the absent row as "never built".
  *
- * It is the wrong reading for exactly one failure, and that failure is the
- * dangerous one. Reading the absent row as "never built" turns the one
+ * It is the wrong reading wherever a build got as far as a provider, and the
+ * most dangerous of those is a timeout. Reading the absent row as "never
+ * built" turns the one
  * failure the engine refuses to retry AUTOMATICALLY — a timeout, excluded by
  * FailureClass::isAutomaticallyRetryable() because the provider may have
  * finished the work after the platform stopped waiting, and retrying it

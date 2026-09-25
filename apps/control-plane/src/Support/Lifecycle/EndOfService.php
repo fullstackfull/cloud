@@ -35,8 +35,10 @@ use RuntimeException;
  * authorityOver() sits beside execute() and is matched on the same kinds, so a
  * kind added to one and not the other fails on the first request rather than
  * ending on a guess. It is what the operator's route asks before it acts, and
- * it is asked whatever `force` says: `force` decides the retention window and
- * nothing else. For shared hosting it is both `service.terminate` and
+ * it is asked whatever `force` says. `force` decides whether each kind's
+ * suspension-and-window guard applies — forced, a service that is not
+ * suspended at all may be ended — and changes no permission. For shared
+ * hosting it is both `service.terminate` and
  * `hosting_account.manage`, because the service route reaches
  * TerminateHostingAccount — F-18's action layer — without passing F-18's
  * controller gate on the hosting-account route, and must never be the weaker

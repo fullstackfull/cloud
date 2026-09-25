@@ -29,12 +29,14 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  * route did not reach hosting at all: it sent every service down the VPS path,
  * which refused a hosting service for having no virtual machine.
  *
- * So this is the service-shaped half, and the only thing it adds to the
- * account action is the ending. Every guard on the account is
+ * So this is the service-shaped half. What it adds is about the service —
+ * ending it once the account has gone, refusing one that has already ended,
+ * and ending one the panel never had (below). Every guard on the account is
  * TerminateHostingAccount's own — F-18's, status before date: a live account is
  * refused whoever asks unless forced, a suspended one inside its window is
- * refused unless forced — and none of them is re-implemented here, so the two
- * roads to an account cannot disagree about when it may be destroyed.
+ * refused unless forced — and none of them is re-implemented here, so whether
+ * an account may be destroyed yet is decided in one place for the
+ * hosting-account route, the service route and the sweep alike.
  *
  * ---------------------------------------------------------------------------
  * What this does NOT inherit

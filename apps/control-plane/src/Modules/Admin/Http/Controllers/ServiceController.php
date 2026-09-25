@@ -129,9 +129,10 @@ final class ServiceController
      * not: for shared hosting that adds `hosting_account.manage`, because this
      * route reaches TerminateHostingAccount — F-18's action layer — without
      * passing F-18's controller gate on the hosting-account route, and must
-     * not be the weaker door to the same account. `force` decides the
-     * retention window and nothing else; the second permission check it used
-     * to guard asked for the permission the route had already demanded.
+     * not be the weaker door to the same account. `force` decides whether each
+     * kind's suspension-and-window guard applies, and changes no permission;
+     * the second permission check it used to guard asked for the permission
+     * the route had already demanded.
      *
      * ---------------------------------------------------------------------
      * The act, then its record

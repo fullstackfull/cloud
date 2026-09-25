@@ -819,12 +819,14 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
 
     /*
      * Ending a service, of any kind, through EndOfService — the same door the
-     * retention sweep uses. Each kind's action enforces its retention window
-     * and `force` skips it. This middleware is the permission every kind
-     * needs; the controller then asks EndOfService::authorityOver() for the
-     * rest, forced or not, which for shared hosting adds
-     * hosting_account.manage — so this route is never the weaker door to an
-     * account the hosting-account route above also reaches (F-19 × F-18).
+     * retention sweep uses. Each kind's action refuses a service that is not
+     * suspended, or is still inside its retention window, and `force` skips
+     * that guard without changing who may ask. This middleware is the
+     * permission every kind needs; the controller then asks
+     * EndOfService::authorityOver() for the rest, forced or not, which for
+     * shared hosting adds hosting_account.manage — so this route is never the
+     * weaker door to an account the hosting-account route above also reaches
+     * (F-19 × F-18).
      */
     Route::delete('services/{service}', [ServiceController::class, 'terminate'])
         ->middleware('permission:'.Permission::ServiceTerminate->value)
