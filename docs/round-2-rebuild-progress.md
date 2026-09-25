@@ -18,7 +18,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-04 | Critical | in progress | |
 | F-13 | Critical | rebuilt — 47 new tests red→green, Providers+Architecture green | `79b6b13` |
 | F-14 | Critical | rebuilt — 91 new tests (71 red→green), SharedHosting+Architecture green | `b2f33d1` |
-| F-08 | High | in progress | |
+| F-08 | High | rebuilt — 12 of 47 new tests red→green; Queue+Billing+Architecture green | `f24548a` |
 | F-11 | High | in progress | |
 | F-12 | High | queued | |
 | F-15 | High | queued (round seven outstanding) | |
