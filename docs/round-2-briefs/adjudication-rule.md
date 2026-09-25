@@ -28,13 +28,34 @@ Apply them in order. They are independent and both are needed.
 - **Yes** → the sentence is describing the wrong thing. **The sentence moves.**
 - **No** → go to question 2.
 
-**2. Is the claim achievable — is the behaviour it names a bounded, specifiable
-set?**
+**2. Is the claim achievable *by the code that carries it*?**
 
 - **Yes** → the gap is closeable. **The code moves.**
-- **No** → no implementation can deliver the claim (every wrong phrasing, every
-  dynamic callee, an unbounded blacklist). **The sentence moves**, narrowed to
-  what the code can hold.
+- **No** → **the sentence moves**, narrowed to what the code can hold.
+
+A claim fails question 2 two different ways, and both are real:
+
+- **Unbounded.** No implementation could deliver it — every wrong phrasing,
+  every dynamic callee, an unbounded blacklist.
+- **Out of reach.** The claim is perfectly achievable, but not *here*: it
+  describes a property of a layer the code carrying the sentence does not
+  control. A simulator's docblock claiming a platform-wide guarantee is the
+  standard case. The fake can make the guarantee observable in simulation; it
+  cannot make it true in production, however it is written, because the
+  production path does not run through it.
+
+The second form was added after F-24, where a docblock on a test double said it
+*"implements an invariant `RedactedJsonCast`'s docblock already promises"* — a
+promise whose subject is the production handler. Read question 2 as "achievable"
+in the abstract and that blocks, demanding a fix the round was forbidden to
+make; read it as "achievable by this code" and it is a sentence, which is the
+right answer and the one the verifier reached independently.
+
+**The scope of a claim must match the scope of the code carrying it.** A
+sentence in one file asserting a property of the whole platform is a category
+error before it is a falsehood, and the repair is always the sentence — plus,
+where the property genuinely matters, a finding that owns it at the layer that
+can hold it.
 
 **A claim of reach that fails 1 and passes 2 is blocking.** That is the whole
 of it: shipped code asserting a guarantee it does not provide, in a case where
