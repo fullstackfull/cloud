@@ -38,7 +38,10 @@ final readonly class ProxmoxConnection
      *                           with a self-signed certificate turns it off on its own row,
      *                           which keeps the exception visible and local instead of an
      *                           environment variable that silently disables verification
-     *                           for the whole fleet.
+     *                           for the whole fleet. It governs every socket that carries
+     *                           this connection's token: the requests made through
+     *                           request(), and the console socket the gateway opens on the
+     *                           endpoint ProxmoxComputeProvider::consoleEndpoint() describes.
      */
     public function __construct(
         public string $endpoint,
@@ -62,8 +65,20 @@ final readonly class ProxmoxConnection
 
     /**
      * @param  array<string, mixed>  $credentials
-     * @param  bool|null  $verifyTls  The cluster's own decision. Null means the cluster has
-     *                                expressed none and the fleet default applies.
+     * @param  bool|null  $verifyTls  The cluster's own decision. Null means the caller has
+     *                                none to give and the fleet default applies. Both
+     *                                factories pass the row's `verify_tls`, and a saved row
+     *                                always has one — the column is NOT NULL, default true —
+     *                                so for a cluster read back from the table the fleet key
+     *                                is never consulted. The exception is a model that was
+     *                                never given the column — one never saved, or one just
+     *                                created without naming it, since the column default
+     *                                reaches the row and not the object create() returns —
+     *                                because the model declares no default of its own and
+     *                                reads null. Both of the application's creation paths
+     *                                name the column and nothing builds an adapter from an
+     *                                unsaved model, so today that is not reached; it is a
+     *                                property of today's callers, not of the model.
      */
     public static function fromCredentials(
         string $endpoint,
@@ -129,6 +144,13 @@ final readonly class ProxmoxConnection
      * chosen by the cluster, and following one would let a compromised node
      * point any request at a host of its choosing — re-posting the body on a
      * 307 or 308, with the token attached.
+     *
+     * One socket that carries the token does not come through here: the
+     * console's, which the console gateway opens itself on the endpoint
+     * ProxmoxComputeProvider::consoleEndpoint() hands it. So `verify` reaches
+     * that socket only as far as consoleEndpoint() carries $verifyTls, and
+     * that is where it drifted once — the console read the fleet-wide config
+     * key while everything here read the cluster's row (F-28).
      */
     public function request(): PendingRequest
     {

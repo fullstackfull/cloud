@@ -52,14 +52,19 @@ use Tests\TestCase;
  *    to the machine's trust store and nothing in production changes.
  *
  * What the matrix can and cannot see, measured by mutating the gateway rather
- * than argued: switching off `verify_peer` fails the first row, switching off
- * `verify_peer_name` fails the third, and hard-coding either on fails the
- * second or fourth. The fifth row — a certificate for this host from the
- * trusted authority, verification on — is the control that makes the two
- * refusals mean something, and it also fails the moment the context names a
- * real `cafile` (a system bundle), because the per-run authority is in no real
- * bundle. The only `cafile` it cannot catch is one naming this run's own
- * authority at its random `tempnam()` path, which no source change can express.
+ * than argued: switching `verify_peer` off fails the first row and switching
+ * `verify_peer_name` off fails the third; hard-coding `verify_peer` on fails
+ * the second and hard-coding `verify_peer_name` on fails the fourth. The
+ * fifth row — a certificate for this host from the trusted authority,
+ * verification on — passes under all four, which is what makes the refusals
+ * mean something: they are refusals of a certificate, not of TLS. It is also
+ * the row that fails the moment the context names a real `cafile`, such as
+ * the system bundle, because the per-run authority is in no real bundle. The
+ * one `cafile` that survives names this run's own authority at its random
+ * `tempnam()` path, which a source change can reach only by reading
+ * `SSL_CERT_FILE` back out of the environment — and a context that does that
+ * trusts the very file OpenSSL's default paths would have read, so it is an
+ * equivalent mutant for this test rather than a gap in it.
  */
 final class TheConsoleSocketIsVerifiedOnItsClustersTermsTest extends TestCase
 {

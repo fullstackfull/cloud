@@ -545,7 +545,9 @@ final class ProxmoxComputeProvider implements ComputeProvider
      * Proxmox's design rather than this platform's: it is why the ticket is
      * kept server-side and why nothing here is ever logged. The API token goes
      * in a header on the same request, exactly as every other call in this
-     * adapter sends it.
+     * adapter sends it — and so the socket is verified on exactly the terms
+     * every other call is: this connection's, which the compute factory takes
+     * from the cluster's own row.
      */
     public function consoleEndpoint(string $nodeName, string $providerId): RemoteConsoleEndpoint
     {
@@ -592,7 +594,22 @@ final class ProxmoxComputeProvider implements ComputeProvider
             ),
             tls: $scheme === 'https',
             headers: ['Authorization' => $this->connection->authorizationHeader()],
-            verifyTls: (bool) config('compute.proxmox.verify_tls', true),
+            /*
+             * The connection's certificate policy, the one every other call
+             * in this adapter runs on — never the fleet-wide config key.
+             *
+             * This socket is opened by the console gateway rather than by
+             * ProxmoxConnection::request(), so nothing shared carries the
+             * policy to it: it goes exactly as far as this argument takes it.
+             * It used to read compute.proxmox.verify_tls, which made one
+             * PROXMOX_VERIFY_TLS=false switch verification off on the console
+             * socket of every cluster at once, whatever its row demanded —
+             * and this socket carries the same API token, in the same
+             * header, plus a root console on a node other customers share.
+             * It also refused the console of a lab cluster whose row waived
+             * verification for every other call to the same host.
+             */
+            verifyTls: $this->connection->verifyTls,
         );
     }
 

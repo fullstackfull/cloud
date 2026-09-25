@@ -111,6 +111,34 @@ return [
 
     'proxmox' => [
         'timeout_seconds' => (int) env('PROXMOX_TIMEOUT_SECONDS', 30),
+
+        /*
+         * The fleet default for certificate verification, and nothing more:
+         * it applies only to a connection built without a cluster's own
+         * decision, and it can never override one.
+         *
+         * Every registered cluster carries its own decision — the
+         * compute_clusters.verify_tls column is NOT NULL and defaults to true
+         * — and the compute adapter, the backups adapter and the console
+         * socket all take verification from that row. So for a cluster read
+         * back from the table, PROXMOX_VERIFY_TLS changes nothing in either
+         * direction. (A cluster model never given the column — never saved,
+         * or just created without naming it — reads null and would fall back
+         * to this key. Both of the application's creation paths name the
+         * column and nothing builds an adapter from an unsaved model, so
+         * today that is not reached; ProxmoxConnection::fromCredentials()
+         * says why.)
+         *
+         * To trust a lab cluster's self-signed certificate, set verify_tls to
+         * false on that cluster's row. The exception stays visible, and
+         * confined to the one cluster it is true of. The console socket read
+         * this key until F-28, so setting it false switched verification off
+         * on every cluster's console at once — a socket that carries the
+         * cluster's API token and a root console.
+         *
+         * Written here because this is where an operator reaching for the
+         * environment variable will read it.
+         */
         'verify_tls' => (bool) env('PROXMOX_VERIFY_TLS', true),
         'default_cpu_overcommit_ratio' => (float) env('PROXMOX_NODE_CPU_OVERCOMMIT_RATIO', 4.0),
         'default_memory_headroom_percent' => (int) env('PROXMOX_NODE_MEMORY_HEADROOM_PERCENT', 10),
