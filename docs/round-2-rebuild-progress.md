@@ -27,7 +27,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-08 | High | rebuilt — 12 of 47 new tests red→green; Queue+Billing+Architecture green | `f24548a` |
 | F-11 | High | rebuilt — new contract tests red→green; Dns+Simulation+Security+Architecture green; closes F-24 DNS limb | `d69856a` |
 | F-12 | High | rebuilt — 9+14 new tests red→green; Dedicated+Ipam+Api+Security+Architecture green | `e0aa0ab` |
-| F-15 | High | in progress (round six + round-seven fixes) | |
+| F-15 | High | rebuilt — round six design + round seven's two blocking fixes; merged with the F-04 × F-15 fix (operator-named domain moved out of the payload) | `8e15efa` |
 | F-17 | High | rebuilt — limiter attachment + ordering fixed (limiter ran before the account was resolved); awaiting verification (ResendInvitation cooldown clause to adjudicate) | `171142b` |
 | F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
 | F-19 | High | in progress | |
@@ -68,5 +68,7 @@ round two and are already in the tree.
 | When | Findings merged | Backend suite | Proofs |
 |---|---|---|---|
 | after F-04 (`2b40b61`) | F-04, F-08, F-11, F-12, F-13, F-14, F-18, F-22, F-23 | 4,279 / 4,279 passed, 154,383 assertions | JSON `tests == passed`; junit 545 testsuites, all `skipped="0"`; exit 0 |
+
+| after F-15 + F-04 × F-15 (`9065968`) | + F-17, F-15 | 4,326 / 4,327 — one timing-dependent failure in the new F-04 × F-15 test (`updated_at` to the second), fixed next commit, 5/5 green after | exit 1 on that run |
 
 Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
