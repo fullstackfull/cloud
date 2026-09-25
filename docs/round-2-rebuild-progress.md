@@ -28,7 +28,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-11 | High | rebuilt — new contract tests red→green; Dns+Simulation+Security+Architecture green; closes F-24 DNS limb | `d69856a` |
 | F-12 | High | rebuilt — 9+14 new tests red→green; Dedicated+Ipam+Api+Security+Architecture green | `e0aa0ab` |
 | F-15 | High | in progress (round six + round-seven fixes) | |
-| F-17 | High | queued (PARTIAL: control half) | |
+| F-17 | High | rebuilt — limiter attachment + ordering fixed (limiter ran before the account was resolved); awaiting verification (ResendInvitation cooldown clause to adjudicate) | `171142b` |
 | F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
 | F-19 | High | in progress | |
 | F-20 | High | in progress (rebuild → independent verification) | |
