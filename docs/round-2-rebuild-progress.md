@@ -62,3 +62,11 @@ immediately, so a stoppage loses at most the finding in flight.
 
 F-01, F-02, F-03, F-05, F-06, F-07, F-09, F-10 and F-16 were closed before
 round two and are already in the tree.
+
+## Full-suite checkpoints
+
+| When | Findings merged | Backend suite | Proofs |
+|---|---|---|---|
+| after F-04 (`2b40b61`) | F-04, F-08, F-11, F-12, F-13, F-14, F-18, F-22, F-23 | 4,279 / 4,279 passed, 154,383 assertions | JSON `tests == passed`; junit 545 testsuites, all `skipped="0"`; exit 0 |
+
+Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
