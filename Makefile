@@ -106,9 +106,24 @@ infra-validate: ## Static checks over the infrastructure tree (no network, no ho
 	python3 infrastructure/scripts/test_validate_inventory.py
 	infrastructure/scripts/test_safety_gate.sh
 	python3 infrastructure/scripts/validate-monitoring.py infrastructure
+	python3 infrastructure/scripts/test_validate_monitoring.py
 	python3 infrastructure/scripts/validate-runbooks.py infrastructure
+	python3 infrastructure/scripts/test_validate_runbooks.py
 	python3 infrastructure/scripts/check-ci-cannot-apply.py .
+	python3 infrastructure/scripts/test_check_ci_cannot_apply.py
 	cd infrastructure/ansible && ansible-lint --offline
+
+# Not in the CI job above, and the reason is not oversight. This one asks git
+# whether a sha resolves, and `actions/checkout` clones to depth 1, so every
+# row naming a commit older than the tip would fail there for a reason that has
+# nothing to do with the ledger. Raising fetch-depth to 0 for one document's
+# sake is the wrong trade. It runs here, where the history is whole.
+.PHONY: ledger-validate
+ledger-validate: ## The remediation ledger's rows say what they advertise
+	python3 infrastructure/scripts/validate-ledger-rows.py
+	python3 infrastructure/scripts/test_validate_ledger_rows.py
+	python3 infrastructure/scripts/validate-integration-manifest.py
+	python3 infrastructure/scripts/test_validate_integration_manifest.py
 
 .PHONY: infra-check
 infra-check: ## Read-only preflight of all declared infrastructure (never mutates)

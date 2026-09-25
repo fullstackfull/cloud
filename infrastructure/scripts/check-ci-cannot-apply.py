@@ -77,6 +77,23 @@ def main(argv: list[str]) -> int:
                     )
 
     print(f"{len(workflows)} workflow file(s), {checked} run step(s) inspected")
+
+    # A gate that inspected nothing is not a gate that found nothing. There are
+    # workflow files here and not one of them has a `run:` step, which means
+    # either the parse produced nothing usable or every step has become a
+    # `uses:` -- and a reusable workflow called by `uses:` is a file this check
+    # never opens, so the applies would have moved somewhere it cannot see
+    # while it went on printing a green line. Refuse, and say which it is.
+    if checked == 0:
+        print(
+            f"inspected no run steps across {len(workflows)} workflow file(s). "
+            f"Either the workflows did not parse, or every step is now a `uses:` "
+            f"and the commands moved into called workflows this check does not "
+            f"read. Neither is a pass.",
+            file=sys.stderr,
+        )
+        return 1
+
     for problem in problems:
         print(f"  FAIL {problem}", file=sys.stderr)
     if problems:

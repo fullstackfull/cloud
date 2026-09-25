@@ -411,10 +411,19 @@ jobs:
       - name: Alert rules name metrics something exports
         run: python3 infrastructure/scripts/validate-monitoring.py infrastructure
 
+      # Seven distinct assertions live in that validator and "the job is green"
+      # is evidence for none of them individually. This drives it over
+      # synthetic trees and requires a red for each.
+      - name: The monitoring validator still refuses what it claims to refuse
+        run: python3 infrastructure/scripts/test_validate_monitoring.py
+
       # A command in a runbook that does not exist costs the operator the
       # minutes they have least of.
       - name: Runbooks name commands that exist
         run: python3 infrastructure/scripts/validate-runbooks.py infrastructure
+
+      - name: The runbook validator still refuses a command that does not exist
+        run: python3 infrastructure/scripts/test_validate_runbooks.py
 
       - name: Ansible syntax
         working-directory: infrastructure/ansible
@@ -450,6 +459,12 @@ jobs:
       # merge. CI validates; a person applies.
       - name: No workflow applies infrastructure
         run: python3 infrastructure/scripts/check-ci-cannot-apply.py .
+
+      # Including the distinction that makes it usable rather than merely
+      # strict: `ansible-playbook --check` is not an apply, and a gate that
+      # cannot tell the two apart is a gate somebody eventually switches off.
+      - name: The no-apply gate still tells an apply from a check run
+        run: python3 infrastructure/scripts/test_check_ci_cannot_apply.py
 
       # infrastructure/ is the tree that talks to everything, so it is the
       # likeliest place for a credential to be committed.
