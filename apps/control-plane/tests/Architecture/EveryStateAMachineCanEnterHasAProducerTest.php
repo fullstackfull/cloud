@@ -167,6 +167,13 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
      * `RetireDedicatedServer` writes it. That is the event this gate was armed
      * for, and the entry went when the writer arrived.
      *
+     * Nor are the nine `OrderStatus` cases the audit's F-19 headline named
+     * (payment_failed, queued_for_provisioning, provisioning,
+     * provisioning_failed, manual_review, active, suspended, refunded,
+     * terminated). They were excused here, each owned by F-19, until F-19
+     * gave every one of them a production writer; the second test then
+     * failed on all nine, as designed, and the entries went.
+     *
      * @var array<string, string>
      */
     private const array UNPRODUCED = [
@@ -181,29 +188,6 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
          * declare it prepared belongs to the Billing module's owner.
          */
         InvoiceStatus::class.'::Uncollectible' => 'No write-off exists: nothing moves an open invoice to uncollectible, and SettleInvoice::PAYABLE reads it. Billing owns the decision.',
-
-        /*
-         * Nine of OrderStatus's thirteen cases, which is the audit's own
-         * headline (F-19). `TransitionOrder` is the only writer of
-         * `orders.status` and it is called from checkout, settlement and
-         * cancellation, so an order lives inside {draft, pending_payment, paid,
-         * cancelled} while fulfilment happens on the service row and the
-         * order is never told. Readers keyed on these states therefore key on
-         * nothing: `PlanCapacity::RELEASED` (two of its three statuses),
-         * `CancelOrder`'s and `AnalyseCountryCurrencyChange`'s sets, and the
-         * `orders.completed_at` column the customer's OrderResource publishes.
-         * Wiring the order lifecycle to fulfilment is F-19's repair, not this
-         * gate's; each entry goes when F-19 gives the state its writer.
-         */
-        OrderStatus::class.'::PaymentFailed' => 'F-19: a failed payment is recorded on the payment attempt; the order is never moved to payment_failed.',
-        OrderStatus::class.'::QueuedForProvisioning' => 'F-19: fulfilment is queued on the service row; the order is never told.',
-        OrderStatus::class.'::Provisioning' => 'F-19: provisioning is tracked on the service and its job; the order is never told.',
-        OrderStatus::class.'::ProvisioningFailed' => 'F-19: a failed build is recorded on the service and its job; the order is never told.',
-        OrderStatus::class.'::ManualReview' => 'F-19: review happens on the provisioning job; the order is never told.',
-        OrderStatus::class.'::Active' => 'F-19: activation happens on the service row; the order stays paid.',
-        OrderStatus::class.'::Suspended' => 'F-19: suspension happens on the service row; the order stays paid.',
-        OrderStatus::class.'::Terminated' => 'F-19: termination happens on the service row; PlanCapacity::RELEASED keys stock release on a status no order reaches.',
-        OrderStatus::class.'::Refunded' => 'F-19: a refund is recorded against the invoice; PlanCapacity::RELEASED keys stock release on a status no order reaches.',
 
         /*
          * The table's own comment calls it "give up": a legal target from

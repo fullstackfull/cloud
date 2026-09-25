@@ -23,7 +23,6 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
-use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
@@ -392,7 +391,7 @@ final class AnOrderFollowsWhatItBoughtTest extends TestCase
     private function placeWithCoupon(Customer $customer, Plan $plan, string $code): Order
     {
         return app(PlaceOrder::class)->execute($customer, new CheckoutRequest(
-            lines: [new CheckoutLine((string) $plan->getKey(), 1)],
+            lines: [$this->checkoutLineFor($plan)],
             billingPeriod: BillingPeriod::Monthly,
             couponCode: $code,
         ));
@@ -401,7 +400,7 @@ final class AnOrderFollowsWhatItBoughtTest extends TestCase
     private function buy(Customer $customer, Plan $plan): Order
     {
         $order = app(PlaceOrder::class)->execute($customer, new CheckoutRequest(
-            lines: [new CheckoutLine((string) $plan->getKey(), 1)],
+            lines: [$this->checkoutLineFor($plan)],
             billingPeriod: BillingPeriod::Monthly,
         ));
 

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Support;
 
+use Illuminate\Support\Str;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
+use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
@@ -101,7 +103,7 @@ trait BuysSharedHosting
         return app(PlaceOrder::class)->execute(
             $customer,
             new CheckoutRequest(
-                lines: [new CheckoutLine((string) $plan->getKey(), 1)],
+                lines: [$this->checkoutLineFor($plan)],
                 billingPeriod: BillingPeriod::Monthly,
             ),
         );
@@ -145,5 +147,24 @@ trait BuysSharedHosting
         }
 
         return false;
+    }
+
+    /**
+     * One unit of a plan, as checkout takes it: a shared-hosting line names
+     * the domain the account is for (F-04) — a fresh one per purchase, since
+     * one live account serves a name — and any other line names none, which
+     * checkout also insists on.
+     */
+    protected function checkoutLineFor(Plan $plan): CheckoutLine
+    {
+        $plan->loadMissing('product');
+
+        return new CheckoutLine(
+            (string) $plan->getKey(),
+            1,
+            $plan->product?->kind === ProductKind::SharedHosting
+                ? 'order-'.strtolower(Str::random(10)).'.example.test'
+                : null,
+        );
     }
 }
