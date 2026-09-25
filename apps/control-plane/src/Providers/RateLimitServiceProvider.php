@@ -144,9 +144,15 @@ final class RateLimitServiceProvider extends ServiceProvider
          * it.
          *
          * Keyed on the account the middleware resolved, never on the
-         * `X-Lynomia-Customer` header. `throttle:team-invitations` runs after
-         * `ResolveActingCustomer` on both invitation routes, so the account is
-         * already settled by the time this closure runs.
+         * `X-Lynomia-Customer` header. Both invitation routes attach this
+         * limiter through `ThrottleAfterAccountResolution`, declared after
+         * `customer`, so the account is already settled by the time this
+         * closure runs. The plain `throttle:team-invitations` alias did NOT
+         * guarantee that: the router's priority sort runs every
+         * ThrottleRequests before `ResolveActingCustomer`, this closure found
+         * no account, and the budget became one per administrator rather
+         * than one per account. TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
+         * pins the attachment and the order; the key is pinned separately.
          *
          * The header used to be consulted first, with a fallback that fired
          * only when it was ABSENT. A caller who sent junk therefore still
@@ -162,8 +168,9 @@ final class RateLimitServiceProvider extends ServiceProvider
          *
          * Falling back to the user, and then to the address, keeps the limiter
          * defined for a request that somehow arrives without an account
-         * resolved — a route in the wrong middleware group, which is a wiring
-         * mistake rather than something a caller can arrange.
+         * resolved — a route in the wrong middleware group, or this limiter
+         * attached through the plain `throttle:` alias, both wiring mistakes
+         * rather than something a caller can arrange.
          */
         RateLimiter::for('team-invitations', function (Request $request): Limit {
             $user = $request->user();

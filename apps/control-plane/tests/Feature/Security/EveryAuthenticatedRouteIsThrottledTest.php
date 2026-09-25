@@ -9,7 +9,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
+use Lynomia\Http\Middleware\ThrottleAfterAccountResolution;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -67,6 +69,56 @@ final class EveryAuthenticatedRouteIsThrottledTest extends TestCase
             $unthrottled,
             'Authenticated API routes reachable at unlimited rate: '.implode(', ', $unthrottled),
         );
+    }
+
+    /**
+     * Every named limiter a route attaches is registered.
+     *
+     * "Carries a throttle" above is satisfied by a name nobody registered, and
+     * Laravel does not check the name until a request arrives: ThrottleRequests
+     * then throws MissingRateLimiterException and the route answers 500 for
+     * everyone. That fails closed, but on the one road the limiter protects,
+     * in production, and only when somebody uses it — which for an invitation
+     * or a password reset can be days after the deploy. Asked of the whole
+     * route table here, the mistake is a red test instead.
+     *
+     * Numeric throttles (`throttle:N,M,prefix` and `throttle:N|M`) name no
+     * limiter and are OneThrottleBucketPerVerbTest's business.
+     */
+    #[Test]
+    public function every_limiter_a_route_names_is_registered(): void
+    {
+        $router = app(Router::class);
+        $unregistered = [];
+
+        foreach (Route::getRoutes() as $route) {
+            foreach ($router->gatherRouteMiddleware($route) as $middleware) {
+                if (! is_string($middleware) || ! str_contains($middleware, ':')) {
+                    continue;
+                }
+
+                [$class, $parameters] = explode(':', $middleware, 2);
+
+                if (! is_a($class, ThrottleRequests::class, true) && $class !== ThrottleAfterAccountResolution::class) {
+                    continue;
+                }
+
+                $name = explode(',', $parameters)[0];
+
+                if (array_filter(explode('|', $name), static fn (string $part): bool => ! is_numeric($part)) === []) {
+                    continue;
+                }
+
+                if (RateLimiter::limiter($name) === null) {
+                    $unregistered[] = sprintf('%s %s names [%s]', $route->methods()[0], $route->uri(), $name);
+                }
+            }
+        }
+
+        $this->assertSame([], $unregistered, implode("\n", [
+            'These routes name a rate limiter nobody registered; each answers 500 on its first request:',
+            ...$unregistered,
+        ]));
     }
 
     #[Test]
