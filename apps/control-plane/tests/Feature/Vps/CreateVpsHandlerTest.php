@@ -6,6 +6,7 @@ namespace Tests\Feature\Vps;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
+use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
@@ -165,8 +166,20 @@ final class CreateVpsHandlerTest extends TestCase
     {
         $job = $this->job();
 
+        /*
+         * One hypervisor across both runs, as a real cluster is. The second
+         * run asks for the same reserved identity and finds the first run's
+         * machine there (F-15), so it builds nothing — and what this test
+         * pins is that the capacity commitment is not doubled on the way to
+         * finding that out either.
+         */
+        $factory = app(ComputeProviderFactory::class);
+        $this->app->instance(ComputeProviderFactory::class, $factory);
+
         app(CreateVpsHandler::class)->execute($job);
-        app(CreateVpsHandler::class)->execute($job);
+        $second = app(CreateVpsHandler::class)->execute($job->fresh());
+
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $second->errorCode);
 
         // Capacity is keyed on the job's idempotency key. Without that, the
         // second commitment never comes back — release is driven by destroying

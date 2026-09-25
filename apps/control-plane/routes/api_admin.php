@@ -145,6 +145,17 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('provisioning.hosting_domain');
 
     /*
+     * Moving a VPS create off a provider identity somebody else's machine
+     * holds (F-15). Behind provisioning.retry for the reason adoption is: it
+     * changes what the platform will build on the strength of a finding a
+     * person confirms. The action refuses every case in which that could
+     * build a second machine.
+     */
+    Route::post('provisioning/jobs/{job}/repoint', [ProvisioningController::class, 'repoint'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.repoint');
+
+    /*
      * The destructive operations queue. Reading it is provisioning.view like
      * the job list; deciding the outcome of one is provisioning.retry, which
      * is the permission that already means "change what the platform believes

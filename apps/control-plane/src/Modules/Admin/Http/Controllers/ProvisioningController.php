@@ -15,6 +15,7 @@ use Lynomia\Modules\Provisioning\Application\Actions\AdoptOrphanResource;
 use Lynomia\Modules\Provisioning\Application\Actions\RetryProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\SharedHosting\Application\Actions\NameTheDomainAHostingJobWillServe;
+use Lynomia\Modules\Vps\Application\Actions\RepointReservedIdentity;
 
 /**
  * The provisioning queue, which is where an operator looks when a customer
@@ -71,6 +72,13 @@ final class ProvisioningController
      * should be able to reach without composing a query: a timed-out job is
      * never retried automatically — the platform stopped waiting, the provider
      * may not have — so somebody has to look at every one of them.
+     *
+     * It publishes what the runbook tells the operator to read, which it did
+     * not use to (F-15): the finding's code and its `reason` — the runbook's
+     * rows for a taken identity are keyed on the reason, and the only other
+     * place the reason appeared was `last_error`, which the screen truncates —
+     * and the provider identity a create reserved, with every node and name a
+     * create under it was sent with, because that is where to look.
      */
     public function needingReview(Request $request): JsonResponse
     {
@@ -80,16 +88,28 @@ final class ProvisioningController
             ->orderByDesc('id')
             ->paginate($this->perPage($request));
 
-        return $this->paginated($jobs, static fn (ProvisioningJob $job): array => [
-            'id' => $job->id,
-            'kind' => $job->kind->value,
-            'status' => $job->status->value,
-            'customer_id' => $job->customer_id,
-            'failure_class' => $job->failure_class?->value,
-            'last_error' => $job->last_error,
-            'attempts' => $job->attempts,
-            'created_at' => $job->created_at?->toIso8601String(),
-        ]);
+        return $this->paginated($jobs, static function (ProvisioningJob $job): array {
+            $finding = is_array($job->result['error'] ?? null) ? $job->result['error'] : [];
+            $reference = $job->result['provider_reference'] ?? null;
+
+            return [
+                'id' => $job->id,
+                'kind' => $job->kind->value,
+                'status' => $job->status->value,
+                'customer_id' => $job->customer_id,
+                'failure_class' => $job->failure_class?->value,
+                'last_error' => $job->last_error,
+                'error_code' => is_string($finding['code'] ?? null) ? $finding['code'] : null,
+                'error_reason' => is_string($finding['reason'] ?? null) ? $finding['reason'] : null,
+                'provider_reference' => is_string($reference) ? $reference : null,
+                'reserved_provider_id' => $job->reserved_provider_id,
+                'reserved_cluster_id' => $job->reserved_cluster_id,
+                'reserved_provider_nodes' => $job->reserved_provider_nodes ?? [],
+                'reserved_provider_hostnames' => $job->reserved_provider_hostnames ?? [],
+                'attempts' => $job->attempts,
+                'created_at' => $job->created_at?->toIso8601String(),
+            ];
+        });
     }
 
     /**
@@ -253,6 +273,59 @@ final class ProvisioningController
                 'id' => $adopted->id,
                 'status' => $adopted->status->value,
                 'service_id' => $adopted->service_id,
+            ],
+        ]);
+    }
+
+    /**
+     * Move a VPS create off a provider identity somebody else's machine holds.
+     *
+     * The route out of `vps.create_identity_taken` with reason
+     * `named_otherwise`, and of nothing else: the action refuses every case in
+     * which a new identity could let the job build beside a machine that may
+     * be its own (F-15), and nothing here can override that. The job is not
+     * requeued; the operator retries it, and the retry looks under the new
+     * identity before it builds.
+     */
+    public function repoint(Request $request, string $job): JsonResponse
+    {
+        $found = ProvisioningJob::query()->findOrFail($job);
+
+        $validated = $request->validate([
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $user = $request->user();
+        $by = $user instanceof User ? sprintf('%s <%s>', $user->name, $user->email) : 'system';
+        $from = $found->reserved_provider_id;
+
+        $repointed = app(RecordActAtomically::class)->execute(
+            act: static fn (): ProvisioningJob => app(RepointReservedIdentity::class)->execute(
+                job: $found,
+                evidence: $validated['evidence'],
+                repointedBy: $by,
+            ),
+            describe: static fn (ProvisioningJob $job): AuditedAct => new AuditedAct(
+                action: AuditAction::ProvisioningIdentityRepointed,
+                subject: $job,
+                customerId: $job->customer_id,
+                context: [
+                    'evidence' => $validated['evidence'],
+                    'from' => $from,
+                    'to' => $job->reserved_provider_id,
+                    'service_id' => $job->service_id,
+                    'repointed_by' => $by,
+                ],
+            ),
+        );
+
+        return response()->json([
+            'data' => [
+                'id' => $repointed->id,
+                'status' => $repointed->status->value,
+                'reserved_provider_id' => $repointed->reserved_provider_id,
+                'previous_provider_id' => $from,
+                'service_id' => $repointed->service_id,
             ],
         ]);
     }

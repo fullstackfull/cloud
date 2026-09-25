@@ -610,7 +610,7 @@ return [
     'api.admin.provisioning.needs_review' => [
         'tag' => 'Operator',
         'summary' => 'Jobs waiting for a person',
-        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state.',
+        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the last attempt\'s finding (`error_code`, `error_reason`) and, for a VPS create, the provider identity it reserved and every node and name a create under it was sent with.',
         'permission' => 'provisioning.view',
         'response' => $many('AdminProvisioningJob'),
     ],
@@ -1249,6 +1249,14 @@ return [
         'permission' => 'provisioning.retry',
         'body' => ['domain', 'evidence'],
         'response' => $one('AdminNamedHostingDomain'),
+    ],
+    'api.admin.provisioning.repoint' => [
+        'tag' => 'Operator',
+        'summary' => 'Move a VPS create off an identity somebody else holds',
+        'description' => 'The route out of `vps.create_identity_taken` with reason `named_otherwise`, and nothing else: a machine that is not this build\'s, by name, sits at the hypervisor id the create reserved. Gives the job a new id it has never held; the job is not requeued — retry it, and the retry looks under the new id before it builds. Refuses (409) a job not stopped for review, one holding no identity, one that already has a resource at the provider (adopt that instead), one whose last finding is not a taken identity, a finding from an earlier attempt or about an identity the job no longer holds, and a machine whose ownership was not established (`unnamed`, `shape_differs`). There is no override. The evidence is required and audited.',
+        'permission' => 'provisioning.retry',
+        'body' => ['evidence'],
+        'response' => $one('AdminRepointedJob'),
     ],
     'api.admin.provisioning.retry' => [
         'tag' => 'Operator',

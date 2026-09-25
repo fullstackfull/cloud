@@ -478,8 +478,31 @@ final class RunProvisioningJob implements ShouldQueue
         $existing['remote_job_id'] = $result->remoteJobId ?? $job->remote_job_id;
         $existing['response'] = $result->metadata;
 
+        /*
+         * The finding: what this attempt found, stamped with the attempt that
+         * found it. Written by every failed attempt — the ones that settle and
+         * the ones scheduleRetry() puts back in the queue — and by
+         * DetectStaleJobs for an attempt that never answered, so it is always
+         * the LAST attempt's finding and never an older one left behind.
+         *
+         * The attempt number, the handler's `reason` and the provider identity
+         * the finding is about are carried because an operator action reads
+         * them as a licence (F-15: `RepointReservedIdentity` acts only on a
+         * finding that is about the identity the job holds now, from the
+         * attempt the job last made). A finding that cannot say which attempt
+         * or which identity it is about cannot be told apart from a stale one.
+         */
         if ($result->isFailure()) {
-            $existing['error'] = ['code' => $result->errorCode, 'class' => $result->failureClass?->value];
+            $reason = $result->metadata['reason'] ?? null;
+            $identity = $result->metadata['reserved_provider_id'] ?? null;
+
+            $existing['error'] = [
+                'code' => $result->errorCode,
+                'class' => $result->failureClass?->value,
+                'attempt' => $job->attempts,
+                'reason' => is_string($reason) ? $reason : null,
+                'reserved_provider_id' => is_scalar($identity) ? (string) $identity : null,
+            ];
         }
 
         return $existing;

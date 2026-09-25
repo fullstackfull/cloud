@@ -38,6 +38,16 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  *    resource exists. Adoption is the way out of that — it attaches what is
  *    already there — and a retry would leave the first one orphaned, unbilled,
  *    and holding an address.
+ *
+ *    This refusal can only read what an attempt wrote down, and a create
+ *    whose answer was lost writes down neither a task id nor a resource. For
+ *    a VPS create that used to be the whole story (F-15): the retry was
+ *    accepted, drew a fresh machine id, and built a second machine. What
+ *    closes it is not here but in the create itself — the machine's identity
+ *    is reserved on the job before the provider is called, so the retried
+ *    attempt asks for the same one and looks under it before it builds. If
+ *    it finds this build's machine it settles carrying it as the provider
+ *    reference, and from then on this refusal holds.
  *  - **A job that has destroyed data.** A reinstall past the destructive line
  *    cannot be undone by running it again, and running it again lands a second
  *    installation on top of whatever the first one wrote.

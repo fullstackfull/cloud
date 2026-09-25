@@ -122,6 +122,13 @@ enum AuditAction: string
     // The domain a stopped hosting build will serve, corrected by a person —
     // the repair a retry cannot be, recorded before the retry that follows it.
     case HostingJobDomainNamed = 'provisioning.hosting_domain_named';
+    /*
+     * A VPS create moved off a provider identity somebody else's machine
+     * holds (F-15). The platform found the stranger by name; the operator
+     * confirms it and takes the decision that the job may build elsewhere,
+     * which is why it is an assertion about the world as well as an act.
+     */
+    case ProvisioningIdentityRepointed = 'provisioning.identity_repointed';
     case DriftAcknowledged = 'drift.acknowledged';
     case DriftResolved = 'drift.resolved';
     case ReconciliationRequested = 'infrastructure.reconciliation_requested';
@@ -386,7 +393,8 @@ enum AuditAction: string
     public function isAnAssertionAboutTheWorld(): bool
     {
         return match ($this) {
-            self::OrphanAdopted, self::DriftResolved, self::DriftAcknowledged,
+            self::OrphanAdopted, self::ProvisioningIdentityRepointed,
+            self::DriftResolved, self::DriftAcknowledged,
             self::ReinstallConfirmed, self::ReinstallAbandoned,
             self::DedicatedServerReturnedToStock, self::DedicatedServerRetired => true,
             default => false,
