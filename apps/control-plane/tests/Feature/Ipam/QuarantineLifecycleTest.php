@@ -42,6 +42,33 @@ final class QuarantineLifecycleTest extends TestCase
     {
         parent::setUp();
 
+        /*
+         * Frozen, because three tests here compare a date the application
+         * derived from the clock against one the test derives from `now()`
+         * again. The first read is the release: `releaseAssignment()`, in
+         * the test body, writes `quarantined_until` through
+         * `IpPool::quarantineExpiryFor()`. The second is the assertion,
+         * which computes the expected date afresh. If midnight UTC falls
+         * between the two, the expectation is a day later than the write —
+         * reproduced by parking the clock at 23:59:59.500 and stepping it to
+         * 00:00:00.500 the moment the address is saved:
+         *
+         *   -'2026-10-03'
+         *   +'2026-10-02'
+         *
+         * It is the shape that failed ShowHostingAccountEndpointTest in run
+         * 197, at day granularity rather than second. Frozen here rather
+         * than in the three methods because it also fixes the instant the
+         * fixtures are built at, and because the freeze has to precede the
+         * write: frozen after it, the clock is pinned to a moment later than
+         * the write, and midnight can still fall in between.
+         *
+         * `travel()` still works on a frozen clock — it moves the instant and
+         * holds it there — so the sweeper tests' arithmetic is unchanged.
+         * The pool's window is the claim; the wall clock was never part of it.
+         */
+        $this->freezeTime();
+
         $this->allocator = app(IpAllocator::class);
         $this->subnet = Subnet::factory()->forBlock('198.51.100.8/29', gateway: '198.51.100.9')->create();
         app(SeedSubnetAddresses::class)->execute($this->subnet);
