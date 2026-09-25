@@ -132,8 +132,11 @@ it such a convincing way to lose a business.
 | What it finds | What happens |
 | --- | --- |
 | A record the platform calls `active`, absent from the zone | Drift, critical: the name is not resolving and the portal says it is |
-| A record in `indeterminate` whose value *is* in the zone | Settled to `active`, picking up the provider's identifier |
-| A record in `deleting` or `indeterminate` whose value is gone | Settled to `deleted` — the answer the platform was waiting for |
+| A record left `indeterminate` by a **publish**, whose value *is* in the zone | Settled to `active`, claiming the provider's identifier (see below) |
+| A record left `indeterminate` by a **publish**, whose value is not in the zone | Left `indeterminate`. The record never arrived; it is not a deletion the customer asked for |
+| A record in `deleting`, or left `indeterminate` by a **delete**, whose value is gone | Settled to `deleted` — the answer the platform was waiting for |
+| A record left `indeterminate` by a **delete**, whose value is still in the zone | `needs_review`. The customer asked for it to go and it is still answering; it is not `active` |
+| An `indeterminate` record that cannot say which call left it there | Left alone. Rows written before `indeterminate_after` existed; guessing would be wrong either way |
 | A record in the zone that this platform did not write | Drift, warning. Left exactly where it is, for ever |
 | A zone at the provider with no live row here | Drift, warning. Usually a claim that timed out after the zone was created |
 
@@ -142,6 +145,70 @@ and the zone stays stale so the next run looks again. A sweep that recorded
 "missing at the provider" every time an API was down would fill an operator's
 queue with the platform's own outage, and the one real missing record would be
 somewhere in the middle of it.
+
+## One record, one row: identity
+
+A name holds as many records as were written to it. Several A records at one
+name are round robin; two MX records are a primary and a backup exchanger. So
+nothing in this module identifies a record by `(type, name)`.
+
+**Which record a record *is*** is answered in one place,
+`DnsRecordIdentity::findAmong()`, and both provider implementations ask it:
+
+1. the provider's identifier, if the record carries one the zone still holds at
+   the same type and name — which is what makes an edit change a value in place;
+2. otherwise the value (`DnsRecord::saysTheSameAs()`: type, name, content,
+   priority and structured fields; content case-insensitive exactly where
+   `DnsRecordType::contentIsCaseInsensitive()` says so). An identifier the zone
+   no longer knows falls through to this tier, and so does a publish whose
+   answer was lost, which then finds the record it already made instead of
+   making a second.
+
+A publish skips its write only when the zone already holds the record
+*exactly* — `isPublishedExactlyAs()`, which adds the TTL. A delete reads before
+it deletes, even with an identifier in hand, and removes the one record found
+and nothing else at the name. The Cloudflare adapter reads every page of a
+listing. The adapter once took `$existing[0]` of whatever sat at a name, and the
+controlled fake keyed its store by `type|name`; both collapsed a name's records
+into one, and because the fake shared the defect no test could see it (F-11).
+The contract is now one suite run against both implementations in the same
+invocation — `CloudflareAdapterKeepsTheRecordContractTest`, over a simulated
+zone that keys records by identifier, and `TheDnsSimulatorKeepsTheRecordContractTest`.
+
+A CAA record is sent to Cloudflare as its three fields and no `content`, while
+the platform's row carries the presentation form built from the same fields.
+The adapter's read rebuilds `content` from the fields, so the two sides compare
+as one record; before it did, a correctly published CAA was reported missing
+*and* orphaned against one identifier on every sweep.
+
+**Two rows never answer for one provider record.** The value tier cannot tell
+"the record this row created and never heard about" from "another row's record
+whose value has moved onto this one" — from inside a provider they are the same
+read. The platform opens exactly that window by itself: an edit writes the new
+value to its row at once and publishes afterwards, so for a moment a second row
+may be added at the value the first is leaving, and its publish adopts the
+first row's identifier. `ClaimProviderRecord` settles it where the fact lives:
+whichever writer stamps an identifier (`PublishRecord`, and the sweep settling
+an unanswered publish) takes it from any other live row in the zone that held
+it. That row's claim is refuted, not doubted — the record has just been read
+carrying the claimant's value — and the row is reported by the sweep as missing
+at the provider, which is the truth: a record too many is recoverable, a record
+silently destroyed is not. The partial unique index
+`dns_records_one_live_provider_record` (`dns_zone_id, provider_record_id` where
+the row is not deleted and holds an identifier) holds the same rule for any
+writer not written yet.
+
+Known and recorded rather than changed: a record **renamed at the provider**
+under an identifier the platform holds is not removed by a delete, because the
+delete's read is narrowed to the record's own type and name. It now sits at a
+name the platform never asked to remove, and the sweep reports it as a record
+nobody here wrote. Both implementations resolve it the same way.
+
+The table holds each value once per `(type, name)` —
+`dns_records_one_live_value` hashes content alone — so the same MX host at a
+second priority is refused. It is refused as `dns.record.one_value_per_name`,
+not as a duplicate: the two records are different, and a customer is not told
+otherwise.
 
 ## Giving a domain up
 

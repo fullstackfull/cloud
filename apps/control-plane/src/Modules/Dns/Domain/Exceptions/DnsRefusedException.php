@@ -123,6 +123,20 @@ final class DnsRefusedException extends DomainException
             ->withStatus(409);
     }
 
+    /**
+     * The same value at the same name and type, differing in priority or in
+     * its structured fields. Not a duplicate — the platform's own comparison
+     * calls the two records different — but this platform holds each value
+     * once per name, so the existing record is the one to change.
+     */
+    public static function oneValuePerName(string $name): self
+    {
+        return (new self('That name already has a record of this type with this value at a different priority or setting. Change that record instead of adding a second.'))
+            ->withContext(['name' => $name])
+            ->as('dns.record.one_value_per_name')
+            ->withStatus(409);
+    }
+
     public static function notEditable(string $id): self
     {
         return (new self('This record is on its way out and cannot be changed.'))

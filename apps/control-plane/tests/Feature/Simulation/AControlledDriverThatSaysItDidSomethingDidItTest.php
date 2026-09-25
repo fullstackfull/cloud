@@ -367,14 +367,25 @@ final class AControlledDriverThatSaysItDidSomethingDidItTest extends TestCase
 
         // A repeat keeps the identifier: one record, one id, whether written
         // once or three times.
-        $again = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.rehearsal.example', '198.51.100.11'));
+        $again = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.rehearsal.example', '198.51.100.10'));
 
         $this->assertSame($record->id(), $again->id());
         $this->assertCount(1, $provider->records($zone));
 
+        // A second address at the name is a second record, not the first one
+        // overwritten: the simulator holds what a real zone holds, which is
+        // what lets it catch an adapter that collapses the two (F-11).
+        $sibling = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.rehearsal.example', '198.51.100.11'));
+
+        $this->assertNotSame($record->id(), $sibling->id());
+        $this->assertCount(2, $provider->records($zone));
+
+        // And removing one leaves the other answering.
         $provider->delete($zone, $again);
 
-        $this->assertSame([], $provider->records($zone));
+        $left = $provider->records($zone);
+        $this->assertCount(1, $left);
+        $this->assertSame('198.51.100.11', $left[0]->content());
     }
 
     #[Test]

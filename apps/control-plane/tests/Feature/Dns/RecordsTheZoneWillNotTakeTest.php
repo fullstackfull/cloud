@@ -7,6 +7,7 @@ namespace Tests\Feature\Dns;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Ipam\Domain\Enums\IpVersion;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
 use PHPUnit\Framework\Attributes\Test;
@@ -109,6 +110,29 @@ final class RecordsTheZoneWillNotTakeTest extends DnsTestCase
         $this->add(['type' => 'A', 'name' => 'a.example.test', 'content' => '198.51.100.24'])
             ->assertStatus(403)
             ->assertJsonPath('error.code', 'dns.record.address_not_yours');
+    }
+
+    #[Test]
+    public function another_spelling_of_somebody_elses_v6_address_is_the_same_address(): void
+    {
+        [$neighbour] = $this->accountWithOwner();
+
+        // No writer in src/ stores a v6 row today; a factory does, so that the
+        // rule is exercised for the day one does.
+        $address = IpAddress::factory()->create(['address' => '2001:db8::1', 'ip_version' => IpVersion::V6]);
+        IpAssignment::factory()->create([
+            'ip_address_id' => $address->getKey(),
+            'customer_id' => $neighbour->getKey(),
+            'released_at' => null,
+        ]);
+
+        // AAAA content is case-insensitive and has more than one spelling;
+        // a byte-exact lookup let every other spelling through.
+        foreach (['2001:db8::1', '2001:DB8::1', '2001:0db8:0000:0000:0000:0000:0000:0001'] as $spelling) {
+            $this->add(['type' => 'AAAA', 'name' => 'v6.example.test', 'content' => $spelling])
+                ->assertStatus(403)
+                ->assertJsonPath('error.code', 'dns.record.address_not_yours');
+        }
     }
 
     #[Test]
@@ -217,6 +241,41 @@ final class RecordsTheZoneWillNotTakeTest extends DnsTestCase
 
         $this->add(['type' => 'A', 'name' => 'www.example.test', 'content' => '203.0.113.11'])
             ->assertCreated();
+    }
+
+    #[Test]
+    public function the_same_host_at_another_priority_is_refused_without_calling_it_the_same_record(): void
+    {
+        $this->add(['type' => 'MX', 'name' => 'example.test', 'content' => 'mail.example.test', 'priority' => 10])->assertCreated();
+
+        // Refused, because this platform holds each value once per name — but
+        // not as a duplicate. The two records do not say the same thing, and
+        // telling a customer they do is the priority-blindness F-11 is about.
+        $this->add(['type' => 'MX', 'name' => 'example.test', 'content' => 'mail.example.test', 'priority' => 20])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'dns.record.one_value_per_name');
+    }
+
+    #[Test]
+    public function a_host_differing_only_in_case_is_the_same_record(): void
+    {
+        $this->add(['type' => 'MX', 'name' => 'example.test', 'content' => 'mail.example.test', 'priority' => 10])->assertCreated();
+
+        $this->add(['type' => 'MX', 'name' => 'example.test', 'content' => 'Mail.Example.test', 'priority' => 10])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'dns.record.duplicate');
+    }
+
+    #[Test]
+    public function the_same_certificate_authority_twice_is_a_duplicate(): void
+    {
+        $caa = ['type' => 'CAA', 'name' => 'example.test', 'data' => ['flags' => 0, 'tag' => 'issue', 'value' => 'letsencrypt.org']];
+
+        $this->add($caa)->assertCreated();
+
+        $this->add($caa)
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'dns.record.duplicate');
     }
 
     #[Test]

@@ -75,11 +75,20 @@ final class DnsProviderFactoryTest extends TestCase
         $zone = $provider->withZone('lynomia.test');
 
         $first = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.10'));
-        $second = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.11'));
+        $again = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.10'));
 
         // One record, one identifier, whether it was written once or twice.
         $this->assertCount(1, $provider->records($zone, DnsRecordType::A));
-        $this->assertSame($first->id(), $second->id());
+        $this->assertSame($first->id(), $again->id());
+
+        // A changed value under the record's identifier is that record
+        // changing. The same value without one would be a second record
+        // (round robin): identity is the identifier or the value, never the
+        // name — which this test once asserted, pinning the F-11 collapse.
+        $changed = $provider->publish($zone, DnsRecord::of(DnsRecordType::A, 'www.lynomia.test', '192.0.2.11', id: $first->id()));
+
+        $this->assertCount(1, $provider->records($zone, DnsRecordType::A));
+        $this->assertSame($first->id(), $changed->id());
         $this->assertSame('192.0.2.11', $provider->records($zone, DnsRecordType::A)[0]->content());
     }
 

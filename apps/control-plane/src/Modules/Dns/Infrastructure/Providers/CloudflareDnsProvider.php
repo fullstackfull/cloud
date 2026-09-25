@@ -8,6 +8,7 @@ use Lynomia\Modules\Dns\Domain\Contracts\DnsProvider;
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsNotConfiguredException;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
+use Lynomia\Modules\Dns\Domain\Services\DnsRecordIdentity;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsZone;
 use Lynomia\Modules\Dns\Infrastructure\CloudflareApi;
@@ -17,17 +18,21 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 /**
  * Forward DNS through Cloudflare's v4 API.
  *
- * Two things about this adapter are deliberate and worth reading before
+ * Three things about this adapter are deliberate and worth reading before
  * changing it.
  *
  * **Nothing is retried here.** A create that times out may have created the
- * record; asking again is how a zone ends up with two answers for one name.
+ * record; asking again blind is how a zone ends up holding one value twice.
  * The timeout is reported as indeterminate and the decision is the platform's.
  *
- * **A publish reads before it writes.** That costs a round trip and buys
- * idempotence the interface promises: the same record published twice leaves
- * one, and a record already holding the wanted value is left alone rather than
- * rewritten, which would bump the zone serial and re-propagate for nothing.
+ * **A publish reads before it writes, and so does a delete.** That costs a
+ * round trip and buys the idempotence the interface promises: the same record
+ * published twice leaves one, and a record already holding exactly the wanted
+ * value is left alone rather than rewritten, which would bump the zone serial
+ * and re-propagate for nothing.
+ *
+ * **A name holds several records, and this adapter touches one.** Which one is
+ * {@see DnsRecordIdentity}'s answer — never "the first record at this name".
  */
 final class CloudflareDnsProvider implements DnsProvider
 {
@@ -38,6 +43,11 @@ final class CloudflareDnsProvider implements DnsProvider
      * zones than one page pages rather than silently seeing the first fifty.
      */
     private const int PAGE_SIZE = 50;
+
+    /**
+     * Records are asked for a hundred at a time, and every page is read.
+     */
+    private const int RECORD_PAGE_SIZE = 100;
 
     private ?CloudflareConnection $connection = null;
 
@@ -189,7 +199,7 @@ final class CloudflareDnsProvider implements DnsProvider
 
     public function records(DnsZone $zone, ?DnsRecordType $type = null, ?string $name = null): array
     {
-        $query = ['per_page' => 100];
+        $query = ['per_page' => self::RECORD_PAGE_SIZE];
 
         if ($type !== null) {
             $query['type'] = $type->value;
@@ -199,46 +209,111 @@ final class CloudflareDnsProvider implements DnsProvider
             $query['name'] = strtolower(trim($name, " \t\n\r\0\x0B."));
         }
 
-        $body = $this->call('GET', '/zones/'.$zone->id().'/dns_records', $query, 'list records in '.$zone->name());
-
-        /** @var list<array<string, mixed>> $rows */
-        $rows = is_array($body['result'] ?? null) ? array_values($body['result']) : [];
-
         $records = [];
+        $page = 1;
 
-        foreach ($rows as $row) {
-            $recordType = DnsRecordType::tryFrom((string) ($row['type'] ?? ''));
+        /*
+         * Every page. This read once stopped at the first hundred records,
+         * against a platform ceiling of 250 per zone
+         * (`dns.records_per_zone`), so a large zone's records past the first
+         * page were reported missing by the sweep and invisible to a publish
+         * looking for the record it was about to create again.
+         */
+        do {
+            $body = $this->call('GET', '/zones/'.$zone->id().'/dns_records', [...$query, 'page' => $page], 'list records in '.$zone->name());
 
-            // A zone holds types this platform does not publish — NS and SOA at
-            // the very least. They are somebody else's records; skipping them
-            // is not a gap, it is the boundary of what this contract covers.
-            if ($recordType === null) {
-                continue;
+            /** @var list<array<string, mixed>> $rows */
+            $rows = is_array($body['result'] ?? null) ? array_values($body['result']) : [];
+
+            foreach ($rows as $row) {
+                $record = $this->recordFrom($row);
+
+                if ($record !== null) {
+                    $records[] = $record;
+                }
             }
 
-            $records[] = DnsRecord::of(
-                type: $recordType,
-                name: (string) ($row['name'] ?? ''),
-                content: (string) ($row['content'] ?? ''),
-                ttl: (int) ($row['ttl'] ?? DnsRecord::AUTOMATIC_TTL),
-                priority: isset($row['priority']) ? (int) $row['priority'] : null,
-                data: is_array($row['data'] ?? null) ? $row['data'] : [],
-                id: (string) ($row['id'] ?? ''),
-            );
-        }
+            $totalPages = (int) ($body['result_info']['total_pages'] ?? 1);
+            $page++;
+        } while ($page <= $totalPages && $rows !== []);
 
         return $records;
     }
 
+    /**
+     * One listed row in the platform's shape, or null for a type the platform
+     * does not publish.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function recordFrom(array $row): ?DnsRecord
+    {
+        $recordType = DnsRecordType::tryFrom((string) ($row['type'] ?? ''));
+
+        // A zone holds types this platform does not publish — NS and SOA at
+        // the very least. They are somebody else's records; skipping them
+        // is not a gap, it is the boundary of what this contract covers.
+        if ($recordType === null) {
+            return null;
+        }
+
+        $content = (string) ($row['content'] ?? '');
+
+        /** @var array<string, mixed> $data */
+        $data = is_array($row['data'] ?? null) ? $row['data'] : [];
+
+        /*
+         * The two sides of this adapter have to agree on what a structured
+         * record looks like. `payloadFor()` sends CAA as `data` and no
+         * `content`, so the record it wrote can come back with no content at
+         * all — while the platform's own record carries the presentation
+         * form (`0 issue "letsencrypt.org"`) as content, built from the same
+         * three fields. Left as read, a correctly published CAA compared as
+         * a *different* record from the one the platform wrote: reported
+         * missing and orphaned against one identifier on every sweep, and
+         * duplicated by every republish. So the read rebuilds content from
+         * the fields, in the platform's spelling, whatever the provider put
+         * in `content` — the fields are what was sent, and what is compared.
+         */
+        if ($recordType->isStructured() && $data !== []) {
+            $data = [
+                'flags' => (int) ($data['flags'] ?? 0),
+                'tag' => (string) ($data['tag'] ?? ''),
+                'value' => (string) ($data['value'] ?? ''),
+            ];
+            $content = sprintf('%d %s "%s"', $data['flags'], $data['tag'], $data['value']);
+        }
+
+        return DnsRecord::of(
+            type: $recordType,
+            name: (string) ($row['name'] ?? ''),
+            content: $content,
+            ttl: (int) ($row['ttl'] ?? DnsRecord::AUTOMATIC_TTL),
+            priority: isset($row['priority']) ? (int) $row['priority'] : null,
+            data: $data,
+            id: (string) ($row['id'] ?? ''),
+        );
+    }
+
+    /**
+     * Make the zone hold this record, touching no other record at its name.
+     *
+     * Read, then decide by {@see DnsRecordIdentity}: the record under the
+     * identifier this one carries, or else the record already holding its
+     * value, or else none. The read is narrowed to type and name only to keep
+     * it small; nothing is concluded from *where* a record sits, only from
+     * which record it is. Taking the first record at the name instead — as
+     * this method once did — overwrote a round-robin address with its
+     * sibling and replaced a primary mail exchanger with the backup.
+     */
     public function publish(DnsZone $zone, DnsRecord $record): DnsRecord
     {
-        $existing = $this->records($zone, $record->type(), $record->name());
+        $current = DnsRecordIdentity::findAmong($record, $this->records($zone, $record->type(), $record->name()));
 
-        $current = $existing[0] ?? null;
-
-        if ($current !== null && $current->saysTheSameAs($record)) {
-            // Already what was asked for. Writing it again would bump the zone
-            // serial and re-propagate a record that has not changed.
+        if ($current !== null && $current->isPublishedExactlyAs($record)) {
+            // Already exactly what was asked for — TTL included, which is why
+            // this is not `saysTheSameAs()`. Writing it again would bump the
+            // zone serial and re-propagate a record that has not changed.
             return $current;
         }
 
@@ -255,24 +330,37 @@ final class CloudflareDnsProvider implements DnsProvider
 
         $id = (string) ($row['id'] ?? '');
 
-        return $id === '' ? $record : $record->withId($id);
+        if ($id !== '') {
+            return $record->withId($id);
+        }
+
+        // No identifier in the answer. A record rewritten under one the read
+        // just returned keeps that one; a created record has none to carry.
+        $held = $current?->id();
+
+        return $held === null || $held === '' ? $record : $record->withId($held);
     }
 
+    /**
+     * Remove this one record and nothing else at its name.
+     *
+     * Reads first, even when the record carries an identifier. Firing a held
+     * identifier blind meant a record already removed in the provider's
+     * console answered with an error, and the row parked for a person over a
+     * zone that already said what the customer asked — while the contract's
+     * own words are that removing what is not there is not an error.
+     */
     public function delete(DnsZone $zone, DnsRecord $record): void
     {
-        $existing = $record->id() !== null
-            ? [$record]
-            : $this->records($zone, $record->type(), $record->name());
+        $found = DnsRecordIdentity::findAmong($record, $this->records($zone, $record->type(), $record->name()));
 
-        foreach ($existing as $found) {
-            $id = $found->id();
+        $id = $found?->id();
 
-            if ($id === null || $id === '') {
-                continue;
-            }
-
-            $this->call('DELETE', '/zones/'.$zone->id().'/dns_records/'.$id, [], 'delete '.$record->type()->value.' '.$record->name());
+        if ($id === null || $id === '') {
+            return;
         }
+
+        $this->call('DELETE', '/zones/'.$zone->id().'/dns_records/'.$id, [], 'delete '.$record->type()->value.' '.$record->name());
     }
 
     /**

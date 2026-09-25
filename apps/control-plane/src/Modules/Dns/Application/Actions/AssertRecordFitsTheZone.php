@@ -62,7 +62,7 @@ final readonly class AssertRecordFitsTheZone
         $this->assertRoom($zone, $ignoring);
         $this->assertAddressIsTheirs($zone, $type, $content);
         $this->assertCnameStandsAlone($zone, $type, $normalised, $ignoring);
-        $this->assertNotADuplicate($zone, $type, $normalised, $content, $ignoring);
+        $this->assertNotADuplicate($zone, $type, $normalised, $content, $priority, $data, $ignoring);
     }
 
     /**
@@ -112,7 +112,7 @@ final readonly class AssertRecordFitsTheZone
         }
 
         /** @var IpAddress|null $address */
-        $address = IpAddress::query()->where('address', $content)->first();
+        $address = IpAddress::query()->where('address', self::canonical($content))->first();
 
         // Not one of ours. Not our business.
         if ($address === null) {
@@ -128,6 +128,44 @@ final readonly class AssertRecordFitsTheZone
         if (! $holds) {
             throw DnsRefusedException::addressIsNotYours($content);
         }
+    }
+
+    /**
+     * The one spelling of an address the inventory is looked up by.
+     *
+     * AAAA content is case-insensitive
+     * ({@see DnsRecordType::contentIsCaseInsensitive()}) and has more than one
+     * spelling besides — `2001:DB8::1`, `2001:0db8:0000:…:0001` — and a
+     * byte-exact lookup matched only the one the inventory stored, so every
+     * other spelling of a neighbour's address took the "not one of ours"
+     * return and was accepted.
+     *
+     * `inet_pton()` reads a string as IPv6 exactly when it contains a colon.
+     * On every other input this method is the identity: the dotted-quad set
+     * `inet_pton()` accepts is exactly the set `inet_ntop()` writes back, and
+     * anything it refuses is returned verbatim. So it changes nothing for an
+     * IPv4 address, canonical or not — a non-canonical v4 spelling stored by
+     * some future writer is not helped by it; only canonicalising the column
+     * would close that. It matters on the day `ip_addresses` holds a v6 row,
+     * which no writer in `src/` produces today.
+     */
+    private static function canonical(string $content): string
+    {
+        $content = trim($content);
+
+        if (! str_contains($content, ':')) {
+            return $content;
+        }
+
+        $packed = @inet_pton($content);
+
+        if ($packed === false) {
+            return $content;
+        }
+
+        $text = inet_ntop($packed);
+
+        return $text === false ? $content : $text;
     }
 
     /**
@@ -162,6 +200,24 @@ final readonly class AssertRecordFitsTheZone
     }
 
     /**
+     * One value per name and type — and a refusal that says which rule it is.
+     *
+     * The table holds a value once per `(type, name)`
+     * (`dns_records_one_live_value` hashes content alone), so the same MX host
+     * at a second priority cannot be added. That is a limit of this platform,
+     * not a duplicate: the two records do not say the same thing, and the
+     * platform's own comparison calls them different. Refusing it as "a
+     * record of this type with this value" told a customer two different
+     * records were identical, which is the priority-blindness F-11 is about;
+     * so the two cases carry two codes.
+     *
+     * Content is compared the way {@see DnsRecordType::contentIsCaseInsensitive()}
+     * says: `Mail.Example.test` is the MX `mail.example.test` already holds.
+     * The index is case-sensitive, so this only ever refuses more than it
+     * would — never less.
+     *
+     * @param  array<string, mixed>  $data
+     *
      * @throws DnsRefusedException
      */
     private function assertNotADuplicate(
@@ -169,19 +225,40 @@ final readonly class AssertRecordFitsTheZone
         DnsRecordType $type,
         string $name,
         string $content,
+        ?int $priority,
+        array $data,
         ?string $ignoring,
     ): void {
-        $exists = DnsRecord::query()
+        $wanted = trim($content);
+
+        /** @var list<DnsRecord> $atThisName */
+        $atThisName = DnsRecord::query()
             ->where('dns_zone_id', $zone->getKey())
             ->where('type', $type->value)
             ->where('name', $name)
-            ->where('content', $content)
             ->where('state', '!=', DnsState::Deleted->value)
             ->when($ignoring !== null, static fn ($query) => $query->whereKeyNot($ignoring))
-            ->exists();
+            ->get()
+            ->all();
 
-        if ($exists) {
-            throw DnsRefusedException::duplicate($name);
+        foreach ($atThisName as $row) {
+            $sameContent = $type->contentIsCaseInsensitive()
+                ? strtolower($row->content) === strtolower($wanted)
+                : $row->content === $wanted;
+
+            if (! $sameContent) {
+                continue;
+            }
+
+            $held = $row->data ?? [];
+            ksort($held);
+            ksort($data);
+
+            if ($row->priority === $priority && $held === $data) {
+                throw DnsRefusedException::duplicate($name);
+            }
+
+            throw DnsRefusedException::oneValuePerName($name);
         }
     }
 }
