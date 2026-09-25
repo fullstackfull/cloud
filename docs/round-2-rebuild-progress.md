@@ -28,7 +28,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-20 | High | queued | |
 | F-21 | High | queued | |
 | F-22 | High | rebuilt — drift alert + route pinned by validator (39/39), log path fixed; Architecture+Monitoring green | `bb1c77e` |
-| F-23 | High | in progress | |
+| F-23 | High | rebuilt — reachability gate red→green (11 unwritten states allow-listed to owners), WordPress state strings added; Architecture 135/135, vitest/tsc/eslint clean | `5ae2e58` |
 | F-24 | High | queued | |
 | F-41 | High | queued (last: changes the test harness) | |
 | F-46 | High | queued (PARTIAL) | |
