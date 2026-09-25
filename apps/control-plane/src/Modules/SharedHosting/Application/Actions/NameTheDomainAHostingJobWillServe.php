@@ -30,10 +30,25 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  * act, recorded as such, and the retry that follows it is the ordinary one
  * with its ordinary guards.
  *
- * It writes the job's payload and nothing else: not the status, not the
- * attempts, not the account row. The account row is the reservation's to
- * write, under the node's lock, in the same write as the check that justifies
- * it — see ReserveHostingNodeCapacity.
+ * It writes one column of the job and nothing else: not the status, not the
+ * attempts, not the account row — and not the payload. The account row is the
+ * reservation's to write, under the node's lock, in the same write as the
+ * check that justifies it — see ReserveHostingNodeCapacity.
+ *
+ * ---------------------------------------------------------------------------
+ * Why not the payload (F-04 x F-15)
+ * ---------------------------------------------------------------------------
+ *
+ * This first wrote the name into the job's payload. A job's payload is
+ * written once, when the job is created, and never again: a VPS create claims
+ * a machine it finds as its own by the names its payload gave it, and that
+ * is only safe while nothing rewrites the payload — a writer here is the
+ * precedent the next "harmless" one arrives under. So the name is recorded in
+ * `operator_named_domain`, a column that holds nothing else, assigned by name
+ * and never from the request; and the build reads the job's domain through
+ * {@see ProvisioningJob::hostingDomain()}, which prefers it to what the job
+ * was created with. The payload comes out of this act byte for byte as it
+ * went in.
  *
  * ---------------------------------------------------------------------------
  * The same question the build will ask, asked first
@@ -61,6 +76,11 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 final readonly class NameTheDomainAHostingJobWillServe
 {
     /**
+     * `previous` is the name the build would have served before this act —
+     * an earlier operator's, else the one the job was created with, else
+     * null — so a correction made twice audits the second one against the
+     * first, not against the payload.
+     *
      * @return array{job: ProvisioningJob, previous: string|null, domain: string}
      *
      * @throws HostingJobDomainRefusedException
@@ -105,11 +125,9 @@ final readonly class NameTheDomainAHostingJobWillServe
                 throw HostingDomainConflictException::forDomain($folded);
             }
 
-            /** @var array<string, mixed> $payload */
-            $payload = $locked->payload;
-            $previous = isset($payload['primary_domain']) ? (string) $payload['primary_domain'] : null;
+            $previous = $locked->hostingDomain();
 
-            $locked->payload = [...$payload, 'primary_domain' => $folded];
+            $locked->operator_named_domain = $folded;
             $locked->save();
 
             return ['job' => $locked, 'previous' => $previous, 'domain' => $folded];

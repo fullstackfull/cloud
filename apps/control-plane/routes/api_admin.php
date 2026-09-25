@@ -135,10 +135,11 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     /*
      * Correcting the domain a stopped hosting build will serve: the repair a
      * retry cannot be, for a build refused because it names no domain or one
-     * another live account serves. It writes the job's payload and nothing
-     * else; the retry that follows is the one above. Behind provisioning.retry
-     * for the same reason adoption is — it changes what the platform will do
-     * on the strength of a person's word.
+     * another live account serves. It writes one column of the job,
+     * `operator_named_domain`, and nothing else — never the payload, which is
+     * written once (F-15); the retry that follows is the one above. Behind
+     * provisioning.retry for the same reason adoption is — it changes what
+     * the platform will do on the strength of a person's word.
      */
     Route::put('provisioning/jobs/{job}/hosting-domain', [ProvisioningController::class, 'nameHostingDomain'])
         ->middleware('permission:'.Permission::ProvisioningRetry->value)

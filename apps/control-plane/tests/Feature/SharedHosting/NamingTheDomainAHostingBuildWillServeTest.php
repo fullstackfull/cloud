@@ -6,6 +6,7 @@ namespace Tests\Feature\SharedHosting;
 
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
@@ -36,10 +37,12 @@ use Tests\TestCase;
  * both would be refused identically on every retry — because a retry is not a
  * repair. It runs the same job again.
  *
- * So naming the domain is its own act, separate from retry: it writes the
- * job's payload and nothing else, it is audited, and it answers the same
- * question the build will ask (is this name free?) before it accepts one. Then
- * an ordinary retry builds under the corrected name.
+ * So naming the domain is its own act, separate from retry: it writes one
+ * column of the job, `operator_named_domain`, and nothing else — not the
+ * payload, which F-15 needs written once — it is audited, and it answers the
+ * same question the build will ask (is this name free?) before it accepts
+ * one. Then an ordinary retry builds under the corrected name, which the
+ * build reads through `ProvisioningJob::hostingDomain()`.
  *
  * The traps it walks are the ones earlier rounds fell into:
  *
@@ -87,16 +90,20 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
     public function an_operator_names_the_domain_and_a_retry_builds_under_it(): void
     {
         $job = $this->failedJob(['primary_domain' => null]);
+        $written = $this->payloadOf($job);
 
         $this->nameIt($job, ' Right.Example.Test. ')
             ->assertOk()
             ->assertJsonPath('data.primary_domain', 'right.example.test');
 
         $fresh = $job->fresh();
-        $this->assertSame('right.example.test', $fresh?->payload['primary_domain'] ?? null);
+        $this->assertSame('right.example.test', $fresh?->operator_named_domain);
+        $this->assertSame('right.example.test', $fresh?->hostingDomain());
 
-        // The payload and nothing else: it is still a failed job, and running
-        // it again is a separate decision.
+        // One column and nothing else: the payload is as it was created, it
+        // is still a failed job, and running it again is a separate decision.
+        $this->assertSame($written, $this->payloadOf($job), 'naming the domain rewrote the job\'s payload');
+        $this->assertArrayNotHasKey('primary_domain', $fresh?->payload ?? []);
         $this->assertSame(ProvisioningJobStatus::Failed, $fresh?->status);
         $this->assertSame([], $this->panel->creates);
 
@@ -110,6 +117,47 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
         $this->assertSame(ProvisioningJobStatus::Succeeded, $job->fresh()?->status);
         $this->assertCount(1, $this->panel->creates);
         $this->assertSame('right.example.test', $this->panel->creates[0]->primaryDomain);
+        $this->assertSame($written, $this->payloadOf($job), 'the retry rewrote the job\'s payload');
+    }
+
+    #[Test]
+    public function a_second_correction_is_audited_against_the_first_and_the_payload_never_moves(): void
+    {
+        /*
+         * "The name before" is the name the build would have served, not the
+         * payload's: after one correction the payload still says what the job
+         * was created with, and auditing the second correction against that
+         * would record a name the job had already stopped serving.
+         */
+        $job = $this->failedJob(['primary_domain' => 'created.example.test']);
+        $written = $this->payloadOf($job);
+
+        $this->nameIt($job, 'first.example.test')
+            ->assertOk()
+            ->assertJsonPath('data.previous_domain', 'created.example.test');
+
+        $this->nameIt($job, 'second.example.test')
+            ->assertOk()
+            ->assertJsonPath('data.previous_domain', 'first.example.test')
+            ->assertJsonPath('data.primary_domain', 'second.example.test');
+
+        $audited = AuditEntry::query()
+            ->where('action', AuditAction::HostingJobDomainNamed)
+            ->get()
+            ->mapWithKeys(static fn (AuditEntry $entry): array => [
+                (string) ($entry->context['primary_domain'] ?? '') => $entry->context['previous_domain'] ?? null,
+            ])
+            ->sortKeys()
+            ->all();
+
+        $this->assertSame([
+            'first.example.test' => 'created.example.test',
+            'second.example.test' => 'first.example.test',
+        ], $audited);
+
+        $this->assertSame('second.example.test', $job->fresh()?->hostingDomain());
+        $this->assertSame($written, $this->payloadOf($job));
+        $this->assertSame('created.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
     }
 
     #[Test]
@@ -196,7 +244,8 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'hosting.domain_in_use');
 
-        $this->assertSame('mine.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
+        $this->assertSame('mine.example.test', $job->fresh()?->hostingDomain());
+        $this->assertNull($job->fresh()?->operator_named_domain);
         $this->assertSame(0, AuditEntry::query()->where('action', AuditAction::HostingJobDomainNamed)->count());
     }
 
@@ -243,6 +292,15 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
     }
 
     // ---- fixtures ---------------------------------------------------------
+
+    /**
+     * The payload as the database holds it: a writer that reorders keys or
+     * re-encodes a value has written.
+     */
+    private function payloadOf(ProvisioningJob $job): string
+    {
+        return (string) DB::table('provisioning_jobs')->where('id', $job->id)->value('payload');
+    }
 
     private function nameIt(ProvisioningJob $job, string $domain): TestResponse
     {

@@ -2758,7 +2758,7 @@ return [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'status' => ['type' => ['string', 'null']],
             'primary_domain' => ['type' => 'string', 'description' => 'The name the build will now serve, folded.'],
-            'previous_domain' => ['type' => ['string', 'null'], 'description' => 'What the job named before, or null when it named nothing.'],
+            'previous_domain' => ['type' => ['string', 'null'], 'description' => 'The name the build would have served before this correction - an earlier correction\'s, else the one the job was created with - or null when it named nothing.'],
         ],
     ],
     'AdminHostingPasswordReset' => [

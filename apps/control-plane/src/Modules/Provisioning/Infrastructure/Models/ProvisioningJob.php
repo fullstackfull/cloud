@@ -38,6 +38,10 @@ use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
  * and the reserved identity is then the only thing that says where to look.
  * See reserveProviderIdentity().
  *
+ * The payload is written once, when the job is created, and never again
+ * (F-15). What is learned about a job afterwards is recorded beside it, in a
+ * column of its own — see hostingDomain().
+ *
  * @property string $id
  * @property ?string $service_id
  * @property ?string $requested_by_user_id
@@ -64,6 +68,7 @@ use Lynomia\Modules\Shared\Infrastructure\Casts\RedactedJsonCast;
  * @property ?list<string> $reserved_provider_nodes
  * @property ?string $reserved_cluster_id
  * @property ?list<string> $reserved_provider_hostnames
+ * @property ?string $operator_named_domain
  */
 class ProvisioningJob extends Model
 {
@@ -291,6 +296,37 @@ class ProvisioningJob extends Model
             nodes: self::listFrom($this->reserved_provider_nodes),
             hostnames: self::listFrom($this->reserved_provider_hostnames),
         );
+    }
+
+    /**
+     * The domain a hosting build will serve, as the job holds it: the name an
+     * operator named for it if one has, otherwise the one it was created with.
+     *
+     * F-04 x F-15. A hosting build refused over its name is repaired by an
+     * operator naming the domain, and that name used to be written into the
+     * payload — a second writer of a column F-15 needs written once. It is
+     * recorded in `operator_named_domain` instead, and the payload keeps what
+     * the job was created with. So "the job's domain" is now two columns and
+     * one rule, and the rule lives here: every reader — the build, the
+     * operator surface that corrects it — asks this method, because a reader
+     * that went back to the payload alone would build under the name the
+     * operator had just corrected away from, on a job reporting success.
+     *
+     * Returned as the job holds it, not folded or validated. The build folds
+     * and validates what this returns, as it always has; the column is only
+     * ever written folded.
+     */
+    public function hostingDomain(): ?string
+    {
+        if ($this->operator_named_domain !== null) {
+            return $this->operator_named_domain;
+        }
+
+        /** @var array<string, mixed> $payload */
+        $payload = $this->payload;
+        $carried = $payload['primary_domain'] ?? null;
+
+        return $carried === null ? null : (string) $carried;
     }
 
     /**

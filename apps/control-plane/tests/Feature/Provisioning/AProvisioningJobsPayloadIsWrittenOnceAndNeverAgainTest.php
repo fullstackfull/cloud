@@ -5,8 +5,19 @@ declare(strict_types=1);
 namespace Tests\Feature\Provisioning;
 
 use Closure;
+use Database\Seeders\RolePermissionSeeder;
 use FilesystemIterator;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -98,8 +109,12 @@ use Tests\TestCase;
  * - **Mass assignment** — `$job->update($request->validated())`. The model
  *   guards only `id`, so this would reach the column, and it is undecidable
  *   from the text. There is no such call anywhere in `src/`, `app/` or
- *   `routes/` today; what bounds it is the admin surface, which offers no
- *   route that edits a job — and that is asserted below rather than stated.
+ *   `routes/` today; what bounds it is the admin surface, which offers
+ *   exactly one route that writes onto a job something a request supplies —
+ *   the hosting-domain correction (F-04) — and that route is named below and
+ *   driven with an overposted body, which is how it is shown to write one
+ *   named column and leave the payload byte for byte as it was. That is
+ *   asserted below rather than stated.
  *
  * Scope is `src/`. The other places code lives were censused by hand when this
  * was written: `app/`, `routes/`, `bootstrap/`, `config/` and `database/`
@@ -108,6 +123,8 @@ use Tests\TestCase;
  */
 final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestCase
 {
+    use RefreshDatabase;
+
     /**
      * The one writer of `provisioning_jobs.payload`. Never add to this list.
      *
@@ -116,6 +133,16 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
     private const array PROVISIONING_JOBS_PAYLOAD_WRITERS = [
         'src/Modules/Provisioning/Application/Actions/CreateProvisioningJob.php' => ['array key' => 1],
     ];
+
+    /**
+     * The one route on the provisioning admin surface that writes onto a job
+     * something the request supplies: the operator's correction of the
+     * domain a stopped hosting build will serve (F-04). It writes
+     * `operator_named_domain`, by name, and never the payload — which is why
+     * it is not a writer on the list above, and why it is driven below rather
+     * than listed.
+     */
+    private const string THE_ONE_ROUTE_THAT_WRITES_WHAT_A_REQUEST_SUPPLIES = 'PUT api/admin/provisioning/jobs/{job}/hosting-domain';
 
     /**
      * Every other match, each with what it is.
@@ -358,22 +385,31 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
 
     /**
      * What bounds mass assignment: the admin surface for provisioning jobs,
-     * exactly — two reads and three acts, none of which edits a job.
+     * exactly — two reads, three acts that take nothing from the request but
+     * evidence and a reference, and ONE route that writes onto a job a value
+     * the request supplies.
      *
      * A route added here that takes a job's attributes is a mass-assignment
-     * writer of the payload that no textual scan can see.
+     * writer of the payload that no textual scan can see. The one route that
+     * writes what an operator typed is not in the list of routes that do not;
+     * it is named on its own, pinned to the controller method it runs, and
+     * driven by the test after this one, which is what makes it safe to have
+     * rather than a line somebody added to make this pass.
      */
     #[Test]
     public function the_admin_surface_offers_no_route_that_edits_a_job(): void
     {
         $routes = [];
+        $actions = [];
 
         foreach (Route::getRoutes() as $route) {
             if (! str_starts_with($route->uri(), 'api/admin/provisioning')) {
                 continue;
             }
 
-            $routes[] = implode('|', array_values(array_diff($route->methods(), ['HEAD']))).' '.$route->uri();
+            $key = implode('|', array_values(array_diff($route->methods(), ['HEAD']))).' '.$route->uri();
+            $routes[] = $key;
+            $actions[$key] = $route->getActionName();
         }
 
         sort($routes);
@@ -384,7 +420,113 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             'POST api/admin/provisioning/jobs/{job}/adopt',
             'POST api/admin/provisioning/jobs/{job}/repoint',
             'POST api/admin/provisioning/jobs/{job}/retry',
-        ], $routes);
+        ], array_values(array_diff($routes, [self::THE_ONE_ROUTE_THAT_WRITES_WHAT_A_REQUEST_SUPPLIES])));
+
+        $this->assertContains(
+            self::THE_ONE_ROUTE_THAT_WRITES_WHAT_A_REQUEST_SUPPLIES,
+            $routes,
+            'The hosting-domain correction is gone; if that is deliberate, remove it and its drive below with it.',
+        );
+
+        // Pinned to the method the drive below exercises: the same URI behind
+        // a different controller method would be a writer nobody has driven.
+        $this->assertSame(
+            ProvisioningController::class.'@nameHostingDomain',
+            $actions[self::THE_ONE_ROUTE_THAT_WRITES_WHAT_A_REQUEST_SUPPLIES],
+        );
+    }
+
+    /**
+     * Why the one route that writes what a request supplies is safe: it
+     * writes one named column, and the payload comes out byte-identical.
+     *
+     * Driven with the body a mass-assignment writer would obey — a new
+     * payload, a JSON-path key into it, a status, an attempt count and the
+     * very column it writes, under their own names — and asserted on the row
+     * as the database holds it, every column: the payload is the same bytes,
+     * and the only columns that moved are `operator_named_domain`, to the
+     * folded name from `domain` and not the overposted value, and
+     * `updated_at`. A refused correction moves nothing at all.
+     */
+    #[Test]
+    public function the_one_route_that_writes_a_job_writes_one_named_column_and_never_the_payload(): void
+    {
+        $this->seed(RolePermissionSeeder::class);
+
+        $operator = User::factory()->create();
+        $operator->syncRoles([Role::SuperAdmin->value]);
+
+        $job = ProvisioningJob::factory()->kind(ProvisioningJobKind::CreateHostingAccount)->create([
+            'customer_id' => Customer::factory()->create()->getKey(),
+            'status' => ProvisioningJobStatus::Failed,
+            'failure_class' => FailureClass::Permanent,
+            'attempts' => 1,
+            'max_attempts' => 3,
+            'payload' => [
+                'hosting_package_id' => '01JZZZZZZZZZZZZZZZZZZZZZZZ',
+                'primary_domain' => 'as-created.example.test',
+                'username' => 'ascreated',
+                'contact_email' => 'owner@example.test',
+            ],
+        ]);
+
+        $before = $this->rowOf($job);
+
+        $this->actingAs($operator)
+            ->putJson('/api/admin/provisioning/jobs/'.$job->id.'/hosting-domain', [
+                'domain' => ' Named.Example.Test. ',
+                'evidence' => 'customer confirmed the name by ticket 4411',
+                'payload' => ['primary_domain' => 'overposted.example.test', 'hostname' => 'someone-elses-box'],
+                'payload->primary_domain' => 'overposted.example.test',
+                'status' => 'queued',
+                'attempts' => 0,
+                'operator_named_domain' => 'overposted.example.test',
+                'reserved_provider_hostnames' => ['someone-elses-box'],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.primary_domain', 'named.example.test')
+            ->assertJsonPath('data.previous_domain', 'as-created.example.test');
+
+        $after = $this->rowOf($job);
+
+        $this->assertSame($before['payload'], $after['payload'], 'The hosting-domain route rewrote the job\'s payload: it is a second writer.');
+
+        $moved = array_keys(array_filter(
+            $after,
+            static fn (mixed $value, string $column): bool => $value !== $before[$column],
+            ARRAY_FILTER_USE_BOTH,
+        ));
+        sort($moved);
+
+        $this->assertSame(['operator_named_domain', 'updated_at'], $moved, 'The hosting-domain route wrote more of the job than its one column.');
+        $this->assertSame('named.example.test', $after['operator_named_domain']);
+
+        // And a refusal writes nothing: the same body against a job that has
+        // not stopped leaves every column as it was.
+        DB::table('provisioning_jobs')->where('id', $job->id)->update(['status' => ProvisioningJobStatus::Running->value]);
+        $running = $this->rowOf($job);
+
+        $this->actingAs($operator)
+            ->putJson('/api/admin/provisioning/jobs/'.$job->id.'/hosting-domain', [
+                'domain' => 'other.example.test',
+                'evidence' => 'customer confirmed the name by ticket 4412',
+                'payload' => ['primary_domain' => 'overposted.example.test'],
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'hosting.job_not_settled');
+
+        $this->assertSame($running, $this->rowOf($job));
+    }
+
+    /**
+     * Every column of the job as the database holds it, uncast: a writer that
+     * re-encodes the payload without changing its meaning has still written.
+     *
+     * @return array<string, mixed>
+     */
+    private function rowOf(ProvisioningJob $job): array
+    {
+        return (array) DB::table('provisioning_jobs')->where('id', $job->id)->first();
     }
 
     // ---------------------------------------------------------------------

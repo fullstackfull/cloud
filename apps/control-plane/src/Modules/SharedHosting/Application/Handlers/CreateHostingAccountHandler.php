@@ -64,11 +64,13 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  * Now each of the three has one source, and a missing one is a refusal:
  *
  *  - the DOMAIN is the one the customer named at checkout, carried on the job
- *    and folded where it enters the account row. A job without one — every
- *    order placed before checkout asked — fails Permanent with
- *    `hosting.domain_missing` before anything is placed or reserved, and an
- *    operator names it from the provisioning queue and retries. So does one
- *    another live account already serves (`hosting.domain_in_use`).
+ *    and folded where it enters the account row — or the one an operator
+ *    named for the job since, which wins (`ProvisioningJob::hostingDomain()`).
+ *    A job without one — every order placed before checkout asked — fails
+ *    Permanent with `hosting.domain_missing` before anything is placed or
+ *    reserved, and an operator names it from the provisioning queue and
+ *    retries. So does one another live account already serves
+ *    (`hosting.domain_in_use`).
  *
  *  - the CONTACT ADDRESS is the one the order was billed to, carried on the
  *    job, falling back to the account's own billing address and then its
@@ -154,8 +156,13 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
          * same job names the same nothing; an operator names the domain on
          * the job and then retries it. No provider reference is carried, so
          * that retry is not refused.
+         *
+         * Read through hostingDomain(), never from the payload directly: the
+         * name an operator corrects is recorded beside the payload, which is
+         * written once, and a build that read the payload alone would serve
+         * the name the operator corrected away from.
          */
-        $submitted = trim((string) ($payload['primary_domain'] ?? ''));
+        $submitted = trim((string) $job->hostingDomain());
 
         if ($submitted === '') {
             return ProvisioningResult::failed(

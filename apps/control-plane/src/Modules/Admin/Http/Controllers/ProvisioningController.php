@@ -171,8 +171,12 @@ final class ProvisioningController
      *
      * The repair a retry cannot be. A build refused because it names no
      * domain, or one another live account serves, is refused identically on
-     * every retry; this writes the job's payload and nothing else, and the
-     * operator then retries it through the ordinary path. Behind
+     * every retry; this records the name in the job's own
+     * `operator_named_domain` and writes nothing else — not the payload,
+     * which is written once — and the operator then retries it through the
+     * ordinary path. Only the validated `domain` reaches the job, assigned by
+     * name; nothing else in the request is written anywhere but the audit
+     * trail. Behind
      * provisioning.retry, the permission that already means "change what the
      * platform believes on the strength of a person's word" — and the evidence
      * the operator relied on (usually the customer confirming the name) is

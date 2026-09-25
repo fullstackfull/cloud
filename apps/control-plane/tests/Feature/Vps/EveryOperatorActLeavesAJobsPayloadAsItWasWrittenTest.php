@@ -8,8 +8,13 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Provisioning\Application\Actions\DetectStaleJobs;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
 use Tests\TestCase;
@@ -24,6 +29,13 @@ use Tests\TestCase;
  * offers an operator over a job, and the sweeper that acts without one, is
  * driven here, and after each the payload must come out byte-for-byte as it
  * was written and the list of names must still hold exactly one.
+ *
+ * That includes the one act that writes onto a job something the operator
+ * typed: the correction of the domain a stopped hosting build will serve
+ * (F-04). It is driven twice — on a VPS create, which it refuses, and on the
+ * hosting build it exists for, where it records the name in a column of its
+ * own and the build is then retried and built under it — and the payload
+ * comes out of both as it went in.
  *
  * It is the effect that is asserted, not a count of writers: a second writer
  * planted on any of these paths — a hostname "normalised while we are
@@ -76,6 +88,12 @@ final class EveryOperatorActLeavesAJobsPayloadAsItWasWrittenTest extends TestCas
         $this->runWorker($job);
         $this->assertUntouched($job, $written, 'the attempt that found a stranger');
 
+        $this->nameHostingDomainAsOperator($job, 'shop.example.test')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'hosting.job_not_a_hosting_build');
+        $this->assertUntouched($job, $written, 'the hosting-domain correction, refused for a VPS create');
+        $this->assertNull($job->refresh()->operator_named_domain);
+
         $this->repointAsOperator($job)->assertOk();
         $this->assertSame(null, $job->refresh()->reserved_provider_hostnames, 'a repoint starts the new identity\'s names empty');
         $this->assertSame($written, $this->payloadOf($job), 'the repoint changed the payload');
@@ -106,6 +124,42 @@ final class EveryOperatorActLeavesAJobsPayloadAsItWasWrittenTest extends TestCas
         $this->runWorker($job);
 
         $this->assertUntouched($job, $written, 'the retry after the sweep');
+    }
+
+    #[Test]
+    public function a_hosting_build_named_retried_and_built_leaves_the_payload_untouched(): void
+    {
+        HostingNode::factory()->create([
+            'panel' => HostingPanel::Fake,
+            'max_accounts' => 50,
+            'account_count' => 0,
+            'disk_total_mib' => 2_097_152,
+            'disk_used_mib' => 209_715,
+        ]);
+
+        $job = ProvisioningJob::factory()->kind(ProvisioningJobKind::CreateHostingAccount)->create([
+            'customer_id' => $this->customer->id,
+            'status' => ProvisioningJobStatus::Queued,
+            // No domain: every hosting order placed before checkout asked for one.
+            'payload' => ['hosting_package_id' => (string) HostingPackage::factory()->create()->getKey()],
+        ]);
+        $written = $this->payloadOf($job);
+
+        $this->runWorker($job);
+        $this->assertSame(ProvisioningJobStatus::Failed, $job->refresh()->status);
+        $this->assertSame('hosting.domain_missing', $job->result['error']['code'] ?? null);
+        $this->assertSame($written, $this->payloadOf($job), 'The payload changed during the attempt that found no domain.');
+
+        $this->nameHostingDomainAsOperator($job, 'Shop.Example.Test')->assertOk();
+        $this->assertSame($written, $this->payloadOf($job), 'The payload changed during the hosting-domain correction: it has a second writer.');
+        $this->assertSame('shop.example.test', $job->refresh()->operator_named_domain);
+
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $this->assertSame(ProvisioningJobStatus::Succeeded, $job->refresh()->status);
+        $this->assertSame('shop.example.test', HostingAccount::query()->where('customer_id', $this->customer->id)->sole()->primary_domain);
+        $this->assertSame($written, $this->payloadOf($job), 'The payload changed during the retry that built under the named domain.');
     }
 
     /**

@@ -206,6 +206,20 @@ trait DrivesVpsCreatesThroughTheOperatorPath
     }
 
     /**
+     * The operator's correction of the domain a stopped hosting build will
+     * serve (F-04) — the one act on the operator's surface that writes onto a
+     * job something the operator typed.
+     */
+    protected function nameHostingDomainAsOperator(ProvisioningJob $job, string $domain): TestResponse
+    {
+        return $this->actingAs($this->operator())
+            ->putJson('/api/admin/provisioning/jobs/'.$job->id.'/hosting-domain', [
+                'domain' => $domain,
+                'evidence' => 'The customer confirmed the name by ticket.',
+            ]);
+    }
+
+    /**
      * Put somebody else's machine at an id, on a node, before this job asks.
      */
     protected function aStrangerAt(string $providerId, string $name = 'someone-elses-box', string $node = 'pve-01'): void

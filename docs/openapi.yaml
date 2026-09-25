@@ -8522,7 +8522,7 @@ paths:
         - "Operator"
       summary: "Correct the domain a stopped hosting build will serve"
       description: |-
-        The repair a retry cannot be. A hosting build refused because it names no domain (`hosting.domain_missing`) or one another live account serves (`hosting.domain_in_use`) is refused the same way on every retry; this writes the job's domain and nothing else, and the ordinary retry then builds under it. The name is validated and folded as the account row requires, and refused (409 `hosting.domain_in_use`) if another live account serves it - the job's own earlier rows excepted. Only a stopped hosting build can be corrected (409 `hosting.job_not_settled`, `hosting.job_not_a_hosting_build`). The evidence and the name before and after land in the audit trail.
+        The repair a retry cannot be. A hosting build refused because it names no domain (`hosting.domain_missing`) or one another live account serves (`hosting.domain_in_use`) is refused the same way on every retry; this records the name on the job, in a field of its own, and writes nothing else - the job's payload keeps what it was created with - and the ordinary retry then builds under the named domain. The name is validated and folded as the account row requires, and refused (409 `hosting.domain_in_use`) if another live account serves it - the job's own earlier rows excepted. Only a stopped hosting build can be corrected (409 `hosting.job_not_settled`, `hosting.job_not_a_hosting_build`). The evidence and the name before and after land in the audit trail.
 
         Requires the `provisioning.retry` permission.
       parameters:
@@ -20168,7 +20168,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "What the job named before, or null when it named nothing."
+          description: "The name the build would have served before this correction - an earlier correction's, else the one the job was created with - or null when it named nothing."
     AdminNamedHostingDomainResponse:
       type: "object"
       required:
