@@ -28,7 +28,25 @@ final readonly class CapacitySnapshot implements JsonSerializable
         /** Days until `available` reaches zero, or null when nothing is being allocated. */
         public ?float $runwayDays,
         public int $observationDays,
+        /**
+         * Of `quarantined`, how many have no clock: held for a machine nobody
+         * has yet declared empty. These do not come back on their own, and a
+         * number that only grows here is a machine somebody forgot.
+         */
+        public int $quarantinedHeld = 0,
     ) {}
+
+    /**
+     * The quarantined addresses that will come back on their own.
+     *
+     * The floor is belt and braces: the one place that builds a snapshot
+     * counts the held addresses as a subset of the quarantined ones, so the
+     * difference cannot go negative from there.
+     */
+    public function quarantinedOnAClock(): int
+    {
+        return max(0, $this->quarantined - $this->quarantinedHeld);
+    }
 
     /**
      * Share of allocatable space currently spoken for, 0.0–1.0.
@@ -83,6 +101,7 @@ final readonly class CapacitySnapshot implements JsonSerializable
             'reserved' => $this->reserved,
             'assigned' => $this->assigned,
             'quarantined' => $this->quarantined,
+            'quarantined_held' => $this->quarantinedHeld,
             'unavailable' => $this->unavailable,
             'utilisation' => $this->utilisation(),
             'allocations_per_day' => $this->allocationsPerDay,

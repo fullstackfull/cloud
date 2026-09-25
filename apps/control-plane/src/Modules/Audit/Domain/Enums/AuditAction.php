@@ -78,6 +78,18 @@ enum AuditAction: string
      * anything on the machine.
      */
     case DedicatedServerReturnedToStock = 'dedicated_server.returned_to_stock';
+
+    /**
+     * A physical machine left the fleet for good.
+     *
+     * The same kind of row as the one above — a person's word that the
+     * machine is empty and going, with their evidence — and it is what starts
+     * the quarantine clock on the addresses the machine was holding. A second
+     * retirement of one machine writes a second row: the state machine treats
+     * the repeated transition as a harmless no-op, by design, so retries stay
+     * safe.
+     */
+    case DedicatedServerRetired = 'dedicated_server.retired';
     case SubscriptionCancelled = 'subscription.cancelled';
 
     // Data that cannot be recovered once it is gone.
@@ -362,7 +374,7 @@ enum AuditAction: string
         return match ($this) {
             self::OrphanAdopted, self::DriftResolved, self::DriftAcknowledged,
             self::ReinstallConfirmed, self::ReinstallAbandoned,
-            self::DedicatedServerReturnedToStock => true,
+            self::DedicatedServerReturnedToStock, self::DedicatedServerRetired => true,
             default => false,
         };
     }

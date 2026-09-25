@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use Lynomia\Modules\Ipam\Application\Queries\HeldQuarantineAddresses;
 use Lynomia\Modules\Ipam\Domain\Services\IpCapacityReporter;
 use Lynomia\Modules\Ipam\Domain\ValueObjects\CapacitySnapshot;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
@@ -32,7 +33,7 @@ final class ReportIpCapacity extends Command
 
     protected $description = 'Report address capacity and runway for each pool, broken down by subnet.';
 
-    public function handle(IpCapacityReporter $reporter): int
+    public function handle(IpCapacityReporter $reporter, HeldQuarantineAddresses $held): int
     {
         $days = is_numeric($this->option('days'))
             ? max(1, (int) $this->option('days'))
@@ -81,6 +82,8 @@ final class ReportIpCapacity extends Command
                 ['Subnet', 'Total', 'Available', 'Assigned', 'Quarantined', 'Used', 'Runway'],
                 $rows,
             );
+
+            $this->reportHeld($held, $pool, $summary);
         }
 
         if ($tight > 0) {
@@ -96,6 +99,58 @@ final class ReportIpCapacity extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * The quarantined addresses no clock will end, and the machine each one
+     * is waiting for.
+     *
+     * A held quarantine ends when somebody returns its machine to stock or
+     * retires it, and nothing else. A machine left in maintenance and
+     * forgotten keeps its addresses out of circulation for exactly as long as
+     * nobody reads this — so it is listed by name, oldest wait first, rather
+     * than folded into the quarantined column where it looks like capacity
+     * that is coming back.
+     *
+     * The count printed is the pool's total, not the length of the list. The
+     * list stops at a limit, and a sentence saying "100 addresses are
+     * waiting" when 140 are would be false on the one screen meant to find
+     * them. How long the list should be is a separate question this does not
+     * settle.
+     */
+    private function reportHeld(HeldQuarantineAddresses $query, IpPool $pool, CapacitySnapshot $summary): void
+    {
+        if ($summary->quarantinedHeld === 0) {
+            return;
+        }
+
+        $held = $query->inPool($pool);
+
+        // Belt and braces rather than a claim that the two counts can
+        // disagree: both read the same rows, and the list cannot be longer
+        // than the count unless something changed between the two reads.
+        $total = max($summary->quarantinedHeld, count($held));
+
+        $this->warn(sprintf(
+            '%d address(es) in %s are waiting for a person: each is held for a machine nobody has yet returned to stock or retired.',
+            $total,
+            $pool->slug,
+        ));
+
+        if (count($held) < $total) {
+            $this->line(sprintf('Listed below are the %d longest-waiting.', count($held)));
+        }
+
+        $this->table(
+            ['Address', 'Held for', 'Since'],
+            array_map(static fn (array $row): array => [
+                $row['address'],
+                $row['holder_type'] === null
+                    ? 'unattributed'
+                    : sprintf('%s %s', class_basename($row['holder_type']), $row['holder_id'] ?? '?'),
+                $row['held_since'] ?? 'unknown',
+            ], $held),
+        );
     }
 
     private function describe(CapacitySnapshot $snapshot): string

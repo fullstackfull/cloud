@@ -834,6 +834,15 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::DedicatedManage->value)
         ->name('dedicated.return_to_stock');
 
+    /*
+     * Or taking it out of the fleet for good. The same permission for the same
+     * reason — a statement about a physical machine — and the other act that
+     * starts the quarantine clock on the addresses the machine was holding.
+     */
+    Route::post('dedicated/{server}/retire', [ServiceController::class, 'retire'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('dedicated.retire');
+
     Route::get('audit', [AuditController::class, 'index'])
         ->middleware('permission:'.Permission::AuditView->value)
         ->name('audit.index');

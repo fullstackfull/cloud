@@ -2815,6 +2815,14 @@ return [
             'status' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminRetiredServer' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'dedicated_server_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'status' => ['type' => ['string', 'null']],
+        ],
+    ],
     'AdminReconciliationRequest' => [
         'type' => 'object',
         'additionalProperties' => false,
