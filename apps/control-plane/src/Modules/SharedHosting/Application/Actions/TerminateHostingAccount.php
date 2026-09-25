@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\AccountStillInServiceException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\RetentionPeriodActiveException;
 use Lynomia\Modules\SharedHosting\Infrastructure\HostingProviderFactory;
@@ -28,6 +30,12 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  * this check, and the only way past it is an explicit, deliberate override
  * that a person has to ask for.
  *
+ * The check is two questions, not one: is this account suspended at all, and
+ * has its window run out. An account that is serving has no window, and before
+ * F-18 that absence was read as a window that had elapsed — so the cheapest
+ * path through this action destroyed live sites. See
+ * assertWaitingToBeReleased() for why the status is asked first.
+ *
  * The node's account slot is released only once the panel confirms the account
  * is gone. Releasing it earlier would let the scheduler place a new account
  * into disk that is still occupied.
@@ -40,10 +48,13 @@ final readonly class TerminateHostingAccount
     ) {}
 
     /**
-     * @param  bool  $force  Skip the retention window. Reserved for an operator acting on
-     *                       an explicit request — an abuse case, or a customer who has asked
-     *                       for their data to be deleted now. Never set by an automated path.
+     * @param  bool  $force  Skip the guard entirely — the suspension as well as the window.
+     *                       Reserved for an operator acting on an explicit request — an abuse
+     *                       case, or a customer who has asked for their data to be deleted
+     *                       now — who also holds service.terminate, which the operator
+     *                       endpoint checks. Never set by an automated path.
      *
+     * @throws AccountStillInServiceException
      * @throws RetentionPeriodActiveException
      * @throws HostingProviderException
      */
@@ -55,12 +66,8 @@ final readonly class TerminateHostingAccount
             return $account;
         }
 
-        if (! $force && ! $account->retentionHasElapsed()) {
-            throw RetentionPeriodActiveException::forAccount(
-                (string) $account->getKey(),
-                $account->username,
-                (string) $account->retentionReleasesAt()?->toIso8601String(),
-            );
+        if (! $force) {
+            $this->assertWaitingToBeReleased($account);
         }
 
         $node = $account->node()->firstOrFail();
@@ -82,5 +89,62 @@ final readonly class TerminateHostingAccount
         return $this->capacity->releaseFor($account, HostingAccountStatus::Terminated, [
             'terminated_at' => now(),
         ]);
+    }
+
+    /**
+     * The guard, in the order that makes it one.
+     *
+     * The status is asked before the date, and that ordering is the guard
+     * rather than a detail of it. `suspended_at` is not a reliable witness on
+     * its own: the create path writes Active without clearing it and a
+     * re-armed row keeps it, so a serving account can carry a suspension date
+     * from months ago whose "window" elapsed long since. Read first, that date
+     * would let the row through. Only a Suspended account has a window that
+     * means anything, so everything else — Active, Pending, and Failed too —
+     * is refused here before any date is looked at.
+     *
+     * Failed is refused for ever rather than let through: the short-circuit
+     * above matches Terminated alone, so a failed build, with nothing at the
+     * panel to destroy, reaches this and stops. That fails closed, and is
+     * recorded rather than repaired here. `HostingAccountStatus::isTerminal()`
+     * carries the predicate that would admit it, and has no callers: an unused
+     * predicate beside a hand-written equality that needs it is the shape of a
+     * decision half taken, and it is somebody else's decision to finish.
+     *
+     * @throws AccountStillInServiceException
+     * @throws RetentionPeriodActiveException
+     */
+    private function assertWaitingToBeReleased(HostingAccount $account): void
+    {
+        if ($account->status !== HostingAccountStatus::Suspended) {
+            throw AccountStillInServiceException::forAccount(
+                (string) $account->getKey(),
+                $account->username,
+                $account->status->value,
+            );
+        }
+
+        if ($account->retentionHasElapsed()) {
+            return;
+        }
+
+        /*
+         * The refusal names the date the data may go, and it is always a real
+         * timestamp: the field is a Timestamp wherever it is published. A
+         * suspended row with no `suspended_at` cannot prove when its window
+         * started, so it is read as starting now — a full window from the
+         * moment of asking, the same reading the VPS path makes. That date
+         * moves with each ask, which is the honest answer to a window with no
+         * anchor; an empty string or a sentence in its place is not.
+         */
+        $releasesAt = $account->retentionReleasesAt() ?? CarbonImmutable::now()->addDays(
+            max(0, (int) config('hosting.retention.suspended_days', 30)),
+        );
+
+        throw RetentionPeriodActiveException::forAccount(
+            (string) $account->getKey(),
+            $account->username,
+            $releasesAt->toIso8601String(),
+        );
     }
 }

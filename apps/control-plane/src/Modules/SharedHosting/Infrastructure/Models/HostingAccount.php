@@ -159,12 +159,26 @@ class HostingAccount extends Model
 
     /**
      * Whether the retention window has elapsed and the data may be released.
+     *
+     * A row with no `suspended_at` has no window, and a window that does not
+     * exist has not elapsed. This once answered true for it — and a live
+     * account is exactly the row with no `suspended_at`, so the question
+     * "may this be destroyed yet?" was answered yes for every serving site on
+     * the platform (F-18). The safe reading of an unprovable window is that
+     * it is still running.
+     *
+     * This answers the date question only. Whether the account is waiting to
+     * be released at all is the status's question, and the status is asked
+     * first — see TerminateHostingAccount. A serving account can carry a
+     * months-old `suspended_at` (the create path writes Active without
+     * clearing it, and a re-armed row keeps it), and for that row this method
+     * says true.
      */
     public function retentionHasElapsed(?int $days = null): bool
     {
         $releasesAt = $this->retentionReleasesAt($days);
 
-        return $releasesAt === null || $releasesAt->isPast();
+        return $releasesAt !== null && $releasesAt->isPast();
     }
 
     public function isSuspended(): bool

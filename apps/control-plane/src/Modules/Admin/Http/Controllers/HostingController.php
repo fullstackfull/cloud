@@ -11,6 +11,7 @@ use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\SharedHosting\Application\Actions\TerminateHostingAccount;
 use Lynomia\Modules\SharedHosting\Application\Actions\UnsuspendHostingAccount;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 
 /**
@@ -65,12 +66,26 @@ final class HostingController
     /**
      * Delete an account and everything on it.
      *
-     * `force` skips the retention window, and it is a real decision rather
-     * than a convenience: the window exists so that a customer who is
-     * suspended by mistake, or who changes their mind, still has their site.
-     * Forcing is for an abuse case or an erasure request, so it needs its own
-     * permission on top — an operator who may terminate expired accounts must
-     * not thereby be able to delete a live customer's data today.
+     * The route's permission, hosting_account.manage, is for clearing out
+     * accounts whose retention window has run out, and that is all it is for.
+     * Anything else — a live customer's site, or a suspended one still inside
+     * its window — needs service.terminate on top: an operator who may
+     * terminate expired accounts must not thereby be able to delete a live
+     * customer's data today.
+     *
+     * `force` skips the window, and it is a real decision rather than a
+     * convenience: the window exists so that a customer who is suspended by
+     * mistake, or who changes their mind, still has their site. Forcing is for
+     * an abuse case or an erasure request.
+     *
+     * The second permission is asked for on the account's status as well as
+     * on `force`, and that is F-18. It used to be asked only under `force`,
+     * while the action read a live account's missing `suspended_at` as an
+     * elapsed window — so the weaker grant, sent without `force`, destroyed a
+     * serving site, and the control was exactly inverted. The action now
+     * refuses a live account on its own (409) and this gate refuses the weaker
+     * principal first (403); each is pinned separately, so neither is load
+     * the other quietly carries.
      *
      * There is deliberately no "force success" here, and no way to mark an
      * account terminated in the platform without the panel having actually
@@ -92,12 +107,19 @@ final class HostingController
          * A genuinely different grant from the one on the route, not the same
          * one asked for twice. service.terminate is the platform's permission
          * for destroying a customer's service, and that is what skipping the
-         * window does: an operator who may clear out accounts whose retention
-         * has elapsed does not thereby get to delete a live customer's site
-         * this afternoon.
+         * window does — and what destroying an account that is not suspended
+         * at all does, whether or not `force` was sent. Only a suspended
+         * account (whose window the action still checks) and one already
+         * terminated (a no-op) are within the route's own grant.
          */
-        if ($force && $request->user()?->can(Permission::ServiceTerminate->value) !== true) {
-            abort(403, 'Skipping the retention window needs permission to terminate a service.');
+        $withinTheRoutesGrant = ! $force && in_array(
+            $found->status,
+            [HostingAccountStatus::Suspended, HostingAccountStatus::Terminated],
+            true,
+        );
+
+        if (! $withinTheRoutesGrant && $request->user()?->can(Permission::ServiceTerminate->value) !== true) {
+            abort(403, 'Destroying an account that is not waiting out its retention window needs permission to terminate a service.');
         }
 
         $terminated = app(TerminateHostingAccount::class)->execute($found, force: $force);
