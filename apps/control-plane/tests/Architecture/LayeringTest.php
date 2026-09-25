@@ -307,6 +307,98 @@ final class LayeringTest extends TestCase
         $this->assertSame([], $violations, "Domain exceptions without an error code:\n  ".implode("\n  ", $violations));
     }
 
+    /**
+     * Who may reach each action that ends a service, in production.
+     *
+     * F-18 closed the hosting-account route with two layers — a controller
+     * gate and a refusal inside TerminateHostingAccount — and F-19 then opened
+     * a second route to the same action that inherits only the second layer.
+     * That is safe because the new route asks EndOfService::authorityOver()
+     * for both permissions itself, and it stays safe only while nothing else
+     * reaches these actions around it: a third caller would be a door with
+     * whatever gate its author remembered. So the door set is measured here,
+     * not described.
+     *
+     * Production only. Tests call these actions directly, which is the point of
+     * having them; the claim in EndOfService's docblock is scoped to production
+     * for the same reason.
+     *
+     * @var array<string, list<string>> class => every file under src/ and app/ that names it
+     */
+    private const array THE_DOORS_TO_ENDING_A_SERVICE = [
+        'Lynomia\\Support\\Lifecycle\\EndOfService' => [
+            'src/Modules/Admin/Http/Controllers/ServiceController.php',
+            'src/Modules/Provisioning/Application/Actions/EndExpiredServices.php',
+        ],
+        'Lynomia\\Modules\\Vps\\Application\\Actions\\TerminateVpsService' => [
+            'src/Support/Lifecycle/EndOfService.php',
+        ],
+        'Lynomia\\Modules\\Dedicated\\Application\\Actions\\DecommissionDedicatedServer' => [
+            'src/Support/Lifecycle/EndOfService.php',
+        ],
+        'Lynomia\\Modules\\SharedHosting\\Application\\Actions\\EndHostingService' => [
+            'src/Support/Lifecycle/EndOfService.php',
+        ],
+        'Lynomia\\Modules\\SharedHosting\\Application\\Actions\\TerminateHostingAccount' => [
+            'src/Modules/Admin/Http/Controllers/HostingController.php',
+            'src/Modules/SharedHosting/Application/Actions/EndHostingService.php',
+        ],
+        'Lynomia\\Modules\\Provisioning\\Application\\Actions\\EndAnUnbuiltService' => [
+            'src/Modules/Dedicated/Application/Actions/DecommissionDedicatedServer.php',
+            'src/Modules/SharedHosting/Application/Actions/EndHostingService.php',
+            'src/Modules/Vps/Application/Actions/TerminateVpsService.php',
+        ],
+    ];
+
+    #[Test]
+    public function every_way_to_end_a_service_is_a_door_somebody_chose(): void
+    {
+        $root = (string) realpath(self::SRC.'/..');
+        $found = array_fill_keys(array_keys(self::THE_DOORS_TO_ENDING_A_SERVICE), []);
+
+        foreach ([...$this->phpFiles($root.'/src'), ...$this->phpFiles($root.'/app')] as $file) {
+            $code = self::withoutComments($file['source']);
+            $namespace = preg_match('/^namespace\s+([^;]+);/m', $code, $m) === 1 ? $m[1] : '';
+            $relative = substr((string) realpath($file['path']), strlen($root) + 1);
+
+            foreach (array_keys(self::THE_DOORS_TO_ENDING_A_SERVICE) as $class) {
+                $cut = (int) strrpos($class, '\\');
+                $short = substr($class, $cut + 1);
+                $home = substr($class, 0, $cut);
+
+                if ($namespace === $home && preg_match('/\b(class|interface|trait)\s+'.$short.'\b/', $code) === 1) {
+                    // The class's own file.
+                    continue;
+                }
+
+                /*
+                 * Named in full — an import or an inline reference — or by its
+                 * short name from a file in its own namespace, which needs no
+                 * import at all.
+                 */
+                $named = str_contains($code, $class)
+                    || ($namespace === $home && preg_match('/\b'.$short.'\b/', $code) === 1);
+
+                if ($named) {
+                    $found[$class][] = $relative;
+                }
+            }
+        }
+
+        $expected = self::THE_DOORS_TO_ENDING_A_SERVICE;
+
+        foreach (array_keys($expected) as $class) {
+            sort($expected[$class]);
+            sort($found[$class]);
+        }
+
+        $this->assertSame(
+            $expected,
+            $found,
+            'A service can be ended through a door nobody chose. Every caller of these actions must ask EndOfService::authorityOver() or be one of the routes that already do (F-19 × F-18).',
+        );
+    }
+
     #[Test]
     public function no_module_calls_another_modules_http_layer(): void
     {

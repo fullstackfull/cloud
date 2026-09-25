@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceRefundExceedsPaymentException;
 use Lynomia\Modules\Billing\Domain\Exceptions\UnsettleablePaymentException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -103,6 +105,23 @@ final readonly class RecordInvoiceRefund
              */
             if ($locked->status === InvoiceStatus::Paid && $locked->refundableAmount()->isZero()) {
                 $locked = $this->transitionInvoice->execute($locked, InvoiceStatus::Refunded);
+
+                /*
+                 * Announced once, on the transition, after the outermost
+                 * commit — the rule SettleInvoice follows for InvoicePaid: a
+                 * queued listener must not find an invoice whose refund is
+                 * about to roll back.
+                 */
+                $refunded = new InvoiceRefunded(
+                    invoiceId: (string) $locked->getKey(),
+                    customerId: (string) $locked->customer_id,
+                    orderId: $locked->order_id === null ? null : (string) $locked->order_id,
+                    refundedAt: CarbonImmutable::now(),
+                );
+
+                DB::afterCommit(static function () use ($refunded): void {
+                    event($refunded);
+                });
             }
 
             return $locked->refresh();

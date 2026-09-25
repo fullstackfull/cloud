@@ -64,6 +64,7 @@ final readonly class ProvisionOrderedService
     public function __construct(
         private CreateProvisioningJob $createJob,
         private LocalPlacementFeasibility $placement,
+        private TransitionService $transitionService,
     ) {}
 
     public function execute(Order $order, OrderItem $item, ?Subscription $subscription = null): ?Service
@@ -123,7 +124,14 @@ final readonly class ProvisionOrderedService
             payload: $payload,
         ));
 
-        $service->forceFill(['status' => ServiceStatus::Provisioning])->save();
+        /*
+         * Through the one writer of a service's status rather than assigned
+         * here. The move is announced, and the order this service was bought
+         * on reads it as its build being asked for (F-19) — before the job is
+         * dispatched, because on a synchronous queue the build runs inside the
+         * dispatch and would otherwise finish before the order heard it began.
+         */
+        $service = $this->transitionService->execute($service, ServiceStatus::Provisioning);
 
         RunProvisioningJob::dispatch((string) $job->getKey());
 

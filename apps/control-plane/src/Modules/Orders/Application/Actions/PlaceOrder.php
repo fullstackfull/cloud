@@ -449,27 +449,27 @@ final readonly class PlaceOrder
     /**
      * Orders that carry this coupon and have not yet redeemed it.
      *
-     * Counted from orders that are still alive, and excluding any that already
-     * has a redemption row — those are counted by redemption_count instead, and
-     * counting them in both places would refuse the very order that is being
-     * redeemed.
+     * Counted from orders that still hold what they bought — the same rule as
+     * a plan unit, asked of PlanCapacity rather than kept as a second list. A
+     * second list is what this used to be, and two of its three statuses could
+     * not occur (F-19); a refunded order now holds its coupon use until its
+     * service ends, exactly as it holds its unit. Any order that already has a
+     * redemption row is excluded — those are counted by redemption_count
+     * instead, and counting them in both places would refuse the very order
+     * that is being redeemed.
      */
     private function outstandingCouponHolds(Coupon $coupon, ?Customer $customer = null): int
     {
-        return (int) DB::table('orders')
+        $query = DB::table('orders')
             ->where('orders.coupon_id', $coupon->getKey())
-            ->whereNotIn('orders.status', [
-                OrderStatus::Cancelled->value,
-                OrderStatus::Refunded->value,
-                OrderStatus::Terminated->value,
-            ])
             ->whereNotExists(
                 fn ($query) => $query->selectRaw('1')
                     ->from('coupon_redemptions')
                     ->whereColumn('coupon_redemptions.order_id', 'orders.id')
             )
-            ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()))
-            ->count();
+            ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()));
+
+        return PlanCapacity::stillHolding($query)->count();
     }
 
     /**

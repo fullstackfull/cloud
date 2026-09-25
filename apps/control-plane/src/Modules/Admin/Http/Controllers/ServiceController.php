@@ -8,18 +8,15 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Http\Concerns\ListsAcrossTenants;
 use Lynomia\Modules\Audit\Application\Actions\RecordActAtomically;
+use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
-use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
-use Lynomia\Modules\Dedicated\Application\Actions\DecommissionDedicatedServer;
 use Lynomia\Modules\Dedicated\Application\Actions\RetireDedicatedServer;
 use Lynomia\Modules\Dedicated\Application\Actions\ReturnDedicatedServerToStock;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
-use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
-use Lynomia\Modules\Rbac\Domain\Enums\Permission;
-use Lynomia\Modules\Vps\Application\Actions\TerminateVpsService;
+use Lynomia\Support\Lifecycle\EndOfService;
 
 /**
  * Ending a service, which is the one act on this surface that destroys data.
@@ -30,10 +27,11 @@ use Lynomia\Modules\Vps\Application\Actions\TerminateVpsService;
  * producer, and a cancelled customer's machine, address and share of a node's
  * capacity were held for ever. This is the other half of that pair.
  *
- * The override is a second permission check rather than a flag, for the same
- * reason it is in the hosting controller: "terminate what has expired" and
- * "delete a live customer's data today" are different decisions, and a role
- * that may do the first should not thereby be able to do the second.
+ * The retention window is each kind's own action's to enforce, and `force` is
+ * the only way past it. Who may send `force` is not a separate grant here:
+ * every permission the kind needs is asked on every call (see terminate()),
+ * because a check that runs only under `force` is a check the unforced call
+ * walks around — which is how F-18 happened on the hosting route.
  */
 final class ServiceController
 {
@@ -108,6 +106,44 @@ final class ServiceController
         });
     }
 
+    /**
+     * Ending a service, through the same door the retention sweep uses.
+     *
+     * ---------------------------------------------------------------------
+     * One table, not two (F-19)
+     * ---------------------------------------------------------------------
+     *
+     * This method used to decide for itself how each kind ends — `dedicated`,
+     * else a VPS — while EndOfService made the same decision for the sweep. A
+     * shared-hosting service fell into the VPS branch and was refused for
+     * having no virtual machine, and a VPS whose build had failed could not be
+     * ended at all. Both now go through EndOfService, and so does the question
+     * of who may ask.
+     *
+     * ---------------------------------------------------------------------
+     * The permission, and what `force` does not change
+     * ---------------------------------------------------------------------
+     *
+     * The route demands `service.terminate`. EndOfService::authorityOver()
+     * names everything the kind needs, and all of it is asked here, forced or
+     * not: for shared hosting that adds `hosting_account.manage`, because this
+     * route reaches TerminateHostingAccount — F-18's action layer — without
+     * passing F-18's controller gate on the hosting-account route, and must
+     * not be the weaker door to the same account. `force` decides whether each
+     * kind's suspension-and-window guard applies, and changes no permission;
+     * the second permission check it used to guard asked for the permission
+     * the route had already demanded.
+     *
+     * ---------------------------------------------------------------------
+     * The act, then its record
+     * ---------------------------------------------------------------------
+     *
+     * The same order as the sweep, and RecordAuditEntry's rule for an act that
+     * reaches a provider: the hosting path deletes an account at the panel
+     * before this returns, and rolling the platform's rows back because the
+     * trail could not be written would leave them describing a site that no
+     * longer exists. A trail that cannot be written is a 500 an operator sees.
+     */
     public function terminate(Request $request, string $service): JsonResponse
     {
         $found = Service::query()->findOrFail($service);
@@ -119,93 +155,50 @@ final class ServiceController
 
         $force = (bool) ($validated['force'] ?? false);
 
-        if ($force) {
-            /*
-             * Skipping the retention window destroys data a customer might
-             * still be about to pay for. It needs the authority to terminate,
-             * asserted a second time and separately from the authority to
-             * queue an ordinary expiry.
-             */
+        foreach (EndOfService::authorityOver($found->kind) as $permission) {
             abort_unless(
-                $request->user()?->can(Permission::ServiceTerminate->value) === true,
+                $request->user()?->can($permission->value) === true,
                 403,
+                'Ending a service of this kind needs '.$permission->value.'.',
             );
         }
 
         $user = $request->user();
 
-        $terminatedBy = $user instanceof User
-            ? sprintf('%s <%s>', $user->name, $user->email)
-            : 'system';
+        $ended = app(EndOfService::class)->execute($found, force: $force);
 
-        /*
-         * A dedicated server ends differently, and the difference is physical.
-         * A machine's disks hold the customer's data until somebody erases
-         * them, and no call this platform can make proves that happened — so
-         * the server leaves the customer and goes to maintenance rather than
-         * back into stock, and a second, deliberate act returns it (or retires
-         * it). Its addresses leave the customer here too, held without a
-         * quarantine clock until that second act. There is nothing to queue:
-         * no provider is asked to destroy anything.
-         */
-        if ($found->kind === ProductKind::Dedicated->value) {
-            $server = app(RecordActAtomically::class)->execute(
-                act: static fn (): DedicatedServer => app(DecommissionDedicatedServer::class)
-                    ->execute($found, force: $force),
-                describe: static fn (DedicatedServer $decommissioned): AuditedAct => new AuditedAct(
-                    action: AuditAction::ServiceTerminated,
-                    subject: $found,
-                    customerId: $found->customer_id,
-                    context: [
-                        'reason' => $validated['reason'],
-                        'forced' => $force,
-                        'kind' => $found->kind,
-                        'dedicated_server_id' => (string) $decommissioned->getKey(),
-                        'serial' => $decommissioned->serial,
-                        'terminated_by' => $terminatedBy,
-                    ],
-                ),
-            );
-
-            return response()->json([
-                'data' => [
-                    'service_id' => (string) $found->getKey(),
-                    'status' => $found->fresh()?->status->value,
-                    'provisioning_job_id' => null,
-                    // Nothing is queued, and the machine is not back in stock:
-                    // it is held in maintenance until an operator says its
-                    // disks have been erased.
-                    'queued' => false,
-                    'dedicated_server_status' => $server->status->value,
-                ],
-            ], 202);
-        }
-
-        $job = app(RecordActAtomically::class)->execute(
-            act: static fn (): ProvisioningJob => app(TerminateVpsService::class)->execute($found, force: $force),
-            describe: static fn (ProvisioningJob $queued): AuditedAct => new AuditedAct(
-                action: AuditAction::ServiceTerminated,
-                subject: $found,
-                customerId: $found->customer_id,
-                context: [
-                    'reason' => $validated['reason'],
-                    'forced' => $force,
-                    'kind' => $found->kind,
-                    'provisioning_job_id' => (string) $queued->getKey(),
-                    'terminated_by' => $terminatedBy,
-                ],
-            ),
+        app(RecordAuditEntry::class)->execute(
+            action: AuditAction::ServiceTerminated,
+            subject: $found,
+            customerId: $found->customer_id,
+            context: [
+                'reason' => $validated['reason'],
+                'forced' => $force,
+                'kind' => $found->kind,
+                'terminated_by' => $user instanceof User
+                    ? sprintf('%s <%s>', $user->name, $user->email)
+                    : 'system',
+                ...$ended->auditContext(),
+            ],
         );
 
         return response()->json([
             'data' => [
                 'service_id' => (string) $found->getKey(),
                 'status' => $found->fresh()?->status->value,
-                'provisioning_job_id' => (string) $job->getKey(),
-                // Queued, not done: the machine is destroyed by a worker, and
-                // the service reaches `terminated` when that worker succeeds.
-                'queued' => true,
-                'dedicated_server_status' => null,
+                'provisioning_job_id' => $ended->provisioningJobId,
+                /*
+                 * Queued, not done, for a VPS: the machine is destroyed by a
+                 * worker, and the service reaches `terminated` when that worker
+                 * succeeds. Nothing is queued for the other endings — a
+                 * dedicated server is held in maintenance until an operator
+                 * says its disks have been erased, a hosting account is gone
+                 * from the panel already, and a service nothing was built for
+                 * had nothing to destroy.
+                 */
+                'queued' => $ended->isQueued(),
+                'dedicated_server_status' => $ended->dedicatedServerStatus,
+                'hosting_account_id' => $ended->hostingAccountId,
             ],
         ], 202);
     }

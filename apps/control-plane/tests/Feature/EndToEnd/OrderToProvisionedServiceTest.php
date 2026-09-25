@@ -130,7 +130,13 @@ final class OrderToProvisionedServiceTest extends TestCase
 
         $this->payFor($order);
 
-        $this->assertSame(OrderStatus::Paid, $order->refresh()->status);
+        /*
+         * Paid, and past it: the build has been asked for and no worker has
+         * claimed it (the job is faked). Before F-19 the order read `paid`
+         * here and for ever after, whatever became of the build.
+         */
+        $this->assertNotNull($order->refresh()->paid_at);
+        $this->assertSame(OrderStatus::QueuedForProvisioning, $order->status);
 
         /** @var Service $service */
         $service = Service::query()->where('order_id', $order->id)->sole();
@@ -179,6 +185,9 @@ final class OrderToProvisionedServiceTest extends TestCase
         $this->assertSame(ServiceStatus::Provisioning, $service->status);
         $this->assertSame(1, ProvisioningJob::query()->where('service_id', $service->id)->count());
         $this->assertSame(1, Subscription::query()->where('customer_id', $this->customer->id)->count());
+
+        // The same place for the order too: its build asked for and waiting.
+        $this->assertSame(OrderStatus::QueuedForProvisioning, $order->refresh()->status);
 
         Queue::assertPushed(RunProvisioningJob::class);
     }

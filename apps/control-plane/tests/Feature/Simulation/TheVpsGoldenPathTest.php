@@ -144,7 +144,14 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
 
         $this->assertSame(InvoiceStatus::Paid, $invoice->fresh()?->status);
         $this->assertSame(0, $invoice->fresh()?->amount_due_minor);
-        $this->assertSame(OrderStatus::Paid, $order->fresh()?->status);
+
+        /*
+         * Paid, and the build asked for: the order follows what it bought
+         * (F-19). It used to stop at `paid` here and never move again, so a
+         * machine delivered and a machine nobody could build read the same.
+         */
+        $this->assertNotNull($order->fresh()?->paid_at);
+        $this->assertSame(OrderStatus::QueuedForProvisioning, $order->fresh()?->status);
 
         $subscription = Subscription::query()->where('customer_id', $customer->getKey())->sole();
         $this->assertSame(9_000, $subscription->recurring_amount_minor);
@@ -161,6 +168,10 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
 
         $this->assertSame(ProvisioningJobStatus::Succeeded, $job->fresh()?->status);
         $this->assertSame(ServiceStatus::Active, $service->fresh()?->status);
+
+        // Delivered, and the order says so — in the worker that delivered it.
+        $this->assertSame(OrderStatus::Active, $order->fresh()?->status);
+        $this->assertNotNull($order->fresh()?->completed_at);
 
         // ---- the machine, the address, and the hypervisor -----------------
         $machine = VirtualMachine::query()->where('service_id', $service->getKey())->sole();
@@ -342,7 +353,9 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
          * different and worse thing.
          */
         $this->assertNotSame(InvoiceStatus::Paid, $invoice->fresh()?->status);
-        $this->assertNotSame(OrderStatus::Paid, $order->fresh()?->status);
+        // Unpaid, and saying why (F-19): the decline is the order's as well.
+        $this->assertSame(OrderStatus::PaymentFailed, $order->fresh()?->status);
+        $this->assertNull($order->fresh()?->paid_at);
 
         $this->assertSame(0, Service::query()->where('customer_id', $customer->getKey())->count());
         $this->assertSame(0, ProvisioningJob::query()->where('customer_id', $customer->getKey())->count());

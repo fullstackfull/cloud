@@ -848,12 +848,6 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('hosting_accounts.terminate');
 
     /*
-     * Ending a service and destroying the machine behind it. The action
-     * enforces the retention window; `force` skips it and is checked again
-     * inside the controller, because "terminate what has expired" and "delete
-     * a live customer's data today" are different decisions.
-     */
-    /*
      * The service list, and the only place `placement_blocked_reason` can be
      * read without a SQL client. `?blocked=1` narrows it to the customers who
      * have paid for something the platform could not place.
@@ -862,6 +856,17 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->middleware('permission:'.Permission::ServiceViewAny->value)
         ->name('services.index');
 
+    /*
+     * Ending a service, of any kind, through EndOfService — the same door the
+     * retention sweep uses. Each kind's action refuses a service that is not
+     * suspended, or is still inside its retention window, and `force` skips
+     * that guard without changing who may ask. This middleware is the
+     * permission every kind needs; the controller then asks
+     * EndOfService::authorityOver() for the rest, forced or not, which for
+     * shared hosting adds hosting_account.manage — so this route is never the
+     * weaker door to an account the hosting-account route above also reaches
+     * (F-19 × F-18).
+     */
     Route::delete('services/{service}', [ServiceController::class, 'terminate'])
         ->middleware('permission:'.Permission::ServiceTerminate->value)
         ->name('services.terminate');

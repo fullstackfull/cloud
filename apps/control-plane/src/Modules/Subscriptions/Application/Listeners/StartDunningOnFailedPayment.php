@@ -70,7 +70,10 @@ final class StartDunningOnFailedPayment implements ShouldQueue
         if ($subscription === null) {
             // A first purchase, a wallet top-up, or an attempt against an
             // invoice with no subscription. There is no recurring commitment
-            // to put into dunning; the order simply stays unpaid.
+            // to put into dunning. A first purchase's order hears the same
+            // event and records the decline itself (the Orders module's
+            // RecordFailedPaymentOnTheOrder, F-19); it stays unpaid and
+            // payable either way.
             return;
         }
 

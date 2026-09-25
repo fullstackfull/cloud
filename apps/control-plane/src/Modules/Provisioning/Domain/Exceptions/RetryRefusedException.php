@@ -62,6 +62,18 @@ final class RetryRefusedException extends DomainException
             ->as('provisioning.retry_destroys_again');
     }
 
+    /**
+     * The service the job was working for has ended. Running a build for it
+     * now would make a resource no purchase stands behind.
+     */
+    public static function becauseTheServiceHasEnded(string $jobId, string $serviceId): self
+    {
+        $exception = new self('The service this job was working for has ended, so running it again would build for nobody.');
+
+        return $exception->withContext(['provisioning_job_id' => $jobId, 'service_id' => $serviceId])
+            ->as('provisioning.retry_after_the_service_ended');
+    }
+
     public function errorCode(): string
     {
         return $this->errorCode;

@@ -197,7 +197,6 @@ return [
         'already_terminated' => 'This server has already been terminated.',
         'console_session_invalid' => 'This console session is no longer valid. Open the console again.',
         'console_unavailable' => 'The console is not available for this server right now.',
-        'no_machine_to_destroy' => 'There is no machine attached to this service.',
         'not_active' => 'This server is not active, so that cannot be done.',
         'not_provisioned' => 'This server has not finished being set up yet.',
         'operation_in_flight' => 'Another operation on this server is still running. Wait for it to finish.',
@@ -215,7 +214,6 @@ return [
         'fake_provider_in_production' => 'Dedicated servers cannot be operated right now.',
         'install_profile_not_renderable' => 'That operating system cannot be installed on this server.',
         'no_matching_hardware' => 'No server of this specification is available right now.',
-        'no_server_attached' => 'There is no server attached to this service.',
         'operation_refused' => 'That operation was refused for this server.',
         'power_operation_indeterminate' => 'The server did not confirm the power command. Our team will check its state.',
         'provider_request_failed' => 'The server did not respond to that request. Try again in a moment.',
@@ -226,6 +224,7 @@ return [
         'still_assigned' => 'This server is still assigned to a customer.',
     ],
     'hosting' => [
+        'already_terminated' => 'This hosting service has already been terminated.',
         'fake_provider_in_production' => 'Hosting accounts cannot be operated right now.',
         'account_serves_another_domain' => 'This hosting account was started under a different domain. Our team has the details.',
         'contact_email_missing' => 'This account has no email address the hosting panel can write to. Add one and try again.',

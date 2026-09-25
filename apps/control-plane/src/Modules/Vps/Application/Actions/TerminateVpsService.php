@@ -7,10 +7,12 @@ namespace Lynomia\Modules\Vps\Application\Actions;
 use Carbon\CarbonImmutable;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Application\Actions\CreateProvisioningJob;
+use Lynomia\Modules\Provisioning\Application\Actions\EndAnUnbuiltService;
 use Lynomia\Modules\Provisioning\Application\DTOs\ProvisioningJobRequest;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\Exceptions\ABuildMayExistException;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Vps\Domain\Exceptions\TerminationRefusedException;
@@ -38,20 +40,47 @@ use Lynomia\Modules\Vps\Domain\Exceptions\TerminationRefusedException;
  * quarantine-on-timeout behaviour that every other provider call gets. What
  * this action does is decide that it may happen, and record the decision as a
  * job.
+ *
+ * ---------------------------------------------------------------------------
+ * A service with no machine
+ * ---------------------------------------------------------------------------
+ *
+ * Used to be refused, which meant a VPS whose build failed could never end —
+ * and nor could the purchase behind it (F-19). It now ends here with nothing
+ * queued, provided EvidenceOfABuild finds nothing in the build history that
+ * could exist at the provider; otherwise it is refused with
+ * `provisioning.build_may_exist`, `force` or not.
+ *
+ * The missing row is not that evidence, and neither is either retry path. The
+ * engine refuses to retry a timeout AUTOMATICALLY — the exclusion is
+ * FailureClass::isAutomaticallyRetryable() — because the machine may exist
+ * with no row here. The operator's RetryProvisioningJob does not read the
+ * failure class at all: it refuses only on a recorded provider task or
+ * resource, and requeues a timed-out build that recorded neither. So "the
+ * platform would never retry it" is true of the engine and false of the
+ * button, and nothing here rests on it.
+ *
+ * Only the platform's own entry points reach this action in production — the
+ * operator's route and the retention sweep, both through EndOfService — which
+ * is where the permission to end a service of this kind is asked.
  */
 final readonly class TerminateVpsService
 {
     public function __construct(
         private CreateProvisioningJob $createJob,
+        private EndAnUnbuiltService $unbuilt,
     ) {}
 
     /**
      * @param  bool  $force  Skip the retention window. Reserved for an operator acting on an
      *                       explicit request. Never set by an automated path.
+     * @return ProvisioningJob|null the destroy job, or null when there was no machine and
+     *                              nothing was ever built, and the service has ended here
      *
      * @throws TerminationRefusedException
+     * @throws ABuildMayExistException
      */
-    public function execute(Service $service, bool $force = false, ?string $idempotencyKey = null): ProvisioningJob
+    public function execute(Service $service, bool $force = false, ?string $idempotencyKey = null): ?ProvisioningJob
     {
         if ($service->status === ServiceStatus::Terminated) {
             throw TerminationRefusedException::becauseItIsAlreadyOver((string) $service->getKey());
@@ -60,7 +89,10 @@ final readonly class TerminateVpsService
         $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
 
         if ($machine === null) {
-            throw TerminationRefusedException::becauseThereIsNoMachine((string) $service->getKey());
+            // Nothing to destroy — if and only if nothing was ever built.
+            $this->unbuilt->execute($service);
+
+            return null;
         }
 
         if (! $force) {

@@ -17,6 +17,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobFailed;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
+use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobStarted;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
 use Lynomia\Modules\Provisioning\Domain\Exceptions\HandlerNotRegisteredException;
 use Lynomia\Modules\Provisioning\Domain\Exceptions\ProvisioningFailedException;
@@ -121,6 +122,19 @@ final class RunProvisioningJob implements ShouldQueue
         }
 
         $this->syncService($job, ServiceStatus::Provisioning, $transitionService, $serviceStates, onlyForCreates: true);
+
+        /*
+         * Said after the claim has committed and before the provider is
+         * called. An ordered service is already `provisioning` while its job
+         * waits, so this — not a service transition — is what tells the order
+         * its build has actually begun.
+         */
+        event(new ProvisioningJobStarted(
+            provisioningJobId: (string) $job->getKey(),
+            kind: $job->kind,
+            serviceId: $job->service_id,
+            attempt: $job->attempts,
+        ));
 
         $attempt = ProvisioningAttempt::create([
             'provisioning_job_id' => $job->getKey(),

@@ -91,11 +91,33 @@ server by a person with a screwdriver.
 | Kind | What happens |
 | --- | --- |
 | VPS | `TerminateVpsService` queues a `destroy_vps` job — one attempt, quarantined on timeout like every other destructive provider call |
-| Shared hosting | `TerminateHostingAccount` asks the panel, and releases the node's capacity only once the panel confirms the account is gone |
+| Shared hosting | `EndHostingService`: `TerminateHostingAccount` asks the panel, and releases the node's capacity only once the panel confirms the account is gone; then the service itself reaches `terminated` |
 | Dedicated | `DecommissionDedicatedServer` — **and stops there** |
 
 An unknown kind raises rather than falling through to a default. Guessing would
 mean sending a physical server down the path that destroys a virtual machine.
+
+The operator's `DELETE /api/admin/services/{service}` comes through the same
+`EndOfService` as the sweep (F-19); before, it kept its own
+dedicated-or-else-VPS table and refused every hosting service for having no
+virtual machine. It asks `EndOfService::authorityOver()` for every permission
+the kind needs, whether or not `force` is sent — for shared hosting that is
+`service.terminate` **and** `hosting_account.manage`, so it never asks less
+than `DELETE /api/admin/hosting-accounts/{account}` asks for the same account.
+`force` skips each kind's suspension-and-window guard — so a service that is
+not suspended at all may be ended — and changes no permission.
+
+A service with no machine, server or account behind it used to be refused by
+every kind, so a purchase whose build failed could never end. It now ends with
+nothing destroyed when its build history shows nothing could exist at a
+provider, and is refused `provisioning.build_may_exist` — forced or not — when
+something may: a build still queued or running, one that succeeded, one the
+provider accepted as a task, or one that timed out. `EvidenceOfABuild` reads
+that history; the missing row is never the evidence.
+
+Ending a service ends the order it was bought on once nothing it bought is
+still live, and that is what gives a finite plan's unit and an unredeemed
+coupon use back. A refund does not: it records the money and nothing else.
 
 ### The line automation does not cross
 
