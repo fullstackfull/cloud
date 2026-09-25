@@ -30,6 +30,12 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * anticipated in a comment and which was, in practice, the only way it ever
  * ran.
  *
+ * Keyed on the failed transaction, so a redelivery counts nothing: this runs on
+ * the payments queue with five tries, and a delivery is not a failure. Before
+ * F-08 fixed the retry clocks the queue itself could hand this listener to a
+ * second worker while the first was still inside it; the key is read under the
+ * subscription's row lock, so even two overlapping deliveries count once.
+ *
  * Note what this does NOT do: it does not suspend anything. Failing a payment
  * opens a grace period, and the sweep is what eventually closes it. A listener
  * that took a customer offline the instant their card was declined would take
@@ -40,6 +46,18 @@ final class StartDunningOnFailedPayment implements ShouldQueue
     public string $queue = 'payments';
 
     public int $tries = 5;
+
+    /**
+     * A wait before every retry. Five tries with no ladder is not five
+     * attempts; it is one attempt five times inside the same outage, on the
+     * queue that moves money (F-08).
+     *
+     * @return list<int>
+     */
+    public function backoff(): array
+    {
+        return [5, 15, 60, 300];
+    }
 
     public function __construct(
         private readonly AdvanceDunning $dunning,
@@ -57,7 +75,7 @@ final class StartDunningOnFailedPayment implements ShouldQueue
         }
 
         try {
-            $this->dunning->recordFailedPayment($subscription);
+            $this->dunning->recordFailedPayment($subscription, paymentFailureId: $event->transactionId);
         } catch (IllegalStateTransitionException $e) {
             /*
              * Recorded rather than retried. A cancelled or terminated
