@@ -194,7 +194,7 @@ final class AProductIsOnlyAsReadyAsItsWeakestRequirementTest extends TestCase
     {
         // Compute asks about gpu_passthrough for the GPU product; the VPS
         // product's own requirement does not list it.
-        $compute = $this->provider(ProviderCategory::Compute, 'proxmox', supports: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling']);
+        $compute = $this->provider(ProviderCategory::Compute, 'proxmox', supports: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'inventory_sync']);
         $rdns = $this->provider(ProviderCategory::ReverseDns, 'cloudflare_rdns');
 
         $this->assertSame(ProductReadinessState::ReadyForProduction, $this->evaluate(Product::Vps, [...$this->sharedMet(), $compute, $rdns])->state);

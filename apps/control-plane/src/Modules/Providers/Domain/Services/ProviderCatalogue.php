@@ -61,8 +61,10 @@ final readonly class ProviderCatalogue
                  * carries no device, ResizeVmRequest cannot add one, and no
                  * adapter reads one. Templates are here because the adapter
                  * installs from one — `import-from=` on the disk it builds.
+                 * Inventory sync is here because listNodes() reads each
+                 * online node's storage pools.
                  */
-                capabilities: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling'],
+                capabilities: ['create', 'start', 'stop', 'reboot', 'resize', 'reinstall', 'suspend', 'unsuspend', 'console', 'destroy', 'templates', 'task_polling', 'inventory_sync'],
             ),
             new CatalogueEntry(
                 driver: 'proxmox_backup',
