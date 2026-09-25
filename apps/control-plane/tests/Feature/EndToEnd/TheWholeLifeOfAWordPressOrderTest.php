@@ -15,6 +15,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\SharedHosting\Application\Actions\OrderWordPressSite;
 use Lynomia\Modules\SharedHosting\Application\Actions\VerifyWordPressSites;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\SiteProbe;
@@ -27,7 +28,9 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
 use Lynomia\Modules\SharedHosting\Infrastructure\Probes\FakeSiteProbe;
+use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\RecordingWordPressInstaller;
 use Tests\TestCase;
 
 /**
@@ -128,6 +131,16 @@ final class TheWholeLifeOfAWordPressOrderTest extends TestCase
     #[Test]
     public function the_generated_wordpress_password_is_never_written_to_the_site(): void
     {
+        /*
+         * The password is kept nowhere, so the only place to learn what it was
+         * is the installer it was handed to. Until F-45 this test never knew
+         * it, and so could only look at column names — which is how it stayed
+         * green while every site was being installed with the redactor's
+         * placeholder.
+         */
+        $installer = new RecordingWordPressInstaller(new FakeHostingProvider);
+        app(HostingProviderFactory::class)->swap($this->node, $installer);
+
         $plan = $this->hostingPlan();
 
         $site = app(OrderWordPressSite::class)->execute(
@@ -143,21 +156,50 @@ final class TheWholeLifeOfAWordPressOrderTest extends TestCase
         $invoice = Invoice::query()->where('order_id', $site->order_id)->sole();
         $this->pay($invoice);
 
+        $this->assertCount(1, $installer->installs, 'The paid order never reached the installer.');
+
+        $password = $installer->installs[0]->adminPassword;
+
+        $this->assertNotSame(
+            SecretRedactor::PLACEHOLDER,
+            $password,
+            "the installer was handed the redactor's placeholder as the administrator password",
+        );
+
         /*
-         * The password exists in the job payload, goes to the toolkit, and
-         * reaches nothing else. A copy on the site row would be every
-         * customer's site credentials in one table, protecting nothing a
-         * password reset does not already protect.
+         * The password goes to the toolkit and reaches nothing else. A copy on
+         * the site row would be every customer's site credentials in one
+         * table.
          */
         $row = (array) DB::table('wordpress_sites')
             ->where('id', $site->getKey())
             ->first();
 
         foreach ($row as $column => $value) {
+            // Still worth asserting: there is no column for one to go in.
             $this->assertStringNotContainsString(
                 'password',
                 (string) $column,
                 'The site row has a column that looks like it holds a password.',
+            );
+
+            // And the value itself is in none of the columns there are.
+            $this->assertStringNotContainsString(
+                $password,
+                (string) $value,
+                sprintf('The administrator password was written to wordpress_sites.%s.', $column),
+            );
+        }
+
+        /*
+         * Nor in any provisioning job, which is where it used to be put — the
+         * payload column that turned it into the placeholder.
+         */
+        foreach (DB::table('provisioning_jobs')->get() as $job) {
+            $this->assertStringNotContainsString(
+                $password,
+                (string) json_encode($job, JSON_THROW_ON_ERROR),
+                'The administrator password was written to a provisioning job.',
             );
         }
     }
