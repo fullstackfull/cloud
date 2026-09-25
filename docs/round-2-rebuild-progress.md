@@ -21,7 +21,7 @@ immediately, so a stoppage loses at most the finding in flight.
 
 | Finding | Sev | Status | Commit |
 |---|---|---|---|
-| F-04 | Critical | in progress | |
+| F-04 | Critical | rebuilt — 84 new tests (82 red→green), 1,792 related tests green; 3 migrations | `9ff1e82` |
 | F-13 | Critical | rebuilt — 47 new tests red→green, Providers+Architecture green | `79b6b13` |
 | F-14 | Critical | rebuilt — 91 new tests (71 red→green), SharedHosting+Architecture green | `b2f33d1` |
 | F-08 | High | rebuilt — 12 of 47 new tests red→green; Queue+Billing+Architecture green | `f24548a` |
