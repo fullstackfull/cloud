@@ -6399,3 +6399,64 @@ tables.
 ledger, which quotes four of them. Those quotations have to move in the same
 commit as the rename. F-14 spent five corrections on exactly this defect; there
 is no excuse for creating a sixth knowingly.
+
+## "Touched by six findings" is not six merges, and reading it that way was mine
+
+The contention figure in this ledger has been *31 of 378 files touched by more
+than one finding*, computed over 28 closed findings. Recomputed over the
+integration manifest, with 36: **450 files touched, 43 by more than one
+finding.** Both numbers grew, which is expected.
+
+What is not expected is that the figure was measuring the wrong thing, and I
+wrote it.
+
+**A file touched by six findings is not six merges.** Six of the 43 are touched
+by findings that all carry the *same* change, inherited from a shared ancestor
+— most visibly *"Let a checkout own the Redis database its workers use"*, which
+is an ancestor of six `f`-tips and therefore shows up in six findings'
+diff-against-base. The question integration actually asks is **how many
+distinct versions of the file exist across the tips**, and that is a different
+number:
+
+| distinct versions | files |
+|---|---|
+| 6 | 5 |
+| 5 | 1 |
+| 4 | 3 |
+| 3 | 2 |
+| 2 | 31 |
+| 1 — identical at every tip | 1 |
+
+**Thirty-one of the forty-three are two-way merges and nine are the real work.**
+The two entries that look worst are the two that shrink most:
+`WorkerHarness.php` is touched by *seven* findings and has **two** versions,
+and `ConsolePermitConcurrencyTest.php` is touched by *eight* and has **three**.
+And `TheNewSweepsRunOutsideThisProcessTest.php` is touched by six findings and
+is **byte-identical at all six tips** — it needs no merge at all, and under the
+old count it read as a six-way contention.
+
+So the old figure inflated the hard part of integration and gave no way to see
+where the hard part actually is. It counted *how many diffs mention a file*,
+which is a fact about how the branches were cut, and presented it as *how much
+conflict there is*, which is a fact about their content. One more instrument
+measuring something adjacent to the thing it was named for.
+
+### And the nine that are real have a shape
+
+`lang/en/errors.php` and `lang/ar/errors.php` at six versions each;
+`resources/openapi/operations.php`, `routes/api_admin.php` and
+`docs/openapi.yaml` at six; `resources/openapi/schemas.php` at five;
+`AuditAction.php` at four; the two web locale files at four.
+
+**Every one of them is a registry.** A list of error keys, of operations, of
+routes, of audit actions, of translation strings. The findings do not disagree
+about logic in these files — they each appended an entry to the same list. That
+is the easiest conflict to resolve and the easiest to resolve *wrongly*, by
+taking one side whole and silently dropping the other side's entries, which
+produces a tree that compiles, passes most tests, and is missing an error
+string in Arabic that nobody looks at until a customer sees it.
+
+**Resolve every one of them by union, and check the resulting entry count
+against the sum of what each side added.** That check is cheap, it is the only
+thing that distinguishes a correct union from a plausible one, and it is
+written here because at integration it will feel unnecessary.

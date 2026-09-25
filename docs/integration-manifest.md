@@ -184,6 +184,93 @@ knowingly.
 - **F-24 is red by design and mergeable only with F-04 and F-45 both present.**
   Measured at five points, not inferred: F-04 alone clears none of F-24's eight
   deliberate reds, F-45 alone clears six, both together clear all eight.
-- **The contended files.** 31 of 378 touched files are touched by more than one
-  finding. That set is computed in the ledger and should be recomputed against
-  this manifest before the merge order is fixed.
+- **PHPStan, F-24's dependency and the evidence decision above.** Everything
+  else on this page is measured and current.
+
+## The contended files, by how much work each one actually is
+
+Recomputed over the manifest above. The manifest touches **450 distinct
+files**; **43** are touched by more than one finding.
+
+But "touched by six findings" is not six merges, and reading it that way
+overstates the job badly. Six of these files are touched by findings that all
+carry the **same** change, inherited from a shared ancestor commit — most
+visibly *"Let a checkout own the Redis database its workers use"*, which is an
+ancestor of six `f`-tips. What matters is how many **distinct versions** of the
+file exist across the tips, so that is what the first column counts.
+
+| distinct versions | files |
+|---|---|
+| 6 | 5 |
+| 5 | 1 |
+| 4 | 3 |
+| 3 | 2 |
+| 2 | 31 |
+| 1 (identical at every tip) | 1 |
+
+**So 31 of the 43 are two-way merges and nine are the real work.** The two
+worst-looking entries are the two that shrink most:
+`tests/Feature/Queue/WorkerHarness.php` is touched by seven findings and has
+**two** versions — six share the inherited one and F-41 has the other — and
+`ConsolePermitConcurrencyTest.php` is touched by eight and has **three**.
+`tests/Feature/Queue/TheNewSweepsRunOutsideThisProcessTest.php` is touched by
+six findings and is byte-identical at all six tips: it needs no merge at all.
+
+The nine that need real attention are the top of the table, and they have a
+shape: `lang/en/errors.php` and `lang/ar/errors.php` at six versions each,
+`resources/openapi/operations.php`, `routes/api_admin.php` and
+`docs/openapi.yaml` at six, `resources/openapi/schemas.php` at five,
+`AuditAction.php` at four, and the two web locale files at four. **Every one of
+them is a registry** — a list of error keys, a list of operations, a list of
+routes, a list of audit actions, a list of translation strings. Findings do not
+collide on logic here; they collide because each added an entry to the same
+list. That is the easiest kind of conflict to resolve and the easiest kind to
+resolve wrongly, by taking one side and silently dropping the other side's
+entries. **Resolve these by union, and check the count afterwards against the
+sum of what each side added.**
+
+| versions | findings | file |
+|---|---|---|
+| **6** | F-04, F-11, F-12, F-18, F-19, F-34 | `apps/control-plane/lang/ar/errors.php` |
+| **6** | F-04, F-11, F-12, F-18, F-19, F-34 | `apps/control-plane/lang/en/errors.php` |
+| **6** | F-04, F-12, F-14, F-15, F-26, F-34 | `apps/control-plane/resources/openapi/operations.php` |
+| **6** | F-04, F-12, F-15, F-18, F-19, F-34 | `apps/control-plane/routes/api_admin.php` |
+| **6** | F-04, F-12, F-14, F-15, F-26, F-34 | `docs/openapi.yaml` |
+| **5** | F-04, F-12, F-14, F-15, F-34 | `apps/control-plane/resources/openapi/schemas.php` |
+| **4** | F-04, F-12, F-15, F-34 | `apps/control-plane/src/Modules/Audit/Domain/Enums/AuditAction.php` |
+| **4** | F-04, F-15, F-20, F-21 | `apps/web/src/i18n/locales/ar.json` |
+| **4** | F-04, F-15, F-20, F-21 | `apps/web/src/i18n/locales/en.json` |
+| **3** | F-08, F-26, F-37 | `apps/control-plane/.env.example` |
+| **3** | F-04, F-13, F-14, F-15, F-29, F-31, F-41, F-43 | `apps/control-plane/tests/Feature/Console/ConsolePermitConcurrencyTest.php` |
+| **2** | F-38, F-39 | `.github/workflows/ci.yml` |
+| **2** | F-27, F-31 | `apps/control-plane/bootstrap/app.php` |
+| **2** | F-36, F-37 | `apps/control-plane/routes/console.php` |
+| **2** | F-04, F-18 | `apps/control-plane/src/Modules/Admin/Http/Controllers/HostingController.php` |
+| **2** | F-04, F-15 | `apps/control-plane/src/Modules/Admin/Http/Controllers/ProvisioningController.php` |
+| **2** | F-12, F-19 | `apps/control-plane/src/Modules/Admin/Http/Controllers/ServiceController.php` |
+| **2** | F-15, F-24 | `apps/control-plane/src/Modules/Compute/Infrastructure/Providers/FakeComputeProvider.php` |
+| **2** | F-15, F-28 | `apps/control-plane/src/Modules/Compute/Infrastructure/Providers/ProxmoxComputeProvider.php` |
+| **2** | F-12, F-19 | `apps/control-plane/src/Modules/Dedicated/Application/Actions/DecommissionDedicatedServer.php` |
+| **2** | F-12, F-19 | `apps/control-plane/src/Modules/Dedicated/Domain/Exceptions/DecommissionRefusedException.php` |
+| **2** | F-12, F-34 | `apps/control-plane/src/Modules/Ipam/Domain/Services/IpAllocator.php` |
+| **2** | F-04, F-19 | `apps/control-plane/src/Modules/Orders/Application/Actions/PlaceOrder.php` |
+| **2** | F-04, F-27 | `apps/control-plane/src/Modules/Orders/Domain/Exceptions/CheckoutRejectedException.php` |
+| **2** | F-15, F-19 | `apps/control-plane/src/Modules/Provisioning/Application/Jobs/RunProvisioningJob.php` |
+| **2** | F-18, F-19 | `apps/control-plane/src/Modules/SharedHosting/Application/Actions/TerminateHostingAccount.php` |
+| **2** | F-14, F-24 | `apps/control-plane/src/Modules/SharedHosting/Infrastructure/Providers/FakeHostingProvider.php` |
+| **2** | F-08, F-19 | `apps/control-plane/src/Modules/Subscriptions/Application/Listeners/StartDunningOnFailedPayment.php` |
+| **2** | F-19, F-40 | `apps/control-plane/tests/Architecture/LayeringTest.php` |
+| **2** | F-04, F-13, F-14, F-15, F-29, F-31, F-41 | `apps/control-plane/tests/Feature/Queue/WorkerHarness.php` |
+| **2** | F-11, F-24 | `apps/control-plane/tests/Feature/Simulation/AControlledDriverThatSaysItDidSomethingDidItTest.php` |
+| **2** | F-19, F-35 | `apps/control-plane/tests/Feature/Simulation/TheVpsGoldenPathTest.php` |
+| **2** | F-29, F-41 | `apps/control-plane/tests/TestCase.php` |
+| **2** | F-15, F-28 | `apps/control-plane/tests/Unit/Compute/ProxmoxComputeProviderTest.php` |
+| **2** | F-14, F-15 | `apps/web/src/lib/adminQueries.ts` |
+| **2** | F-11, F-26 | `docs/dns.md` |
+| **2** | F-22, F-37 | `docs/monitoring.md` |
+| **2** | F-22, F-31 | `docs/production-checklist.md` |
+| **2** | F-22, F-39 | `docs/runbooks/drift.md` |
+| **2** | F-15, F-39 | `docs/runbooks/provider-indeterminate.md` |
+| **2** | F-30, F-39 | `docs/runbooks/queue-backlog.md` |
+| **2** | F-38, F-39 | `infrastructure/README.md` |
+
