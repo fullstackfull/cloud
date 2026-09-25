@@ -16,7 +16,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | Finding | Sev | Status | Commit |
 |---|---|---|---|
 | F-04 | Critical | in progress | |
-| F-13 | Critical | in progress | |
+| F-13 | Critical | rebuilt — 47 new tests red→green, Providers+Architecture green | `79b6b13` |
 | F-14 | Critical | in progress | |
 | F-08 | High | in progress | |
 | F-11 | High | in progress | |
