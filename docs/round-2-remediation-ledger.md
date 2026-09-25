@@ -5375,6 +5375,19 @@ formality — it is the evidence that the *decisions* were sound and only their
 *justification* was ambiguous, which is precisely the ledger-downgrade case this
 document already has a clause for. The rule is downgraded; no round reopens.
 
+**And the mechanism deserves its own sentence, because it is the fifth
+coordinator defect of one family.** The rule was never written into a brief
+*file*. `grep -rl 'property is closed' docs/round-2-briefs/` returns nothing: it
+existed only in the dispatch prose I composed for each agent, retyped from
+memory eleven times. A load-bearing rule with no single source has nothing to
+correct and nothing to diff against, so its two readings could coexist for
+eleven dispatches without ever being seen side by side. It now lives in
+`docs/round-2-briefs/adjudication-rule.md`, with its worked examples and with
+the superseded form printed so an agent meeting the old sentence in an older
+brief can recognise it. Every dispatch from here quotes that file rather than
+restating it — which is the same repair as deriving a count instead of typing
+it, one level up.
+
 What it does cost is the briefs. The defective sentence went out in eleven of
 them and in several adjudications, and a verifier that took it literally would
 have reached the opposite verdict — this one nearly did, and only refused
