@@ -425,6 +425,17 @@ jobs:
       - name: The runbook validator still refuses a command that does not exist
         run: python3 infrastructure/scripts/test_validate_runbooks.py
 
+      # A runbook that names an alert no rule defines describes a page that can
+      # never arrive. validate-monitoring.py walks from a rule to its runbook;
+      # this walks back, and nothing did until fifteen invented names had
+      # accumulated. It also keeps the runbooks README's counts derived rather
+      # than typed, and its list of pages with no alert complete.
+      - name: Runbooks name alerts that exist
+        run: python3 infrastructure/scripts/validate-runbook-alerts.py infrastructure
+
+      - name: The runbook alert gate still refuses what it claims to refuse
+        run: python3 infrastructure/scripts/test_validate_runbook_alerts.py
+
       - name: Ansible syntax
         working-directory: infrastructure/ansible
         run: |

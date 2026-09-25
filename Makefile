@@ -109,6 +109,8 @@ infra-validate: ## Static checks over the infrastructure tree (no network, no ho
 	python3 infrastructure/scripts/test_validate_monitoring.py
 	python3 infrastructure/scripts/validate-runbooks.py infrastructure
 	python3 infrastructure/scripts/test_validate_runbooks.py
+	python3 infrastructure/scripts/validate-runbook-alerts.py infrastructure
+	python3 infrastructure/scripts/test_validate_runbook_alerts.py
 	python3 infrastructure/scripts/check-ci-cannot-apply.py .
 	python3 infrastructure/scripts/test_check_ci_cannot_apply.py
 	cd infrastructure/ansible && ansible-lint --offline

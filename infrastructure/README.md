@@ -443,4 +443,6 @@ exists because of a specific thing that went wrong:
 | `test_safety_gate.sh` | The `safety_gate` role quietly stopping to enforce a classification — ten class-and-action pairs against a throwaway localhost inventory |
 | `validate-monitoring.py` | An alert naming a metric nothing emits, an alert with nowhere for the operator to look, a `runbook` path that does not exist, a directory this README claims and does not have, or a collector contract with no implementation and no acknowledgement of that |
 | `validate-runbooks.py` | A `php artisan` line in a runbook or playbook that names a command the application does not define |
+| `validate-runbook-alerts.py` | A runbook citing an alert no rule file defines, a stale count in the runbooks README, or a page no alert names that the README does not list with a reason |
+| `test_validate_runbook_alerts.py` | The above gate quietly stopping to refuse any of those, or its citation threshold drifting off eight |
 | `check-ci-cannot-apply.py` | A workflow step that applies infrastructure. CI validates; a person applies |
