@@ -6307,3 +6307,95 @@ one question and a document has more than one way to be false. What a check
 does not ask, it does not find — which is the same sentence as the empty-set
 gates, the narrow oracle and the inert `where` clause, arriving this time in
 the instrument I built to catch the others.
+
+## The integration manifest, derived from the graph and agreeing with the prose
+
+Task: work out what to merge. The obvious method is to read each row and take
+the branch its slug suggests, and this programme has already established why
+that fails — three branches named after a finding have a tip carrying none of
+that finding's work, so integrating by name merges the wrong thing and looks
+like success. So the manifest is derived from the commit graph instead, and the
+derivation is written down in `docs/integration-manifest.md` so it can be
+re-run rather than trusted.
+
+**The rule:** a finding's integration tip is the descendant-most commit reached
+by an `f`-branch for that finding, and verification branches are never merged.
+
+Over all `remediation/f*` branches that yields **exactly one tip for each of
+the 36 findings with work, with no forks.** The nine findings that closed
+before the branch-per-finding regime have nothing to integrate, and that claim
+is already enforced by the ledger gate rather than asserted.
+
+### Both halves of the rule needed checking, and the second half is why
+
+"Verification branches are never merged" sounds like a policy and is actually a
+claim about what is on them. **Six verification branches carry a commit their
+finding's `f`-tip does not reach**, so the rule silently drops something. What
+it drops splits cleanly:
+
+**Four are evidence.** `v14n`, `v34b`, `v38b` and `v40b` each carry one commit
+of mutation logs, band outputs, probe scripts and a write-up — 28, 11, 1 and 6
+files, all documentation, no source and no test. This is the one real loss, and
+it is now a recorded decision rather than an accident: the four write to three
+different paths (`docs/verification/`, `docs/round-2-verifications/`, and a
+top-level `verification/`), and inheriting three shapes by accident is worse
+than cherry-picking one shape deliberately. **If the evidence is kept, it is
+kept as one directory, chosen at integration.**
+
+**Two are the same commit, three times.** `v12c`, `v12g` and `v29e` each carry
+*"Let a checkout own the Redis database its workers use"* — three distinct shas
+with byte-identical stats, one change cherry-picked onto three branches. It
+arrives at integration anyway, through the `f`-tips of F-04, F-13, F-14, F-15,
+F-29 and F-31. Nothing is lost.
+
+And it explains something F-41 spent a round on. That commit touches
+`WorkerHarness.php` and `ConsolePermitConcurrencyTest.php` **in the same
+diff**, and it is where the `is_numeric($configured) ? (int) $configured :
+self::REDIS_DATABASE` idiom was written — twice, in one sitting, by one hand.
+F-41's verification found one copy and the repair found the other; the reason
+there were exactly two is visible in the graph and was not visible in either
+file.
+
+### The prose and the graph agree, and now a script says so
+
+Cross-checked every CLOSED row's shas against the computed tips on two
+conditions — does the row **name** its tip, and is every sha it names an
+**ancestor** of that tip — and **0 of 36 disagree**. That is a better result
+than I expected and it is worth saying why the second condition matters
+independently: a row may legitimately name several rounds, but a row naming a
+commit that integrating the tip would *not* bring in is a round whose work is
+about to be dropped in silence.
+
+That comparison is now `validate-integration-manifest.py`, in
+`make ledger-validate` beside the row gate, with a self-test that builds real
+repositories with real branches — because `git merge-base --is-ancestor`
+answers the same way for everything in a degenerate repository, and a check
+that answers the same way for everything is not a check.
+
+**The self-test earned itself immediately.** The validator's empty-subject
+guard read `if not found:` — and `found` is also empty when *every* finding has
+forked, which is the worst state the check can see. It would have reported the
+worst state using the message for the most harmless one. Caught by the fifth
+case, fixed to `if not found and not forked:`, with the reason at the site.
+That is now the fifth instance of the same defect family in this session and
+the second one inside an instrument I wrote to catch it.
+
+### The migration collisions hold at seven
+
+Recomputed over the manifest rather than carried forward: ten migrations are
+added in total and **seven collide, in three groups** — the same seven as
+before, which is now measured against the current tips (`f14t`, `f41g`,
+`f47g`) rather than against the tips the plan was written for.
+
+The scheme stays F-32's, because F-32 already solved this and a second scheme
+is worse than a borrowed one: the last six digits of the timestamp carry the
+finding number, so `2026_04_15_000000` becomes `_000004`, `_000008`, `_000015`.
+Ordering was checked rather than assumed — F-15's three and F-11's two are
+separated by the day field, and the three sharing `04_15` touch three unrelated
+tables.
+
+**And a citation hazard, named before walking into it.** Nothing outside
+`database/migrations/` references any of the seven filenames — except this
+ledger, which quotes four of them. Those quotations have to move in the same
+commit as the rename. F-14 spent five corrections on exactly this defect; there
+is no excuse for creating a sixth knowingly.

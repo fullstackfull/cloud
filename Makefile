@@ -122,6 +122,8 @@ infra-validate: ## Static checks over the infrastructure tree (no network, no ho
 ledger-validate: ## The remediation ledger's rows say what they advertise
 	python3 infrastructure/scripts/validate-ledger-rows.py
 	python3 infrastructure/scripts/test_validate_ledger_rows.py
+	python3 infrastructure/scripts/validate-integration-manifest.py
+	python3 infrastructure/scripts/test_validate_integration_manifest.py
 
 .PHONY: infra-check
 infra-check: ## Read-only preflight of all declared infrastructure (never mutates)
