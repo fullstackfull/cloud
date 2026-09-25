@@ -235,6 +235,7 @@ return [
         'preflight_failed' => 'Hosting is not available in this location right now.',
         'provider_request_failed' => 'The hosting panel did not respond to that request. Try again in a moment.',
         'retention_period_active' => 'This suspended service is still within its retention window.',
+        'termination_before_suspension' => 'A hosting account is suspended before it can be terminated.',
         'username_conflict' => 'That username is already taken on this platform.',
         'unsupported_os' => 'Hosting is not available in this location right now.',
         'machine_not_clean' => 'Hosting is not available in this location right now.',

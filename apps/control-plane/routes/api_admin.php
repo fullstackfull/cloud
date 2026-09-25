@@ -798,9 +798,11 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
 
     /*
      * Deleting an account and everything on it. The retention window is
-     * enforced by the action; skipping it needs the same permission again
-     * inside the controller, because "terminate what has expired" and "delete
-     * a live customer's data today" are different decisions.
+     * enforced by the action. This permission covers clearing out an account
+     * whose window has run out; skipping the window, or destroying an account
+     * that is not suspended at all, needs service.terminate as well, checked
+     * inside the controller — because "terminate what has expired" and
+     * "delete a live customer's data today" are different decisions.
      */
     Route::delete('hosting-accounts/{account}', [HostingController::class, 'terminate'])
         ->middleware('permission:'.Permission::HostingAccountManage->value)

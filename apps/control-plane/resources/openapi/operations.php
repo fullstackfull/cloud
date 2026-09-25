@@ -1212,7 +1212,7 @@ return [
     'api.admin.hosting_accounts.terminate' => [
         'tag' => 'Operator',
         'summary' => 'Terminate a hosting account',
-        'description' => 'The retention window is enforced by the action. Skipping it with `force` additionally requires service.terminate: clearing out accounts whose retention has elapsed and deleting a live customer\'s site today are different decisions. Both are recorded in the audit trail, and distinguishably.',
+        'description' => 'The retention window is enforced by the action, and only a suspended account has one: an account that is not suspended is refused with 409 `hosting.termination_before_suspension`, one still inside its window with 409 `hosting.retention_period_active`. Skipping the window with `force`, or asking to destroy an account that is not suspended at all, additionally requires service.terminate: clearing out accounts whose retention has elapsed and deleting a live customer\'s site today are different decisions. Both are recorded in the audit trail, and distinguishably.',
         'permission' => 'hosting_account.manage',
         'body' => ['reason', 'force'],
         'response' => $one('AdminHostingAccountState'),
