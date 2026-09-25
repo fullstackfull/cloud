@@ -107,6 +107,11 @@ final class TheHostingGoldenPathTest extends GoldenPathHarness
         $this->assertSame($account->username, $remote[0]->username);
         $this->assertFalse($remote[0]->suspended);
 
+        // F-04: the panel was handed the domain the order was placed for — not
+        // a `.invalid` placeholder — and the account row serves the same name.
+        $this->assertSame('golden-hosting-1.example.test', $remote[0]->primaryDomain);
+        $this->assertSame('golden-hosting-1.example.test', $account->primary_domain);
+
         /*
          * ---- WordPress, on the account that already exists -----------------
          *

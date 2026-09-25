@@ -137,4 +137,44 @@ describe('the product page', () => {
     expect(body).toEqual({ items: [{ plan_id: '01JPLAN', quantity: 1 }], billing_period: 'monthly' })
     expect(await screen.findByText('order placed')).toBeInTheDocument()
   })
+
+  it('asks a hosting order for the domain it is for, and sends it with the item', async () => {
+    /*
+     * F-04: until checkout asked, every hosting order reached the control
+     * panel under a placeholder name. The domain is the one thing the
+     * customer supplies that the catalogue cannot, so the form asks for it —
+     * and only for hosting, because the server refuses it on anything else.
+     */
+    const ordered = vi.fn()
+    const hosting = { ...PRODUCT, kind: 'shared_hosting', slug: 'web-hosting', name: 'Web Hosting' }
+    vi.stubGlobal('fetch', stubFetch({ product: { status: 200, body: { data: hosting } }, onOrder: ordered }))
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /monthly/i }))
+    await user.type(screen.getByLabelText(/^domain/i), ' shop.example.com ')
+    await user.click(screen.getByRole('button', { name: /place order/i }))
+
+    await waitFor(() => {
+      expect(ordered).toHaveBeenCalledTimes(1)
+    })
+
+    const [, body] = ordered.mock.calls[0] as [Headers, Record<string, unknown>]
+    expect(body).toEqual({
+      items: [{ plan_id: '01JPLAN', quantity: 1, domain: 'shop.example.com' }],
+      billing_period: 'monthly',
+    })
+  })
+
+  it('does not ask a product that is not hosting for a domain', async () => {
+    vi.stubGlobal('fetch', stubFetch({ product: { status: 200, body: { data: PRODUCT } } }))
+    const user = userEvent.setup()
+
+    renderPage()
+
+    await user.click(await screen.findByRole('button', { name: /monthly/i }))
+
+    expect(screen.queryByLabelText(/^domain/i)).not.toBeInTheDocument()
+  })
 })

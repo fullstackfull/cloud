@@ -132,7 +132,12 @@ export interface CheckoutPayload {
    * the idempotency-key defect (AR-1) hid behind its own 422 until that was
    * fixed. Two contract mismatches, one button.
    */
-  items: Array<{ plan_id: string; quantity: number }>
+  /**
+   * `domain` is the name a shared-hosting item is bought for. The server
+   * requires it on a hosting item and refuses it on any other, so it is sent
+   * only when the product is hosting.
+   */
+  items: Array<{ plan_id: string; quantity: number; domain?: string }>
   billing_period: string
   coupon_code?: string
   /**

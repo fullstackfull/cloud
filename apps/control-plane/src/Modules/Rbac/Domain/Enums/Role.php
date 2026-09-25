@@ -75,6 +75,10 @@ enum Role: string
                 Permission::DedicatedManage, Permission::DedicatedPowerControl,
                 Permission::BmcAccess,
                 Permission::HostingNodeManage, Permission::HostingAccountManage,
+                // Held with manage by the one role that holds manage, so no
+                // installation's effective authority moved when it was split
+                // out; a role composed later can hold one without the other.
+                Permission::HostingAccountResetPassword,
                 Permission::IpamView, Permission::IpamManage,
                 Permission::NetworkManage, Permission::DnsManage,
                 Permission::ProvisioningView, Permission::ProvisioningRetry,

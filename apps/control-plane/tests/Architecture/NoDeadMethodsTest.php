@@ -147,18 +147,19 @@ final class NoDeadMethodsTest extends TestCase
         // what it just looked up.
         'CloudflareDnsProvider::zoneFor' => 'the platform matches names against the zones it holds, in its own table',
 
-        // Resetting a hosting account's password. There is no customer path
-        // and no operator path: a customer reaches their panel through
-        // single sign-on, so the password is never theirs to change.
-        'CpanelHostingProvider::changePassword' => 'no password-reset path; customers reach the panel through SSO',
-        'DirectAdminHostingProvider::changePassword' => 'no password-reset path; customers reach the panel through SSO',
-
         /*
          * `listAccounts` and `getTask` were both here until Phase 30A+.
          * `ReconcileHostingNodes` calls the first and `PollProviderTasks` the
          * second, so neither is reserved any more. Noted rather than deleted:
          * the shape of this list is the record of which halves of the product
          * were missing, and when they stopped being.
+         *
+         * `changePassword` on both panels was here until F-04, listed as
+         * having no customer path and no operator path. The operator path is
+         * `ResetHostingAccountPassword`, reached from
+         * POST /api/admin/hosting-accounts/{account}/password-reset. Removed
+         * rather than reworded, so this gate now holds that caller in place:
+         * delete it and both adapter methods are dead again.
          */
 
         // A hard reset of a virtual machine. The customer API offers stop,

@@ -25,9 +25,12 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Application\Handlers\CreateHostingAccountHandler;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
+use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -47,7 +50,19 @@ use PHPUnit\Framework\Attributes\Test;
 #[Group('golden-path')]
 final class WhatAGoldenPathMustNotDoTest extends GoldenPathHarness
 {
-    /** A panel password's shape, and secret to nothing. */
+    /**
+     * A panel password's shape, and secret to nothing — planted where the
+     * build USED to read a password from.
+     *
+     * It is no longer the thing this test chases. The payload column is cast
+     * through the redactor, so a `password` key written there was destroyed
+     * on write and never travelled anywhere: every assertion about it was
+     * true for a reason unrelated to the platform's discretion. And the build
+     * now mints its own password and reads none from the job, so the canary
+     * cannot reach the panel by construction. Asserting on it alone would be
+     * a security test whose canary never leaves the nest. The credential that
+     * does travel is the minted one, and that is what is searched for below.
+     */
     private const string PANEL_CANARY = 'Pnl-canary-7f3a9c2e51';
 
     /** A WordPress administrator's password, same idea. */
@@ -76,9 +91,10 @@ final class WhatAGoldenPathMustNotDoTest extends GoldenPathHarness
         [, $invoice] = $this->orderAndInvoice($customer, $plan, 'canary-hosting');
 
         /*
-         * The password the panel will be given, put in by hand where the
-         * product would put a generated one. A generated secret would also be
-         * unfindable afterwards, which is the opposite of what this test needs.
+         * A job as a hand-built request would carry it, with a password
+         * planted where the build no longer reads one. The panel's real
+         * credential is minted inside the worker and is found afterwards by
+         * asking the controlled panel what it was handed.
          */
         $job = $this->outsideTheTransaction(
             fn (): ProvisioningJob => app(CreateProvisioningJob::class)->execute(new ProvisioningJobRequest(
@@ -115,14 +131,24 @@ final class WhatAGoldenPathMustNotDoTest extends GoldenPathHarness
         $this->assertSame(ProvisioningJobStatus::Succeeded, $job->fresh()?->status);
 
         /*
-         * And then everywhere a person or a machine could read afterwards. The
-         * payload column is the interesting one: it is written through the
-         * redactor and cast through `RedactedJsonCast`, so a secret put into a
-         * request never reaches the row — which is what this asserts rather
-         * than assumes.
+         * The credential that actually reached the panel: minted by the build
+         * in the worker, held by the panel, and — by design — written nowhere
+         * the platform can read. The controlled panel remembers across
+         * processes, so the test can ask it.
+         */
+        $account = HostingAccount::query()->where('username', 'canaryone')->sole();
+        $minted = (new FakeHostingProvider)->credentialHandedTo($node, $account->username);
+
+        $this->assertIsString($minted, 'the panel holds no password for the account it built');
+        $this->assertSame(CreateHostingAccountHandler::PASSWORD_LENGTH, strlen($minted));
+        $this->assertNotSame(self::PANEL_CANARY, $minted, 'the build handed the panel a password from the payload');
+
+        /*
+         * And then everywhere a person or a machine could read afterwards.
          */
         foreach ($this->placesSecretsCouldSettle() as $where => $text) {
-            $this->assertStringNotContainsString(self::PANEL_CANARY, $text, 'the panel password reached '.$where);
+            $this->assertStringNotContainsString($minted, $text, 'the minted panel password reached '.$where);
+            $this->assertStringNotContainsString(self::PANEL_CANARY, $text, 'the planted panel password reached '.$where);
             $this->assertStringNotContainsString(self::ADMIN_CANARY, $text, 'the admin password reached '.$where);
         }
 
@@ -371,7 +397,7 @@ final class WhatAGoldenPathMustNotDoTest extends GoldenPathHarness
             'provisioning_jobs' => 'the provisioning job payload',
             'provisioning_attempts' => 'an attempt record',
             'hosting_accounts' => 'the hosting account row',
-            'audit_entries' => 'the audit trail',
+            'audit_log' => 'the audit trail',
             'services' => 'the service row',
             'notifications' => 'a customer notification',
         ];

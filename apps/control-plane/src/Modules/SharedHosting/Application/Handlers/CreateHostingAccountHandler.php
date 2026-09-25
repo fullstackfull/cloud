@@ -4,17 +4,22 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Handlers;
 
+use Illuminate\Support\Str;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ProvisioningHandler;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\ValueObjects\ProvisioningResult;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
+use Lynomia\Modules\Shared\Domain\Naming\DnsName;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\SharedHosting\Application\Actions\ReserveHostingNodeCapacity;
+use Lynomia\Modules\SharedHosting\Application\Actions\ResetHostingAccountPassword;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\CreateAccountRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\HostingPlacementRequest;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingDomainConflictException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingNodeUnlicensedException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingProviderException;
 use Lynomia\Modules\SharedHosting\Domain\Exceptions\HostingUsernameConflictException;
@@ -45,9 +50,62 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  * Every failure is classified, because the engine's retry and compensation
  * behaviour depends entirely on that classification — and getting it wrong is
  * how a customer ends up with two accounts, or with none and no refund.
+ *
+ * ---------------------------------------------------------------------------
+ * What the panel is handed (F-04)
+ * ---------------------------------------------------------------------------
+ *
+ * WHAT WAS WRONG: a real order reached the panel with no password, no contact
+ * address and `<username>.hosting.invalid` as its domain. Fulfilment built the
+ * job from the plan's resources and the package id, this handler defaulted
+ * the three missing values instead of refusing, and the controlled panel —
+ * which read none of them — reported the account created.
+ *
+ * Now each of the three has one source, and a missing one is a refusal:
+ *
+ *  - the DOMAIN is the one the customer named at checkout, carried on the job
+ *    and folded where it enters the account row. A job without one — every
+ *    order placed before checkout asked — fails Permanent with
+ *    `hosting.domain_missing` before anything is placed or reserved, and an
+ *    operator names it from the provisioning queue and retries. So does one
+ *    another live account already serves (`hosting.domain_in_use`).
+ *
+ *  - the CONTACT ADDRESS is the one the order was billed to, carried on the
+ *    job, falling back to the account's own billing address and then its
+ *    owner's.
+ *
+ *  - the PASSWORD is minted here, per attempt, and read from nowhere. See
+ *    PASSWORD_LENGTH.
  */
 final readonly class CreateHostingAccountHandler implements ProvisioningHandler
 {
+    /**
+     * The length of the panel password minted for every attempt.
+     *
+     * Letters and digits only. Both panels take the password in a form body —
+     * WHM as a query parameter, DirectAdmin url-encoded — and a symbol that one
+     * side encodes and the other decodes differently is a password the
+     * customer can never type back, set on an account nobody can then log in
+     * to. Thirty-two characters from sixty-two is past any strength rule
+     * either panel applies, without needing a symbol to get there.
+     *
+     * Minted rather than read from the job. The job's payload column is cast
+     * through the redactor, so a `password` written there is `[redacted]` by
+     * the time a worker reads it, and the panel would have been handed the
+     * marker as a credential; one that escaped the redactor would sit in a
+     * row. It is passed to the panel and dropped — never stored, never logged,
+     * never returned (see CreateAccountRequest).
+     *
+     * The cost of keeping nothing is an attempt whose `createacct` answer was
+     * lost: the panel may hold a live account under a password nobody has.
+     * That loss was written down here as a product gap with no remedy. It has
+     * a caller now: {@see ResetHostingAccountPassword} sets a fresh one on the
+     * operator's word, audited, so an account in that state can be handed
+     * over rather than abandoned. A customer reaches the panel by single
+     * sign-on and never needed this password at all.
+     */
+    public const int PASSWORD_LENGTH = 32;
+
     public function __construct(
         private HostingNodeScheduler $scheduler,
         private ReserveHostingNodeCapacity $reserveCapacity,
@@ -76,16 +134,56 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
 
         if ($package === null) {
             /*
-             * Permanent, and the only permanent class in this handler. A job
-             * naming a package that does not exist will name the same
-             * non-existent package on every retry; retrying it wastes a worker
-             * and delays the operator finding out.
+             * Permanent. A job naming a package that does not exist will
+             * name the same non-existent package on every retry; retrying it
+             * wastes a worker and delays the operator finding out.
              */
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 'hosting.unknown_package',
                 sprintf('No hosting package exists with the id "%s".', $packageId),
                 metadata: ['hosting_package_id' => $packageId],
+            );
+        }
+
+        /*
+         * The name, before anything is placed or reserved. A job without one
+         * would otherwise be built under a placeholder — the `.invalid` name
+         * every hosting order carried before checkout asked for a domain —
+         * on a job reporting success. Permanent, because every retry of the
+         * same job names the same nothing; an operator names the domain on
+         * the job and then retries it. No provider reference is carried, so
+         * that retry is not refused.
+         */
+        $submitted = trim((string) ($payload['primary_domain'] ?? ''));
+
+        if ($submitted === '') {
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'hosting.domain_missing',
+                'The job names no domain for the hosting account, and one is never invented.',
+            );
+        }
+
+        $problem = DnsName::problemWith($submitted);
+
+        if ($problem !== null) {
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'hosting.domain_unusable',
+                sprintf('The job\'s domain cannot be served: %s.', $problem),
+            );
+        }
+
+        $primaryDomain = DnsName::canonicalAsSubmitted($submitted);
+
+        $contactEmail = $this->contactEmailFor($payload, $job);
+
+        if ($contactEmail === '') {
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'hosting.contact_email_missing',
+                'Neither the job nor the account carries an address the panel can write to about this account.',
             );
         }
 
@@ -117,8 +215,7 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
 
         $node = $decision->node();
 
-        $username = $this->username($payload, $job, $node->panel);
-        $primaryDomain = (string) ($payload['primary_domain'] ?? $username.'.hosting.invalid');
+        $username = self::usernameFor($payload, (string) $job->getKey(), $node->panel);
 
         try {
             $reservation = $this->reserveCapacity->reserve(
@@ -136,6 +233,21 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
             // next attempt scores the fleet again and lands somewhere else.
             return ProvisioningResult::failed(
                 FailureClass::Capacity,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: $this->redactor->redact($e->context()),
+            );
+        } catch (HostingDomainConflictException $e) {
+            /*
+             * Permanent, for the same reason as a taken username: every retry
+             * of this job asks for the same name. Nothing was created, and the
+             * reservation refused before taking a slot or rolled back the one
+             * it took, so there is nothing to compensate. No provider
+             * reference, so the remedy the refusal names — correct the name on
+             * the job, then retry — is open.
+             */
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
                 $e->errorCode(),
                 $e->getMessage(),
                 metadata: $this->redactor->redact($e->context()),
@@ -190,9 +302,9 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
             $result = $this->providers->for($node)->createAccount($node, new CreateAccountRequest(
                 username: $account->username,
                 primaryDomain: $account->primary_domain,
-                password: (string) ($payload['password'] ?? ''),
+                password: Str::password(self::PASSWORD_LENGTH, symbols: false),
                 packageName: $package->panel_package_name,
-                contactEmail: (string) ($payload['contact_email'] ?? ''),
+                contactEmail: $contactEmail,
                 dedicatedIp: (bool) ($payload['dedicated_ip'] ?? false),
                 locale: isset($payload['locale']) ? (string) $payload['locale'] : null,
             ));
@@ -298,9 +410,14 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
      * because cPanel silently shortens a name it considers too long — and two
      * customers whose names shorten to the same string would be one account.
      *
+     * Public and static because it is the definition of "this job's account":
+     * the operator surface that names a job's domain has to recognise the
+     * job's own earlier row without placing it, and a second spelling of this
+     * rule there would drift from the one the build uses.
+     *
      * @param  array<string, mixed>  $payload
      */
-    private function username(array $payload, ProvisioningJob $job, HostingPanel $panel): string
+    public static function usernameFor(array $payload, string $jobId, HostingPanel $panel): string
     {
         $requested = trim((string) ($payload['username'] ?? ''));
 
@@ -308,9 +425,32 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
             // Derived from the job rather than random, so that a retry of the
             // same job produces the same name and collides with its own
             // earlier attempt instead of creating a second account.
-            $requested = 'lyn'.strtolower(substr((string) $job->getKey(), -8));
+            $requested = 'lyn'.strtolower(substr($jobId, -8));
         }
 
         return substr($requested, 0, $panel->maxUsernameLength());
+    }
+
+    /**
+     * Who the panel writes to about this account.
+     *
+     * The address the order was billed to, carried on the job by fulfilment;
+     * then the account's billing address as it is now; then its owner's. A
+     * job created before fulfilment carried one, or by hand, still reaches
+     * somebody who answers for the account.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function contactEmailFor(array $payload, ProvisioningJob $job): string
+    {
+        $carried = trim((string) ($payload['contact_email'] ?? ''));
+
+        if ($carried !== '') {
+            return $carried;
+        }
+
+        $customer = $job->customer_id === null ? null : Customer::query()->find($job->customer_id);
+
+        return trim((string) ($customer?->billing_email ?? $customer?->owner()?->email ?? ''));
     }
 }

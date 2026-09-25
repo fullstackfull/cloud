@@ -133,6 +133,18 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->name('provisioning.adopt');
 
     /*
+     * Correcting the domain a stopped hosting build will serve: the repair a
+     * retry cannot be, for a build refused because it names no domain or one
+     * another live account serves. It writes the job's payload and nothing
+     * else; the retry that follows is the one above. Behind provisioning.retry
+     * for the same reason adoption is — it changes what the platform will do
+     * on the strength of a person's word.
+     */
+    Route::put('provisioning/jobs/{job}/hosting-domain', [ProvisioningController::class, 'nameHostingDomain'])
+        ->middleware('permission:'.Permission::ProvisioningRetry->value)
+        ->name('provisioning.hosting_domain');
+
+    /*
      * The destructive operations queue. Reading it is provisioning.view like
      * the job list; deciding the outcome of one is provisioning.retry, which
      * is the permission that already means "change what the platform believes
@@ -795,6 +807,21 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('hosting-accounts/{account}/unsuspend', [HostingController::class, 'unsuspend'])
         ->middleware('permission:'.Permission::HostingAccountManage->value)
         ->name('hosting_accounts.unsuspend');
+
+    /*
+     * Setting a new panel password and handing it back once. Its own
+     * permission, not hosting_account.manage: a reset is quiet and hands the
+     * holder a live login to a customer's mail, files and databases, and it is
+     * the only operator path into a customer's panel. Three a minute per
+     * operator, as the credential reset it is — the limiter is keyed on the
+     * user, and its prefix is its own.
+     */
+    Route::post('hosting-accounts/{account}/password-reset', [HostingController::class, 'resetPassword'])
+        ->middleware([
+            'permission:'.Permission::HostingAccountResetPassword->value,
+            'throttle:3,1,hosting-password-reset:',
+        ])
+        ->name('hosting_accounts.password_reset');
 
     /*
      * Deleting an account and everything on it. The retention window is

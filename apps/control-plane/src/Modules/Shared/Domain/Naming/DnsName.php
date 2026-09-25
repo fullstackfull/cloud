@@ -115,6 +115,34 @@ final readonly class DnsName implements Stringable
     }
 
     /**
+     * The name a person typed, folded the way a submitted domain is stored.
+     *
+     * Wider than {@see self::canonical()} at the edges, because a domain
+     * pasted into a form arrives with whatever surrounded it: every leading
+     * and trailing space, tab, newline, NUL and dot is dropped, in any
+     * interleaving, where `canonical()` drops whitespace and one root dot.
+     * Composed from `canonical()` rather than written beside it, so the
+     * platform keeps one lower-casing rule.
+     *
+     * It is byte-for-byte `strtolower(trim($name, " \t\n\r\0\x0B."))`, the
+     * expression it replaced, and that equivalence is pinned rather than
+     * argued: this value feeds `orders.request_fingerprint`, so a fold that
+     * moved would move the fingerprint of every basket a client is mid-way
+     * through retrying and answer each of them 409.
+     *
+     * It is the fold behind `hosting_accounts.primary_domain`'s CHECK
+     * constraint, which computes `lower(btrim(…))` in the database. The two
+     * agree for ASCII and only for ASCII — PHP's `strtolower` is byte-wise
+     * and PostgreSQL's `lower()` follows the locale — so a caller folds a
+     * name only after {@see self::problemWith()} has accepted it, and that
+     * refuses anything outside ASCII.
+     */
+    public static function canonicalAsSubmitted(string $candidate): string
+    {
+        return self::canonical(trim($candidate, " \t\n\r\0\x0B."));
+    }
+
+    /**
      * Why this string is not a DNS host name, or null if it is one.
      *
      * A sentence rather than a boolean, and a sentence naming the specific

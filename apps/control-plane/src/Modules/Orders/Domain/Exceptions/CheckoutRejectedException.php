@@ -113,6 +113,51 @@ final class CheckoutRejectedException extends DomainException
         return $exception->as('checkout.invalid_quantity');
     }
 
+    /**
+     * A hosting account is built for a name, and this line did not say which.
+     *
+     * Refused rather than defaulted: the default the platform used to reach
+     * for was `<username>.hosting.invalid`, handed to a real control panel on
+     * a job that then reported success.
+     */
+    public static function becauseTheDomainIsMissing(string $planId): self
+    {
+        $exception = new self('A hosting plan needs the domain the account is for.');
+        $exception->withContext(['plan_id' => $planId]);
+
+        return $exception->as('checkout.domain_required');
+    }
+
+    /**
+     * The line names something that is not a host name.
+     *
+     * The reason is DnsName's sentence — "it is a URL rather than a hostname",
+     * "it is not ASCII" — about the customer's own input, so it is safe to hand
+     * back and it tells them what to change.
+     */
+    public static function becauseTheDomainIsUnusable(string $planId, string $domain, string $reason): self
+    {
+        $exception = new self(sprintf('"%s" cannot be used as a domain: %s.', $domain, $reason));
+        $exception->withContext(['plan_id' => $planId, 'reason' => $reason]);
+
+        return $exception->as('checkout.domain_unusable');
+    }
+
+    /**
+     * A domain on a line that builds nothing a domain belongs to.
+     *
+     * Refused rather than ignored, because it is fingerprinted: a basket that
+     * carried a name nobody used would conflict with an identical basket
+     * without one, for a difference that changed nothing that was bought.
+     */
+    public static function becauseADomainDoesNotApply(string $planId): self
+    {
+        $exception = new self('Only a hosting plan takes a domain.');
+        $exception->withContext(['plan_id' => $planId]);
+
+        return $exception->as('checkout.domain_not_applicable');
+    }
+
     public static function becauseIdempotencyKeyWasReused(string $key): self
     {
         $exception = new self(

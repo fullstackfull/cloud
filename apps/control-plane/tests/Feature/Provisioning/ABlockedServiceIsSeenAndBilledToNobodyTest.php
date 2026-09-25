@@ -70,7 +70,7 @@ final class ABlockedServiceIsSeenAndBilledToNobodyTest extends ServiceApiTestCas
 
         // Paid for while the configuration existed.
         $order = app(PlaceOrder::class)->execute($customer, new CheckoutRequest(
-            lines: [new CheckoutLine($plan->id, 1)],
+            lines: [new CheckoutLine($plan->id, 1, 'blocked.example.test')],
             billingPeriod: BillingPeriod::Monthly,
             couponCode: null,
             idempotencyKey: null,

@@ -19,11 +19,16 @@ import { safeLabel } from '@/lib/safeLabel'
 /**
  * One product, its plans, and the checkout.
  *
- * Nothing on this page decides a price. The plan id, the quantity and the
- * billing period are all the server is sent; what it costs is resolved there
- * from the plan, and the totals shown here come back from the order it created.
- * A checkout that computes its own total is a checkout an attacker can argue
- * with.
+ * Nothing on this page decides a price. The plan id, the quantity, the
+ * billing period and — for hosting — the domain the account is for are all the
+ * server is sent; what it costs is resolved there from the plan, and the totals
+ * shown here come back from the order it created. A checkout that computes its
+ * own total is a checkout an attacker can argue with.
+ *
+ * The domain is asked for because nothing else can supply it. A hosting account
+ * is built for a name, and until checkout asked, every hosting order reached
+ * the control panel under a placeholder that no resolver answers for. The
+ * server validates and folds it; this page only collects it.
  */
 export function ProductPage() {
   const { t } = useTranslation()
@@ -50,6 +55,9 @@ export function ProductPage() {
   const [period, setPeriod] = useState<string>('monthly')
   const [quantity, setQuantity] = useState(1)
   const [coupon, setCoupon] = useState('')
+  const [domain, setDomain] = useState('')
+
+  const needsDomain = product?.kind === 'shared_hosting'
 
   /*
    * One key per basket, minted when the page loads and reused for every retry
@@ -103,7 +111,7 @@ export function ProductPage() {
 
     try {
       const order = await place.mutateAsync({
-        items: [{ plan_id: selected, quantity }],
+        items: [{ plan_id: selected, quantity, ...(needsDomain ? { domain: domain.trim() } : {}) }],
         billing_period: period,
         ...(coupon.trim() === '' ? {} : { coupon_code: coupon.trim() }),
         idempotencyKey,
@@ -191,6 +199,30 @@ export function ProductPage() {
                 dir="ltr"
                 onChange={(event) => { setQuantity(Math.max(1, Number(event.target.value))); }}
               />
+
+              {needsDomain ? (
+                <Field
+                  label={t('catalogue.domain')}
+                  value={domain}
+                  dir="ltr"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
+                  placeholder="example.com"
+                  onChange={(event) => {
+                    setDomain(event.target.value)
+                    /*
+                     * The domain is part of what is bought, and the server
+                     * fingerprints it: the same key with a different name is
+                     * refused as a different purchase. So a changed name is a
+                     * new basket and gets a new key, as a changed plan does.
+                     */
+                    setIdempotencyKey(newIdempotencyKey())
+                  }}
+                  hint={t('catalogue.domainHint')}
+                />
+              ) : null}
 
               <Field
                 label={t('catalogue.couponCode')}

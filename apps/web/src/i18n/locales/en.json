@@ -540,6 +540,8 @@
     "quantity": "Quantity",
     "couponCode": "Coupon code",
     "couponHint": "Optional. Applied when the order is placed, consumed when it is paid.",
+    "domain": "Domain",
+    "domainHint": "The domain this hosting is for, such as example.com. Enter it without https:// or a path.",
     "placeOrder": "Place order",
     "priceIsServerSide": "The price is resolved on the server from the plan you chose. Nothing on this page can change it.",
     "planCount_one": "{{count}} plan available",
