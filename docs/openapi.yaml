@@ -8365,6 +8365,81 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/provisioning/jobs/{job}/repoint":
+    post:
+      operationId: "api_admin_provisioning_repoint"
+      tags:
+        - "Operator"
+      summary: "Move a VPS create off an identity somebody else holds"
+      description: |-
+        The route out of `vps.create_identity_taken` with reason `named_otherwise`, and nothing else: a machine that is not this build's, by name, sits at the hypervisor id the create reserved. Gives the job a new id it has never held; the job is not requeued — retry it, and the retry looks under the new id before it builds. Refuses (409) a job not stopped for review, one holding no identity, one that already has a resource at the provider (adopt that instead), one whose last finding is not a taken identity, a finding from an earlier attempt or about an identity the job no longer holds, and a machine whose ownership was not established (`unnamed`, `shape_differs`). There is no override. The evidence is required and audited.
+
+        Requires the `provisioning.retry` permission.
+      parameters:
+        - name: "job"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRepointedJobResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/provisioning/jobs/{job}/retry":
     post:
       operationId: "api_admin_provisioning_retry"
@@ -8447,7 +8522,7 @@ paths:
         - "Operator"
       summary: "Jobs waiting for a person"
       description: |-
-        Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state.
+        Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the last attempt's finding (`error_code`, `error_reason`) and, for a VPS create, the provider identity it reserved and every node and name a create under it was sent with.
 
         Requires the `provisioning.view` permission.
       parameters:
@@ -20024,6 +20099,39 @@ components:
           type:
             - "string"
             - "null"
+        error_code:
+          type:
+            - "string"
+            - "null"
+          description: "The last attempt's finding, e.g. `vps.create_identity_taken`."
+        error_reason:
+          type:
+            - "string"
+            - "null"
+          description: "Why, where the finding has a reason: for a taken identity `named_otherwise`, `unnamed` or `shape_differs`. The runbook's rows are keyed on it."
+        provider_reference:
+          type:
+            - "string"
+            - "null"
+        reserved_provider_id:
+          type:
+            - "string"
+            - "null"
+          description: "The hypervisor id a VPS create reserved before calling; where to look for what it built."
+        reserved_cluster_id:
+          type:
+            - "string"
+            - "null"
+        reserved_provider_nodes:
+          type: "array"
+          items:
+            type: "string"
+          description: "Every node a create under the reserved id was sent to."
+        reserved_provider_hostnames:
+          type: "array"
+          items:
+            type: "string"
+          description: "Every name a create under the reserved id was sent with."
         correlation_id:
           type:
             - "string"
@@ -20252,6 +20360,35 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminReinstallVerdict"
+    AdminRepointedJob:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+        reserved_provider_id:
+          type:
+            - "string"
+            - "null"
+        previous_provider_id:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+    AdminRepointedJobResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminRepointedJob"
     AdminRetriedJob:
       type: "object"
       additionalProperties: false

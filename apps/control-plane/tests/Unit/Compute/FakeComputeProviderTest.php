@@ -259,6 +259,42 @@ final class FakeComputeProviderTest extends TestCase
     }
 
     #[Test]
+    public function a_machine_carrying_the_unnamed_marker_is_built_and_reports_no_name(): void
+    {
+        // What Proxmox reports while qmcreate is still writing the config —
+        // the window a retry after a lost answer arrives in (F-15).
+        $this->provider->createVirtualMachine($this->request(101, 'web-01-'.FakeComputeProvider::UNNAMED_MARKER));
+
+        $machine = $this->provider->getVm('pve-01', '101');
+
+        $this->assertNotNull($machine);
+        $this->assertNull($machine->name);
+        $this->assertSame('web-01-'.FakeComputeProvider::UNNAMED_MARKER, $machine->raw['requested_hostname'] ?? null);
+    }
+
+    #[Test]
+    public function a_machine_both_unnamed_and_undestroyable_is_still_undestroyable(): void
+    {
+        /*
+         * The destroy marker is read from the name the machine was asked for.
+         * Read from the name it reports, an unnamed machine was a TypeError
+         * under strict types — and coalescing that null to '' would have made
+         * it silently destroyable instead, which is worse.
+         */
+        $hostname = 'web-01-'.FakeComputeProvider::UNNAMED_MARKER.'-'.FakeComputeProvider::UNDESTROYABLE_MARKER;
+        $this->provider->createVirtualMachine($this->request(101, $hostname));
+
+        try {
+            $this->provider->destroyVm('pve-01', '101');
+            $this->fail('An undestroyable machine was destroyed because it reported no name.');
+        } catch (ComputeProviderException $e) {
+            $this->assertTrue($e->isIndeterminate());
+        }
+
+        $this->assertNotNull($this->provider->getVm('pve-01', '101'));
+    }
+
+    #[Test]
     public function listing_machines_is_ordered_so_that_assertions_are_stable(): void
     {
         foreach ([103, 101, 102] as $vmId) {

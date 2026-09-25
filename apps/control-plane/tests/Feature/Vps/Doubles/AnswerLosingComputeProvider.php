@@ -16,6 +16,7 @@ use Lynomia\Modules\Compute\Domain\DTOs\VmOperation;
 use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
+use Throwable;
 
 /**
  * The controlled hypervisor, with one thing added: it can build a machine and
@@ -42,6 +43,16 @@ final class AnswerLosingComputeProvider implements ComputeProvider
     /** @var ?Closure(CreateVmRequest): void */
     public ?Closure $atTheMomentOfCreate = null;
 
+    /**
+     * When set, thrown once the machine is built: the worker process dying
+     * between the cluster accepting a create and anything being written down
+     * about it. Not a provider exception, so nothing in the handler catches it.
+     */
+    public ?Throwable $dieAfterBuilding = null;
+
+    /** When set, every read of a machine fails with this, as an unreachable node does. */
+    public ?ComputeProviderException $failReadsWith = null;
+
     public function __construct(public readonly FakeComputeProvider $fleet = new FakeComputeProvider) {}
 
     public function name(): string
@@ -58,6 +69,10 @@ final class AnswerLosingComputeProvider implements ComputeProvider
         }
 
         $operation = $this->fleet->createVirtualMachine($request);
+
+        if ($this->dieAfterBuilding !== null) {
+            throw $this->dieAfterBuilding;
+        }
 
         if (! $this->loseTheAnswerToCreates) {
             return $operation;
@@ -127,6 +142,10 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
     public function getVm(string $nodeName, string $providerId): ?RemoteVmState
     {
+        if ($this->failReadsWith !== null) {
+            throw $this->failReadsWith;
+        }
+
         return $this->fleet->getVm($nodeName, $providerId);
     }
 

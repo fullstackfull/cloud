@@ -81,6 +81,18 @@ final class FakeComputeProvider implements ComputeProvider
      */
     public const string UNDESTROYABLE_MARKER = 'undestroyable';
 
+    /**
+     * A machine carrying this is built and then reported with no name.
+     *
+     * Proxmox omits `name` from a machine's status while `qmcreate` is still
+     * writing its config — exactly the window in which a retry arrives after
+     * a create whose answer was lost. Without this marker every machine the
+     * fake made carried a name, so the platform's handling of "a machine is
+     * there and says nothing about whose it is" (F-15) could not be reached
+     * by any test.
+     */
+    public const string UNNAMED_MARKER = 'unnamed';
+
     /** Appended to a UPID's id segment to mark a task that will report failure. */
     private const string FAILED_TASK_SUFFIX = '-failed';
 
@@ -160,7 +172,7 @@ final class FakeComputeProvider implements ComputeProvider
         $this->machines[$request->nodeName][$providerId] = new RemoteVmState(
             providerId: $providerId,
             nodeName: $request->nodeName,
-            name: $request->hostname,
+            name: self::hostnameCarries($request->hostname, self::UNNAMED_MARKER) ? null : $request->hostname,
             // Whether it starts is a property of the request, so a test that
             // asks for a machine to be left off gets one that is off.
             powerState: $request->startAfterCreate ? PowerState::Running : PowerState::Stopped,
@@ -180,6 +192,14 @@ final class FakeComputeProvider implements ComputeProvider
                 'fake' => true,
                 'storage' => $request->storageName,
                 'installed_template' => $request->templateReference,
+                /*
+                 * The name the machine was asked for, kept apart from the
+                 * name it reports. Markers that act later — destroy's among
+                 * them — are read from here, because the reported name can be
+                 * absent: reading them from `name` made a machine that was
+                 * both unnamed and undestroyable silently destroyable.
+                 */
+                'requested_hostname' => $request->hostname,
             ],
         );
 
@@ -361,9 +381,12 @@ final class FakeComputeProvider implements ComputeProvider
          * conclusively: the call fails with the outcome unknown, which is the
          * one state a termination must never resolve by releasing the
          * machine's address. Keyed on the name the machine was created with,
-         * because a destroy takes no hostname of its own.
+         * because a destroy takes no hostname of its own — and on the name it
+         * was ASKED for, not the one it reports, because a machine may report
+         * none (see UNNAMED_MARKER), which with strict types was a TypeError
+         * here rather than a destroy.
          */
-        if (self::hostnameCarries($machine->name, self::UNDESTROYABLE_MARKER)) {
+        if (self::hostnameCarries(self::requestedHostnameOf($machine), self::UNDESTROYABLE_MARKER)) {
             throw ComputeProviderException::requestFailed(self::NAME, 'destroy_vm', [
                 'node' => $nodeName,
                 'vmid' => $providerId,
@@ -723,6 +746,20 @@ final class FakeComputeProvider implements ComputeProvider
     private static function hostnameCarries(string $hostname, string $marker): bool
     {
         return str_contains(strtolower($hostname), $marker);
+    }
+
+    /**
+     * The name a machine was created with, whatever it reports now.
+     *
+     * Falls back to the reported name for a machine created before the
+     * request was recorded (a shared fleet file written by an older build),
+     * and to '' only when neither exists — which carries no marker.
+     */
+    private static function requestedHostnameOf(RemoteVmState $machine): string
+    {
+        $requested = $machine->raw['requested_hostname'] ?? null;
+
+        return is_string($requested) ? $requested : ($machine->name ?? '');
     }
 
     /**

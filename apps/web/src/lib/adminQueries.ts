@@ -80,6 +80,18 @@ export interface AdminProvisioningJob {
   max_attempts?: number
   failure_class: string | null
   last_error: string | null
+  /*
+   * Published by the needs-review list only (F-15): the last attempt's
+   * finding, and the provider identity a VPS create reserved before it called
+   * — where to look for what it built, and what the runbook keys its rows on.
+   */
+  error_code?: string | null
+  error_reason?: string | null
+  provider_reference?: string | null
+  reserved_provider_id?: string | null
+  reserved_cluster_id?: string | null
+  reserved_provider_nodes?: string[]
+  reserved_provider_hostnames?: string[]
   correlation_id?: string | null
   created_at: string | null
 }
@@ -108,6 +120,49 @@ export function useRetryProvisioningJob() {
     mutationFn: ({ id, evidence }: { id: string; evidence: string }) =>
       admin.post<Envelope<AdminProvisioningJob>>(
         `/provisioning/jobs/${encodeURIComponent(id)}/retry`,
+        { evidence },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provisioning'] })
+    },
+  })
+}
+
+/**
+ * Record that a machine the provider already built belongs to this job.
+ *
+ * The operator is asserting something the platform could not check for
+ * itself, so the reference and the evidence are both required and audited.
+ */
+export function useAdoptProvisioningJob() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, providerReference, evidence }: { id: string; providerReference: string; evidence: string }) =>
+      admin.post<Envelope<AdminProvisioningJob>>(
+        `/provisioning/jobs/${encodeURIComponent(id)}/adopt`,
+        { provider_reference: providerReference, evidence },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'provisioning'] })
+    },
+  })
+}
+
+/**
+ * Move a VPS create off a provider identity somebody else's machine holds.
+ *
+ * Refused by the server in every case where that could build a second
+ * machine; the refusal is shown rather than pre-empted, because only the
+ * server can tell whose the machine at the identity is.
+ */
+export function useRepointProvisioningJob() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, evidence }: { id: string; evidence: string }) =>
+      admin.post<Envelope<AdminProvisioningJob>>(
+        `/provisioning/jobs/${encodeURIComponent(id)}/repoint`,
         { evidence },
       ),
     onSuccess: () => {

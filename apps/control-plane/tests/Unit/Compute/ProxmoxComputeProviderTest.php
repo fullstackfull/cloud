@@ -284,6 +284,31 @@ final class ProxmoxComputeProviderTest extends TestCase
     }
 
     #[Test]
+    public function a_figure_the_cluster_reports_unreadably_is_absent_rather_than_zero(): void
+    {
+        /*
+         * F-15. The VPS create compares a machine's shape against the plan to
+         * decide whether a machine it finds is its own, and a null there is
+         * "not observed". A 0 is an observation — of a machine with no memory
+         * — so an unparseable figure turned into 0 contradicts the plan and
+         * makes the create's own machine look like a stranger's.
+         */
+        Http::fake(['*' => Http::response(['data' => [
+            'name' => 'web-01',
+            'status' => 'running',
+            'cpus' => 'n/a',
+            'maxmem' => 'n/a',
+            'maxdisk' => '',
+        ]])]);
+
+        $machine = $this->provider()->getVm('pve-01', '101');
+
+        $this->assertNull($machine?->vcpu);
+        $this->assertNull($machine?->memoryMib);
+        $this->assertNull($machine?->diskGib);
+    }
+
+    #[Test]
     public function a_task_that_has_not_finished_is_never_reported_as_finished(): void
     {
         Http::fake(['*' => Http::response(['data' => ['status' => 'running', 'starttime' => 1710000000]])]);
