@@ -60,6 +60,11 @@ final class NoConfigurationTrustsEveryCallerTest extends TestCase
             'every IPv6 address' => [['::/0'], '2001:db8:ffff::9'],
             'every IPv6 address, written from a host' => [['2001:db8::5/0'], '2001:db8:ffff::9'],
             'every IPv6 address, in two halves' => [['::/1', '8000::/1'], '2001:db8:ffff::9'],
+            // The upper half on its own is not every caller, and the lower
+            // half is also refused as covering every dual-stack IPv4 caller.
+            // Only the whole-IPv6 range sees that the two halves together are
+            // everything, so the caller is asked from the half it alone refuses.
+            'every IPv6 address, in two halves, asked from the upper half' => [['::/1', '8000::/1'], 'fd00:ffff::9'],
             'every IPv4 caller on a dual-stack socket' => [['::ffff:0:0/96'], '::ffff:198.51.100.9'],
             'every IPv4 caller on a dual-stack socket, by a wider prefix' => [['::/64'], '::ffff:198.51.100.9'],
         ];
