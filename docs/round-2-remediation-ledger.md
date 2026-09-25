@@ -3686,6 +3686,58 @@ own independent verification against its own text.
 |---|---|---|---|
 | **F-47** — `DedicatedServerStatus::Retired` is a legal transition target from three states, with an `isRetired()` predicate, an exclusion in the inventory sweep, and a concurrency comment in `SyncDedicatedServer.php:56` reasoning about a race against a state no production code can produce. Its only writer was a test factory: three readers against zero production writers. | `remediation/f12` | F-12's new `RetireDedicatedServer` (`POST /api/admin/dedicated/{server}/retire`, `dedicated.manage`, evidence required, audited) is that production writer. F-12's verifier drove it independently: a machine decommissioned, marked failed in the rack, then retired returns 200, the quarantine clock starts and the address comes back. | `CLOSED pending its own verification` — the writer exists and is reachable from a real operator act; what still needs checking at F-47's turn is whether the three *readers* are now truthful, in particular whether `SyncDedicatedServer`'s concurrency comment is still reasoning about an impossible state. **Neither the commit message nor the code names F-47**, which is how this nearly went unnoticed. |
 
+## The relaunch, and two live edits waiting in the trees to be committed by somebody else
+
+Eleven agents dispatched after the sixth stoppage, on the user's explicit
+instruction. The thirteen-slot pool is saturated and isolation holds: each agent
+has its own worktree, its own `remediation/*` branch, its own
+`lynomia_test_<slug>` database and its own Redis index, all thirteen distinct
+(checked against `/home/user/worktrees/.redis-slots`, not assumed).
+
+| Slot | Role | Subject |
+|---|---|---|
+| `v04j` `v12j` `v14l` `v15g` `v20b` `v21c` `v29k` | verification | F-04 r6 `544b142`, F-12 r7 `61409f1`, F-14 r13 `f6bea44`, F-15 r4 `dd599c2`, F-20 r2 `0d2e178`, F-21 r3 `1e1ecc7`, F-29 r6 `ef342f3` |
+| `v13m` `v33e` | verification, **new trees** | F-13 r5 `224a5b8` and F-33 r4 `648a819` — both delivered at the stoppage and never verified. New slugs because the implementer's tree cannot verify its own work |
+| `f08d` `f11e` | rework | F-08 round seven (three blocking), F-11 round nine (five blocking) |
+| `f13c` `f33d` | idle | the implementer trees whose rounds are now under verification. Left standing rather than retired, so the round's author is recoverable if a verifier disputes it |
+
+### What was sitting in two of those trees
+
+Before dispatching I read `git status` and `git diff HEAD` in all eleven
+surviving worktrees rather than assuming an externally-stopped agent leaves a
+clean one. Two did not:
+
+- **`v12j` held a live mutant in production source.** `->orderBy('ip_addresses.address')`
+  had been deleted from `HeldQuarantineAddresses::inPool()`, leaving the comment
+  beneath it describing a line that was no longer there. That is a deliberate
+  breakage from step four of the closure protocol, never restored because the
+  agent performing it was stopped mid-measurement.
+- **`f11e` held a planted probe *method* in production source** — an
+  `f11eProbe()` added to `IpamCollector.php`, calling `saveMany` so that F-11's
+  writer-scan would have something to catch. Not a test file: a method on a
+  metrics collector.
+
+Both restored, both verified by an empty `git diff` and by reading the restored
+region rather than trusting the command's exit status. `v04j` also holds an
+untracked `VerifierV04jProbeTest.php` inside the collected test path; I left
+that one for its verifier and named it in the dispatch, because a probe in the
+collected path perturbs every suite count and the agent needs to decide
+knowingly rather than inherit it.
+
+**The reason this is worth a section rather than a line.** A stopped agent's
+tree is not a paused tree, it is an abandoned one, and the two edits above were
+both in `src/`, both plausible-looking, and both would have been swept into the
+next commit by an agent that trusted its own checkout. The mutant is the worse
+of the two: it removes a tie-breaker from a quarantine query, which does not
+fail any test that does not specifically look for ordering — it just makes the
+order non-deterministic. It would have shipped green.
+
+So the rule I have been giving agents — *your own `git status` is the
+authority, not the brief and not a file's plausibility* — is not boilerplate,
+and this is the second time in this programme that reading it has paid. Every
+dispatch above names its tree's specific hazard, by filename, rather than
+repeating the general warning.
+
 ## All forty-seven are traced, and the count is the smaller half of the news
 
 F-24 was the last one. Every finding in the authorised namespace now has either
