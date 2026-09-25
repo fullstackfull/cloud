@@ -42,7 +42,13 @@ final readonly class ConsoleSessionStore
      */
     public const int TTL_SECONDS = 60;
 
-    private const string PREFIX = 'vps:console:session:';
+    /**
+     * Public so a test can reach the record this store writes and rewrite its
+     * deadline — the only way to put a permit past its deadline in front of
+     * consume() while the cache still holds it, which is the state the deadline
+     * comparison exists for. Nothing in production writes here but issue().
+     */
+    public const string PREFIX = 'vps:console:session:';
 
     private const string CONSUMED_PREFIX = 'vps:console:consumed:';
 
