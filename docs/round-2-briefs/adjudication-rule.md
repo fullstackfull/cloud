@@ -16,6 +16,24 @@ A **missing oracle** blocks — a gate that cannot be made red by the failure it
 name promises, a test that passes both before and after the fix, a scan that
 reports success for a reason unrelated to the thing measured.
 
+**A missing oracle is not the same as an uncommitted one**, and the difference
+decides cases. All three exemplars above are about the shipped artefact having
+**no way to fail**. A gate that *can* be made red by the failure its name
+promises, but has no committed regression test, has an oracle — it is just not
+in the tree. That is a different object, and it does not block.
+
+The reductio is decisive: read the other way, every gate in a repository without
+a regression test blocks, which is not what this rule says and not how it has
+been applied. F-38's round three added arity guards *inside* three self-tests
+precisely because those self-tests were **themselves gates that could not be
+made red** — the genuine missing-oracle case — while F-38's round four shipped a
+fix whose proof lived only in a scratch directory, and its verifier ruled that
+not blocking after making the gate red four ways from the tree in under a
+minute. Both rulings are right and they are not in tension.
+
+An uncommitted oracle is a **regression risk**, which is recorded as owed rather
+than treated as blocking.
+
 A **stale sentence** does not block, on its own. To tell which one you have, use
 the two questions.
 
