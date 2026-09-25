@@ -24,11 +24,11 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-15 | High | in progress (round six + round-seven fixes) | |
 | F-17 | High | queued (PARTIAL: control half) | |
 | F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
-| F-19 | High | queued | |
+| F-19 | High | in progress | |
 | F-20 | High | queued | |
 | F-21 | High | queued | |
-| F-22 | High | in progress | |
-| F-23 | High | queued | |
+| F-22 | High | rebuilt — drift alert + route pinned by validator (39/39), log path fixed; Architecture+Monitoring green | `bb1c77e` |
+| F-23 | High | in progress | |
 | F-24 | High | queued | |
 | F-41 | High | queued (last: changes the test harness) | |
 | F-46 | High | queued (PARTIAL) | |
