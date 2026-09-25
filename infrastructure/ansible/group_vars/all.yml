@@ -35,6 +35,24 @@ lynomia_owner_user: lynomia
 lynomia_owner_group: lynomia
 lynomia_base_dir: /opt/lynomia
 
+# -----------------------------------------------------------------------------
+# Log shipping — declared, because it is not done here
+# -----------------------------------------------------------------------------
+# Whether an agent ships the control plane's structured log to Loki. Nothing in
+# this repository installs Grafana Alloy on an application host: the monitoring
+# playbook builds the compose stack on the monitoring host, and the
+# control-plane playbook builds PHP-FPM, Nginx and Horizon. Agents are installed
+# out-of-band in this tree by convention — node_exporter is not installed by it
+# either — so the gap is declared here rather than papered over.
+#
+# Read, not by any play, but by the control plane's test suite
+# (TheLogShipperDeclarationIsTrueTest): every file carrying a SHIPPER-STATUS
+# marker must agree with this value, and while it is false nothing under
+# infrastructure/ansible may install or run a shipper. When an agent is
+# deployed — by a role here or out-of-band — set it to true and change every
+# marker in the same commit.
+lynomia_log_shipper_deployed: false
+
 # UTC everywhere, without exception. Correlating a provisioning failure across
 # the control plane, a hypervisor and a backup server means comparing three
 # timestamps; three local timezones with three DST rules makes that arithmetic,
