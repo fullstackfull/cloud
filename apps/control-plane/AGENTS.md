@@ -22,11 +22,29 @@ layers:
   notifications.
 - `Http/` — controllers, form requests, resources.
 
-`app/` holds only the framework wiring and console commands. A module never
-reaches into another module's `Infrastructure` or `Http`; cross-module work
-goes through the other module's `Domain` contracts or `Application` actions.
-`tests/Architecture/LayeringTest` enforces this, including references in
-docblocks.
+`app/` holds only the framework wiring and console commands.
+
+Between modules, one boundary is absolute and one is not. A module never
+reaches into another module's `Http`;
+`LayeringTest::no_module_calls_another_modules_http_layer` enforces that.
+Reaching into another module's `Infrastructure` is not asserted, and it is
+common: most of it is one module using another's Eloquent model, as Orders
+prices a line with Catalog's `Plan`. The Http rule's docblock says why
+asserting the stricter boundary would leave a permanently red test. For new
+cross-module work, prefer the other module's `Domain` contracts and
+`Application` actions.
+
+The import rules in `LayeringTest` read `use` statements and nothing else. A
+class named in a docblock, written inline by its full name, or assembled from
+a string is invisible to them. So
+`LayeringTest::no_module_names_another_modules_infrastructure_or_http_out_of_sight`
+holds that surface at zero for both layers: another module's `Infrastructure`
+class is named in a `use` line, where the import rules see it, and its `Http`
+not at all. One thing crosses into another module's `Application` that way and
+nothing holds it: `ReferenceTopologyValidator` builds `Monitoring` collector
+class names from a string. What these two paragraphs call a boundary, the
+rules they name, and what they say the import rules see are checked against
+the code by `LayeringTest`.
 
 ## Running things
 
