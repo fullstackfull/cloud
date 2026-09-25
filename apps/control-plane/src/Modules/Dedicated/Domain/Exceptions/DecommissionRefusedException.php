@@ -50,9 +50,19 @@ final class DecommissionRefusedException extends DomainException
             ->as('dedicated.retention_window_open');
     }
 
+    /**
+     * Raised by both doors out of maintenance — returning a machine to stock
+     * and retiring it — so the sentence names neither. It reaches no API body
+     * and no locale file (a caller is answered from `dedicated.still_assigned`
+     * in the error catalogue), but it does land verbatim in the structured
+     * `ERROR` log on every refusal from either door, which is what an
+     * operator reading logs sees.
+     */
     public static function becauseItIsStillSomebodys(string $serverId): self
     {
-        $exception = new self('This server is still assigned to a customer, so it cannot go back into stock.');
+        $exception = new self(
+            'This server is still assigned to a customer, so it can neither go back into stock nor leave the fleet until its service is decommissioned.',
+        );
 
         return $exception->withContext(['dedicated_server_id' => $serverId])
             ->as('dedicated.still_assigned');

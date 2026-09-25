@@ -37,10 +37,16 @@ final readonly class ReleaseQuarantinedAddresses
                 ->select('id')
                 ->where('status', IpAddressStatus::Quarantined->value)
                 /*
-                 * A quarantined row with no expiry is left quarantined for
-                 * ever rather than released now. It means something set the
-                 * status without setting the window, and the safe reading of
-                 * an unknown quarantine is "still serving it".
+                 * A quarantined row with no expiry is left quarantined rather
+                 * than released now. Usually it is a held quarantine: the
+                 * address came off a physical machine that is still racked
+                 * with it configured (IpAllocator::holdAssignment()), and its
+                 * clock starts only when a person declares the machine empty.
+                 * Otherwise something set the status without setting the
+                 * window, and the safe reading of an unknown quarantine is
+                 * "still serving it". Either way no clock here can end it;
+                 * `ipam:capacity` lists them, with the machine each one is
+                 * waiting for, so neither kind is left for ever unseen.
                  */
                 ->whereNotNull('quarantined_until')
                 ->where('quarantined_until', '<=', now())

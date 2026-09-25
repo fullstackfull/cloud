@@ -12,6 +12,7 @@ use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Dedicated\Application\Actions\DecommissionDedicatedServer;
+use Lynomia\Modules\Dedicated\Application\Actions\RetireDedicatedServer;
 use Lynomia\Modules\Dedicated\Application\Actions\ReturnDedicatedServerToStock;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -142,8 +143,10 @@ final class ServiceController
          * A machine's disks hold the customer's data until somebody erases
          * them, and no call this platform can make proves that happened — so
          * the server leaves the customer and goes to maintenance rather than
-         * back into stock, and a second, deliberate act returns it. There is
-         * nothing to queue: no provider is asked to destroy anything.
+         * back into stock, and a second, deliberate act returns it (or retires
+         * it). Its addresses leave the customer here too, held without a
+         * quarantine clock until that second act. There is nothing to queue:
+         * no provider is asked to destroy anything.
          */
         if ($found->kind === ProductKind::Dedicated->value) {
             $server = app(RecordActAtomically::class)->execute(
@@ -244,6 +247,49 @@ final class ServiceController
             'data' => [
                 'dedicated_server_id' => (string) $returned->getKey(),
                 'status' => $returned->status->value,
+            ],
+        ]);
+    }
+
+    /**
+     * A decommissioned machine leaves the fleet instead.
+     *
+     * The other second half of ending a dedicated service, for a machine that
+     * is not going back on the shelf. The same kind of statement as
+     * returnToStock() — a person's word, with what they did, beside their name
+     * — and the one that starts the quarantine clock on the addresses the
+     * machine was holding. Without it, a machine that was never going to be
+     * resold kept its addresses held for ever.
+     */
+    public function retire(Request $request, string $server): JsonResponse
+    {
+        $found = DedicatedServer::query()->findOrFail($server);
+
+        $validated = $request->validate([
+            'evidence' => ['required', 'string', 'min:3', 'max:1000'],
+        ]);
+
+        $user = $request->user();
+
+        $retired = app(RecordActAtomically::class)->execute(
+            act: static fn (): DedicatedServer => app(RetireDedicatedServer::class)->execute($found),
+            describe: static fn (DedicatedServer $gone): AuditedAct => new AuditedAct(
+                action: AuditAction::DedicatedServerRetired,
+                subject: $gone,
+                context: [
+                    'evidence' => $validated['evidence'],
+                    'serial' => $gone->serial,
+                    'retired_by' => $user instanceof User
+                        ? sprintf('%s <%s>', $user->name, $user->email)
+                        : 'system',
+                ],
+            ),
+        );
+
+        return response()->json([
+            'data' => [
+                'dedicated_server_id' => (string) $retired->getKey(),
+                'status' => $retired->status->value,
             ],
         ]);
     }

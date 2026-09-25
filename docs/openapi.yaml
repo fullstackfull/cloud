@@ -1769,6 +1769,81 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/dedicated/{server}/retire":
+    post:
+      operationId: "api_admin_dedicated_retire"
+      tags:
+        - "Operator"
+      summary: "Take a decommissioned machine out of the fleet"
+      description: |-
+        The other second half of ending a dedicated service, for a machine that is not going back on the shelf. Like returning to stock it is a person’s word, with what they did, beside their name in the audit trail — and it starts the quarantine clock on the addresses the machine was holding, which decommissioning released but held while the machine could still be answering on them. `retired` is terminal: a retired machine cannot be returned to stock (409 `state.illegal_transition`). Refuses a server still assigned to a customer (409).
+
+        Requires the `dedicated.manage` permission.
+      parameters:
+        - name: "server"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminRetiredServerResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/dedicated/{server}/return-to-stock":
     post:
       operationId: "api_admin_dedicated_return_to_stock"
@@ -20252,6 +20327,23 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminReinstallVerdict"
+    AdminRetiredServer:
+      type: "object"
+      additionalProperties: false
+      properties:
+        dedicated_server_id:
+          "$ref": "#/components/schemas/Ulid"
+        status:
+          type:
+            - "string"
+            - "null"
+    AdminRetiredServerResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminRetiredServer"
     AdminRetriedJob:
       type: "object"
       additionalProperties: false

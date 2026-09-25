@@ -1487,6 +1487,14 @@ return [
         'body' => ['evidence'],
         'response' => $one('AdminReturnedServer'),
     ],
+    'api.admin.dedicated.retire' => [
+        'tag' => 'Operator',
+        'summary' => 'Take a decommissioned machine out of the fleet',
+        'description' => 'The other second half of ending a dedicated service, for a machine that is not going back on the shelf. Like returning to stock it is a person’s word, with what they did, beside their name in the audit trail — and it starts the quarantine clock on the addresses the machine was holding, which decommissioning released but held while the machine could still be answering on them. `retired` is terminal: a retired machine cannot be returned to stock (409 `state.illegal_transition`). Refuses a server still assigned to a customer (409).',
+        'permission' => 'dedicated.manage',
+        'body' => ['evidence'],
+        'response' => $one('AdminRetiredServer'),
+    ],
     /*
      * The domain queues, from the operator's side. Read-only: an operator who
      * needs to renew or re-point a customer's name does it through the
