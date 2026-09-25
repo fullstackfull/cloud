@@ -39,10 +39,22 @@ use Throwable;
  *    success reports every failure as a success;
  *
  *  - **it signals failure with `error=1` and HTTP 200.** The status line is not
- *    the verdict. Every response in this class goes through one reader that
- *    refuses to return data unless the panel said `error=0`, and that refuses
- *    outright when a MUTATION comes back with no error field at all — because a
- *    create whose success cannot be established is not a success.
+ *    the verdict. Every response in this class goes through one reader, and
+ *    that reader refuses a MUTATION that comes back with no error field at all
+ *    — because a create whose success cannot be established is not a success —
+ *    and refuses a READ with no error field unless the body names a field the
+ *    command it answers is known to return. Reads were once returned as
+ *    whatever `parse_str` made of the body, and `licenceStatus()` then read
+ *    any body at all as a valid licence: an unreadable node was recorded
+ *    licensed and scheduled for paid orders (F-14).
+ *
+ * Nothing is read from a body the parser would have rewritten. `parse_str`
+ * silently drops, renames and overwrites — a repeated key keeps its last
+ * value, a key with a leading NUL vanishes with its value, `expire.date`
+ * becomes `expire_date`, and everything past `max_input_vars` is cut off — and
+ * a rule written over the parsed array cannot see any of it, because the
+ * evidence is gone before the rule runs. So the gate is on the transformation,
+ * not on the spellings anybody has thought of: see {@see self::parse()}.
  *
  * Authentication is a login key in an HTTP Basic header, never the admin
  * password. A login key is scoped to a list of commands, restrictable by
@@ -75,6 +87,112 @@ final class DirectAdminHostingProvider implements HostingProvider
         'CMD_API_USER_PASSWD',
         'CMD_API_LOGIN_KEYS',
     ];
+
+    /**
+     * For each read command, the fields its answer is known to carry.
+     *
+     * A read that comes back without an `error` field must name at least one
+     * of these, or it is not an answer to the command that was asked: an
+     * unrelated url-encoded page, a proxy's form, or a panel build that
+     * answers a different question. A read command with no entry here is not
+     * understood, and its answer is refused rather than returned.
+     *
+     * The CMD_API_SYSTEM_INFO list deliberately duplicates the one in the
+     * Providers module's `DirectAdminConnectionTester::SYSTEM_INFO_KEYS`. The
+     * two modules may not share infrastructure, and each list is the nominal
+     * evidence for its own reader; a change to what DirectAdmin returns has to
+     * be made in both.
+     *
+     * @var array<string, list<string>>
+     */
+    private const array READ_FIELDS = [
+        'CMD_API_LICENSE' => ['status', 'state', 'expires', 'expiry', 'expire_date'],
+        'CMD_API_SHOW_USERS' => ['list'],
+        'CMD_API_SHOW_USER_CONFIG' => [
+            'username', 'name', 'package', 'domain', 'email', 'ip', 'suspended',
+            'vdomains', 'nsubdomains', 'mysql', 'nemails', 'quota', 'bandwidth',
+        ],
+        'CMD_API_SHOW_USER_USAGE' => [
+            'quota', 'bandwidth', 'vdomains', 'nsubdomains', 'mysql', 'nemails', 'inode', 'db_quota',
+        ],
+        'CMD_API_SYSTEM_INFO' => [
+            'loadavg', 'loadavg1', 'load1', 'one', 'kernel', 'os', 'uptime', 'version', 'hostname',
+        ],
+    ];
+
+    /**
+     * Fields of a command's READ_FIELDS that do not identify its answer alone.
+     *
+     * `quota` and `bandwidth` are in both the user-config and the user-usage
+     * answers, so a config answer that carries nothing else could be a usage
+     * answer. `version` and `hostname` are what almost any appliance says
+     * about itself.
+     *
+     * CMD_API_SHOW_USER_USAGE has NO entry, and that is a known asymmetry
+     * rather than an oversight nobody saw: a usage answer carries nothing but
+     * counters, so `quota=100` alone is accepted as one. Recorded, not closed:
+     * a usage figure is not what F-14 is about, and refusing it would need a
+     * field DirectAdmin is not known to send.
+     *
+     * @var array<string, list<string>>
+     */
+    private const array GENERIC_READ_FIELDS = [
+        'CMD_API_SHOW_USER_CONFIG' => ['quota', 'bandwidth'],
+        'CMD_API_SYSTEM_INFO' => ['version', 'hostname'],
+    ];
+
+    /**
+     * Where a licence answer puts the panel's word for its licence, and where
+     * it puts the expiry. EVERY one present is read, not the first: a panel
+     * that says `status=active&state=expired` has said "expired", and a
+     * first-match read that stops at "active" sells the node.
+     *
+     * @var list<string>
+     */
+    private const array LICENCE_STATE_FIELDS = ['status', 'state'];
+
+    /**
+     * @var list<string>
+     */
+    private const array LICENCE_EXPIRY_FIELDS = ['expires', 'expiry', 'expire_date'];
+
+    /**
+     * The words this repository reads as "the licence serves".
+     *
+     * A whitelist, owned as this platform's vocabulary rather than as
+     * DirectAdmin's documented one — the vendor's field values are an external
+     * contract nobody here has verified. A word outside both lists is an
+     * unconfirmed licence, never a serving one: guessing that an unfamiliar
+     * word means "fine" is the defect this class once had.
+     *
+     * @var list<string>
+     */
+    private const array SERVING_LICENCE_STATES = ['active', 'valid', 'licensed'];
+
+    /**
+     * The words recorded verbatim as a licence that does not serve. Each fits
+     * the 32-character `licence_status` column; an unknown word does not have
+     * to, which is one more reason it is recorded as `unconfirmed` instead.
+     *
+     * @var list<string>
+     */
+    private const array NON_SERVING_LICENCE_STATES = [
+        'expired', 'suspended', 'invalid', 'inactive', 'revoked', 'cancelled', 'canceled',
+        'terminated', 'disabled', 'unlicensed', 'blocked',
+    ];
+
+    /**
+     * The last year an expiry may name. Applied once, on the single return
+     * path of {@see self::parseTimestamp()}, so that it meets every branch —
+     * numeric and textual alike. It is a maximum only: a year below zero is
+     * refused by the licence being in the past, not by this.
+     */
+    private const int LATEST_EXPIRY_YEAR = 9999;
+
+    /**
+     * A month's name, full or abbreviated, as one lowercase word.
+     */
+    private const string MONTH_NAME = '^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*$';
 
     /**
      * Connections, memoised per node.
@@ -266,33 +384,147 @@ final class DirectAdminHostingProvider implements HostingProvider
          * expired licence is to stop placing accounts on the node and tell an
          * operator to renew it.
          *
+         * There are three answers, and only one of them sells:
+         *
+         *  - LICENSED: the panel answered its licence command, every word it
+         *    used for the licence is one this repository reads as serving,
+         *    and every expiry it gave is readable and in the future;
+         *  - INVALID (or the panel's own non-serving word, verbatim): the
+         *    panel itself said the licence does not serve, or dated it in the
+         *    past. Renewing it is the remedy;
+         *  - UNCONFIRMED: anything the platform could not read — no answer, a
+         *    body the parser would have rewritten, an answer with no status
+         *    word, a word nobody here knows, an expiry that names no day it
+         *    can be trusted for. Not the same thing as a lapsed licence, and
+         *    not a licence either.
+         *
          * A node whose licence has lapsed refuses its API and says so, so a
-         * failure whose text mentions licensing is recorded as an invalid
+         * refusal whose text mentions licensing is recorded as an invalid
          * licence rather than as an outage — the two need completely different
-         * responses, and only one of them is fixed by waiting.
+         * responses, and only one of them is fixed by waiting. That match is
+         * made ONLY against words the panel spoke (`provider_spoke`): a
+         * transport failure's message carries the request URL, the URL of
+         * this command is `/CMD_API_LICENSE`, and matching "licen" against it
+         * recorded every outage as a lapsed licence and sent an operator to
+         * the vendor about a network fault.
          */
         try {
             $licence = $this->call($node, 'CMD_API_LICENSE', [], 'licence_status');
         } catch (HostingProviderException $e) {
-            $message = (string) ($e->context()['provider_message'] ?? '');
+            $context = $e->context();
+            $message = (string) ($context['provider_message'] ?? '');
+            $spoke = ($context['provider_spoke'] ?? false) === true;
 
             return new LicenceStatus(
                 valid: false,
                 product: self::NAME,
-                state: str_contains(strtolower($message), 'licen') ? 'invalid' : 'unconfirmed',
-                detail: $message === '' ? 'the node gave no detail' : $message,
+                state: $spoke && str_contains(strtolower($message), 'licen') ? 'invalid' : 'unconfirmed',
+                // The exception's own message is composed by this class, so it
+                // is safe to show; the panel's words were scrubbed on the way in.
+                detail: $message === '' ? $e->getMessage() : $message,
             );
         }
 
-        $expiry = self::firstString($licence, ['expires', 'expiry', 'expire_date']);
+        return $this->readLicence($licence);
+    }
+
+    /**
+     * The licence, from an answer that has already passed every gate in
+     * {@see self::parse()}.
+     *
+     * @param  array<string, mixed>  $licence
+     */
+    private function readLicence(array $licence): LicenceStatus
+    {
+        $raw = $this->redactor->redact($licence);
+
+        $unconfirmed = fn (string $why): LicenceStatus => new LicenceStatus(
+            valid: false,
+            product: self::NAME,
+            state: 'unconfirmed',
+            detail: $why,
+            raw: $raw,
+        );
+
+        $words = self::everyValue($licence, self::LICENCE_STATE_FIELDS);
+
+        if ($words === null) {
+            return $unconfirmed('the panel\'s licence answer carries a status field that is empty or not a single word');
+        }
+
+        if ($words === []) {
+            // Not assumed active. The absence of a word is not the panel
+            // saying the licence serves.
+            return $unconfirmed('the panel answered its licence command without saying whether the licence serves');
+        }
+
+        $words = array_map(static fn (string $word): string => strtolower($word), $words);
+
+        foreach ($words as $word) {
+            if (in_array($word, self::NON_SERVING_LICENCE_STATES, true)) {
+                return new LicenceStatus(
+                    valid: false,
+                    product: self::NAME,
+                    state: $word,
+                    detail: sprintf('the panel reports its licence as "%s"', $word),
+                    raw: $raw,
+                );
+            }
+        }
+
+        foreach ($words as $word) {
+            if (! in_array($word, self::SERVING_LICENCE_STATES, true)) {
+                return $unconfirmed(sprintf(
+                    'the panel describes its licence as "%s", which this platform does not read as serving',
+                    $this->redactor->redactString(mb_substr($word, 0, 64)),
+                ));
+            }
+        }
+
+        $expiries = self::everyValue($licence, self::LICENCE_EXPIRY_FIELDS);
+
+        if ($expiries === null) {
+            return $unconfirmed('the panel\'s licence answer carries an expiry field that is empty or not a single value');
+        }
+
+        /*
+         * The earliest expiry decides. Two dates in one answer is a panel
+         * contradicting itself, and the only reading that cannot sell a lapsed
+         * licence is the sooner one.
+         */
+        $earliest = null;
+
+        foreach ($expiries as $expiry) {
+            $at = self::parseTimestamp($expiry);
+
+            if ($at === null) {
+                // Refused, not guessed: an invented expiry is worse than none,
+                // because it is believed — and "none" here would read as a
+                // licence that never lapses.
+                return $unconfirmed('the panel dates its licence in a form that names no day it can be trusted for');
+            }
+
+            $earliest = $earliest === null || $at->isBefore($earliest) ? $at : $earliest;
+        }
+
+        if ($earliest !== null && ! $earliest->isFuture()) {
+            return new LicenceStatus(
+                valid: false,
+                product: self::NAME,
+                state: 'expired',
+                expiresAt: $earliest,
+                detail: sprintf('the panel dates its licence as ending %s', $earliest->toIso8601String()),
+                raw: $raw,
+            );
+        }
 
         return new LicenceStatus(
             valid: true,
             product: self::NAME,
-            state: self::firstString($licence, ['status', 'state']) ?? 'active',
-            expiresAt: $expiry === null ? null : self::parseTimestamp($expiry),
-            detail: 'the panel answered its licence command',
-            raw: $this->redactor->redact($licence),
+            state: $words[0],
+            expiresAt: $earliest,
+            detail: 'the panel answered its licence command and says the licence serves',
+            raw: $raw,
         );
     }
 
@@ -549,10 +781,7 @@ final class DirectAdminHostingProvider implements HostingProvider
         }
 
         $body = trim($response->body());
-
-        /** @var array<string, mixed> $fields */
-        $fields = [];
-        parse_str($body, $fields);
+        $context = ['node' => $node->hostname, 'command' => $command, 'status' => $response->status()];
 
         /*
          * DirectAdmin answers an authentication failure, and some
@@ -562,22 +791,63 @@ final class DirectAdminHostingProvider implements HostingProvider
          * understood, and a mutation that was not understood may still have
          * happened.
          */
-        if ($fields === [] || self::looksLikeHtml($body)) {
+        if (self::looksLikeHtml($body)) {
             throw HostingProviderException::unexpectedResponse(
                 self::NAME,
                 $operation,
                 'the body is not a DirectAdmin url-encoded response',
-                ['node' => $node->hostname, 'command' => $command, 'status' => $response->status()],
+                $context,
+                indeterminate: $mutation,
+            );
+        }
+
+        $loss = self::whatTheParserWouldLose($body);
+
+        if ($loss !== null) {
+            throw HostingProviderException::unexpectedResponse(
+                self::NAME,
+                $operation,
+                $loss.', so the body cannot be read as the panel wrote it',
+                $context,
+                indeterminate: $mutation,
+            );
+        }
+
+        /** @var array<string, mixed> $fields */
+        $fields = [];
+        parse_str($body, $fields);
+
+        if ($fields === []) {
+            throw HostingProviderException::unexpectedResponse(
+                self::NAME,
+                $operation,
+                'the body is not a DirectAdmin url-encoded response',
+                $context,
                 indeterminate: $mutation,
             );
         }
 
         if (array_key_exists('error', $fields)) {
-            if ((int) $fields['error'] !== 0) {
+            $error = is_string($fields['error']) ? trim($fields['error']) : null;
+
+            /*
+             * Only a number is a verdict. `(int)` of anything else is 0, so a
+             * cast here once read `error=none` — or an array — as the panel
+             * saying the call succeeded.
+             */
+            if ($error === null || ! ctype_digit($error)) {
+                throw HostingProviderException::unexpectedResponse(
+                    self::NAME,
+                    $operation,
+                    'the error field is not a number, so the panel never said whether the call succeeded',
+                    $context,
+                    indeterminate: $mutation,
+                );
+            }
+
+            if ((int) $error !== 0) {
                 throw HostingProviderException::requestFailed(self::NAME, $operation, [
-                    'node' => $node->hostname,
-                    'command' => $command,
-                    'status' => $response->status(),
+                    ...$context,
                     // The node's own words, scrubbed. DirectAdmin splits them
                     // over "text" (the headline) and "details" (the reason),
                     // and only the pair is useful: "Cannot Create User" alone
@@ -585,6 +855,11 @@ final class DirectAdminHostingProvider implements HostingProvider
                     // missing.
                     'provider_message' => $this->scrub($node, self::messageFrom($fields)),
                     'panel_error' => 1,
+                    // The message above is the PANEL speaking, not a transport
+                    // failure describing the request. Only words the panel
+                    // spoke may be read for what they say about its licence:
+                    // see licenceStatus().
+                    'provider_spoke' => true,
                 ]);
             }
 
@@ -606,7 +881,94 @@ final class DirectAdminHostingProvider implements HostingProvider
             );
         }
 
+        /*
+         * No error field on a READ. This used to return whatever parse_str
+         * made of the body, and every reader then treated "no error" as an
+         * answer — the licence reader as a valid licence. A read is accepted
+         * without a verdict only when the body names a field the command is
+         * known to return, and one that identifies it.
+         */
+        $identifying = array_diff(self::READ_FIELDS[$command] ?? [], self::GENERIC_READ_FIELDS[$command] ?? []);
+        $named = array_map(static fn (int|string $key): string => (string) $key, array_keys($fields));
+
+        if (array_intersect($identifying, $named) === []) {
+            throw HostingProviderException::unexpectedResponse(
+                self::NAME,
+                $operation,
+                'the response carries no error field and none of the fields this command returns, so it is not an answer to it',
+                $context,
+            );
+        }
+
         return $fields;
+    }
+
+    /**
+     * Why `parse_str` would not return what the panel wrote, or null when it
+     * would.
+     *
+     * This is a gate on the TRANSFORMATION, not on spellings, and that is the
+     * point of it. Each of these once let an unlicensed node be recorded
+     * licensed, and none of them is visible in the parsed array, because the
+     * parse is what destroys the evidence:
+     *
+     *  - a repeated key keeps only its last value (`status=expired&status=
+     *    active`), including a repeat the body never spells as one
+     *    (`%73tatus` IS `status`);
+     *  - a key with a leading NUL is dropped whole, value and all, so the
+     *    panel's "expired" is never seen and nothing says it was there;
+     *  - a key is renamed: `expire.date`, `expire date` and `expire+date` all
+     *    become `expire_date`, the key the expiry rule reads;
+     *  - everything past `max_input_vars` pairs is cut off — and parse_str
+     *    warns while doing it, which the framework turns into an exception
+     *    that escapes this class. So the count is taken BEFORE parsing.
+     *
+     * Two checks catch all four without naming any of them: each pair must
+     * come out of the parser under the name it went in with, and the parser
+     * must keep exactly as many values as the body sent pairs. A whole-pair
+     * drop by a spelling nobody here has thought of fails the second.
+     *
+     * Deliberately NOT caught, and recorded as this reader's owned limits:
+     * key case is not normalised (`STATUS=expired&status=active` never reads
+     * the uppercase word, because no rule reads that spelling), and a key
+     * spelled some way this class does not read is simply unread — its value
+     * survives in the redacted `raw`, which is where an operator finds it.
+     */
+    private static function whatTheParserWouldLose(string $body): ?string
+    {
+        $pairs = array_values(array_filter(explode('&', $body), static fn (string $pair): bool => $pair !== ''));
+        $limit = (int) ini_get('max_input_vars');
+
+        if ($limit > 0 && count($pairs) > $limit) {
+            return sprintf('the body carries %d pairs and the parser keeps only the first %d', count($pairs), $limit);
+        }
+
+        foreach ($pairs as $pair) {
+            $parsed = [];
+            parse_str($pair, $parsed);
+
+            $sent = urldecode(explode('=', $pair, 2)[0]);
+            $bracket = strpos($sent, '[');
+            $sent = $bracket === false ? $sent : substr($sent, 0, $bracket);
+
+            if ($parsed === [] || (string) array_key_first($parsed) !== $sent) {
+                return 'a key in the body would be renamed or dropped by the parser';
+            }
+        }
+
+        $parsed = [];
+        parse_str($body, $parsed);
+
+        $kept = 0;
+        array_walk_recursive($parsed, static function () use (&$kept): void {
+            $kept++;
+        });
+
+        if ($kept !== count($pairs)) {
+            return sprintf('the body sends %d pairs and the parser keeps %d, so a key is repeated or a pair is lost', count($pairs), $kept);
+        }
+
+        return null;
     }
 
     /**
@@ -763,37 +1125,387 @@ final class DirectAdminHostingProvider implements HostingProvider
     }
 
     /**
+     * Every value the answer gives under any of $keys — not the first.
+     *
+     * Null when one of them is present but is not a single non-empty string
+     * (an array from `status[]=…`, or an empty value): a field the panel sent
+     * and this class cannot read is not the same as a field it did not send.
+     *
      * @param  array<string, mixed>  $fields
      * @param  list<string>  $keys
+     * @return list<string>|null
      */
-    private static function firstString(array $fields, array $keys): ?string
+    private static function everyValue(array $fields, array $keys): ?array
     {
-        foreach ($keys as $key) {
-            $value = $fields[$key] ?? null;
+        $values = [];
 
-            if (is_string($value) && trim($value) !== '') {
-                return trim($value);
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $fields)) {
+                continue;
             }
+
+            $value = $fields[$key];
+
+            if (! is_string($value) || trim($value) === '') {
+                return null;
+            }
+
+            $values[] = trim($value);
         }
 
-        return null;
+        return $values;
     }
 
     /**
-     * Null rather than a guess when the vendor's date cannot be read: an
-     * invented expiry is worse than no expiry, because it is believed.
+     * The panel's expiry, or null when it names no day it can be trusted for.
+     *
+     * Null rather than a guess: an invented expiry is worse than no expiry,
+     * because it is believed. And the caller reads null as UNCONFIRMED, never
+     * as "does not expire".
+     *
+     * Nothing in here may throw. The value is chosen by the node, and an
+     * exception from Carbon once escaped this class, past the sync's handler
+     * — which catches only HostingProviderException — on `expires=1e15`.
+     *
+     * The ceiling is applied here, on the single return path, so that it
+     * meets every branch. It once sat inside the numeric branch alone, on the
+     * premise that the textual branch already had one; it did not, and
+     * `UTC+22099-01-01` licensed a node until the year 22099.
      */
     private static function parseTimestamp(string $value): ?CarbonImmutable
     {
-        if (is_numeric($value)) {
-            return CarbonImmutable::createFromTimestampUTC((int) $value);
-        }
-
         try {
-            return CarbonImmutable::parse($value);
+            $parsed = self::readTimestamp(trim($value));
         } catch (Throwable) {
             return null;
         }
+
+        return $parsed !== null && $parsed->year <= self::LATEST_EXPIRY_YEAR ? $parsed : null;
+    }
+
+    /**
+     * The rules, in the order they run. Every one refuses; none repairs.
+     *
+     *  1. **Numbers are unix seconds, written as digits and nothing else.**
+     *     `1e15`, `-1` and `4102358400.5` are numeric to PHP and are refused
+     *     rather than reinterpreted. A millisecond timestamp is refused,
+     *     never divided by a thousand — inventing a millisecond contract this
+     *     repository has no evidence for would mis-license real nodes
+     *     silently — and it is the year ceiling that refuses it: every value
+     *     of thirteen digits or more is past the year 9999 as seconds. Two
+     *     readings here are safe BY ACCIDENT rather than by design, and are
+     *     labelled together because the class is the warning: `20991231`
+     *     (Ymd) is 31 August 1970, and `0` — a common "no expiry" marker —
+     *     is 1 January 1970. Both are in the past, so both refuse the node;
+     *     neither is read as the date or the absence it means.
+     *
+     *  2. **`date_parse()` must report no error and no warning.** Its
+     *     warnings are the parser saying it changed the value: an invalid
+     *     calendar date is rolled forward (`2099-02-31` → 3 March), a
+     *     sixtieth second rolls into the next day, and a leading token read
+     *     as a zone collides with the real one ("Double timezone
+     *     specification" — `V2099-01-01`, and `jan 2099-01-01`, which is a
+     *     real date this rule refuses and is one of this method's disclosed
+     *     over-refusals).
+     *
+     *  3. **It must name a year, a month and a day** as integers. The error
+     *     count alone is not a readability test: `date_parse('2099.12.31')`
+     *     reports no error with `month` and `day` both false. So dotted
+     *     year-first (`Y.m.d`) is refused on every day — pre-existing and
+     *     disclosed, and a panel that writes it is recorded unconfirmed
+     *     always.
+     *
+     *  4. **No relative part.** `tomorrow` and `+1 year` resolve against the
+     *     clock, so they sold the node on every sync, for ever. A weekday is
+     *     the one relative part allowed through, and rule 8 decides it.
+     *
+     *  5. **Nothing before the date but the names of days and months.** A
+     *     leading `V`, `UTC+` or `ACDT+` is read as a zone, and moves what
+     *     follows.
+     *
+     *  6. **A numeric date must be one a reader cannot misread.** See
+     *     {@see self::isAmbiguousNumericDate()}.
+     *
+     *  7. **A date names its day, month and year once each.** See
+     *     {@see self::namesMoreThanADate()}.
+     *
+     *  8. **The day stored must be the day the value names.**
+     *     `date_parse()` REPORTS a relative part and returns components;
+     *     `CarbonImmutable::parse()` APPLIES it. They are different parsers,
+     *     and every rule above reasons about the first while the second
+     *     produces what is stored — so this rule is stated over the second:
+     *     `Fri, 31 Dec 2099` is a Thursday, is stored as 1 January 2100, and
+     *     is refused here.
+     *
+     * The year ceiling is not in this list because it is not in this method:
+     * it is on the return path of parseTimestamp(), where every branch meets
+     * it.
+     *
+     * WHAT THIS COSTS, stated because each item takes a working node out of
+     * service. Measured by rendering every day from 2020-01-01 to 2100-12-31
+     * (29,585 days) in each format and reading it back through
+     * parseTimestamp(). Refused on NO day, and read as the day rendered:
+     * `Y-m-d`, `Y-m-d H:i:s`, `c`, `r`, `D, d M Y`, `D, d M Y H:i:s O`,
+     * `d M Y`, `M d, Y`, `M j Y`, `F j, Y`, `j F Y`, `Y/m/d`, `d-M-Y`,
+     * `Y-m-d\TH:i:s\Z`, `Y-m-d\TH:i:s.uP`, `Y-m-d H:i:s \U\T\C` and `U`. The
+     * rest:
+     *
+     *  - `m/d/Y`, `d-m-Y`, `d.m.Y`: refused on 10,692 days each — the days
+     *    whose day and month are both 12 or less and differ (rule 6);
+     *  - `Y.m.d`: refused on all 29,585 (rule 3);
+     *  - `d-M-y`, with or without a clock or an attached `+0000`: the 11,322
+     *    days from 2070 are read as 1970–2000, the two-digit-year pivot, and
+     *    so are recorded as expired; `D, d M y` refuses the same days,
+     *    because the weekday no longer matches after the pivot (rule 8);
+     *  - `Ymd` is a number, and reads as 1970 (rule 1);
+     *  - a bare `HHMM` clock after a date, and a month name in front of an
+     *    ISO date, are refused (see namesMoreThanADate() and rule 2);
+     *  - a word for "no expiry" — `never`, `unlimited`, `perpetual`, `none`,
+     *    `-` — names no day and is refused, so a panel that writes a
+     *    perpetual licence that way is recorded UNCONFIRMED where it was once
+     *    recorded licensed. Deliberate: which words mean "never" is a
+     *    vendor contract nobody here has evidence for, and the omission of
+     *    an expiry field is read as no expiry already.
+     */
+    private static function readTimestamp(string $value): ?CarbonImmutable
+    {
+        if ($value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return ctype_digit($value) ? CarbonImmutable::createFromTimestampUTC((int) $value) : null;
+        }
+
+        $parts = date_parse($value);
+
+        if ($parts['error_count'] > 0 || $parts['warning_count'] > 0) {
+            return null;
+        }
+
+        if (! is_int($parts['year']) || ! is_int($parts['month']) || ! is_int($parts['day'])) {
+            return null;
+        }
+
+        if (self::carriesARelativePart($parts)
+            || self::hasAPrefixThatIsNotAName($value)
+            || self::isAmbiguousNumericDate($value)
+            || self::namesMoreThanADate($value)
+        ) {
+            return null;
+        }
+
+        $parsed = CarbonImmutable::parse($value);
+
+        if ($parsed->year !== $parts['year'] || $parsed->month !== $parts['month'] || $parsed->day !== $parts['day']) {
+            return null;
+        }
+
+        return $parsed;
+    }
+
+    /**
+     * A relative part other than a bare weekday.
+     *
+     * @param  array<string, mixed>  $parts  date_parse()'s answer
+     */
+    private static function carriesARelativePart(array $parts): bool
+    {
+        $relative = $parts['relative'] ?? null;
+
+        if (! is_array($relative)) {
+            return false;
+        }
+
+        foreach (['year', 'month', 'day', 'hour', 'minute', 'second'] as $unit) {
+            if (($relative[$unit] ?? 0) !== 0) {
+                return true;
+            }
+        }
+
+        // "+2 weekdays", "first day of", "last day of": each moves the date.
+        return isset($relative['weekdays'])
+            || isset($relative['first_day_of_month'])
+            || isset($relative['last_day_of_month']);
+    }
+
+    private static function hasAPrefixThatIsNotAName(string $value): bool
+    {
+        $prefix = strtolower((string) preg_replace('/[0-9].*$/s', '', $value));
+
+        foreach (preg_split('/[^a-z]+/', $prefix, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+            if (preg_match('/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*$|'.self::MONTH_NAME.'/', $word) !== 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A numeric date whose day and month a reader cannot tell apart, or whose
+     * year field is not exactly four digits.
+     *
+     * Applied to the first `n{sep}n{sep}n` in the value, with `/`, `-` or `.`
+     * as the separator:
+     *
+     *  - **day or month first** (the first field is one or two digits): the
+     *    year is the LAST field and must be exactly four digits, the middle
+     *    field at most two, and when both of the first two are 12 or less and
+     *    differ, the value is refused whatever the separator — `12/01/2026`
+     *    is 1 December to PHP and 12 January to half the panels that write
+     *    it, and the first reading sold an already-expired licence. This is
+     *    the one priced over-refusal of the rule: a panel writing `m/d/Y`,
+     *    `d-m-Y` or `d.m.Y` is refused on every day whose day is 12 or less
+     *    and not equal to its month;
+     *
+     *  - **year first** (the first field is wider): the year is the FIRST
+     *    field and must be exactly four digits, and the other two at most two.
+     *    The four-digit test applies to whichever field is the year: a rule
+     *    that only tested the last field never reached `99999999/01/31` at
+     *    all — it did not fail the test, it never entered it — and that value
+     *    licensed a node until 9999. `99999/12/31` is worse in kind: both
+     *    parsers agree on 12 September 2031, both wrong, so no rule about the
+     *    OUTCOME can see it. `2099/12/99999` and `2099-01-012:45` are the same
+     *    rule's other two fields.
+     */
+    private static function isAmbiguousNumericDate(string $value): bool
+    {
+        if (preg_match('/^[^0-9]*([0-9]+)([\/.\-])([0-9]+)\2([0-9]+)/', $value, $m) !== 1) {
+            return false;
+        }
+
+        [, $first, , $second, $third] = $m;
+
+        if (strlen($first) > 2) {
+            return strlen($first) !== 4 || strlen($second) > 2 || strlen($third) > 2;
+        }
+
+        if (strlen($third) !== 4 || strlen($second) > 2) {
+            return true;
+        }
+
+        return (int) $first <= 12 && (int) $second <= 12 && (int) $first !== (int) $second;
+    }
+
+    /**
+     * Whether the value names a number beyond the day, month and year of one
+     * date — which is how a second year gets in.
+     *
+     * timelib reads a bare four-digit token after a date as a clock `HHMM`
+     * when it is a legal time and as a YEAR when it is not, and it does so
+     * with no error and no warning; both parsers then agree, so rule 8
+     * cannot see it. `2020-01-01 9999` recorded a licence that expired in
+     * 2020 as running to 9999. The same holds for a two-digit-year date
+     * (`01-Jan-20 9999`), for the years glued into one run
+     * (`01 Jan 20209999`), and for a number behind a clock
+     * (`Jan 1 20 23:59:59T2035`).
+     *
+     * So the question is not "how many four-digit runs are there" — a
+     * two-digit-year date has none of its own, and that rule removed nothing
+     * — but "how many numbers does the value name once the clock and the zone
+     * are set aside". A date with a month NAME has two (day and year); a
+     * numeric date has three. More is a second thing; a number wider than
+     * four digits is refused outright, and so is a second number wider than
+     * two: only a year is, and `3401 Jan 2020` has the right count and two
+     * years (timelib takes `3401` as the year and spends `2020` on a clock).
+     *
+     * A scope statement, because the rule is easy to over-read: it refuses a
+     * value that names TWO years. It has nothing to say about a panel that
+     * names one wrong year, and one residue is known and accepted — a digit
+     * glued onto a date with no separator makes a different well-formed date
+     * (`01-Jan-20` and `58` is `01-Jan-2058`), which only refusing `d-M-y`
+     * outright would close.
+     *
+     * What is set aside, in this order, which matters:
+     *
+     *  1. an offset SEPARATED by whitespace (`… +0000`, `… -05:00`) whose
+     *     hours are at most 14 and minutes at most 59. The whitespace
+     *     lookbehind is load-bearing: without it `31-12-1200 9999` has its
+     *     own year `-1200` eaten as a zone, leaves one year, and reads as
+     *     31 December 9999;
+     *  2. an offset ATTACHED to what precedes it (`15-Jun-27+0000`,
+     *     `…T23:59:59+00:00`), only when BOTH limbs hold — the offset is a
+     *     valid spelling, and everything before it is a complete date on its
+     *     own. `31-12-1200` ends in `-1200`, which is a valid offset's
+     *     spelling exactly; the second limb is what separates the two (`31-12`
+     *     is not a date), and without it the same row licenses a node to
+     *     31 December 9999. The trailing `(?![0-9])` stops an offset matching
+     *     the front of a longer run: `+868783` is not `+8687` and `83`;
+     *  3. a clock, `H:MM`, `H:MM:SS`, with a fraction ONLY after seconds. A
+     *     fraction allowed after `HH:MM` would eat `.9999` behind a colonned
+     *     offset and leave the date's own year as the only number;
+     *
+     * Offsets go first so that a clock pattern cannot claim the `00:00` of a
+     * `+00:00`.
+     *
+     * The disclosed cost: a bare `HHMM` clock (`31-Dec-69 2359`) is refused,
+     * because it is the same shape as the second year and no test on the
+     * token separates them. A panel is not known to write it.
+     */
+    private static function namesMoreThanADate(string $value): bool
+    {
+        $rest = (string) preg_replace_callback(
+            '/(?<=\s)[+-]([0-9]{2}):?([0-9]{2})(?![0-9])/',
+            static fn (array $m): string => self::isAnOffset($m[1], $m[2]) ? ' ' : $m[0],
+            $value,
+        );
+
+        $rest = (string) preg_replace_callback(
+            '/(?<=[0-9A-Za-z])[+-]([0-9]{2}):?([0-9]{2})(?![0-9])/',
+            static function (array $m) use ($rest): string {
+                [$offset, $at] = $m[0];
+
+                return self::isAnOffset($m[1][0], $m[2][0]) && self::isACompleteDate(substr($rest, 0, $at))
+                    ? ' '
+                    : $offset;
+            },
+            $rest,
+            flags: PREG_OFFSET_CAPTURE,
+        );
+
+        $rest = (string) preg_replace('/(?<![0-9])[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:[.,][0-9]+)?)?(?![0-9:])/', ' ', $rest);
+
+        preg_match_all('/[0-9]+/', $rest, $numbers);
+
+        $wide = 0;
+
+        foreach ($numbers[0] as $number) {
+            if (strlen($number) > 4) {
+                return true;
+            }
+
+            $wide += strlen($number) > 2 ? 1 : 0;
+        }
+
+        if ($wide > 1) {
+            return true;
+        }
+
+        $named = preg_match('/(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i', $rest) === 1 ? 2 : 3;
+
+        return count($numbers[0]) !== $named;
+    }
+
+    private static function isAnOffset(string $hours, string $minutes): bool
+    {
+        return (int) $hours <= 14 && (int) $minutes <= 59;
+    }
+
+    /**
+     * Whether $value, alone, is a date `date_parse()` reads without complaint
+     * and with a year, a month and a day. The attached-offset limb of
+     * namesMoreThanADate() asks it of whatever precedes the offset.
+     */
+    private static function isACompleteDate(string $value): bool
+    {
+        $parts = date_parse($value);
+
+        return $parts['error_count'] === 0
+            && $parts['warning_count'] === 0
+            && is_int($parts['year'])
+            && is_int($parts['month'])
+            && is_int($parts['day']);
     }
 
     /**
