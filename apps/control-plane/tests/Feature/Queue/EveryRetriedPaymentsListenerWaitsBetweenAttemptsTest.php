@@ -13,6 +13,8 @@ use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Domains\Application\Listeners\RegisterDomainOnPayment;
 use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
+use Lynomia\Modules\Orders\Application\Listeners\RecordFailedPaymentOnTheOrder;
+use Lynomia\Modules\Orders\Application\Listeners\RecordRefundOnTheOrder;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
@@ -52,7 +54,14 @@ final class EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest extends TestCas
 {
     use PlantsAQueuedClassInARealRoot;
 
-    /** The seven listeners that move money, as the dispatcher routes them. */
+    /**
+     * The nine listeners on the money queue, as the dispatcher routes them.
+     *
+     * The last two are F-19's: they record a declined first payment and a
+     * full refund on the order. Neither moves money, but both hear money's
+     * events on money's queue, and a retry with no wait is the same hazard
+     * there as anywhere else on it.
+     */
     private const array THE_MONEY_QUEUE = [
         RecordRefundAgainstTheInvoice::class,
         SettleInvoiceOnPaymentCaptured::class,
@@ -61,6 +70,8 @@ final class EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest extends TestCas
         ResizeOnPlanChangeSettlement::class,
         ReviveSubscriptionOnRenewalPayment::class,
         StartDunningOnFailedPayment::class,
+        RecordFailedPaymentOnTheOrder::class,
+        RecordRefundOnTheOrder::class,
     ];
 
     private ThePayloadTheWorkerWillRead $probe;

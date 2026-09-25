@@ -13,6 +13,10 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  * Every refusal here protects one of two people: the customer who may still be
  * about to pay, or the next customer, who must not be sold a machine with
  * somebody else's data on its disks.
+ *
+ * A service with no server attached is not refused here any more (F-19): it
+ * ends when nothing was built for it, and is refused by the provisioning
+ * module's `provisioning.build_may_exist` when something may have been.
  */
 final class DecommissionRefusedException extends DomainException
 {
@@ -23,13 +27,6 @@ final class DecommissionRefusedException extends DomainException
         $exception = new self('This service has already been terminated.');
 
         return $exception->withContext(['service_id' => $serviceId])->as('dedicated.already_terminated');
-    }
-
-    public static function becauseThereIsNoServer(string $serviceId): self
-    {
-        $exception = new self('This service has no dedicated server attached to it.');
-
-        return $exception->withContext(['service_id' => $serviceId])->as('dedicated.no_server_attached');
     }
 
     public static function becauseItIsStillInService(string $serviceId, ServiceStatus $status): self

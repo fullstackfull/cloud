@@ -22,6 +22,7 @@ use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Application\Actions\BeginRetentionWindow;
 use Lynomia\Modules\Provisioning\Application\Actions\EndExpiredServices;
+use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -205,15 +206,26 @@ final class TheRetentionSweepTest extends TestCase
     #[Test]
     public function one_service_that_cannot_be_ended_does_not_stop_the_others(): void
     {
-        // A VPS service with no machine behind it: the termination action
-        // refuses, and the sweep has to step over it rather than stopping.
-        Service::factory()->create([
+        /*
+         * A VPS service with no machine row whose build timed out: the machine
+         * may exist at the provider with nothing here pointing at it, so the
+         * termination refuses (`provisioning.build_may_exist`), and the sweep
+         * has to step over it rather than stopping. A VPS with no machine and
+         * no such build used to be this fixture; since F-19 it simply ends,
+         * because nothing was ever built for it.
+         */
+        $stuck = Service::factory()->create([
             'customer_id' => $this->customer->id,
             'kind' => 'vps',
             'status' => ServiceStatus::Suspended,
             'suspended_at' => CarbonImmutable::now()->subDays(40),
             'retention_ends_at' => CarbonImmutable::now()->subDays(2),
             'ended_reason' => BeginRetentionWindow::BY_CUSTOMER,
+        ]);
+
+        ProvisioningJob::factory()->kind(ProvisioningJobKind::CreateVps)->failedWith(FailureClass::Timeout)->create([
+            'service_id' => $stuck->getKey(),
+            'attempts' => 1,
         ]);
 
         $healthy = $this->vps(BeginRetentionWindow::BY_CUSTOMER, CarbonImmutable::now()->subDay());
@@ -352,11 +364,20 @@ final class TheRetentionSweepTest extends TestCase
     #[Test]
     public function a_hosting_account_whose_window_has_run_out_is_ended_by_the_sweep(): void
     {
-        [, $account] = $this->hosting('departed', HostingAccountStatus::Suspended, 40);
+        [$service, $account] = $this->hosting('departed', HostingAccountStatus::Suspended, 40);
 
         $this->assertSame(1, app(EndExpiredServices::class)->execute()['ended']);
         $this->assertSame(HostingAccountStatus::Terminated, $account->fresh()?->status);
         $this->assertFalse($this->hostingPanelHas('departed'));
+
+        /*
+         * F-18 × F-19, checked together: the sweep ends the service it was
+         * sent for, not only the account. Before EndHostingService the account
+         * went and the service stayed `suspended` beside it for ever — which
+         * the order it was bought on, and its plan unit, never got past.
+         */
+        $this->assertSame(ServiceStatus::Terminated, $service->fresh()?->status);
+        $this->assertNotNull($service->fresh()?->terminated_at);
     }
 
     #[Test]

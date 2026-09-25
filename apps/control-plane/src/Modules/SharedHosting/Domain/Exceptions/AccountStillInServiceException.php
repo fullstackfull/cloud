@@ -16,8 +16,10 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  * date is read, because a serving account can carry a stale `suspended_at`
  * whose "window" elapsed months ago.
  *
- * The only way past it is `force`, which the operator endpoint grants only
- * to somebody who also holds the permission to terminate a service.
+ * The only way past it is `force`, which is granted only to somebody holding
+ * both `hosting_account.manage` and `service.terminate` — by the hosting-account
+ * route's controller, and by the service route's EndOfService::authorityOver(),
+ * which asks for both whether or not `force` is sent.
  */
 final class AccountStillInServiceException extends DomainException
 {

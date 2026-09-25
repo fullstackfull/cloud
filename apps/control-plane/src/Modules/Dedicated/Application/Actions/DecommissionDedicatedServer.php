@@ -11,8 +11,10 @@ use Lynomia\Modules\Dedicated\Domain\StateMachines\DedicatedServerStateMachine;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Ipam\Domain\Enums\ReleaseReason;
 use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
+use Lynomia\Modules\Provisioning\Application\Actions\EndAnUnbuiltService;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\Exceptions\ABuildMayExistException;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 
 /**
@@ -56,6 +58,13 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * rack; a clock started now could run out before anybody erased it, and the
  * next customer would be handed an address a racked machine answers on. The
  * clock starts in step two, when a person says the disks are empty.
+ *
+ * **A service with no server was refused, and now ends when nothing was
+ * built (F-19).** A dedicated order whose chassis could not be reserved has no
+ * server to take back, and refusing it meant the purchase could never end.
+ * It ends here with no machine touched — unless EvidenceOfABuild finds a
+ * build that may have reserved one, which is refused with
+ * `provisioning.build_may_exist` whatever `force` says.
  */
 final readonly class DecommissionDedicatedServer
 {
@@ -63,12 +72,17 @@ final readonly class DecommissionDedicatedServer
         private DedicatedServerStateMachine $states,
         private TransitionService $transitionService,
         private IpAllocator $addresses,
+        private EndAnUnbuiltService $unbuilt,
     ) {}
 
     /**
+     * @return DedicatedServer|null the machine now in maintenance, or null when the service
+     *                              had no server and nothing was ever built for it
+     *
      * @throws DecommissionRefusedException
+     * @throws ABuildMayExistException
      */
-    public function execute(Service $service, bool $force = false): DedicatedServer
+    public function execute(Service $service, bool $force = false): ?DedicatedServer
     {
         if ($service->status === ServiceStatus::Terminated) {
             throw DecommissionRefusedException::becauseItIsAlreadyOver((string) $service->getKey());
@@ -84,7 +98,10 @@ final readonly class DecommissionDedicatedServer
         $server = DedicatedServer::query()->where('service_id', $service->getKey())->first();
 
         if ($server === null) {
-            throw DecommissionRefusedException::becauseThereIsNoServer((string) $service->getKey());
+            // No machine to take back — if and only if none was ever reserved.
+            $this->unbuilt->execute($service);
+
+            return null;
         }
 
         if (! $force) {

@@ -2805,6 +2805,7 @@ return [
             'provisioning_job_id' => ['type' => ['string', 'null']],
             'queued' => ['type' => 'boolean'],
             'dedicated_server_status' => ['type' => ['string', 'null']],
+            'hosting_account_id' => ['type' => ['string', 'null']],
         ],
     ],
     'AdminReturnedServer' => [

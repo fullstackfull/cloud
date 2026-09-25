@@ -51,8 +51,11 @@ final readonly class TerminateHostingAccount
      * @param  bool  $force  Skip the guard entirely — the suspension as well as the window.
      *                       Reserved for an operator acting on an explicit request — an abuse
      *                       case, or a customer who has asked for their data to be deleted
-     *                       now — who also holds service.terminate, which the operator
-     *                       endpoint checks. Never set by an automated path.
+     *                       now — who holds both service.terminate and hosting_account.manage.
+     *                       Two operator routes reach this action and each checks both before
+     *                       forcing: the hosting-account route in its controller, the service
+     *                       route (through EndHostingService) in EndOfService::authorityOver().
+     *                       Never set by an automated path.
      *
      * @throws AccountStillInServiceException
      * @throws RetentionPeriodActiveException

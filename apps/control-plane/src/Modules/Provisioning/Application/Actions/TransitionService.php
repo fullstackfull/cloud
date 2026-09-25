@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Provisioning\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
 use Lynomia\Modules\Provisioning\Domain\StateMachines\ServiceStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
@@ -21,6 +22,16 @@ use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
  * A re-entrant transition is a no-op rather than an error, because retried
  * jobs and redelivered webhooks land here routinely and converging is the
  * point.
+ *
+ * ---------------------------------------------------------------------------
+ * Every real move is announced
+ * ---------------------------------------------------------------------------
+ *
+ * A move that changed the row raises ServiceStatusChanged once the outermost
+ * transaction has committed; a converging call raises nothing. Being the only
+ * writer is what makes that announcement complete, and the order a service
+ * was bought on depends on it: before F-19 the order was paid for and then
+ * never told that what it bought was built, suspended or ended.
  */
 final readonly class TransitionService
 {
@@ -33,6 +44,8 @@ final readonly class TransitionService
      */
     public function execute(Service $service, ServiceStatus $to): Service
     {
+        $moved = null;
+
         /*
          * Deliberately no converge check and no validation before the lock.
          *
@@ -50,7 +63,7 @@ final readonly class TransitionService
          * the right price for a status that is always read from the row it is
          * about to change.
          */
-        return DB::transaction(function () use ($service, $to): Service {
+        $transitioned = DB::transaction(function () use ($service, $to, &$moved): Service {
             /*
              * Re-read under a row lock and re-check. Two workers can pass the
              * check above concurrently — a suspension for non-payment while a
@@ -67,14 +80,48 @@ final readonly class TransitionService
 
             // The authoritative "from" is the locked row's status, not the
             // caller's possibly stale copy.
-            $this->stateMachine->assertCanTransition($locked->status, $to);
+            $from = $locked->status;
+            $this->stateMachine->assertCanTransition($from, $to);
 
             $locked->status = $to;
             $this->stampTimestamps($locked, $to);
             $locked->save();
 
+            $moved = new ServiceStatusChanged(
+                serviceId: (string) $locked->getKey(),
+                orderId: $locked->order_id === null ? null : (string) $locked->order_id,
+                from: $from,
+                to: $to,
+            );
+
             return $locked;
         });
+
+        if ($moved instanceof ServiceStatusChanged) {
+            $this->announce($moved);
+        }
+
+        return $transitioned;
+    }
+
+    /**
+     * Held until the outermost transaction commits. A caller that moves the
+     * service inside its own transaction — a decommission, an adoption, an
+     * operator's retry — may still roll the move back, and a listener must not
+     * act on a status that never became true. With nothing open, the move has
+     * already committed and the announcement belongs now.
+     */
+    private function announce(ServiceStatusChanged $moved): void
+    {
+        if (DB::transactionLevel() > 0) {
+            DB::afterCommit(static function () use ($moved): void {
+                event($moved);
+            });
+
+            return;
+        }
+
+        event($moved);
     }
 
     /**

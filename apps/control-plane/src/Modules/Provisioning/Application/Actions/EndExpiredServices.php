@@ -74,7 +74,7 @@ final readonly class EndExpiredServices
 
         foreach ($this->outOfTime($now) as $service) {
             try {
-                $detail = $this->ending->execute($service);
+                $how = $this->ending->execute($service);
             } catch (Throwable $e) {
                 $failed++;
 
@@ -112,8 +112,8 @@ final readonly class EndExpiredServices
                     'kind' => $service->kind,
                     'ended_reason' => $service->ended_reason,
                     'retention_ended_at' => $service->retention_ends_at?->toIso8601String(),
-                    'detail' => $detail,
                     'terminated_by' => 'retention sweep',
+                    ...$how->auditContext(),
                 ],
             );
 

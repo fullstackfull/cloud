@@ -30,7 +30,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * What it will not do
  * ---------------------------------------------------------------------------
  *
- * A retry is not a repair, and the three refusals are the difference:
+ * A retry is not a repair, and the four refusals are the difference:
  *
  *  - **A job that has not stopped.** Queued or running work does not need a
  *    person; retrying it is how one order becomes two machines.
@@ -41,6 +41,17 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  *  - **A job that has destroyed data.** A reinstall past the destructive line
  *    cannot be undone by running it again, and running it again lands a second
  *    installation on top of whatever the first one wrote.
+ *  - **A job whose service has ended.** A purchase whose build left nothing
+ *    behind can now be ended (F-19, EndAnUnbuiltService), and its failed build
+ *    job is still on the review screen with this button beside it. Running it
+ *    would build a machine for a service that is over: unbilled, unowned, and
+ *    holding an address.
+ *
+ * What it deliberately does NOT refuse is a failure by its class. A timed-out
+ * build with no provider task recorded is requeued here; the engine's own
+ * refusal of a timeout is FailureClass::isAutomaticallyRetryable(), which this
+ * action never reads. Nothing else may lean on this button to have refused it —
+ * EvidenceOfABuild reads the build history itself for exactly that reason.
  *
  * There is deliberately no way to force past any of them. An operator who
  * knows better than the platform has adoption for the second case and the
@@ -80,6 +91,10 @@ final readonly class RetryProvisioningJob
 
             if ($built !== null) {
                 throw RetryRefusedException::becauseSomethingWasBuilt((string) $locked->getKey(), $built);
+            }
+
+            if ($this->itsServiceHasEnded($locked)) {
+                throw RetryRefusedException::becauseTheServiceHasEnded((string) $locked->getKey(), (string) $locked->service_id);
             }
 
             $destroyed = $this->destructive->destructionState($locked);
@@ -143,6 +158,15 @@ final readonly class RetryProvisioningJob
         return $job->remote_job_id === null || $job->remote_job_id === ''
             ? null
             : 'provider task '.$job->remote_job_id;
+    }
+
+    private function itsServiceHasEnded(ProvisioningJob $job): bool
+    {
+        if ($job->service_id === null) {
+            return false;
+        }
+
+        return Service::query()->find($job->service_id)?->status === ServiceStatus::Terminated;
     }
 
     /**
