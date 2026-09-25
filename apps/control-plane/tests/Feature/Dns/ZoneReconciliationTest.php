@@ -7,6 +7,7 @@ namespace Tests\Feature\Dns;
 use Lynomia\Modules\Dns\Application\Actions\ReconcileZones;
 use Lynomia\Modules\Dns\Domain\Enums\DnsRecordType;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\IndeterminateAfter;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DnsRecord as DnsRecordValue;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsRecord;
 use Lynomia\Modules\Dns\Infrastructure\Models\DnsZone;
@@ -105,6 +106,7 @@ final class ZoneReconciliationTest extends DnsTestCase
             'name' => 'www.example.test',
             'content' => '203.0.113.10',
             'state' => DnsState::Indeterminate,
+            'indeterminate_after' => IndeterminateAfter::Publish,
             'failure_reason' => 'the provider stopped answering',
         ]);
 
@@ -140,6 +142,35 @@ final class ZoneReconciliationTest extends DnsTestCase
         // This is the answer the platform was waiting for. The Timeout Rule
         // says wait for it, and this is what waiting looks like when it pays.
         $this->assertSame(DnsState::Deleted, $record->refresh()->state);
+    }
+
+    #[Test]
+    public function a_row_that_cannot_say_which_call_it_was_waiting_on_is_not_guessed_at(): void
+    {
+        $provider = $this->provider();
+        $zone = $this->zoneHeldByTheProvider();
+
+        $providerZone = $provider->findZone('example.test');
+        $this->assertNotNull($providerZone);
+
+        $provider->publish($providerZone, DnsRecordValue::of(DnsRecordType::A, 'www.example.test', '203.0.113.10'));
+
+        // Written before anything recorded which call left a row
+        // indeterminate. Present in the zone and absent from it are each the
+        // answer to one call and the opposite of the other's.
+        $present = DnsRecord::factory()->create([
+            'dns_zone_id' => $zone->getKey(), 'type' => DnsRecordType::A, 'name' => 'www.example.test',
+            'content' => '203.0.113.10', 'state' => DnsState::Indeterminate, 'indeterminate_after' => null,
+        ]);
+        $absent = DnsRecord::factory()->create([
+            'dns_zone_id' => $zone->getKey(), 'type' => DnsRecordType::A, 'name' => 'gone.example.test',
+            'content' => '203.0.113.11', 'state' => DnsState::Indeterminate, 'indeterminate_after' => null,
+        ]);
+
+        $this->assertSame(0, app(ReconcileZones::class)->execute()['settled']);
+
+        $this->assertSame(DnsState::Indeterminate, $present->refresh()->state);
+        $this->assertSame(DnsState::Indeterminate, $absent->refresh()->state);
     }
 
     #[Test]

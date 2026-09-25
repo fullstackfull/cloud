@@ -307,6 +307,7 @@ return [
             'duplicate' => 'That name already has a record of this type with this value.',
             'limit_reached' => 'This zone already holds as many records as its plan allows.',
             'not_editable' => 'This record cannot be changed in its current state.',
+            'one_value_per_name' => 'That name already has a record of this type with this value at a different priority or setting. Change that record instead of adding a second.',
             'outside_zone' => 'That name is outside this zone.',
         ],
         'refused' => 'That DNS request was refused.',

@@ -8,7 +8,9 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
+use Lynomia\Modules\Dns\Application\Actions\ClaimProviderRecord;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
+use Lynomia\Modules\Dns\Domain\Enums\IndeterminateAfter;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsNotConfiguredException;
 use Lynomia\Modules\Dns\Domain\Exceptions\DnsProviderException;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException;
@@ -41,7 +43,7 @@ final class PublishRecord implements ShouldQueue
         private readonly string $recordId,
     ) {}
 
-    public function handle(DnsProviderFactory $providers, SecretRedactor $redactor): void
+    public function handle(DnsProviderFactory $providers, SecretRedactor $redactor, ClaimProviderRecord $claim): void
     {
         $record = DnsRecord::query()->with('zone')->find($this->recordId);
 
@@ -84,7 +86,12 @@ final class PublishRecord implements ShouldQueue
         } catch (DnsProviderException $e) {
             $record->transitionTo(
                 $e->isIndeterminate() ? DnsState::Indeterminate : DnsState::Failed,
-                ['failure_reason' => $redactor->redactString($e->getMessage())],
+                [
+                    'failure_reason' => $redactor->redactString($e->getMessage()),
+                    // What the sweep needs to settle this row the right way:
+                    // a publish that never answered, not a delete.
+                    'indeterminate_after' => $e->isIndeterminate() ? IndeterminateAfter::Publish : null,
+                ],
             );
 
             return;
@@ -94,8 +101,14 @@ final class PublishRecord implements ShouldQueue
             return;
         }
 
-        $record->transitionTo(DnsState::Active, [
-            'provider_record_id' => $published->id(),
+        /*
+         * The identifier may be one the provider's value tier found rather
+         * than one this call created — the record this row made last time
+         * and never heard about, or another row's record whose value has
+         * moved onto this one's. Only this table can tell those apart, so
+         * the claim settles it here; see ClaimProviderRecord.
+         */
+        $claim->execute($record, DnsState::Active, $published->id(), [
             'failure_reason' => null,
             'last_published_at' => now(),
         ]);
