@@ -43,10 +43,10 @@ import en from '@/i18n/locales/en.json'
  * below, in both directions:
  *
  * - destroyed at `reinstalling`, `configuring`, `verifying`, `completed`,
- *   `failed`, `needs_review` and `indeterminate` — the seven states
+ *   `failed`, `needs_review` and `indeterminate` — the six states
  *   `ReinstallState::impliesDestroyedData()` is true for, plus `failed`, which
- *   an operator's verdict or a failure after the destructive call can leave
- *   destroyed;
+ *   a rebuild reaches destroyed when an operator settles a reviewed one that
+ *   way;
  * - intact at `requested`, `queued`, `preparing` and `failed` — every state a
  *   rebuild can be in before `VmReinstall::advanceTo()` stamps `destroyed_at`.
  *
@@ -69,7 +69,8 @@ import en from '@/i18n/locales/en.json'
  * Whether the Arabic says the right thing. The rows below check that the
  * Arabic sentence exists, is rendered, is written in Arabic script and is not
  * the English one; a fluent sentence saying the opposite would pass all of
- * them. The Arabic was checked by reading it.
+ * them. The Arabic was checked by reading it against the Dedicated sentence it
+ * is the singular of: the disks become the disk, and "on them" becomes "on it".
  */
 
 /** The VPS sentence, singular: a VPS has one disk. Dedicated's is plural. */
@@ -352,15 +353,15 @@ describe('a VPS whose rebuild erased the disk, on its own page', () => {
   /*
    * The published fact, not the state name. `needs_review` and
    * `indeterminate` are written by the handler itself, with no operator in
-   * the loop, after the destructive call — these are the outcomes a customer
-   * is most likely to be reading.
+   * the loop, after the destructive call; a guard re-pinned to `failed` would
+   * say nothing about the disk on any of these rows.
    */
   it.each(['reinstalling', 'configuring', 'verifying', 'needs_review', 'indeterminate'])(
     'says the disk is gone at %s, where the state name alone does not say it',
     async (state) => {
       await renderMachinePage(rebuild(state, true))
 
-      expect(screen.getByText(safeStateLabel(state))).toBeInTheDocument()
+      expect(screen.getByText(stateLabel(state))).toBeInTheDocument()
       expect(screen.getByText(ENGLISH_SENTENCE)).toBeInTheDocument()
     },
   )
@@ -392,7 +393,7 @@ describe('a VPS whose rebuild erased the disk, on its own page', () => {
     async (state) => {
       await renderMachinePage(rebuild(state, false))
 
-      expect(screen.getByText(safeStateLabel(state))).toBeInTheDocument()
+      expect(screen.getByText(stateLabel(state))).toBeInTheDocument()
       expect(screen.queryByText(ENGLISH_SENTENCE)).not.toBeInTheDocument()
     },
   )
@@ -460,10 +461,10 @@ describe('the Dedicated twin, which already said it', () => {
  * On /vps a rebuild that erased the disk and one that did not, both settled as
  * `failed`, render the same cell: "The rebuild did not run", in muted grey. That
  * is F-20's own sentence still reproducible on a VPS screen, and it is recorded
- * here rather than fixed, on three grounds: the list's sentence is incomplete
- * rather than false; the Dedicated list carries no rebuild information at all,
- * so there is no twin to match; and the machine's own page, which does say it,
- * is one click away. A marker is not impossible — one conditioned on
+ * here rather than fixed, on the three grounds F-20's closure ruled on: the
+ * list's sentence is incomplete rather than false; the Dedicated list carries
+ * no rebuild information at all, so there is no twin to match; and the
+ * machine's own page, which does say it, is one click away. A marker is not impossible — one conditioned on
  * `data_destroyed` alone would fire on every machine ever rebuilt, but one
  * conditioned on the fact and a state other than `completed` would not — it
  * was simply not what F-20 closed with.
@@ -499,7 +500,7 @@ describe('the VPS list', () => {
 })
 
 /** The English label for a rebuild state, from the catalogue the page reads. */
-function safeStateLabel(state: string): string {
+function stateLabel(state: string): string {
   const label = lookup(en, `vps.reinstallState.${state}`)
 
   if (label === undefined) throw new Error(`en.json has no vps.reinstallState.${state}`)
