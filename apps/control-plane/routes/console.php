@@ -141,6 +141,22 @@ Schedule::command('dedicated:sync-inventory')
     ->onOneServer()
     ->appendOutputTo(storage_path('logs/schedule.log'));
 
+/*
+ * Abandoned power claims, every five minutes.
+ *
+ * A power request claims its idempotency key before it calls the controller;
+ * a worker that dies in between leaves a claim nothing else would ever settle,
+ * and every repeat of that key was refused as "still in flight" for ever. This
+ * settles claims past their lease as indeterminate — the truth about a crashed
+ * request — and sends nothing to any chassis. Cheap: one query for the claims
+ * past their lease, one conditional write each.
+ */
+Schedule::command('dedicated:expire-abandoned-power-claims')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->onOneServer()
+    ->appendOutputTo(storage_path('logs/schedule.log'));
+
 Schedule::command('backups:reconcile')
     ->everyFiveMinutes()
     ->withoutOverlapping(10)

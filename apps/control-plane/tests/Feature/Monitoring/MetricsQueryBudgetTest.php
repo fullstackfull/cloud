@@ -9,7 +9,12 @@ use Illuminate\Cache\Repository;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
+use Lynomia\Modules\Dedicated\Domain\Enums\PowerOperationOutcome;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedPowerOperation;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
@@ -68,7 +73,18 @@ final class MetricsQueryBudgetTest extends TestCase
     // facts share another, because each pair is two aggregations over the same
     // grouping. The third is the per-group verification status, which groups
     // differently and cannot join them without a cross product.
-    private const int BUDGET = 45;
+    // 47: the dedicated collector, which put the power path on /metrics for
+    // the first time. Two GROUP BYs over dedicated_power_operations: power
+    // requests by action and outcome, and claims past their lease by action.
+    // seedFleet() gives it rows to read, so the N+1 assertion sees it.
+    //
+    // A caution the number carries with it: the N+1 assertion catches a loop
+    // whose cost grows with rows, not one whose cost is fixed — a query per
+    // action costs the same at both measurements, because the small fleet
+    // already holds all three actions. Such a loop is caught today only
+    // because this budget has no headroom. Raising it with slack for the next
+    // collector hides that shape from both tests.
+    private const int BUDGET = 47;
 
     private MetricsRegistry $registry;
 
@@ -286,6 +302,32 @@ final class MetricsQueryBudgetTest extends TestCase
             $pool = IpPool::factory()->create();
             $subnet = Subnet::factory()->for($pool, 'ipPool')->create();
             IpAddress::factory()->count(4)->for($subnet)->create();
+        }
+
+        /*
+         * Dedicated power operations, so the dedicated collector reads rows
+         * rather than an empty table. Without them its query count is the same
+         * at both measurements whatever it does internally, and a per-row loop
+         * in it would pass the N+1 assertion above — the assertion this budget
+         * leans on — without being seen.
+         *
+         * Four rows per pool, cycling three actions against four outcomes.
+         * `Claimed` is the first outcome, so every fourth row is a claim, and
+         * every row is a day old — past any lease — so the abandoned-claims
+         * count is exercised rather than always answering zero.
+         */
+        $server = DedicatedServer::factory()->create();
+        $actions = DedicatedPowerAction::cases();
+        $outcomes = PowerOperationOutcome::cases();
+
+        for ($i = 0; $i < $pools * 4; $i++) {
+            DedicatedPowerOperation::query()->create([
+                'dedicated_server_id' => $server->getKey(),
+                'action' => $actions[$i % count($actions)],
+                'idempotency_key' => 'dedicated:'.$server->getKey().':power:'.Str::ulid(),
+                'outcome' => $outcomes[$i % count($outcomes)],
+                'requested_at' => now()->subDay(),
+            ]);
         }
 
         DB::table('jobs')->insert([

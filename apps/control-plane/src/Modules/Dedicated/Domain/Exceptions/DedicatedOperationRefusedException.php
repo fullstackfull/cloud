@@ -81,12 +81,14 @@ final class DedicatedOperationRefusedException extends DomainException
     /**
      * The same idempotency key is already in flight against this machine.
      *
-     * The row was claimed and the controller has not answered yet. Two things
-     * this deliberately does not do: send the instruction again, and report
-     * the first request as finished. A power request that is still waiting on
-     * a BMC is the one moment when the honest answer is "ask again shortly" —
-     * the alternative is a second reset of a chassis that may already be
-     * going down.
+     * The row was claimed, the controller has not answered yet, and the
+     * claim is still inside its lease. Two things this deliberately does not
+     * do: send the instruction again, and report the first request as
+     * finished. A power request that is still waiting on a BMC is the one
+     * moment when the honest answer is "ask again shortly" — the alternative
+     * is a second reset of a chassis that may already be going down. "Shortly"
+     * is a promise the lease keeps: past it, a claim whose process died is
+     * settled as indeterminate and the key is answered rather than refused.
      */
     public static function becauseTheSameRequestIsStillInFlight(string $serverId, DedicatedPowerAction $action): self
     {

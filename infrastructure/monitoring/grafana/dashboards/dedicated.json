@@ -1,7 +1,7 @@
 {
   "uid": "lynomia-dedicated",
   "title": "Dedicated servers",
-  "description": "Dedicated fleet: reachability, hardware health where the BMC exposes it, and provisioning state.",
+  "description": "Dedicated fleet: reachability, hardware health where the BMC exposes it, provisioning state, and power requests the platform cannot vouch for.",
   "tags": [
     "lynomia",
     "dedicated"
@@ -587,6 +587,219 @@
             "uid": "lynomia-prometheus"
           },
           "legendFormat": "{{status}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisSoftMin": 0
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Power",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Indeterminate power requests (24h)",
+      "description": "Power requests that ended without a confirmed outcome: the controller stopped answering, or the worker died before it answered. Each is a machine that may be mid-reset, off or untouched, and nothing will try again. Find it at its controller.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lynomia-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(delta(lynomia_dedicated_power_operation_total{outcome=\"indeterminate\"}[24h]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lynomia-prometheus"
+          },
+          "legendFormat": "requests",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Abandoned power claims",
+      "description": "Claims past their lease that nothing has settled yet. The sweep settles them as indeterminate every five minutes, so above zero for long is one of two things this panel cannot tell apart: the same old claims staying means the sweep is not running; different, recent ones each time mean workers are dying mid-call while the sweep keeps up. The runbook tells them apart.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lynomia-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(lynomia_dedicated_power_claims_abandoned)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lynomia-prometheus"
+          },
+          "legendFormat": "claims",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Power requests by outcome",
+      "description": "Requests sent to management controllers, by what came back. Claimed is a request still waiting on a controller.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "lynomia-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (delta(lynomia_dedicated_power_operation_total[1h]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "lynomia-prometheus"
+          },
+          "legendFormat": "{{outcome}}",
           "range": true
         }
       ],

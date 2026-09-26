@@ -61,7 +61,14 @@ final class ScheduledWorkIsRegisteredTest extends TestCase
     {
         $scheduled = $this->scheduledCommands();
 
-        foreach (['subscriptions:renew', 'subscriptions:sweep', 'backups:reconcile'] as $command) {
+        /*
+         * `dedicated:expire-abandoned-power-claims` is one of the two paths
+         * that settle a power claim whose worker died. The other — a repeat of
+         * the same key — only runs if the customer comes back; without the
+         * sweep, a claim nobody repeats stays `claimed` for ever and the
+         * abandoned-claims gauge is the only thing that ever notices.
+         */
+        foreach (['subscriptions:renew', 'subscriptions:sweep', 'backups:reconcile', 'dedicated:expire-abandoned-power-claims'] as $command) {
             $this->assertContains(
                 $command,
                 $scheduled,

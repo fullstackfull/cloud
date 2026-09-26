@@ -9,6 +9,7 @@ use Lynomia\Modules\Monitoring\Application\Collectors\BackupCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\CapacityCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ConsoleCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\ControlCenterCollector;
+use Lynomia\Modules\Monitoring\Application\Collectors\DedicatedCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\DnsCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\IpamCollector;
 use Lynomia\Modules\Monitoring\Application\Collectors\LifecycleCollector;
@@ -57,6 +58,7 @@ final class MonitoringServiceProvider extends ServiceProvider
                 $app->make(ProductCollector::class),
                 $app->make(ControlCenterCollector::class),
                 $app->make(BackupCollector::class),
+                $app->make(DedicatedCollector::class),
             );
         });
     }
