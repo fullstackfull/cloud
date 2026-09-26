@@ -78,6 +78,32 @@ succeed.
 The reservation is written in the same transaction as the state change, so there is no
 window in which an address is marked reserved but nothing records why.
 
+## A registered block is one the allocator can hand out
+
+The allocator hands out `ip_addresses` rows, not subnets. Registering an IPv4 block through
+`POST /api/admin/infrastructure/ip-pools/{pool}/subnets` therefore expands it into one row
+per address (`SeedSubnetAddresses`) in the same transaction as the subnet row, after the
+overlap check below: the network, broadcast and gateway addresses, and any address named in
+`reserved_addresses`, are written `unavailable`; every other address is `available`. The
+answer carries `allocatable_addresses`, and so does the `infrastructure.subnet.registered`
+audit entry.
+
+Until this was done (F-02) the route wrote the subnet and no rows, and a block an operator
+registered was one `IpAllocator::reserve()` refused as exhausted.
+
+Three cases are handled differently, and each says so:
+
+- **IPv6** is registered without rows (`allocatable_addresses: 0`): it is delegated as a
+  prefix per service, never expanded.
+- **Held space** — `"allocatable": false` — records a block, typically an aggregate, so
+  that nothing inside it can be registered elsewhere, and writes no rows.
+- **An IPv4 block wider than a /16** registered for allocation is refused with
+  `422 infrastructure.subnet_too_wide_to_allocate_from`. Register the pieces to allocate
+  from, and the aggregate as held space if it should be guarded.
+
+`infra:preflight`'s `mapping.network` passes only when the active pools hold at least one
+address the allocator could give a customer machine (`IpAllocator::customerAllocatableCount`).
+
 ## Blocks in one realm never overlap
 
 Everything above is keyed on the `ip_addresses` row, and none of it can see that two rows

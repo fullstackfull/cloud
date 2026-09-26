@@ -7,8 +7,9 @@ namespace Lynomia\Modules\Infrastructure\Domain\Exceptions;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
 /**
- * A block the estate cannot take, because a block it already holds shares an
- * address with it in the same realm.
+ * A block the estate cannot take: a block it already holds shares an address
+ * with it in the same realm, or it is too wide to be expanded into the address
+ * rows the allocator hands out.
  *
  * 422 rather than the 409 InventoryChangeRefused answers with. A 409 says a
  * reload and a retry may well succeed; this one will not, because no route
@@ -22,6 +23,8 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  */
 final class SubnetRegistrationRefused extends DomainException
 {
+    private string $refusal = 'infrastructure.subnet_overlaps';
+
     public static function becauseItOverlaps(string $block, string $registered, string $pool, string $datacenter): self
     {
         $exception = new self(sprintf(
@@ -41,8 +44,35 @@ final class SubnetRegistrationRefused extends DomainException
         ]);
     }
 
+    /**
+     * A block registered for allocation becomes one row per address, written
+     * inside the registration's own transaction. Past the limit that is a
+     * write the request should not be making, and an estate does not
+     * allocate customer addresses out of a block that size: it registers the
+     * pieces it hands out, and may register the aggregate as held space.
+     */
+    public static function becauseItIsTooWideToAllocateFrom(string $block, int $addresses, int $limit): self
+    {
+        $exception = new self(sprintf(
+            '%s holds %d addresses, and a block registered for allocation is expanded into one row per address; '
+            .'the most one registration expands is %d. Register the pieces you will allocate from, or register '
+            .'this block with "allocatable": false to hold the space without allocating from it.',
+            $block,
+            $addresses,
+            $limit,
+        ));
+
+        $exception->refusal = 'infrastructure.subnet_too_wide_to_allocate_from';
+
+        return $exception->withContext([
+            'cidr' => $block,
+            'addresses' => $addresses,
+            'limit' => $limit,
+        ]);
+    }
+
     public function errorCode(): string
     {
-        return 'infrastructure.subnet_overlaps';
+        return $this->refusal;
     }
 }

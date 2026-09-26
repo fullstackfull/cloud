@@ -33,6 +33,32 @@ final readonly class InstallProfileRenderer
     private const string PLACEHOLDER_PATTERN = '/\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/';
 
     /**
+     * The values both install handlers pass for every build — the machine's
+     * name and its IPv4 address, prefix length and gateway — before anything
+     * a job's own `install_variables` adds. ProvisionDedicatedHandler and
+     * ReinstallDedicatedHandler each write these four keys; a placeholder
+     * outside them has to be covered by the profile's own defaults, or the
+     * profile cannot be rendered by an order-driven build, which names no
+     * extras. RecordOsInstallProfile refuses such a profile when it is
+     * written, rather than a build refusing it after a machine was reserved.
+     *
+     * @var list<string>
+     */
+    public const array PLATFORM_VARIABLES = ['hostname', 'ipv4_address', 'ipv4_prefix_length', 'ipv4_gateway'];
+
+    /**
+     * Every placeholder a template names, once each, in order of appearance.
+     *
+     * @return list<string>
+     */
+    public function placeholdersIn(string $template): array
+    {
+        preg_match_all(self::PLACEHOLDER_PATTERN, $template, $matches);
+
+        return array_values(array_unique($matches[1]));
+    }
+
+    /**
      * @param  array<string, scalar|null>  $variables  The caller's values, which win over the profile's
      *                                                 defaults.
      * @return array<string, mixed> The rendered configuration, ready to be handed to the boot server.

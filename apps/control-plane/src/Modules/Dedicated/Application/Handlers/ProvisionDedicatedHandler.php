@@ -21,6 +21,7 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\PxeBootAuthorisation;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Ipam\Domain\Exceptions\AddressNotAllocatableException;
 use Lynomia\Modules\Ipam\Domain\Exceptions\IpPoolExhaustedException;
 use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
@@ -39,8 +40,13 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * created, so the irreversible step is not "a machine now exists" but "a
  * machine's disks have been erased".
  *
+ *  0. **Resolve what the build needs** — the address pool and the install
+ *     profile — before anything is held. A job that names neither is refused
+ *     outright; nothing is reserved for a build that cannot run.
  *  1. **Reserve a machine** — a row lock. Cheap, and undoable.
  *  2. **Reserve addresses** — rows. Released or quarantined by compensation.
+ *     Refused, the machine goes straight back to stock: it has been held,
+ *     never touched, and only now does it move to `provisioning`.
  *  3. **Authorise one-time PXE** — a recorded decision, then a boot override
  *     armed for exactly one boot.
  *  4. **Power cycle** — the first step whose effect is physical.
@@ -62,7 +68,12 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *    customer who was content to wait; the metadata carries the manual-review
  *    disposition so the order goes to an operator rather than round a retry
  *    loop for ever.
- *  - **exhausted address pool → Capacity**, for the same reason.
+ *  - **exhausted address pool → Capacity**, for the same reason — and the
+ *    machine is released, not held. It was reserved and nothing else: no
+ *    boot armed, no power touched. Left in `provisioning` it was out of stock
+ *    for good (compensation releases addresses and knows nothing of chassis),
+ *    and the next build for that hardware was refused
+ *    `dedicated.no_matching_hardware`. A retry reserves again.
  *  - **the server is not in a state to be installed → Permanent.** The request
  *    is wrong and will be just as wrong next time.
  *  - **a controller that refused out loud → Transient.** It answered; nothing
@@ -127,6 +138,41 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
             }
         }
 
+        /*
+         * What the build installs and where its address comes from, resolved
+         * before a machine is held. Placement names both for an order
+         * (LocalPlacementFeasibility); a job that names neither, or names one
+         * that no longer exists, is refused as it is — a missing array key
+         * used to surface as an ErrorException after the chassis was already
+         * reserved and moved to `provisioning`.
+         */
+        $pool = IpPool::query()->find((string) ($payload['ip_pool_id'] ?? ''));
+        $profile = OsInstallProfile::query()->find((string) ($payload['os_install_profile_id'] ?? ''));
+
+        if ($pool === null || $profile === null) {
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                'dedicated.placement_incomplete',
+                sprintf(
+                    'The job names no %s that exists, so there is nothing to build with.',
+                    $pool === null ? 'IP pool' : 'OS install profile',
+                ),
+                metadata: [
+                    'ip_pool_id' => isset($payload['ip_pool_id']) ? (string) $payload['ip_pool_id'] : null,
+                    'os_install_profile_id' => isset($payload['os_install_profile_id']) ? (string) $payload['os_install_profile_id'] : null,
+                ],
+            );
+        }
+
+        /*
+         * Whether this order already held a machine before this attempt — an
+         * operator holding one for a named customer, or an earlier attempt.
+         * A hold this attempt did not take is not this attempt's to release.
+         */
+        $heldBefore = $job->order_id !== null && DedicatedServer::query()
+            ->where('reserved_by_order_id', $job->order_id)
+            ->exists();
+
         try {
             $server = $this->reserveServer->execute(
                 hardwareProfile: (string) ($payload['hardware_profile'] ?? ''),
@@ -153,12 +199,9 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
             );
         }
 
-        // The machine is ours; from here it is being built rather than held.
-        $this->transition($server, DedicatedServerStatus::Provisioning);
-
         try {
             $reservations = $this->ipAllocator->reserve(
-                scope: IpPool::query()->findOrFail((string) $payload['ip_pool_id']),
+                scope: $pool,
                 provisioningJobId: (string) $job->getKey(),
                 customer: $customer,
                 count: (int) ($payload['ipv4_count'] ?? 1),
@@ -168,15 +211,24 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
                 FailureClass::Capacity,
                 $e->errorCode(),
                 $e->getMessage(),
-                metadata: $this->redactor->redact($e->context()),
+                metadata: [...$this->redactor->redact($e->context()), ...$this->giveBackUntouched($server, $heldBefore)],
+            );
+        } catch (AddressNotAllocatableException $e) {
+            // A pool that may not serve a customer, and never will.
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: [...$this->redactor->redact($e->context()), ...$this->giveBackUntouched($server, $heldBefore)],
             );
         }
 
+        // The machine is ours and has an address to come up on; from here it
+        // is being built rather than held.
+        $this->transition($server, DedicatedServerStatus::Provisioning);
+
         $primary = $reservations[0];
         $address = $primary->ipAddress()->firstOrFail();
-
-        /** @var OsInstallProfile $profile */
-        $profile = OsInstallProfile::query()->findOrFail((string) $payload['os_install_profile_id']);
 
         try {
             $authorisation = $this->authorisePxe->execute(
@@ -513,6 +565,44 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
                 'held_for_review' => true,
             ],
         );
+    }
+
+    /**
+     * Put back a machine this build held and never touched.
+     *
+     * Only from `reserved`: that is a hold and nothing more, and `reserved →
+     * available` is the state machine's own release edge. A machine already
+     * in `provisioning` — a retry of an attempt that got further — may have
+     * had a boot armed, and stays where it is for the reasons
+     * {@see self::failWithoutReleasing()} gives. And only a hold this attempt
+     * took: one the order already had — an operator's, for a named customer —
+     * stays held.
+     *
+     * @return array<string, scalar|null> what the result's metadata says was done
+     */
+    private function giveBackUntouched(DedicatedServer $server, bool $heldBefore): array
+    {
+        $server->refresh();
+
+        if ($server->status === DedicatedServerStatus::Reserved && $heldBefore) {
+            return ['dedicated_server_id' => (string) $server->getKey(), 'held_for_retry' => true];
+        }
+
+        if ($server->status !== DedicatedServerStatus::Reserved) {
+            return ['dedicated_server_id' => (string) $server->getKey(), 'held_for_review' => true];
+        }
+
+        $this->states->assertCanTransition($server->status, DedicatedServerStatus::Available);
+
+        $server->forceFill([
+            'status' => DedicatedServerStatus::Available,
+            'reserved_by_order_id' => null,
+            'reserved_until' => null,
+            'customer_id' => null,
+            'service_id' => null,
+        ])->save();
+
+        return ['dedicated_server_id' => (string) $server->getKey(), 'released_to_stock' => true];
     }
 
     private function transition(DedicatedServer $server, DedicatedServerStatus $to): void

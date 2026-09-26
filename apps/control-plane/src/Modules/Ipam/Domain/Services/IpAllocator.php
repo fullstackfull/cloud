@@ -152,6 +152,37 @@ final readonly class IpAllocator
     }
 
     /**
+     * How many addresses reserve() could hand a customer out of this pool
+     * right now, asked through the allocator's own rules rather than a copy
+     * of them.
+     *
+     * Zero for a pool whose scope may not serve a customer (reserve() refuses
+     * one before it reads a row) and for a pool that is switched off; otherwise
+     * the `available` rows in the pool's active IPv4 subnets — the same subnet
+     * list reserve() locks from. It does not lock, so it cannot see a row
+     * another transaction holds and has not committed: an order can still be
+     * refused while this answers more than zero, and the answer is a count of
+     * committed rows, not a promise.
+     */
+    public function customerAllocatableCount(IpPool $pool): int
+    {
+        if (! $pool->scope->isCustomerAllocatable()) {
+            return 0;
+        }
+
+        $subnetIds = $this->subnetIdsFor($pool);
+
+        if ($subnetIds === []) {
+            return 0;
+        }
+
+        return DB::table('ip_addresses')
+            ->whereIn('subnet_id', $subnetIds)
+            ->where('status', IpAddressStatus::Available->value)
+            ->count();
+    }
+
+    /**
      * Turn a held reservation into a live assignment.
      *
      * @param  ?string  $serviceId  The service the address now belongs to. A string id rather than a

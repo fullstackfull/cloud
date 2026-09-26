@@ -11,7 +11,10 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
@@ -113,19 +116,46 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         $this->assertSame(1, Order::query()->count());
     }
 
-    // ---- dedicated is not gated here --------------------------------------
+    // ---- dedicated ---------------------------------------------------------
 
     #[Test]
-    public function a_dedicated_plan_is_not_refused_for_want_of_a_local_mapping(): void
+    public function a_dedicated_plan_with_nothing_to_build_it_from_cannot_be_ordered(): void
     {
         /*
-         * A dedicated server reserves a chassis from inventory inside its own
-         * handler; there is no catalogue mapping to resolve up front, so there
-         * is nothing here that could truthfully be checked. Gating it on
-         * something invented would refuse a product that is perfectly orderable.
+         * This row used to be `a_dedicated_plan_is_not_refused_for_want_of_a_local_mapping`
+         * and asserted the order was accepted. It was asserting the defect
+         * (F-02): the Dedicated build reserves a machine in a datacenter, an
+         * address from a pool and installs from an OS install profile, and an
+         * order for a plan with none of the three was taken, paid, and could
+         * never be built. Those three are rows this platform holds, so they
+         * are checked before money moves, as a hosting package and a cluster
+         * are.
          */
         [$customer] = $this->accountWithOwner();
         $plan = $this->planFor(ProductKind::Dedicated);
+
+        try {
+            $this->place($customer, $plan);
+            $this->fail('An order was accepted for a Dedicated plan the estate holds nothing to build from.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertSame('checkout.not_deliverable', $e->errorCode());
+        }
+
+        $this->assertSame(0, Order::query()->count());
+        $this->assertSame(0, Invoice::query()->count());
+    }
+
+    #[Test]
+    public function a_dedicated_plan_whose_machine_address_and_install_profile_resolve_is_accepted(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $plan = $this->planFor(ProductKind::Dedicated);
+        $plan->forceFill(['resources' => ['hardware_profile' => 'ded-standard-1', 'ipv4_count' => 1]])->save();
+
+        $datacenter = Datacenter::factory()->create();
+        DedicatedServer::factory()->inDatacenter($datacenter)->profile('ded-standard-1')->create();
+        IpPool::factory()->create(['datacenter_id' => $datacenter->getKey(), 'is_active' => true, 'ip_version' => 4]);
+        OsInstallProfile::factory()->create();
 
         $this->place($customer, $plan);
 

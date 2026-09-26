@@ -353,6 +353,13 @@ enum AuditAction: string
     case GpuDeviceRegistered = 'infrastructure.gpu.registered';
     case VmTemplateRecorded = 'infrastructure.template.recorded';
     case VmTemplateWithdrawn = 'infrastructure.template.withdrawn';
+    // The answer files a Dedicated build installs from (F-02: nothing but a
+    // factory wrote one, and the build does findOrFail on it).
+    case OsInstallProfileRecorded = 'infrastructure.os_install_profile.recorded';
+    case OsInstallProfileWithdrawn = 'infrastructure.os_install_profile.withdrawn';
+    // A person saying a discovered hypervisor node may take customers, or
+    // may not (F-02: nothing moved a node out of `maintenance`).
+    case ComputeNodeStatusChanged = 'infrastructure.node.status_changed';
     case DesiredStateAssigned = 'infrastructure.desired_state.assigned';
     case DesiredStateCleared = 'infrastructure.desired_state.cleared';
     case PlanComputed = 'infrastructure.plan.computed';

@@ -17,6 +17,7 @@ use Lynomia\Modules\Infrastructure\Application\Preflight\Checks\ProviderChain;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckStatus;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
+use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
@@ -190,6 +191,8 @@ final class APreflightNeverDropsACheckSilentlyTest extends TestCase
         'a compute estate whose only address pool is switched off' => ['vps', 'gpu_compute'],
         'a compute estate with an active address pool and no installable template' => ['vps', 'gpu_compute'],
         'a compute estate that can build a machine and give it an address' => ['vps', 'gpu_compute'],
+        'a compute estate whose only active pool holds no allocatable address' => ['vps', 'gpu_compute'],
+        'a compute estate whose only allocatable addresses are in a management pool' => ['vps', 'gpu_compute'],
         'a machine cleared for reimaging with its controller bound' => ['dedicated'],
         'an active hosting node and a mapped package' => ['shared_hosting', 'wordpress'],
         'a catalogued TLD that is enabled and open to registration' => ['domains'],
@@ -227,6 +230,33 @@ final class APreflightNeverDropsACheckSilentlyTest extends TestCase
 
         $this->assertSame('fail', $network['status']);
         $this->assertStringContainsString('1 address pool(s) are registered and none of them is active', $network['summary']);
+    }
+
+    #[Test]
+    public function an_active_pool_with_no_allocatable_address_is_not_reported_green(): void
+    {
+        /*
+         * F-35 x F-02. This passed as "1 of 1 registered address pool(s) are
+         * active" while IpAllocator::reserve() refused the same estate as
+         * exhausted: the operator's subnet route wrote no address rows, and a
+         * pass here was the only thing an operator was shown.
+         */
+        $this->build('a compute estate whose only active pool holds no allocatable address');
+
+        $network = $this->check($this->mappingBand('vps'), 'mapping.network');
+
+        $this->assertSame('fail', $network['status']);
+        $this->assertStringContainsString('no address a customer machine can be given', $network['summary']);
+    }
+
+    #[Test]
+    public function addresses_only_a_management_pool_holds_are_not_counted_for_a_customer_machine(): void
+    {
+        // The allocator refuses a management address to a customer service,
+        // so rows there are not an address a customer machine can be given.
+        $this->build('a compute estate whose only allocatable addresses are in a management pool');
+
+        $this->assertSame('fail', $this->check($this->mappingBand('vps'), 'mapping.network')['status']);
     }
 
     #[Test]
@@ -453,6 +483,8 @@ final class APreflightNeverDropsACheckSilentlyTest extends TestCase
             'a compute estate whose only address pool is switched off' => $this->computeEstate(template: true, pool: 'inactive'),
             'a compute estate with an active address pool and no installable template' => $this->computeEstate(template: false, pool: 'allocatable'),
             'a compute estate that can build a machine and give it an address' => $this->computeEstate(template: true, pool: 'allocatable'),
+            'a compute estate whose only active pool holds no allocatable address' => $this->computeEstate(template: true, pool: 'empty'),
+            'a compute estate whose only allocatable addresses are in a management pool' => $this->computeEstate(template: true, pool: 'management'),
             'a machine cleared for reimaging with its controller bound' => ManagedServer::factory()->clearedForReimage()->withBmc()->create(),
             'an active hosting node and a mapped package' => [HostingNode::factory()->create(), HostingPackage::factory()->create()],
             'a catalogued TLD that is enabled and open to registration' => DomainTld::factory()->onSale()->create(),
@@ -464,7 +496,7 @@ final class APreflightNeverDropsACheckSilentlyTest extends TestCase
      * storage, a template with or without the reference the hypervisor knows
      * it by, and one of three address arrangements.
      *
-     * @param  'none'|'inactive'|'allocatable'  $pool
+     * @param  'none'|'inactive'|'allocatable'|'empty'|'management'  $pool
      */
     private function computeEstate(bool $template, string $pool = 'none'): void
     {
@@ -491,6 +523,22 @@ final class APreflightNeverDropsACheckSilentlyTest extends TestCase
         if ($pool === 'allocatable') {
             $subnet = Subnet::factory()->forBlock('198.51.100.0/29')->create([
                 'ip_pool_id' => IpPool::factory()->create()->getKey(),
+            ]);
+
+            app(SeedSubnetAddresses::class)->execute($subnet);
+        }
+
+        if ($pool === 'empty') {
+            // An active pool and an active subnet with no address rows: the
+            // shape a subnet registered before registration expanded it had.
+            Subnet::factory()->forBlock('198.51.100.0/29')->create([
+                'ip_pool_id' => IpPool::factory()->create()->getKey(),
+            ]);
+        }
+
+        if ($pool === 'management') {
+            $subnet = Subnet::factory()->forBlock('10.250.0.0/29')->create([
+                'ip_pool_id' => IpPool::factory()->create(['scope' => IpPoolScope::Management])->getKey(),
             ]);
 
             app(SeedSubnetAddresses::class)->execute($subnet);

@@ -16,8 +16,9 @@ namespace Lynomia\Modules\Ipam\Application\DTOs;
 final readonly class SubnetSeedResult
 {
     /**
-     * @param  list<string>  $unavailableAddresses  Network, broadcast and gateway — the addresses that exist as
-     *                                              rows so nothing can invent them, and are never allocatable.
+     * @param  list<string>  $unavailableAddresses  Network, broadcast, gateway and any address the caller
+     *                                              reserved — the addresses that exist as rows so nothing can
+     *                                              invent them, and are never allocatable.
      * @param  list<string>  $conflictingAddresses  Non-host addresses that are already reserved or assigned to
      *                                              somebody. The seeder refuses to overwrite these; they need an
      *                                              operator, because something is using an address it must not.

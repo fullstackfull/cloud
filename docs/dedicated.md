@@ -37,6 +37,32 @@ handed the same machine.
 what happened to their old server, or an auditor asks where a serial number went, deleting
 the row destroys the only answer.
 
+## What an order's build is given
+
+`LocalPlacementFeasibility` resolves three things for a Dedicated plan before any money
+moves, from rows the platform holds, and the paid order's provisioning job carries them:
+
+- **the datacenter** — the plan's `placement_constraints.datacenter_id`, or the only
+  datacenter holding a machine of the plan's `hardware_profile` that is not retired;
+- **the address pool** — `placement_constraints.ip_pool_id`, or the only active customer
+  IPv4 pool in that datacenter;
+- **the OS install profile** — the active one named by
+  `placement_constraints.os_install_profile_slug`, or the only active one.
+
+If any of them has no single answer, checkout refuses the plan (`checkout.not_deliverable`).
+Whether a machine of the profile is free is not asked here: stock moves between checkout
+and build, and the build reserves under a row lock.
+
+OS install profiles are operator data (`POST /api/admin/infrastructure/os-install-profiles`,
+`dedicated.manage`, audited with a SHA-256 of the template). A slug is written once; a
+corrected recipe is a new profile and the old one is withdrawn. A template naming a
+placeholder that neither a build (`hostname`, `ipv4_address`, `ipv4_prefix_length`,
+`ipv4_gateway`) nor the profile's defaults supply is refused.
+
+A build refused an address (`ipam.pool_exhausted`) gives its machine back: the chassis was
+reserved and nothing else, so it returns to `available` and the retry reserves again. It
+moves to `provisioning` only once its addresses are held.
+
 ## Out-of-band management
 
 Prefer **Redfish** where supported — it is a specified HTTP API with real error semantics.

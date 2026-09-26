@@ -8,7 +8,11 @@ use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
+use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
@@ -45,10 +49,24 @@ use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
  * to ask for one exists. Whether a node has room is a provider's answer and a
  * different phase's problem.
  *
- * A Dedicated plan is not gated. It reserves a chassis from inventory inside
- * its own handler and has no catalogue mapping to resolve up front, so there
- * is nothing here that could truthfully be checked — and refusing it for want
- * of an invented mapping would turn a sellable product into an unsellable one.
+ * ---------------------------------------------------------------------------
+ * Dedicated
+ * ---------------------------------------------------------------------------
+ *
+ * This used to say a Dedicated plan had nothing to resolve up front, and
+ * resolved nothing — so an order's job carried the plan's resources alone.
+ * ProvisionDedicatedHandler reserves a chassis in a datacenter, reserves its
+ * address from a pool and installs from an OS install profile, and the job
+ * named none of the three: the reservation looked in datacenter '' and
+ * answered no_matching_hardware for ever, and a job that got further died on
+ * an undefined array key (F-02, the re-audit's probe). So a Dedicated plan
+ * resolves, from rows this platform holds, the datacenter holding its
+ * hardware profile, the customer pool in that datacenter and the active
+ * install profile — each what the plan's constraints name, or the estate's
+ * only answer. Whether a machine of that profile is free is still the
+ * handler's question, answered under a row lock: stock moves between checkout
+ * and build, and a capacity wait is the right outcome for a machine that is
+ * busy, not a refusal at checkout.
  */
 final readonly class LocalPlacementFeasibility
 {
@@ -64,6 +82,10 @@ final readonly class LocalPlacementFeasibility
 
         if ($kind === ProductKind::SharedHosting) {
             return $this->hosting($plan);
+        }
+
+        if ($kind === ProductKind::Dedicated) {
+            return $this->dedicated($plan, $constraints);
         }
 
         if ($kind !== ProductKind::Vps) {
@@ -95,6 +117,80 @@ final readonly class LocalPlacementFeasibility
         }
 
         return PlacementResolution::ready(['hosting_package_id' => (string) $choice->package->getKey()]);
+    }
+
+    /**
+     * Where a Dedicated build takes its machine, its address and its OS from.
+     *
+     * The datacenter is the one the plan names, or the only one holding a
+     * machine of the plan's hardware profile that is not retired. The pool is
+     * the one the plan names, or the only active customer IPv4 pool in that
+     * datacenter — a machine is cabled to its building's network, so a pool
+     * elsewhere is not a candidate. The install profile is the active one the
+     * plan names by slug, or the only active one.
+     *
+     * @param  array<string, mixed>  $constraints
+     */
+    private function dedicated(Plan $plan, array $constraints): PlacementResolution
+    {
+        /** @var array<string, mixed> $resources */
+        $resources = $plan->resources ?? [];
+        $hardware = is_string($resources['hardware_profile'] ?? null) ? $resources['hardware_profile'] : '';
+
+        $datacenter = $this->soleTarget(
+            $constraints['datacenter_id'] ?? null,
+            static fn (): ?string => self::soleId(
+                Datacenter::query()->whereIn(
+                    'id',
+                    DedicatedServer::query()
+                        ->where('hardware_profile', $hardware)
+                        ->where('status', '!=', DedicatedServerStatus::Retired->value)
+                        ->select('datacenter_id'),
+                ),
+            ),
+        );
+
+        if ($datacenter === null) {
+            return PlacementResolution::blocked(
+                'no single datacenter holds a machine of the plan\'s hardware profile, and the plan names none',
+            );
+        }
+
+        $pool = $this->soleTarget(
+            $constraints['ip_pool_id'] ?? null,
+            static fn (): ?string => self::soleId(
+                IpPool::query()
+                    ->where('is_active', true)
+                    ->where('ip_version', 4)
+                    ->where('datacenter_id', $datacenter)
+                    ->whereIn('scope', self::customerAllocatableScopes()),
+            ),
+        );
+
+        if ($pool === null) {
+            return PlacementResolution::blocked(
+                'no single customer IP pool in the datacenter holding the hardware, and the plan names none',
+            );
+        }
+
+        $declared = $constraints['os_install_profile_slug'] ?? null;
+        $profiles = OsInstallProfile::query()->where('is_active', true);
+
+        $profile = is_string($declared) && $declared !== ''
+            ? $profiles->where('slug', $declared)->value('id')
+            : self::soleId($profiles);
+
+        if ($profile === null) {
+            return PlacementResolution::blocked(
+                'the plan names no active OS install profile, and the estate offers no single one',
+            );
+        }
+
+        return PlacementResolution::ready([
+            'datacenter_id' => $datacenter,
+            'ip_pool_id' => $pool,
+            'os_install_profile_id' => (string) $profile,
+        ]);
     }
 
     /**

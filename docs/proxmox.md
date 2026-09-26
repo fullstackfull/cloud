@@ -46,6 +46,13 @@ OFFLINE     unreachable or failed
 `DRAINING` exists so a node can be emptied gradually before planned work without the
 disruption of migrating everything at once.
 
+A node the reconcile sweep (`infrastructure:reconcile`) discovers is recorded in
+`MAINTENANCE`: discovery is not authorisation. An operator holding `node.maintenance` puts
+it into service, drains it or takes it out with
+`PUT /api/admin/infrastructure/nodes/{node}/status` (`active`, `draining` or `maintenance`,
+with a reason, audited). `OFFLINE` is not set by hand. Placement still requires the node to
+be healthy as well as active.
+
 ## Placement
 
 The scheduler is a weighted score, not "first node with room". Putting every machine on
