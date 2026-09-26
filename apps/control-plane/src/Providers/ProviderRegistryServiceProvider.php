@@ -124,14 +124,21 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
      * Whether this process is running as "production" only because nothing said
      * otherwise.
      *
-     * Both halves matter. A missing environment file alone is not enough — a
+     * Every clause matters. A missing environment file alone is not enough — a
      * container may legitimately carry everything in real environment variables
-     * — so APP_ENV must also be absent from the environment before the guard
-     * stands down.
+     * — so APP_ENV must also be absent from the environment, and a cached
+     * configuration counts as configured: a host that ran `config:cache` loads
+     * no environment file at all, and that is the normal shape of a production
+     * deployment. The question is SettleTheApplicationEnvironment's, asked
+     * through it so the two cannot disagree again; they did (OB-3, re-audit of
+     * round three), and a cached production configuration naming fake
+     * providers booted with this guard stood down. The guard adds one clause
+     * of its own: a console `--env=` argument also said something.
      */
     private function productionIsAnUnconfiguredDefault(): bool
     {
-        return ! $this->environmentWasNamed() && ! is_file($this->app->environmentFilePath());
+        return ! $this->environmentWasNamed()
+            && SettleTheApplicationEnvironment::nothingWasConfigured($this->app);
     }
 
     /**
@@ -179,6 +186,15 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
 
         if (is_file($path)) {
             return '';
+        }
+
+        if ($this->app->configurationIsCached()) {
+            return sprintf(
+                ' The configuration was read from the cache at %s, which says "production"; no environment '
+                .'file is read while it exists. Rebuild it with `php artisan config:cache` from the intended '
+                .'environment, or remove it.',
+                $this->app->getCachedConfigPath(),
+            );
         }
 
         return sprintf(

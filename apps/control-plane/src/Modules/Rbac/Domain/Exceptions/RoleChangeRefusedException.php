@@ -88,6 +88,22 @@ final class RoleChangeRefusedException extends DomainException
     }
 
     /**
+     * `customer` is the baseline every customer login holds, so its list is
+     * a grant to the whole customer base at once, including logins that do
+     * not exist yet. It is fixed by the platform (Role::defaultPermissions()
+     * and the seeder) and edited by nobody at runtime, super admin included.
+     */
+    public static function becauseItIsTheCustomerBaseline(string $role): self
+    {
+        $exception = new self(
+            'The customer role is held by every customer login; its permissions are set by the platform and cannot be edited here.'
+        );
+        $exception->withContext(['role' => $role]);
+
+        return $exception->as('rbac.role_is_the_customer_baseline');
+    }
+
+    /**
      * The dead end this whole area exists to close, recreated from the inside:
      * a deployment with nobody able to administer it has no supported way back,
      * because the console bootstrap refuses once a privileged operator exists.

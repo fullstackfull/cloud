@@ -17,7 +17,6 @@ use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
-use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
 use Lynomia\Modules\Provisioning\Application\Actions\BeginRetentionWindow;
@@ -36,6 +35,7 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Providers\FakeHostingProvider;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -49,6 +49,7 @@ use Tests\TestCase;
 final class TheRetentionSweepTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private Customer $customer;
 
@@ -393,8 +394,7 @@ final class TheRetentionSweepTest extends TestCase
 
         $this->seed(RolePermissionSeeder::class);
 
-        $operator = User::factory()->create();
-        $operator->givePermissionTo(Permission::HostingAccountManage->value);
+        $operator = $this->staffHoldingExactly([Permission::HostingAccountManage]);
 
         $this->actingAs($operator->fresh() ?? $operator)
             ->postJson('/api/admin/hosting-accounts/'.$account->getKey().'/unsuspend', ['reason' => 'Paid by bank transfer.'])

@@ -12,14 +12,18 @@ use Tests\TestCase;
 
 /**
  * The administrative surface is separated from the customer surface by the
- * permission on each route, not by the prefix it sits under.
+ * permission on each route and by the staff gate, not by the prefix it sits
+ * under.
  *
  * `/api/admin` and `/api/v1` authenticate with the same guard, so a customer's
- * session or personal access token reaches both. The prefix is signposting; the
- * permission is the control. A route added to the admin file without one is
- * therefore not "missing a nice-to-have" — it is a customer-reachable
- * administrative endpoint, and the only reliable way to keep that from
- * happening on a busy afternoon is to fail the build.
+ * session or personal access token reaches both. The prefix is signposting.
+ * The staff gate (EnsureTheCallerIsStaff; held on every route by
+ * TheCustomerRoleIsNotAWayIntoTheAdminSurfaceTest) refuses a login with no
+ * staff role; the permission decides which staff may do what. A route added
+ * to the admin file without a permission is therefore not "missing a
+ * nice-to-have" — it is an endpoint every operator reaches whatever their
+ * role, and one step (the staff gate) from every customer. The only reliable
+ * way to keep that from happening on a busy afternoon is to fail the build.
  */
 final class AdminRoutesRequireAPermissionTest extends TestCase
 {
@@ -47,7 +51,7 @@ final class AdminRoutesRequireAPermissionTest extends TestCase
         $this->assertSame(
             [],
             $unguarded,
-            "Administrative routes reachable by any verified customer:\n  ".implode("\n  ", $unguarded),
+            "Administrative routes that name no permission:\n  ".implode("\n  ", $unguarded),
         );
     }
 

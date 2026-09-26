@@ -21617,7 +21617,7 @@ components:
     AdminRole:
       type: "object"
       additionalProperties: false
-      description: "A role and what it may do. Super Admin's authority comes from a bypass rather than from the permissions attached to it, so its list is empty and `permissions_are_editable` is false — editing it would change nothing while looking like it had."
+      description: "A role and what it may do. `permissions_are_editable` is false for two roles, and the platform refuses to edit either: Super Admin, whose authority comes from a bypass rather than from the permissions attached to it, so its list is empty and editing it would change nothing while looking like it had (`rbac.role_is_protected`); and Customer, the baseline every customer login holds, whose list is fixed by the platform because a change to it is a change for every customer at once (`rbac.role_is_the_customer_baseline`)."
       properties:
         name:
           type: "string"

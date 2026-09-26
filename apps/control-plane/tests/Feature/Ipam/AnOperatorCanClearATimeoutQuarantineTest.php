@@ -27,6 +27,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -52,6 +53,7 @@ use Tests\TestCase;
 final class AnOperatorCanClearATimeoutQuarantineTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private const string AWAITING = '/api/admin/infrastructure/ip-addresses/awaiting-clearance';
 
@@ -313,8 +315,7 @@ final class AnOperatorCanClearATimeoutQuarantineTest extends TestCase
         $this->actingAs($noc)->postJson($this->releaseUrl($address), ['evidence' => 'Seen.'])->assertForbidden();
 
         // Seeing the list is not the authority to act on it.
-        $viewer = User::factory()->create();
-        $viewer->givePermissionTo(Permission::IpamView->value);
+        $viewer = $this->staffHoldingExactly([Permission::IpamView]);
 
         $this->actingAs($viewer)->getJson(self::AWAITING)->assertOk()->assertJsonCount(1, 'data');
         $this->actingAs($viewer)->postJson($this->adoptUrl($address), ['evidence' => 'Seen.'])->assertForbidden();
