@@ -43,10 +43,12 @@ logging {
 //
 // The path is where that channel writes on a control-plane host: the
 // application's storage_path('logs/lynomia.json') under the release directory
-// the control_plane Ansible role deploys into (control_plane_release_dir,
-// {{ lynomia_base_dir }}/current). It used to be /var/log/lynomia/lynomia.json,
-// a directory nothing creates and the application user cannot, so every line
-// the application logged landed in a file nothing read.
+// the control_plane Ansible role declares and runs Horizon and cron from
+// (control_plane_release_dir, {{ lynomia_base_dir }}/current); the CI/CD
+// pipeline, not the role, puts the release there. It used to be
+// /var/log/lynomia/lynomia.json, a directory nothing creates and the
+// application user cannot, so every line the application logged landed in a
+// file nothing read.
 // CriticalDriftReachesAnOperatorTest derives both sides and holds them
 // together; change the channel and this line in the same commit.
 //

@@ -16,10 +16,11 @@ use Tests\TestCase;
  *
  * Nothing under `infrastructure/ansible` installs Grafana Alloy on an
  * application host, so the structured log reaches Loki by no route at all.
- * That gap is recorded rather than closed here: agent installation is
- * out-of-band in this tree by convention (node_exporter is not installed by it
- * either), and a role nobody can execute offline, added to a play that runs
- * against production, risks a working deploy to fix an observability gap.
+ * That gap is recorded rather than closed here: on a control-plane host this
+ * tree installs no agent (the control_plane role opens 9100 for node_exporter
+ * and installs none, though the proxmox role does install it on hypervisors),
+ * and a role nobody can execute offline, added to a play that runs against
+ * production, risks a working deploy to fix an observability gap.
  *
  * What made the gap dangerous was not its existence but the sentences denying
  * it. `config/logging.php` said "Grafana Alloy tails this file and ships it to
@@ -57,7 +58,9 @@ use Tests\TestCase;
  * red against a true declaration on the first run. It matches four shapes that
  * mean install-or-run, after stripping comments, so a task title or a comment
  * that mentions Alloy is not an installation. It can miss an exotic shape
- * (false negatives); it is built not to fire on prose (no false positives).
+ * (false negatives), and it is built not to fire on prose. It reads one line
+ * at a time, so a module argument naming the package fires whatever the
+ * task's `state:` says: a task removing Alloy is flagged too.
  */
 final class TheLogShipperDeclarationIsTrueTest extends TestCase
 {

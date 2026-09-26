@@ -13,13 +13,25 @@ the seven silently ceasing to fire would look exactly like today.
 Every case below builds a synthetic infrastructure tree that differs from a
 known-good one in one respect, and requires the validator to name that respect.
 
-F-22 added three more: where each alert goes (a real walk of Alertmanager's
-route tree over PyYAML, with the drift page pinned to the on-call), a series
-that must never page, and a Loki ruler wired with nothing to evaluate. The
-routing cases include the shapes that fooled a hand-written YAML reader in PHP
-five times over — flow style, an inline comment on a quoted matcher, a legacy
-`match:` block, `continue: true` — because those are what a real parser makes
-disappear, and a regression to a hand-written reader would bring them back.
+F-22 added three more: where each alert goes (a walk of Alertmanager's route
+tree over PyYAML, with the drift page pinned to the on-call), a series that
+must never page, and a Loki ruler wired with nothing to evaluate. The routing
+cases include the shapes that fooled a hand-written YAML reader in PHP five
+times over — flow style, and an inline comment on a quoted matcher — which a
+real YAML parser makes disappear.
+
+A real YAML parser does not make the walk right, though: the walk is a model of
+Alertmanager, and a model can be wrong in ways the file never is. Its first
+version read `prov\\w+` as `provw+` and `severity='critical'` as `critical`, and
+in both the drift page went somewhere other than where it said. So the walk's
+semantics are held two ways here. The tree cases each tell the right code from
+a plausible wrong one — `continue: true` with a later sibling that also
+receives, a legacy `match:` for another component that must leave the page
+alone — and the golden tables at the bottom are Alertmanager v0.28.1's own
+answers, recorded from its matcher parser (compat.Matchers, fallback mode) and
+from Go's regexp, for inputs chosen because a reader could get them wrong.
+They were recorded, not derived: rerun the recording if MODELLED_ALERTMANAGER
+moves.
 
 Run: python3 infrastructure/scripts/test_validate_monitoring.py
 Exit 0 when every case behaves, 1 otherwise.
@@ -178,8 +190,16 @@ receivers:
 """
 
 DRIFT_PINS = {
-    "ResourceDriftOpen": {"receiver": "pagerduty-critical", "reads": "lynomia_resource_drift_open"},
-    "DriftQueueUnworked": {"receiver": "platform-team", "reads": "lynomia_open_drift_total"},
+    "ResourceDriftOpen": {
+        "receiver": "pagerduty-critical",
+        "reads": "lynomia_resource_drift_open",
+        "expr": 'lynomia_resource_drift_open{severity="critical"} > 0',
+    },
+    "DriftQueueUnworked": {
+        "receiver": "platform-team",
+        "reads": "lynomia_open_drift_total",
+        "expr": "sum(lynomia_open_drift_total) > 0",
+    },
 }
 
 NEVER_PAGES = {"lynomia_open_drift_total": "is cleared by acknowledging"}
@@ -199,6 +219,27 @@ services:
     volumes:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
+"""
+
+COMPOSE_ALERTMANAGER = """
+services:
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --enable-feature=classic-mode
+"""
+
+PROMETHEUS_RELABELLING = """
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: [alertmanager:9093]
+  alert_relabel_configs:
+    - source_labels: [component]
+      regex: provisioning
+      target_label: component
+      replacement: backups
 """
 
 
@@ -360,6 +401,22 @@ groups:
         "ResourceDriftOpen must read lynomia_resource_drift_open",
     ),
     (
+        # "Critical only": without the selector, every info and warning drift
+        # pages, and the page still reads the right series and reaches the
+        # right receiver.
+        "the page widened past critical drift is refused",
+        drift(rules=DRIFT_RULES.replace(
+            'lynomia_resource_drift_open{severity="critical"} > 0', "lynomia_resource_drift_open > 0")),
+        "ResourceDriftOpen's expression is 'lynomia_resource_drift_open > 0'",
+    ),
+    (
+        "a pinned expression reformatted only in its whitespace still passes",
+        drift(rules=DRIFT_RULES.replace(
+            'lynomia_resource_drift_open{severity="critical"} > 0',
+            'lynomia_resource_drift_open{severity="critical"}   >   0')),
+        None,
+    ),
+    (
         "a pinned series name inside a longer identifier is not a read of it",
         drift(rules=DRIFT_RULES.replace(
             "sum(lynomia_open_drift_total)", "sum(lynomia_open_drift_total_by_tenant)"
@@ -370,7 +427,7 @@ groups:
         "relabelling the page onto another team's sub-route is refused",
         drift(rules=DRIFT_RULES.replace("severity: critical\n          component: provisioning",
                                         "severity: critical\n          component: backups")),
-        "is delivered to pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
     ),
     (
         "the same diversion written in flow style is refused",
@@ -378,7 +435,7 @@ groups:
             "      receiver: pagerduty-critical\n      routes:\n        - matchers:\n            - component = backups\n          receiver: pagerduty-critical-backups\n          continue: false\n",
             "      receiver: pagerduty-critical\n      routes: [{matchers: ['component =~ \"backups|provisioning\"'], receiver: pagerduty-critical-backups}]\n",
         )),
-        "is delivered to pagerduty-critical-backups",
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
     ),
     (
         "a diversion behind an inline comment on a quoted matcher is refused",
@@ -386,7 +443,7 @@ groups:
             "            - component = backups\n",
             "            - 'component =~ \"backups|provisioning\"'  # see runbook 'backup-verify'\n",
         )),
-        "is delivered to pagerduty-critical-backups",
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
     ),
     (
         "a diversion by a legacy `match:` block is refused",
@@ -394,15 +451,139 @@ groups:
             "        - matchers:\n            - component = backups\n",
             "        - match:\n            component: provisioning\n",
         )),
-        "is delivered to pagerduty-critical-backups",
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
     ),
     (
-        "a copy that takes the page away by `continue: true` is refused",
+        "a `continue: true` sub-route with no later match still takes the page away",
         drift(alertmanager=ALERTMANAGER.replace(
             "            - component = backups\n          receiver: pagerduty-critical-backups\n          continue: false\n",
             "            - component = provisioning\n          receiver: pagerduty-critical-backups\n          continue: true\n",
         )),
-        "is delivered to pagerduty-critical-backups",
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+    ),
+    (
+        # Tells a walk that honours `continue: true` from one that stops at the
+        # first match: only the first walk reaches the second sibling.
+        "a `continue: true` copy followed by a sibling that also receives leaves the page in place",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n          receiver: pagerduty-critical-backups\n          continue: false\n",
+            "            - component = provisioning\n          receiver: pagerduty-critical-backups\n          continue: true\n"
+            "        - matchers:\n            - component = provisioning\n          receiver: pagerduty-critical\n",
+        )),
+        None,
+    ),
+    (
+        # Tells a walk that reads `match:` from one that ignores it: ignored,
+        # this route has no matchers and catches the page.
+        "a legacy `match:` route for another component leaves the page in place",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n",
+            "        - match:\n            component: backups\n",
+        )),
+        None,
+    ),
+    (
+        "a diversion by a legacy `match_re:` block is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n",
+            "        - match_re:\n            component: 'backups|prov.*'\n",
+        )),
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+    ),
+    # Where the walk once read a matcher differently from Alertmanager, and the
+    # page went somewhere the walk did not say.
+    (
+        "a backslash Alertmanager keeps in a regex is kept, and the diversion refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n",
+            '            - component =~ "backups|prov\\w+"\n',
+        )),
+        "pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+    ),
+    (
+        "a single-quoted value keeps its quotes, and the page that then reaches nobody is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - severity = critical\n", "        - severity='critical'\n", 1,
+        )),
+        "is routed to platform-team, and is pinned to 'pagerduty-critical'",
+    ),
+    (
+        "a regex Go's RE2 reads differently from Python's re is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n",
+            '            - component =~ "backups|prov[[:alpha:]]+"\n',
+        )),
+        "Go's RE2 and Python's re might not read alike",
+    ),
+    (
+        "a route key written twice is refused, as Alertmanager refuses it",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "          receiver: pagerduty-critical-backups\n",
+            "          receiver: pagerduty-critical-backups\n          receiver: pagerduty-critical\n",
+        )),
+        "is written twice",
+    ),
+    (
+        "a `continue` go-yaml and PyYAML type differently is refused",
+        drift(alertmanager=ALERTMANAGER.replace("          continue: false\n", "          continue: n\n", 1)),
+        "is not a boolean",
+    ),
+    (
+        "a legacy `match:` value that is not a string is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n",
+            "        - match:\n            component: yes\n",
+        )),
+        "non-string True",
+    ),
+    (
+        "matchers on the root route are refused, as Alertmanager refuses them",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "route:\n  receiver: platform-team\n",
+            "route:\n  receiver: platform-team\n  matchers:\n    - severity = critical\n",
+        )),
+        "the root route has matchers",
+    ),
+    (
+        "a route on a label the pinned rule does not set cannot pin the page",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n", '            - instance =~ "pve-.*"\n',
+        )),
+        "a route matching on instance decides where it goes",
+    ),
+    (
+        "a templated label on a pinned rule is not a label the walk knows",
+        drift(
+            rules=DRIFT_RULES.replace(
+                "severity: critical\n          component: provisioning",
+                "severity: critical\n          component: '{{ $labels.component }}'",
+            ),
+        ),
+        "a route matching on component decides where it goes",
+    ),
+    (
+        "alert relabelling in prometheus.yml leaves no pin checkable",
+        drift(extra_yml={"prometheus/prometheus.yml": PROMETHEUS_RELABELLING}),
+        "prometheus.yml relabels alerts",
+    ),
+    (
+        "the Alertmanager the walk models, run as modelled, passes",
+        drift(extra_yml={"docker-compose.monitoring.yml": COMPOSE_ALERTMANAGER}),
+        None,
+    ),
+    (
+        "an Alertmanager version the walk does not model is refused",
+        drift(extra_yml={"docker-compose.monitoring.yml": COMPOSE_ALERTMANAGER.replace(
+            "v0.28.1", "v0.29.0")}),
+        "the route walk models",
+    ),
+    (
+        "Alertmanager run with only its UTF-8 matcher parser is refused",
+        drift(extra_yml={"docker-compose.monitoring.yml": COMPOSE_ALERTMANAGER.replace(
+            "      - --config.file=/etc/alertmanager/alertmanager.yml\n",
+            "      - --config.file=/etc/alertmanager/alertmanager.yml\n"
+            "      - --enable-feature=utf8-strict-mode\n")}),
+        "utf8-strict-mode",
     ),
     (
         "an alert routed to a receiver nobody defined is refused",
@@ -477,6 +658,136 @@ groups:
 ]
 
 
+# -- Alertmanager's own answers (recorded) --------------------------------------
+#
+# Recorded from Alertmanager v0.28.1 -- matcher/compat.Matchers after
+# compat.InitFromFlags with no feature flags, as cmd/alertmanager starts -- and
+# from Go's regexp compiling ^(?:pattern)$, as labels.NewMatcher does.
+
+# Lines Alertmanager reads, and what it reads them as. The walk must read each
+# the same way: refusing one of these is a false red, and is a failure here.
+MATCHERS_READ_ALIKE: list[tuple[str, list[tuple[str, str, str]]]] = [
+    ("severity = critical", [("severity", "=", "critical")]),
+    ('severity="critical"', [("severity", "=", "critical")]),
+    ("severity!=info", [("severity", "!=", "info")]),
+    ('{severity="critical", component="backups"}', [("severity", "=", "critical"), ("component", "=", "backups")]),
+    ("component = backups, severity = critical", [("component", "=", "backups"), ("severity", "=", "critical")]),
+    ('component =~ "backups|payments"', [("component", "=~", "backups|payments")]),
+    ("component=~backups|payments", [("component", "=~", "backups|payments")]),
+    ('instance =~ "pve-\\\\d+"', [("instance", "=~", "pve-\\d+")]),
+    ('team = ""', [("team", "=", "")]),
+    ('x:y = "a,b"', [("x:y", "=", "a,b")]),
+    ('a = "multi\\nline"', [("a", "=", "multi\nline")]),
+    ('a = "q\\"uote"', [("a", "=", 'q"uote')]),
+    ("a = b\\", [("a", "=", "b\\")]),
+    ("a=b,", [("a", "=", "b")]),
+    ("  severity = critical  ", [("severity", "=", "critical")]),
+    # A backslash before anything but `"`, `\` or `n` is kept.
+    ('component =~ "backups|prov\\w+"', [("component", "=~", "backups|prov\\w+")]),
+    ('component = "a\\b"', [("component", "=", "a\\b")]),
+    ("component = a\\b", [("component", "=", "a\\b")]),
+    ('component = "a\\\\b"', [("component", "=", "a\\b")]),
+    # A single quote is not a quote.
+    ("severity='critical'", [("severity", "=", "'critical'")]),
+    ("component =~ 'backups|provisioning'", [("component", "=~", "'backups|provisioning'")]),
+]
+
+# Lines the walk must refuse: Alertmanager refuses the first group; it reads
+# the second only through its UTF-8 parser, which the walk does not port.
+MATCHERS_REFUSED: list[str] = [
+    "component backups", 'a = "unterminated', 'a = b"c', "a=b,,c=d", ",a=b", 'a =~ "(unbalanced"',
+    "1a = b", '"quoted name" = x', " {a=b}",
+]
+
+# Regexes on which Go and Python agree, with Go's verdict on each string. The
+# walk must match every string as Go does.
+REGEX_VERDICTS: list[tuple[str, dict[str, bool]]] = [
+    ("backups|prov\\w+", {"provisioning": True, "provw": True, "backups": True, "prov_1": True, "prové": False}),
+    ("pve-\\d+", {"pve-01": True, "pve-": False, "pve-٣": False}),
+    ("[a-z0-9_-]+", {"a-b_1": True, "A": False, "é": False}),
+    ("[^\\W]+", {"abc": True, "a-b": False}),
+    ("(?:ab|c)*d{2,3}", {"ababdd": True, "cddd": True, "dddd": False, "d": False}),
+    ("a.c", {"abc": True, "a\nc": False, "a\rc": True}),
+    ("[!-,-]x", {"!x": True, ",x": True, "-x": True, ".x": False}),
+    ("(a|)+b", {"b": True, "aab": True, "ba": False}),
+    ("x{0}y", {"y": True, "xy": False}),
+    ("\\.\\*\\[\\]", {".*[]": True, "a*[]": False}),
+]
+
+# Regexes the walk must refuse: each is read differently by the two engines,
+# or exists in only one of them. (Go / Python, in brief.)
+REGEXES_REFUSED: list[str] = [
+    "[[:alpha:]]+",   # POSIX class / a set, then a literal `]`
+    "[x[:alpha:]|[a]",  # the same, and Python compiles it without a warning
+    "a{,3}",          # literal / zero to three a's
+    "a{01}",          # literal / exactly one a
+    "a)|(b",          # re-anchors the wrapped pattern / an error
+    "\\s",            # excludes \v / includes it
+    "\\pL",           # a Unicode class / an error
+    "(?i)a",          # Unicode case folding / ASCII-or-Unicode, differently
+    "^a$",            # anchors inside the wrapper differ at a trailing newline
+    "a\\z", "\\Q.\\E", "\\x{41}",     # Go only
+    "a(?=b)", "(a)\\1", "a*+", "\\u00e9", "\\Z",  # Python only
+    "(a{600}){2}",    # past Go's nested repeat limit / accepted
+    "[a-c-e]", "[a&&b]", "[\\b]", "[]a]", "a{2}{3}",
+    "[!--]",          # a range today in both; Python warns `--` may become set difference
+]
+
+
+def _as_matcher(name: str, op: str, value: str) -> str:
+    """A classic-parser line whose value reads back as `value`."""
+    return f'{name} {op} "' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def golden_failures() -> list[tuple[str, list[str]]]:
+    checks: list[tuple[str, list[str]]] = []
+
+    wrong = []
+    for line, expected in MATCHERS_READ_ALIKE:
+        try:
+            got = [tuple(m) for m in validator.parse_matchers({"matchers": [line]})]
+        except validator.RouteError as error:
+            got = f"refused: {error}"
+        if got != expected:
+            wrong.append(f"{line!r}: Alertmanager reads {expected!r}, the walk {got!r}")
+    checks.append(("every matcher Alertmanager reads, the walk reads the same", wrong))
+
+    wrong = []
+    for line in MATCHERS_REFUSED:
+        try:
+            got = validator.parse_matchers({"matchers": [line]})
+            wrong.append(f"{line!r}: read as {got!r}")
+        except validator.RouteError:
+            pass
+    checks.append(("every matcher the walk cannot read as Alertmanager does, it refuses", wrong))
+
+    wrong = []
+    for pattern, verdicts in REGEX_VERDICTS:
+        try:
+            parsed = validator.parse_matchers({"matchers": [_as_matcher("x", "=~", pattern)]})
+        except validator.RouteError as error:
+            wrong.append(f"{pattern!r}: refused ({error})")
+            continue
+        if parsed != [("x", "=~", pattern)]:
+            wrong.append(f"{pattern!r}: read back as {parsed!r}")
+            continue
+        for text, go in verdicts.items():
+            if validator.matches(parsed, {"x": text}) != go:
+                wrong.append(f"{pattern!r} on {text!r}: Go says {go}")
+    checks.append(("every portable regex matches as Go's regexp matches", wrong))
+
+    wrong = []
+    for pattern in REGEXES_REFUSED:
+        try:
+            got = validator.parse_matchers({"matchers": [_as_matcher("x", "=~", pattern)]})
+            wrong.append(f"{pattern!r}: read as {got!r}")
+        except validator.RouteError:
+            pass
+    checks.append(("every regex the two engines read differently is refused", wrong))
+
+    return checks
+
+
 def main() -> int:
     failures = 0
     for name, kwargs, expected in CASES:
@@ -518,7 +829,15 @@ def main() -> int:
         failures += 1
         print(f"      PINNED_ROUTES: {shipped!r}\n      NEVER_PAGES: {validator.NEVER_PAGES!r}")
 
-    total = len(CASES) + 2
+    checks = golden_failures()
+    for name, wrong in checks:
+        print(f"{'PASS' if not wrong else 'FAIL'}  {name}")
+        if wrong:
+            failures += 1
+            for line in wrong:
+                print(f"      {line}")
+
+    total = len(CASES) + 2 + len(checks)
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 
