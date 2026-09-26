@@ -244,9 +244,11 @@ export function RegisterPage() {
            empty select is exactly what a first render looks like, and
            without this nothing told a failed page from a slow one;
          - they were read and did not say whether registration is open — an
-           error too, because the countries, currencies and document links
-           are all on screen and the greyed button would otherwise be the
-           only thing different from a page that works;
+           error too, because the answer has arrived and no other is on its
+           way. Without it, an answer that carried nothing would look like a
+           page still loading, and one that carried everything else —
+           countries, currencies and document links all drawn — would differ
+           from a page that works only in the greyed button;
          - the server said registration is not open — a warning, and only
            then, so a slow or failed request never tells somebody who can
            register that they cannot.

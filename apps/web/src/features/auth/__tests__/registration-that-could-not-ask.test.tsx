@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -47,7 +47,7 @@ import i18n from '@/i18n'
 
 type Answer =
   | { kind: 'pending' }
-  | { kind: 'failed'; status: number }
+  | { kind: 'failed'; status: number; body?: unknown }
   | { kind: 'answered'; body: unknown }
 
 interface Recorded {
@@ -114,7 +114,7 @@ function stubFetch(answers: Answer[]): Recorded[] {
             ok: false,
             status: answer.status,
             statusText: 'Service Unavailable',
-            text: () => Promise.resolve(''),
+            text: () => Promise.resolve(answer.body === undefined ? '' : JSON.stringify(answer.body)),
           } as Response)
         }
 
@@ -146,13 +146,16 @@ function stubFetch(answers: Answer[]): Recorded[] {
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={client}>
-        <RegisterPage />
-      </QueryClientProvider>
-    </MemoryRouter>,
-  )
+  return {
+    client,
+    ...render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <RegisterPage />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    ),
+  }
 }
 
 function registrations(recorded: Recorded[]): Recorded[] {
@@ -193,6 +196,26 @@ describe('registration that could not ask whether it may register', () => {
     expect(alert).toHaveTextContent(/could not load/i)
     // No evidence the platform is closed, so the screen does not claim it.
     expect(screen.queryByText(/registration is not open yet/i)).toBeNull()
+  })
+
+  it('says what went wrong beneath that, with the request reference to quote', async () => {
+    stubFetch([
+      {
+        kind: 'failed',
+        status: 503,
+        body: { error: { code: 'service.degraded', message: 'upstream pool exhausted', request_id: 'req-abc-123' } },
+      },
+    ])
+
+    renderPage()
+
+    const alert = await screen.findByRole('alert')
+
+    // A 5xx is described generically — what the server said is for the log —
+    // and the reference is what lets somebody find that log line.
+    expect(alert).toHaveTextContent('Something went wrong on our side.')
+    expect(alert).toHaveTextContent('req-abc-123')
+    expect(alert).not.toHaveTextContent('upstream pool exhausted')
   })
 
   it('does not offer Create account while it does not know registration is open', async () => {
@@ -289,6 +312,54 @@ describe('registration that could not ask whether it may register', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/could not confirm that registration is open/i)
     expect(createAccount()).toBeDisabled()
     expect(screen.queryByText(/registration is not open yet/i)).toBeNull()
+  })
+
+  it('offers the same way to ask again when the answer did not say, and it asks again', async () => {
+    const recorded = stubFetch([options({ documents: DOCUMENTS }), OPEN])
+    const user = userEvent.setup()
+
+    renderPage()
+
+    const alert = await screen.findByRole('alert')
+    const tryAgain = within(alert).getByRole('button', { name: /try again/i })
+
+    // Not a submit button, for the same reason as on the failed read.
+    expect(tryAgain).toHaveAttribute('type', 'button')
+
+    await user.click(tryAgain)
+
+    await waitFor(() => {
+      expect(screen.queryAllByRole('alert')).toEqual([])
+    })
+    expect(optionReads(recorded)).toHaveLength(2)
+    expect(registrations(recorded)).toEqual([])
+    expect(createAccount()).toBeEnabled()
+  })
+
+  it('keeps a good answer, and the form usable on it, when a later read of the options fails', async () => {
+    const recorded = stubFetch([OPEN, { kind: 'failed', status: 503 }])
+    const { client } = renderPage()
+
+    expect(await screen.findByRole('option', { name: 'Kuwait' })).toBeInTheDocument()
+    expect(createAccount()).toBeEnabled()
+
+    // A refetch — a window regaining focus, a reconnect — that fails. The
+    // query tells its observers in a batch on the next macrotask, so that
+    // task is let run too: without it the page is never told, and whatever it
+    // would have drawn on hearing is not what gets asserted below.
+    await act(async () => {
+      await client.refetchQueries()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    const [query] = client.getQueryCache().findAll()
+
+    expect(optionReads(recorded)).toHaveLength(2)
+    expect(query?.state.status).toBe('error')
+    // The answer already on screen still stands, and so does what it allows.
+    expect(screen.getByRole('option', { name: 'Kuwait' })).toBeInTheDocument()
+    expect(screen.queryAllByRole('alert')).toEqual([])
+    expect(createAccount()).toBeEnabled()
   })
 
   it('keeps drawing the page when the answer has no legal section at all', async () => {

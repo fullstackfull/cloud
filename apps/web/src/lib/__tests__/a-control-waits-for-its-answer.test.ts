@@ -16,7 +16,9 @@ import { describe, expect, it } from 'vitest'
  * surface, `PlansPage`'s Compute-plan button on `desired.data?.data === null`,
  * live while the desired state it computes from was unread. Both are a strict
  * comparison against a sentinel, evaluated on a value that can be absent. Both
- * are fixed in the components; this file keeps them fixed.
+ * are fixed in the components; this file keeps them fixed — each of the two
+ * must be judged, and judged shut, so rewriting either into a shape this file
+ * cannot read fails here as surely as reverting it.
  *
  * ## What this gate asserts, exactly
  *
@@ -24,13 +26,17 @@ import { describe, expect, it } from 'vitest'
  * resolved text literally contains `.data` leaves its control live while the
  * query behind that `.data` is unresolved.** "Live" means `disabled` comes out
  * anything but `true`, or `ready` anything but `false` — `Button` disables only
- * on `disabled === true`, and `ConfirmDialog`'s `ready` defaults to true.
+ * on `disabled === true`, and `ConfirmDialog`'s `ready` defaults to true. And
+ * **F-21's own two gates are always among those judged shut**
+ * (`FINDING_GATES`).
  *
  * It narrows exactly where that sentence does, and the narrowing is a pattern
  * match applied before the evaluation: a prop whose resolved text does not
  * contain `.data` is never judged, however it came by its value. The shapes
  * that walks past are listed under "What it cannot see", with the sites in
- * this tree that have them.
+ * this tree that have them. Where the text cannot tell what a name in a gate
+ * holds, steps 1 and 2 below hide or refuse that name rather than substitute
+ * a guess.
  *
  * ## How: evaluate, do not pattern-match
  *
@@ -40,23 +46,57 @@ import { describe, expect, it } from 'vitest'
  *
  *  1. Its expression is resolved by substituting `const` initialisers to a
  *     fixpoint. A name is looked up in the gate's own region first — a region
- *     runs from one column-zero declaration (`function`, `class`, `const`,
- *     `let`, exported or not) to the next — and then among the file's
- *     column-zero `const`s, exported or not. A parameter of the region's own
- *     declaration hides a column-zero `const` of the same name, and so does
- *     any other binding the region declares (a destructured `const`, a
- *     `let`, an inner `function`). A `const` initialised by a hook call is
- *     never substituted: it is the query itself. Only an initialiser that
- *     is complete on its own line is substituted; any other `const` only
- *     hides.
- *  2. Resolution **refuses** rather than guesses in three cases, and a refusal
+ *     runs from one column-zero declaration (a `function`, a named `class`, a
+ *     `const`, `let` or `var`, exported or not, or any `export default`) to
+ *     the next — and then among the file's column-zero `const`s, exported or
+ *     not. A parameter of the region's own declaration — the first function's
+ *     or arrow's parameter list opening on its line (or the next, when the
+ *     line ends on its `=`), wrapped in a call such as `memo(…)` or not —
+ *     hides a column-zero `const` of the same name, and so does any
+ *     declaration opening its own line in the region (a destructured `const`,
+ *     a `let`, an inner `function` or `class`). A `const` initialised by a
+ *     hook call is never substituted: it is the query itself. Only an
+ *     initialiser that is the whole statement on its own line is substituted:
+ *     the line closes every bracket it opens, holds one declarator and one
+ *     statement, and does not end on an operator, and the next line of code
+ *     is not indented deeper and does not open with something that can only
+ *     continue an expression (`?`, `:`, `||`, `&&`, `??`, `.`, `(`, `as`, and
+ *     the rest). Any other `const` only hides. That reading errs toward
+ *     hiding — a comma between generic arguments counts as a second
+ *     declarator — because a statement taken to end early is substituted as
+ *     something it is not, and can certify a live gate as shut, where one
+ *     taken to carry on only hides.
+ *  2. Resolution **refuses** rather than guesses in five cases, and a refusal
  *     is reported like any other gate that cannot be judged — whether or not
  *     the text reaches `.data`, since what the refused name would have
- *     brought in is exactly what is not known. The cases: a name declared
- *     more than once in the region; a declared name that is also a parameter
- *     of a callback, `catch` or `for` binding anywhere in the region, since
- *     which one a gate reads cannot be told from the text; and an expression
- *     that does not settle.
+ *     brought in is exactly what is not known. The cases:
+ *      - a name declared more than once in the region, or, declared nowhere
+ *        in it, more than once at column zero;
+ *      - a parameter of the region's own declaration that is also declared
+ *        inside it;
+ *      - a name declared in the region that is also bound anywhere else in
+ *        it, or a column-zero `const` bound anywhere in the region by
+ *        anything but the region's own parameters (which hide it): by a
+ *        parameter of an arrow function, a function or a method, whatever
+ *        it holds — a pattern, a default with a call in it, a function type;
+ *        by a `catch` or `for` binding, patterns included; by a declaration
+ *        that does not open its line, or that follows another on one, or
+ *        that is a `using`; by the name of a nested function or class. Which
+ *        one a gate reads cannot be told from the text;
+ *      - a column-zero `const` whose initialiser reads a name the region
+ *        binds: written at module scope, it reads module scope, and
+ *        substituted into the region its text would read the region's;
+ *      - an expression that does not settle.
+ *
+ *     The bindings are read from text, not from a parse, and the reading
+ *     errs one way on purpose. Declarations are read with comments blanked,
+ *     so commented-out code declares nothing — and a declaration only the
+ *     raw text shows, as behind a `/*` that was JSX text, counts as a
+ *     binding besides. Every pair of parentheses is examined, inside strings
+ *     and comments too, and the region is read both with its comments and
+ *     without them, keeping every name either reading finds. A name wrongly
+ *     taken for a binding costs a refusal; a binding missed would cost a
+ *     verdict about a value the control never reads.
  *  3. The resolved text is run against a stub of an unresolved query —
  *     twice, once **pending** and once **failed** — with every identifier
  *     written `X.data` or `X?.data` answering as that stub. Any other name
@@ -82,9 +122,11 @@ import { describe, expect, it } from 'vitest'
  *
  * **66** `disabled=`/`ready=` props in 37 files. **6** reach `.data`:
  * **4 shut** (`RegisterPage`'s Create account, `PlansPage`'s Compute plan and
- * Run, `InvoicesPage`'s pay-from-credit `ready`), **2 guarded**, 0 live. With
- * the two pre-fix lines restored, the same run reports exactly those two as
- * live. **60** are dropped by the `.data` filter:
+ * Run, `InvoicesPage`'s pay-from-credit `ready`), **2 guarded**, 0 live, and
+ * **0 refused** — the binding reading over-collects by design, and on this
+ * tree none of what it collects collides with a name a gate reads. With the
+ * two pre-fix lines restored, the same run reports exactly those two as live.
+ * **60** are dropped by the `.data` filter:
  *
  *  - **25**, in 19 files, gate on a field of a server record the control is
  *    drawn for — a record a parent read and passed down as a prop, or a row of
@@ -111,7 +153,7 @@ import { describe, expect, it } from 'vitest'
  *
  * ## What it cannot see
  *
- * Seven shapes pass silently. The site counts are measured on this tree.
+ * Six shapes pass silently. The site counts are measured on this tree.
  *
  *  1. A query read through a destructured `data` — three sites, above.
  *  2. A gate passed as a spread, `<Button {...{ disabled: x }}>`: no
@@ -119,19 +161,21 @@ import { describe, expect, it } from 'vitest'
  *  3. A value a parent read from a query and passed down, or a row of a list
  *     — 25 sites, and `AssignForm`'s, above.
  *  4. A value whose `const` is not substituted: one initialised through a
- *     hook (`useMemo`, `useState` from a query), one whose initialiser spans
- *     lines, or one whose initialiser holds an arrow function — the last so a
- *     `const` that is itself a function is never evaluated as a value, which
- *     also stops `ProvidersPage`'s and `AssignForm`'s `.find((…) => …)`.
+ *     hook (`useMemo`, `useState` from a query); one whose statement carries
+ *     on past its line, or whose line holds a second declarator or statement
+ *     (step 1); or one whose initialiser holds an arrow function — the last
+ *     so a `const` that is itself a function is never evaluated as a value,
+ *     which also stops `ProvidersPage`'s and `AssignForm`'s
+ *     `.find((…) => …)`. Of the `const`s whose line is bracket-balanced, six
+ *     in this tree hide for the second reason alone: five whose statement
+ *     carries on past the line, and `OperatorsPage`'s
+ *     `new Map<string, typeof catalogue>()`, whose generic-argument comma
+ *     reads as a second declarator. None of the six reads `.data`, and no
+ *     verdict turns on them.
  *  5. A gate computed in a `.ts` file, or by calling a function: the text
  *     holds a call, not a `.data`. No site.
  *  6. A control gated by a prop with another name (`aria-disabled`,
  *     `isDisabled`, `canSubmit`). No site under a gate-like name.
- *  7. A column-zero `const`'s initialiser is resolved in the gate's region,
- *     not at module scope, so a region binding with the same name as
- *     something that initialiser reads would be substituted in its place. A
- *     hook cannot run at module scope, so no module `const` can reach a
- *     query's `.data`; no site.
  *
  * Widening to any of these is deliberately not done here: an unmeasured
  * widening is worse than a measured boundary.
@@ -159,8 +203,8 @@ interface Region {
   end: number
   /** The parameters of the region's own declaration. */
   params: Set<string>
-  /** Parameters of callbacks, `catch` and `for` bindings anywhere inside it. */
-  innerBindings: Set<string>
+  /** Every other binding anywhere inside it, with what binds it: see `bindingsIn`. */
+  innerBindings: Map<string, string>
   declarations: Map<string, Declaration[]>
 }
 
@@ -302,7 +346,14 @@ function balanced(text: string): boolean {
   return depth === 0
 }
 
-/** Splits on `separator` where it is not inside brackets or a string. */
+/**
+ * Splits on `separator` where it is not inside brackets or a string.
+ *
+ * Angle brackets are not counted. Over a parameter list that splits a generic
+ * type's arguments apart, which only adds names; counting them would let the
+ * `>` of an arrow type, or a comparison in a default, swallow every parameter
+ * after it.
+ */
 function splitTopLevel(text: string, separator: string): string[] {
   const parts: string[] = []
   let depth = 0
@@ -317,8 +368,8 @@ function splitTopLevel(text: string, separator: string): string[] {
       continue
     }
 
-    if (character === '(' || character === '[' || character === '{' || character === '<') depth += 1
-    if (character === ')' || character === ']' || character === '}' || character === '>') depth -= 1
+    if (character === '(' || character === '[' || character === '{') depth += 1
+    if (character === ')' || character === ']' || character === '}') depth -= 1
 
     if (depth === 0 && character === separator) {
       parts.push(text.slice(from, index))
@@ -333,12 +384,15 @@ function splitTopLevel(text: string, separator: string): string[] {
   return parts
 }
 
+/** TypeScript's parameter-property modifiers, which come before the name they modify. */
+const MODIFIERS = /^(?:(?:public|private|protected|readonly|override)\s+)+/
+
 /** The names a parameter list or a destructuring pattern binds. */
 function bindingNames(list: string): string[] {
   const names: string[] = []
 
   for (const item of splitTopLevel(list, ',')) {
-    let piece = item.trim().replace(/^\.\.\./, '')
+    let piece = item.trim().replace(/^\.\.\./, '').replace(MODIFIERS, '')
 
     if (piece === '') continue
 
@@ -422,20 +476,425 @@ function mapIdentifiers(text: string, replace: (name: string) => string | null):
   return out
 }
 
+/*
+ * A column-zero declaration opens a region: a named function, class, `const`,
+ * `let` or `var`, exported or not, and any `export default` — whose function
+ * or class need not have a name.
+ */
 const OPENER =
-  /^(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function\s*\*?\s*([A-Za-z_$][\w$]*)|class\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*))/
+  /^(?:(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function\b\s*\*?\s*([A-Za-z_$][\w$]*)?|class\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*))|export\s+default\b)/
 
 const DECLARATION = /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::\s*([^=]*?))?\s*=(?![=>])\s*(.*)$/
 
-/** A `const` line's initialiser, when it is complete on that line and not a hook call. */
+/**
+ * A `const` line's initialiser, when the line holds the whole of it and
+ * nothing else, and it is not a hook call or a function. Whether the statement
+ * carries on to the next line is `carriesOn`'s question, asked by the caller.
+ */
 function substitutable(rest: string): string | null {
   const init = rest.replace(/\s+\/\/.*$/, '').replace(/;\s*$/, '').trim()
 
   if (init === '' || !balanced(init)) return null
+  // A second declarator (`= a, b = c`) or a second statement (`= a; f()`):
+  // the text after `=` is then not this constant's value.
+  if (splitTopLevel(init, ',').length > 1 || splitTopLevel(init, ';').length > 1) return null
   if (/^(?:await\s+)?use[A-Z0-9]\w*\s*(?:<[^>]*>)?\s*\(/.test(init)) return null
   if (/=>/.test(init) || /^(?:async\s+)?function\b/.test(init)) return null
 
   return init
+}
+
+/**
+ * `text` with every comment blanked to spaces and its line breaks kept, so
+ * offsets and line numbers do not move and nothing a comment says is read as
+ * code. A `//` or `/*` written as JSX text is blanked too, which is why the
+ * bindings are also read from the raw text (`modelOf`).
+ */
+function withoutComments(text: string): string {
+  let out = ''
+  let index = 0
+
+  while (index < text.length) {
+    const character = text.charAt(index)
+
+    if (character === "'" || character === '"' || character === '`') {
+      const end = endOfString(text, index)
+      out += text.slice(index, end)
+      index = end
+      continue
+    }
+
+    if (character === '/' && text.charAt(index + 1) === '/') {
+      const newline = text.indexOf('\n', index)
+      const end = newline === -1 ? text.length : newline
+      out += ' '.repeat(end - index)
+      index = end
+      continue
+    }
+
+    if (character === '/' && text.charAt(index + 1) === '*') {
+      const close = text.indexOf('*/', index + 2)
+      const end = close === -1 ? text.length : close + 2
+      out += text.slice(index, end).replace(/[^\n]/g, ' ')
+      index = end
+      continue
+    }
+
+    out += character
+    index += 1
+  }
+
+  return out
+}
+
+/** Text that, ending a line, leaves the expression on it unfinished. */
+const UNFINISHED =
+  /(?:[=+\-*/%&|^!~?:<>,.([{]|(?<![\w$])(?:typeof|instanceof|in|of|new|await|void|delete|as|satisfies|yield|keyof))$/
+
+/** Text that, opening a line, can only carry on the expression before it. */
+const CONTINUING = /^(?:[^\w$\s})\];]|(?:as|satisfies|instanceof|in|of)(?![\w$]))/
+
+/** The next line of code after a line break: its indentation and its text. */
+const NEXT_LINE = /(?:[ \t]*\r?\n)*([ \t]*)(\S[^\n]*)?/y
+
+/**
+ * Whether the statement whose line ends at `lineEnd` carries on to the next
+ * line: that line leaves its expression unfinished, or the next line of code
+ * is indented deeper than `indent` (the statement's own line), or opens with
+ * something that can only continue an expression — `?`, `:`, `||`, `&&`,
+ * `??`, `.`, `(`, `as`, and the rest. `text` has its comments blanked, so a
+ * comment between two lines of one statement is a blank line here.
+ *
+ * It says yes when in doubt, and that direction is the point: a statement
+ * taken to end early is substituted as something it is not, and can certify a
+ * live gate as shut; a statement taken to carry on only hides.
+ */
+function carriesOn(text: string, lineEnd: number, indent: number): boolean {
+  const lineStart = text.lastIndexOf('\n', lineEnd - 1) + 1
+
+  if (UNFINISHED.test(text.slice(lineStart, lineEnd).trimEnd())) return true
+
+  NEXT_LINE.lastIndex = lineEnd + 1
+  const next = lineEnd >= text.length ? null : NEXT_LINE.exec(text)
+  const nextText = next?.[2]
+
+  if (next === null || nextText === undefined) return false
+
+  return (next[1]?.length ?? 0) > indent || CONTINUING.test(nextText)
+}
+
+// ---------------------------------------------------------------------------
+// Every other binding in a region
+// ---------------------------------------------------------------------------
+
+function skipSpace(text: string, index: number): number {
+  let at = index
+  while (at < text.length && /\s/.test(text.charAt(at))) at += 1
+  return at
+}
+
+function identifierEnd(text: string, index: number): number {
+  let at = index + 1
+  while (at < text.length && IDENTIFIER_PART.test(text.charAt(at))) at += 1
+  return at
+}
+
+/** The indentation of the line that `index` is on. */
+function indentAt(text: string, index: number): number {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1
+  return /^[ \t]*/.exec(text.slice(lineStart, index))?.[0].length ?? 0
+}
+
+/** Words after which a type is still expected, so a `{` is an object type and not a body. */
+const TYPE_OPERATORS = new Set(['keyof', 'typeof', 'extends', 'is', 'infer', 'readonly', 'unique', 'asserts'])
+
+/**
+ * What follows the `)` at `close`: `=>`, which makes the brackets an arrow
+ * function's parameters; `{`, a function or method body; or neither. A return
+ * type between them — `(row): Row =>`, `(): () => void =>`,
+ * `(): { ok: boolean } =>` — is read through, bracket by bracket.
+ */
+function afterParameters(text: string, close: number): 'arrow' | 'body' | null {
+  let at = skipSpace(text, close + 1)
+
+  if (text.startsWith('=>', at)) return 'arrow'
+  if (text.charAt(at) === '{') return 'body'
+  if (text.charAt(at) !== ':') return null
+
+  at += 1
+  let angle = 0
+  let expectingType = true
+  const limit = Math.min(text.length, at + 500)
+
+  while (at < limit) {
+    const character = text.charAt(at)
+
+    if (/\s/.test(character)) {
+      at += 1
+      continue
+    }
+
+    if (text.startsWith('=>', at)) {
+      if (angle === 0) return 'arrow'
+      at += 2
+      expectingType = true
+      continue
+    }
+
+    if (character === '{' && !expectingType && angle === 0) return 'body'
+
+    if (character === '(' || character === '[' || character === '{') {
+      const end = closing(text, at)
+      if (end === -1) return null
+      at = end + 1
+      expectingType = false
+      continue
+    }
+
+    if (character === "'" || character === '"' || character === '`') {
+      at = endOfString(text, at)
+      expectingType = false
+      continue
+    }
+
+    if (character === '<') {
+      angle += 1
+      at += 1
+      expectingType = true
+      continue
+    }
+
+    if (character === '>') {
+      if (angle === 0) return null
+      angle -= 1
+      at += 1
+      expectingType = false
+      continue
+    }
+
+    if ('|&?:,.'.includes(character)) {
+      if (character === ',' && angle === 0) return null
+      at += 1
+      expectingType = character !== '.'
+      continue
+    }
+
+    if (IDENTIFIER_PART.test(character)) {
+      const end = identifierEnd(text, at)
+      expectingType = TYPE_OPERATORS.has(text.slice(at, end))
+      at = end
+      continue
+    }
+
+    return null
+  }
+
+  return null
+}
+
+/** Statement heads whose parenthesised part is followed by a body and binds nothing. */
+const CONTROL_HEADS = new Set(['if', 'for', 'while', 'switch', 'with'])
+
+/**
+ * What the brackets from `open` to `close` are, when they bind names: a
+ * `catch` binding, or the parameters of an arrow function, a function or a
+ * method. Null when they bind nothing.
+ */
+function parameterListKind(text: string, open: number, close: number): string | null {
+  const before = text.slice(Math.max(0, open - 200), open)
+
+  if (/(?<![\w$.])catch\s*$/.test(before)) return 'a `catch` binding'
+
+  const after = afterParameters(text, close)
+
+  if (after === 'arrow') return 'a callback parameter'
+  if (/(?<![\w$.])function\b\s*\*?\s*(?:[A-Za-z_$][\w$]*)?\s*(?:<[^()]*>)?\s*$/.test(before)) {
+    return 'a parameter of a nested function'
+  }
+
+  if (after === 'body') {
+    const head = /([A-Za-z_$][\w$]*)\s*(?:<[^()]*>)?\s*$/.exec(before)?.[1]
+    if (head === undefined || !CONTROL_HEADS.has(head)) return 'a method parameter'
+  }
+
+  return null
+}
+
+/**
+ * Where a type annotation that starts at `index`, just past its `:`, ends: at
+ * the `=`, `,`, `;` or closing bracket after it, or at a line break the
+ * statement does not carry on past.
+ */
+function endOfType(text: string, index: number, indent: number): number {
+  let at = index
+  let angle = 0
+
+  while (at < text.length) {
+    const character = text.charAt(at)
+
+    if (character === "'" || character === '"' || character === '`') {
+      at = endOfString(text, at)
+      continue
+    }
+
+    if (character === '(' || character === '[' || character === '{') {
+      const close = closing(text, at)
+      if (close === -1) return text.length
+      at = close + 1
+      continue
+    }
+
+    if (character === '=' && text.charAt(at + 1) === '>') {
+      at += 2
+      continue
+    }
+
+    if (character === '<') angle += 1
+    if (character === '>' && angle > 0) angle -= 1
+
+    if (angle === 0 && '=,;)]}'.includes(character)) return at
+    if (character === '\n' && angle === 0 && !carriesOn(text, at, indent)) return at
+
+    at += 1
+  }
+
+  return at
+}
+
+/**
+ * Where an initialiser that starts at `index`, just past its `=`, ends: at a
+ * `,` or `;` outside brackets, at the bracket that closes around it, or at a
+ * line break the statement does not carry on past.
+ */
+function endOfInitialiser(text: string, index: number, indent: number): number {
+  let at = index
+
+  while (at < text.length) {
+    const character = text.charAt(at)
+
+    if (character === "'" || character === '"' || character === '`') {
+      at = endOfString(text, at)
+      continue
+    }
+
+    if (character === '(' || character === '[' || character === '{') {
+      const close = closing(text, at)
+      if (close === -1) return text.length
+      at = close + 1
+      continue
+    }
+
+    if (',;)]}'.includes(character)) return at
+    if (character === '\n' && !carriesOn(text, at, indent)) return at
+
+    at += 1
+  }
+
+  return at
+}
+
+/**
+ * The names bound by the declarator list that starts at `index`, just past a
+ * `const`, `let`, `var` or `using`: every declarator, pattern or name, however
+ * many there are and whatever their types and initialisers hold.
+ */
+function declaratorNames(text: string, index: number): string[] {
+  const indent = indentAt(text, index)
+  const names: string[] = []
+  let at = index
+
+  for (;;) {
+    at = skipSpace(text, at)
+    const character = text.charAt(at)
+
+    if (character === '{' || character === '[') {
+      const close = closing(text, at)
+      if (close === -1) break
+      names.push(...bindingNames(text.slice(at, close + 1)))
+      at = close + 1
+    } else if (IDENTIFIER_START.test(character)) {
+      const end = identifierEnd(text, at)
+      names.push(text.slice(at, end))
+      at = end
+    } else {
+      break
+    }
+
+    at = skipSpace(text, at)
+    if (text.charAt(at) === '!') at = skipSpace(text, at + 1)
+    if (text.charAt(at) === ':') at = skipSpace(text, endOfType(text, at + 1, indent))
+    if (text.charAt(at) === '=' && text.charAt(at + 1) !== '=' && text.charAt(at + 1) !== '>') {
+      at = endOfInitialiser(text, at + 1, indent)
+    }
+
+    if (text.charAt(at) !== ',') break
+    at += 1
+  }
+
+  return names
+}
+
+/**
+ * Every name `text` binds other than by the declarations that open their own
+ * line, which the region records itself — each with what binds it:
+ *
+ *  - every bracket pair that is a parameter list: an arrow function's (its
+ *    return type read through), a function's, a method's, and a `catch`
+ *    binding, whatever the parameters hold — patterns, defaults with calls in
+ *    them, function types;
+ *  - a bare arrow parameter, `row => …`;
+ *  - every declarator of a `const`, `let` or `var` that does not open its
+ *    line — which is every `for` binding — and every declarator after the
+ *    first of one that does; and every declarator of a `using`, which the
+ *    region's own declarations do not record;
+ *  - the name of a function or class that does not open its line.
+ *
+ * It reads text, not a parse, and it errs one way on purpose: every bracket
+ * pair is examined, inside strings and comments too, so a name wrongly taken
+ * for a binding costs a refusal, where a binding missed would cost a verdict
+ * about a value the gate never reads.
+ */
+function bindingsIn(text: string): Map<string, string> {
+  const bindings = new Map<string, string>()
+  const bind = (names: string[], kind: string): void => {
+    for (const name of names) if (name !== '' && !bindings.has(name)) bindings.set(name, kind)
+  }
+
+  const onlyIndentBefore = (index: number, allowing = ''): boolean => {
+    const lineStart = text.lastIndexOf('\n', index - 1) + 1
+    return new RegExp(`^[ \\t]+${allowing}$`).test(text.slice(lineStart, index))
+  }
+
+  for (let index = text.indexOf('('); index !== -1; index = text.indexOf('(', index + 1)) {
+    const close = closing(text, index)
+    const kind = close === -1 ? null : parameterListKind(text, index, close)
+    if (kind !== null) bind(bindingNames(text.slice(index + 1, close)), kind)
+  }
+
+  for (const match of text.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g)) {
+    bind([match[1] ?? ''], 'a callback parameter')
+  }
+
+  for (const match of text.matchAll(/(?<![\w$.])(const|let|var|using(?=\s+[A-Za-z_$][\w$]*\s*=))\s+(?=[A-Za-z_$[{])/g)) {
+    const names = declaratorNames(text, match.index + match[0].length)
+    const inFor = /(?<![\w$.])for\s*(?:await\s*)?\(\s*$/.test(text.slice(Math.max(0, match.index - 40), match.index))
+
+    if (match[1] === 'using') {
+      bind(names, 'a `using` declaration')
+    } else if (onlyIndentBefore(match.index)) {
+      bind(names.slice(1), 'a second declarator on a line')
+    } else {
+      bind(names, inFor ? 'a `for` binding' : 'a declaration that does not open its line')
+    }
+  }
+
+  for (const match of text.matchAll(/(?<![\w$.])(function\b\s*\*?\s*|class\s+)([A-Za-z_$][\w$]*)/g)) {
+    if (!onlyIndentBefore(match.index, '(?:async\\s+)?')) {
+      bind([match[2] ?? ''], match[1]?.startsWith('class') === true ? 'a nested class' : 'a nested function')
+    }
+  }
+
+  return bindings
 }
 
 function addDeclaration(into: Map<string, Declaration[]>, name: string, declaration: Declaration): void {
@@ -445,61 +904,57 @@ function addDeclaration(into: Map<string, Declaration[]>, name: string, declarat
 }
 
 /** The parameters of the declaration that opens at `offset` in `text`. */
-function openerParams(text: string, offset: number, lineEnd: number): { names: string[]; end: number } {
-  const line = text.slice(offset, lineEnd)
-  const functionMatch = /^[^(=]*\bfunction\b[^(]*\(/.exec(line)
-  const arrowMatch = /=\s*(?:async\s+)?\(/.exec(line)
-  const bareArrow = /=\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>/.exec(line)
+/**
+ * The parameters of the declaration that opens at `offset`: the first
+ * function's or arrow's parameter list that opens on its line — wrapped in a
+ * call or not, so `memo(function X({ … }) {` and `forwardRef((props, ref) =>`
+ * are read like `function X({ … }) {` — or else a bare arrow parameter. A line
+ * that ends on its `=` is read with the next.
+ */
+function openerParams(text: string, offset: number, lineEnd: number): string[] {
+  const nextBreak = text.indexOf('\n', lineEnd + 1)
+  const searchEnd = /=\s*$/.test(text.slice(offset, lineEnd)) ? (nextBreak === -1 ? text.length : nextBreak) : lineEnd
+  const head = text.slice(offset, searchEnd)
 
-  const open =
-    functionMatch !== null
-      ? offset + functionMatch[0].length - 1
-      : arrowMatch !== null
-        ? offset + arrowMatch.index + arrowMatch[0].length - 1
-        : -1
-
-  if (open !== -1) {
+  for (let open = text.indexOf('(', offset); open !== -1 && open < searchEnd; open = text.indexOf('(', open + 1)) {
     const close = closing(text, open)
-    const params = close === -1 ? '' : text.slice(open + 1, close)
-    const isArrow = functionMatch !== null || /^\s*(?::[^=]*)?=>/.test(text.slice(close + 1, close + 200))
+    if (close === -1) break
 
-    return isArrow ? { names: bindingNames(params), end: close === -1 ? lineEnd : close + 1 } : { names: [], end: lineEnd }
+    const kind = parameterListKind(text, open, close)
+    if (kind === 'a callback parameter' || kind === 'a parameter of a nested function') {
+      return bindingNames(text.slice(open + 1, close))
+    }
   }
 
-  if (bareArrow?.[1] !== undefined) return { names: [bareArrow[1]], end: lineEnd }
+  const bareArrow = /=\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>/.exec(head)
 
-  return { names: [], end: lineEnd }
+  return bareArrow?.[1] === undefined ? [] : [bareArrow[1]]
 }
 
-/** Callback parameters, `catch` and `for` bindings in `text`. */
-function innerBindingsOf(text: string): string[] {
-  const names: string[] = []
+/** The names an indented line declares at its start: a pattern's, or one `const`, `let`, `var`, `function` or `class`. */
+function lineStartNames(text: string, offset: number, line: string): string[] {
+  if (!/^\s+/.test(line)) return []
 
-  for (const match of text.matchAll(/\(([^()]*)\)\s*(?::\s*[^=()]+?)?\s*=>/g)) {
-    names.push(...bindingNames(match[1] ?? ''))
+  const pattern = /^\s+(?:const|let|var)\s+([{[])/.exec(line)
+  if (pattern !== null) {
+    const open = offset + pattern[0].length - 1
+    const close = closing(text, open)
+    return bindingNames(text.slice(open, close === -1 ? open + 1 : close + 1))
   }
 
-  for (const match of text.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g)) {
-    if (match[1] !== undefined) names.push(match[1])
-  }
+  const other =
+    /^\s+(?:(?:let|var|const)\s+([A-Za-z_$][\w$]*)|(?:async\s+)?function\b\s*\*?\s*([A-Za-z_$][\w$]*)|class\s+([A-Za-z_$][\w$]*))/.exec(line)
+  const name = other?.[1] ?? other?.[2] ?? other?.[3]
 
-  for (const match of text.matchAll(/\bfunction\s*\*?\s*(?:[A-Za-z_$][\w$]*)?\s*\(([^()]*)\)/g)) {
-    names.push(...bindingNames(match[1] ?? ''))
-  }
-
-  for (const match of text.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][\w$]*)/g)) {
-    if (match[1] !== undefined) names.push(match[1])
-  }
-
-  for (const match of text.matchAll(/\bfor\s*\(\s*(?:const|let|var)\s+(.+?)\s+(?:of|in)\b/g)) {
-    names.push(...bindingNames(match[1] ?? ''))
-  }
-
-  return names
+  return name === undefined ? [] : [name]
 }
 
 function modelOf(source: SourceFile): FileModel {
-  const lines = source.text.split('\n')
+  // Comments blanked, so commented-out code declares nothing and an
+  // apostrophe in a comment cannot open a string. Same length, same lines.
+  const text = withoutComments(source.text)
+  const lines = text.split('\n')
+  const rawLines = source.text.split('\n')
   const offsets: number[] = []
   let running = 0
 
@@ -508,19 +963,29 @@ function modelOf(source: SourceFile): FileModel {
     running += line.length + 1
   }
 
-  const openers: { line: number; name: string }[] = []
+  const lineEndOf = (index: number): number => (offsets[index] ?? 0) + (lines[index]?.length ?? 0)
+
+  /** A `const` line's initialiser, when the statement is complete on that line. */
+  const initialiserOn = (index: number, rest: string): string | null => {
+    const init = substitutable(rest)
+    const indent = /^[ \t]*/.exec(lines[index] ?? '')?.[0].length ?? 0
+
+    return init !== null && !carriesOn(text, lineEndOf(index), indent) ? init : null
+  }
+
+  const openers: { line: number; name: string; head: number }[] = []
   const module = new Map<string, Declaration[]>()
 
   lines.forEach((line, index) => {
     const match = OPENER.exec(line)
     if (match === null) return
 
-    openers.push({ line: index, name: match[1] ?? match[2] ?? match[3] ?? '(anonymous)' })
+    openers.push({ line: index, name: match[1] ?? match[2] ?? match[3] ?? '(anonymous)', head: match[0].length })
 
     // A column-zero `const`, exported or not, is visible to every region.
     const declaration = DECLARATION.exec(line)
     if (declaration?.[1] !== undefined && /^(?:export\s+)?const\b/.test(line)) {
-      addDeclaration(module, declaration[1], { line: index, init: substitutable(declaration[3] ?? '') })
+      addDeclaration(module, declaration[1], { line: index, init: initialiserOn(index, declaration[3] ?? '') })
     } else if (match[3] !== undefined || match[1] !== undefined || match[2] !== undefined) {
       addDeclaration(module, match[1] ?? match[2] ?? match[3] ?? '', { line: index, init: null })
     }
@@ -529,51 +994,66 @@ function modelOf(source: SourceFile): FileModel {
   const regions: Region[] = []
   const firstOpener = openers[0]?.line ?? lines.length
 
-  regions.push({ name: '(module)', start: 0, end: firstOpener, params: new Set(), innerBindings: new Set(), declarations: new Map() })
+  regions.push({ name: '(module)', start: 0, end: firstOpener, params: new Set(), innerBindings: new Map(), declarations: new Map() })
 
   openers.forEach((opener, position) => {
     const start = opener.line
     const end = openers[position + 1]?.line ?? lines.length
     const startOffset = offsets[start] ?? 0
-    const lineEnd = startOffset + (lines[start]?.length ?? 0)
-    const params = openerParams(source.text, startOffset, lineEnd)
-    const endOffset = offsets[end] ?? source.text.length
-    const body = source.text.slice(params.end, endOffset)
+    const params = openerParams(text, startOffset, lineEndOf(start))
+    const endOffset = offsets[end] ?? text.length
 
     const declarations = new Map<string, Declaration[]>()
 
     for (let index = start + 1; index < end; index += 1) {
       const line = lines[index] ?? ''
+      const declaration = /^\s+/.test(line) ? DECLARATION.exec(line) : null
 
-      if (!/^\s+/.test(line)) continue
-
-      const pattern = /^\s+(?:const|let|var)\s+([{[])/.exec(line)
-      if (pattern !== null) {
-        const open = (offsets[index] ?? 0) + pattern[0].length - 1
-        const close = closing(source.text, open)
-        for (const name of bindingNames(source.text.slice(open, close === -1 ? open + 1 : close + 1))) {
-          addDeclaration(declarations, name, { line: index, init: null })
-        }
-        continue
-      }
-
-      const declaration = DECLARATION.exec(line)
       if (declaration?.[1] !== undefined) {
-        addDeclaration(declarations, declaration[1], { line: index, init: substitutable(declaration[3] ?? '') })
+        addDeclaration(declarations, declaration[1], { line: index, init: initialiserOn(index, declaration[3] ?? '') })
         continue
       }
 
-      const other = /^\s+(?:(?:let|var|const)\s+([A-Za-z_$][\w$]*)|(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*))/.exec(line)
-      const name = other?.[1] ?? other?.[2]
-      if (name !== undefined) addDeclaration(declarations, name, { line: index, init: null })
+      for (const name of lineStartNames(text, offsets[index] ?? 0, line)) {
+        addDeclaration(declarations, name, { line: index, init: null })
+      }
+    }
+
+    /*
+     * Everything after the opener's own name, its parameter list included:
+     * the region's own parameters are then found twice, which `lookup` reads
+     * the same as once. Read twice more, with comments and without, keeping
+     * every name either reading finds: the raw text can hide a binding behind
+     * an apostrophe in a comment, the blanked text behind a `//` that was
+     * JSX text rather than a comment.
+     */
+    const bodyStart = startOffset + opener.head
+    const innerBindings = bindingsIn(text.slice(bodyStart, endOffset))
+    for (const [name, kind] of bindingsIn(source.text.slice(bodyStart, endOffset))) {
+      if (!innerBindings.has(name)) innerBindings.set(name, kind)
+    }
+
+    // A declaration opening its line that only the raw text shows — blanked
+    // as a comment, which is right for commented-out code and wrong for a
+    // `/*` that was JSX text — is one more binding the gate cannot place.
+    const seen = new Map<string, number>()
+    for (let index = start + 1; index < end; index += 1) {
+      for (const name of lineStartNames(source.text, offsets[index] ?? 0, rawLines[index] ?? '')) {
+        seen.set(name, (seen.get(name) ?? 0) + 1)
+      }
+    }
+    for (const [name, count] of seen) {
+      if (count > (declarations.get(name)?.length ?? 0) && !innerBindings.has(name)) {
+        innerBindings.set(name, 'a declaration inside what reads as a comment')
+      }
     }
 
     regions.push({
       name: opener.name,
       start,
       end,
-      params: new Set(params.names),
-      innerBindings: new Set(innerBindingsOf(body)),
+      params: new Set(params),
+      innerBindings,
       declarations,
     })
   })
@@ -585,19 +1065,30 @@ type Lookup = { kind: 'substitute'; init: string } | { kind: 'free' } | { kind: 
 
 function lookup(name: string, model: FileModel, region: Region): Lookup {
   const local = region.declarations.get(name) ?? []
+  const parameter = region.params.has(name)
+  const inner = region.innerBindings.get(name)
   // The shadow filter, in this one place: a parameter of the region's own
   // declaration hides a column-zero `const` of the same name.
-  const module = region.params.has(name) ? [] : (model.module.get(name) ?? [])
-
-  if ((local.length > 0 || module.length > 0) && region.innerBindings.has(name)) {
-    return {
-      kind: 'refused',
-      reason: `\`${name}\` is declared in ${region.name} and is also a callback parameter there, so which one this gate reads cannot be told from the text`,
-    }
-  }
+  const module = parameter ? [] : (model.module.get(name) ?? [])
 
   if (local.length > 1) {
     return { kind: 'refused', reason: `\`${name}\` is declared ${String(local.length)} times in ${region.name}` }
+  }
+
+  if (local.length === 1 && parameter) {
+    return {
+      kind: 'refused',
+      reason: `\`${name}\` is a parameter of ${region.name} and is also declared inside it, so which one this gate reads cannot be told from the text`,
+    }
+  }
+
+  if (inner !== undefined && (local.length > 0 || module.length > 0)) {
+    const where = local.length > 0 ? `in ${region.name} and is also ${inner} there` : `at module scope and is also ${inner} in ${region.name}`
+
+    return {
+      kind: 'refused',
+      reason: `\`${name}\` is declared ${where}, so which one this gate reads cannot be told from the text`,
+    }
   }
 
   if (local.length === 0 && module.length > 1) {
@@ -606,9 +1097,41 @@ function lookup(name: string, model: FileModel, region: Region): Lookup {
 
   const found = local[0] ?? module[0]
 
-  if (found === undefined) return { kind: 'free' }
+  if (found === undefined || found.init === null) return { kind: 'free' }
 
-  return found.init === null ? { kind: 'free' } : { kind: 'substitute', init: found.init }
+  /*
+   * A column-zero `const` is written at module scope, and its initialiser
+   * reads module scope. Substituted as text into a gate, every name in it
+   * would be read in the gate's region instead — so a name the region binds
+   * too would be read as the region's, which is how an imported object's
+   * `.data` becomes the component's own query and is judged as one.
+   */
+  if (local.length === 0) {
+    const captured = [...namesIn(found.init)].find(
+      (read) => region.declarations.has(read) || region.params.has(read) || region.innerBindings.has(read),
+    )
+
+    if (captured !== undefined) {
+      return {
+        kind: 'refused',
+        reason: `\`${name}\` is a column-zero constant whose initialiser reads \`${captured}\`, which ${region.name} binds as well, so substituted here it would read the wrong one`,
+      }
+    }
+  }
+
+  return { kind: 'substitute', init: found.init }
+}
+
+/** The names `text` reads: every identifier that is not a property name or a keyword. */
+function namesIn(text: string): Set<string> {
+  const names = new Set<string>()
+
+  mapIdentifiers(text, (name) => {
+    names.add(name)
+    return null
+  })
+
+  return names
 }
 
 function resolve(expression: string, model: FileModel, region: Region): { resolved: string; refusal: string | null } {
@@ -875,6 +1398,25 @@ function probe(text: string, file = 'probe/Probe.tsx'): Report {
 // The gate
 // ---------------------------------------------------------------------------
 
+/**
+ * The finding's own two gates, each named by its file and the query it waits
+ * on. Each must always be judged, and judged shut: rewritten into a shape this
+ * file cannot read — a `const` across lines, a destructured `data`, a hook —
+ * it would otherwise drop out of the judged set in silence, and the defect
+ * could come back with it.
+ */
+const FINDING_GATES = [
+  { file: 'features/auth/RegisterPage.tsx', query: 'options', control: 'Create account' },
+  { file: 'features/controlCenter/PlansPage.tsx', query: 'desired', control: 'Compute plan' },
+] as const
+
+/** Those of the finding's own gates that `result` did not judge shut. */
+function findingGatesNotJudgedShut(result: Report): string[] {
+  return FINDING_GATES.filter(
+    ({ file, query }) => !result.shut.some((gate) => gate.file === file && queryRoots(gate.resolved).has(query)),
+  ).map(({ file, control }) => `${file} (${control})`)
+}
+
 describe('a control that waits on an answer is not live before the answer', () => {
   // Built inside the tests rather than while collecting them, so a gate that
   // throws fails a named test instead of taking the whole file down unnamed.
@@ -885,8 +1427,12 @@ describe('a control that waits on an answer is not live before the answer', () =
     // Floors, so a broken reader cannot pass this file by finding nothing.
     expect(tree().gates.length).toBeGreaterThan(50)
     expect(tree().reaching.length).toBeGreaterThanOrEqual(5)
-    // And the finding's own gate is always among those judged.
-    expect(tree().shut.map((gate) => gate.file)).toContain('features/auth/RegisterPage.tsx')
+    // And the finding's own gates are always among those judged, and shut.
+    expect(
+      findingGatesNotJudgedShut(tree()),
+      'One of F-21’s own gates is no longer judged shut. If it was rewritten into a shape this file cannot read, ' +
+        'rewrite it into one it can: this file is what keeps it fixed.',
+    ).toEqual([])
   })
 
   it('leaves no control live while the query behind it is unresolved', () => {
@@ -933,15 +1479,21 @@ describe('the gate reddens on the defect it exists for', () => {
   const PLANS_FIXED = 'disabled={desired.data === undefined || desired.data.data === null}'
   const PLANS_BROKEN = 'disabled={desired.data?.data === null}'
 
-  function withLines(replacements: Record<string, [string, string]>): SourceFile[] {
+  /** The tree, with each file's `[from, to]` pairs applied in order. */
+  function withLines(replacements: Record<string, [string, string] | [string, string][]>): SourceFile[] {
     return readSources().map((source) => {
       const replacement = replacements[source.file]
       if (replacement === undefined) return source
 
-      const [from, to] = replacement
-      expect(source.text, `${source.file} no longer carries ${from}; update this drift test with it`).toContain(from)
+      const pairs: [string, string][] = typeof replacement[0] === 'string' ? [replacement as [string, string]] : (replacement as [string, string][])
+      let text = source.text
 
-      return { ...source, text: source.text.replace(from, to) }
+      for (const [from, to] of pairs) {
+        expect(text, `${source.file} no longer carries ${from}; update this drift test with it`).toContain(from)
+        text = text.replace(from, to)
+      }
+
+      return { ...source, text }
     })
   }
 
@@ -965,6 +1517,38 @@ describe('the gate reddens on the defect it exists for', () => {
 
     expect(live).toHaveLength(2)
     expect(live.some((line) => line.startsWith(`${PLANS}:`) && line.includes('desired.data?.data === null'))).toBe(true)
+  })
+
+  it('does not certify F-21’s own defect written across lines, and names the gate it can no longer judge', () => {
+    // "Not knowing is permission", in the codebase's own multi-line style. The
+    // first line alone is bracket-balanced and reads as a gate that waits.
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          '  const registrationPermitted = permitted === true\n',
+          '  const registrationPermitted = options.data !== undefined\n    ? permitted === true\n    : true\n',
+        ],
+      }),
+    )
+
+    expect(result.shut.filter((gate) => gate.file === REGISTER)).toEqual([])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it('names the Compute-plan gate too when its twin is written across lines', () => {
+    const result = report(
+      withLines({
+        [PLANS]: [
+          [
+            '  const desired = useDesiredState(server.id)\n',
+            '  const desired = useDesiredState(server.id)\n  const computeClosed = desired.data\n    ?.data === null\n',
+          ],
+          [PLANS_FIXED, 'disabled={computeClosed}'],
+        ],
+      }),
+    )
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${PLANS} (Compute plan)`])
   })
 })
 
@@ -1092,6 +1676,46 @@ export function Probe({ answer }: { answer: Answer }) {
     expect(result.live).toHaveLength(1)
   })
 
+  it.each([
+    ['`memo(function …)`', 'export const Probe = memo(function Probe({ ready }: { ready: boolean }) {\n  return <Button disabled={!ready}>x</Button>\n})'],
+    ['`forwardRef((…) => …)`', 'export const Probe = forwardRef<HTMLButtonElement, Props>(({ ready }, ref) => {\n  return <Button ref={ref} disabled={!ready}>x</Button>\n})'],
+    ['nothing, its arrow on the next line', 'export const Probe =\n  ({ ready }: { ready: boolean }) => <Button disabled={!ready}>x</Button>'],
+  ])('lets a parameter of a component wrapped in %s hide a module constant too', (_wrapper, component) => {
+    const result = probe(`import { probeState } from './fixtures'
+
+const ready = probeState.data?.data.ok === true
+
+${component}`)
+
+    // The gate reads the prop. Substituted, the module constant would come
+    // out false while pending, and `!ready` shut.
+    expect(result.shut).toEqual([])
+    expect(result.unjudgeable.size).toBe(0)
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['!ready'])
+  })
+
+  it('refuses a module constant whose initialiser reads a name the component binds too', () => {
+    const direct = `import { answer } from './fixtures'
+
+const shut = answer.data === undefined
+
+export function Probe() {
+  const answer = useProbeAnswer()
+  return <Button disabled={shut}>x</Button>
+}`
+    // One constant further away, so the check is made at every substitution.
+    const transitive = direct.replace('const shut = answer.data === undefined', 'const closed = answer.data === undefined\nconst shut = closed')
+
+    for (const text of [direct, transitive]) {
+      const result = probe(text)
+
+      // Substituted as text, the imported object's `.data` would be read as
+      // the component's own query: pending, so undefined, so "shut".
+      expect(result.shut).toEqual([])
+      expect([...result.unjudgeable.values()].join('\n')).toContain('whose initialiser reads `answer`, which Probe binds as well')
+    }
+  })
+
   it('refuses a name declared twice in one component rather than picking one', () => {
     const result = probe(`export function Probe() {
   const answer = useProbeAnswer()
@@ -1126,6 +1750,148 @@ export function Probe({ answer }: { answer: Answer }) {
     // gate that actually reads the row's own field.
     expect(result.shut).toEqual([])
     expect(result.unjudgeable.get('probe/Probe.tsx::!ready')).toContain('also a callback parameter')
+  })
+
+  /*
+   * Every other way a name can be bound inside a component. Each of these
+   * probes, at the commit that introduced the refusal above, was reported
+   * shut on the component's constant: a verdict about a value the control
+   * never reads, in the direction that blesses it.
+   */
+  it.each([
+    ['a destructured `catch` binding', 'try { run() } catch ({ ready }) { return <Button disabled={!ready}>x</Button> }', 'a `catch` binding'],
+    ['a typed `catch` binding', 'try { run() } catch (ready: unknown) { return <Button disabled={!ready}>x</Button> }', 'a `catch` binding'],
+    ['a classic `for` binding', 'for (let ready = 0; ready < 1; ready++) out.push(<Button disabled={!ready}>x</Button>)', 'a `for` binding'],
+    ['a `for await` pattern', 'for await (const [ready] of stream) out.push(<Button disabled={!ready}>x</Button>)', 'a `for` binding'],
+    ['a bare arrow parameter', 'return rows.map(ready => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a callback parameter whose default holds a call', 'return rows.map((ready = Boolean(0)) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a callback parameter with a function type', 'return rows.map((ready: () => boolean) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a parameter after one with a function type', 'return rows.map((row: () => void, ready: boolean) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a pattern whose default is an arrow', 'return rows.map(({ ready = () => true }) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a parameter behind a comment with an apostrophe', "return rows.map((\n    // the row's own flag\n    ready,\n  ) => <Button key=\"k\" disabled={!ready}>x</Button>)", 'a callback parameter'],
+    ['a parameter after JSX text with an apostrophe', "return <div><p>Don't</p>{rows.map((ready) => <Button key=\"k\" disabled={!ready}>x</Button>)}</div>", 'a callback parameter'],
+    ['a parameter after a `//` in JSX text', 'return <div><p>a // b</p>{rows.map((ready) => <Button key="k" disabled={!ready}>x</Button>)}</div>', 'a callback parameter'],
+    ['a parameter with a generic return type', 'return rows.map((ready): ReturnType<typeof draw> => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a parameter with a function return type', 'return rows.map((ready): (() => JSX.Element) => () => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
+    ['a parameter of a generic function expression', 'return rows.map(function <T>(ready: T) { return <Button key="k" disabled={!ready}>x</Button> })', 'a parameter of a nested function'],
+    ['the name of a function expression', 'return rows.map(function ready() { return <Button key="k" disabled={!ready}>x</Button> })', 'a nested function'],
+    ['the name of a class expression', 'const Cell = class ready { render() { return <Button disabled={!ready}>x</Button> } }', 'a nested class'],
+    ['a method parameter', 'const table = { cell(ready: boolean) { return <Button disabled={!ready}>x</Button> } }', 'a method parameter'],
+    ['a parameter property', 'const Cell = class { constructor(private readonly ready: boolean) { draw(<Button disabled={!ready}>x</Button>) } }', 'a method parameter'],
+    ['a setter parameter', 'const view = { set value(ready: boolean) { draw(<Button disabled={!ready}>x</Button>) } }', 'a method parameter'],
+    ['a declaration inside a line', 'return rows.map((row) => { const ready = row.ok; return <Button key={row.id} disabled={!ready}>x</Button> })', 'a declaration that does not open its line'],
+    ['a second declarator on a line', 'if (answer.isError) {\n    let seen: Map<string, number> = new Map(), ready = seen.size > 0\n    return <Button disabled={!ready}>x</Button>\n  }', 'a second declarator on a line'],
+    ['a `using` declaration', 'if (answer.isError) {\n    using ready = acquire()\n    return <Button disabled={!ready}>x</Button>\n  }', 'a `using` declaration'],
+  ])('refuses a constant that %s shadows rather than reading the constant', (_shape, body, kind) => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const ready = answer.data?.data.ok === true
+  ${body}
+}`)
+
+    expect(result.shut).toEqual([])
+    expect(result.unjudgeable.get('probe/Probe.tsx::!ready')).toContain(`is also ${kind} there`)
+  })
+
+  it('reads a declaration behind a `/*` that was JSX text as a binding it cannot place', () => {
+    const result = probe(`import { probeState } from './fixtures'
+
+const shut = probeState.data === undefined
+
+export function Probe() {
+  const answer = useProbeAnswer()
+  const hint = <p>Globs like /* match everything</p>
+  const shut = answer.data?.data === null
+  return <Button disabled={shut}>{hint}</Button>
+}`)
+
+    // Blanked as a comment, the component's own `shut` would vanish and the
+    // module's be judged in its place: shut, where the control is live.
+    expect(result.shut).toEqual([])
+    expect(result.unjudgeable.get('probe/Probe.tsx::shut')).toContain('a declaration inside what reads as a comment')
+  })
+
+  it('refuses a name that is both a parameter of the component and declared inside it', () => {
+    const result = probe(`export function Probe({ ready }: { ready: boolean }) {
+  const answer = useProbeAnswer()
+  if (answer.isError) {
+    const ready = answer.data?.data.ok === true
+    log(ready)
+  }
+  return <Button disabled={!ready}>x</Button>
+}`)
+
+    expect(result.shut).toEqual([])
+    expect(result.unjudgeable.get('probe/Probe.tsx::!ready')).toContain('is a parameter of Probe and is also declared inside it')
+  })
+
+  /*
+   * A constant whose statement carries on past its line only hides. Its first
+   * line alone is bracket-balanced in every one of these, and substituted it
+   * would be judged as a gate it is not: the first two are live while pending
+   * or failed, and the third is F-21's own "not knowing is permission".
+   */
+  it.each([
+    ['an `||` on the next line', 'const open = answer.data?.data.ok === true\n    || answer.isPending\n  return <Button disabled={!open}>x</Button>', '!open'],
+    ['an `&&` on the next line', 'const shut = answer.data === undefined\n    && answer.isFetching\n  return <Button disabled={shut}>x</Button>', 'shut'],
+    ['a ternary across lines', 'const permitted = answer.data?.data.ok\n  const open = answer.data !== undefined\n    ? permitted === true\n    : true\n  return <Button disabled={!open}>x</Button>', '!open'],
+    ['an operator ending the line, the next not indented', 'const shut = answer.data === undefined &&\n  answer.isFetching\n  return <Button disabled={shut}>x</Button>', 'shut'],
+    ['a comment between the lines', 'const open = answer.data?.data.ok === true\n    // pending counts as open\n    || answer.isPending\n  return <Button disabled={!open}>x</Button>', '!open'],
+    ['a call opening the next line, not indented', 'const shut = check\n  (answer.data)\n  return <Button disabled={shut}>x</Button>', 'shut'],
+    // The backstop: this codebase indents a statement it carries on, so a
+    // deeper line is read as one whatever it opens with.
+    ['a deeper next line, whatever it opens with', 'const shut = answer.data?.data === null\n    log(answer)\n  return <Button disabled={shut}>x</Button>', 'shut'],
+  ])('does not substitute the first line of a constant that carries on: %s', (_shape, body, resolved) => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  ${body}
+}`)
+
+    expect(result.shut).toEqual([])
+    expect(result.gates.map((gate) => gate.resolved)).toEqual([resolved])
+  })
+
+  it('still substitutes a constant whose statement ends on its own line', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const shut = answer.data?.data === null
+
+  return <Button disabled={shut}>x</Button>
+}`)
+
+    expect(result.live).toHaveLength(1)
+  })
+
+  it('does not substitute an initialiser that holds a second declarator or a second statement', () => {
+    for (const line of ['const shut = answer.data?.data === null, other = true', 'const shut = answer.data?.data === null; const other = true']) {
+      const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  ${line}
+  return <Button disabled={shut}>x</Button>
+}`)
+
+      // Substituted whole, the first would be `(…, other = true)`: true, and shut.
+      expect(result.shut, line).toEqual([])
+      expect(result.gates.map((gate) => gate.resolved), line).toEqual(['shut'])
+    }
+  })
+
+  it.each([
+    ['a function', 'export default function ({ ready }: { ready: boolean }) {\n  return <Button disabled={!ready}>x</Button>\n}'],
+    ['an arrow', 'export default ({ ready }: { ready: boolean }) => <Button disabled={!ready}>x</Button>'],
+  ])('opens a region at an export default of %s that has no name', (_kind, exported) => {
+    const result = probe(`function First() {
+  const answer = useProbeAnswer()
+  const ready = answer.data?.data.ok === true
+  return <Button disabled={!ready}>x</Button>
+}
+
+${exported}`)
+
+    // First's gate is judged on First's constant, and the default export's
+    // reads its own parameter, which is not First's business.
+    expect(result.shut.map((gate) => gate.region)).toEqual(['First'])
+    expect(result.unjudgeable.size).toBe(0)
   })
 
   it('judges a correct comparison with undefined rather than turning it away', () => {
