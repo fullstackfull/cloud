@@ -138,8 +138,9 @@ including while it is queued, building or suspended.
 A customer may cancel only an order whose invoice has taken no money. The invoice is read
 under its own lock inside the cancel, because it hears about a payment before the order
 does: the order leaves `PENDING_PAYMENT` only when the queued fulfilment job runs. A
-settlement that nevertheless finds a cancelled order credits what it took to the wallet
-and delivers nothing.
+settlement that nevertheless finds a cancelled order delivers nothing and credits to the
+wallet what the invoice took less what has already gone back (an overpayment surplus
+already in the wallet, or a refund), once.
 
 ## Renewal and the end of a service
 

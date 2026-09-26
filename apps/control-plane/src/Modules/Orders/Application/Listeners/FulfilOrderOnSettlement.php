@@ -60,8 +60,10 @@ use Throwable;
  * been paid — once it has, it may already be building, active or further
  * along, and asking for `paid` again would be an illegal move backwards rather
  * than the no-op it used to be. An order that has ended since is not fulfilled
- * a second time, and an order that was cancelled is not fulfilled at all: what
- * it took is credited back to the customer's wallet (F-05). StartSubscription refuses to create a second subscription for
+ * a second time, and an order that was cancelled is not fulfilled at all: the
+ * part of what it took that has not already gone back — to the wallet as a
+ * surplus, or by a refund — is credited to the customer's wallet (F-05).
+ * StartSubscription refuses to create a second subscription for
  * a line that has one, and ProvisionOrderedService returns the existing service
  * rather than a second machine — so a redelivered webhook, a retried job, or a
  * settlement that ran twice all produce one fulfilment.
@@ -163,15 +165,18 @@ final class FulfilOrderOnSettlement implements ShouldQueue
      *
      * CANCELLED is terminal, so the move to PAID below would be refused on
      * every retry and the job would end in failed_jobs with the money kept
-     * (F-05). Nothing is delivered for a withdrawn order; whatever it took is
-     * credited back instead. A zero-total order cancelled before this ran
-     * took nothing, and gets only the log line.
+     * (F-05). Nothing is delivered for a withdrawn order. What it took, less
+     * anything already credited to the wallet against its invoice or refunded on
+     * it, is credited to the wallet instead (CreditWhatACancelledOrderPaid says
+     * how the net is worked out); a retry finds nothing left to credit. A
+     * zero-total order cancelled before this ran took nothing, and gets only the
+     * log line.
      */
     private function handBackWhatACancelledOrderPaid(Order $order, OrderFinanciallySettled $event): void
     {
         $credited = $this->creditCancelled->execute((string) $order->getKey());
 
-        Log::warning('A settlement arrived for an order that was cancelled; nothing was delivered and what it took was credited to the wallet.', [
+        Log::warning('A settlement arrived for an order that was cancelled; nothing was delivered and what it still held was credited to the wallet.', [
             'order_id' => (string) $order->getKey(),
             'invoice_id' => $event->invoiceId,
             'basis' => $event->basis->value,

@@ -7,6 +7,8 @@ namespace Tests\Feature\Orders;
 use Carbon\CarbonImmutable;
 use Illuminate\Events\CallQueuedListener;
 use Illuminate\Support\Facades\Queue;
+use Lynomia\Modules\Billing\Application\Actions\CreditWhatACancelledOrderPaid;
+use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
@@ -302,6 +304,83 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
         $this->assertSame(OrderStatus::Cancelled, $order->refresh()->status);
         $this->assertSame(0, Service::query()->where('order_id', $order->getKey())->count());
         $this->assertSame(0, Subscription::query()->where('order_id', $order->getKey())->count());
+    }
+
+    #[Test]
+    public function a_surplus_already_in_the_wallet_is_not_credited_a_second_time(): void
+    {
+        /*
+         * The verifier's first B2 probe: 2.000 captured on a 1.500 invoice.
+         * SettleInvoice sends the 0.500 surplus to the wallet at settlement,
+         * so a cancelled order owes back 1.500 more — not the 2.000 capture.
+         */
+        [$customer] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        Queue::fake();
+
+        $this->settle($invoice, $customer, $invoice->total_minor + 500);
+
+        $ledger = app(WalletLedger::class);
+        $this->assertSame(500, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(), 'Precondition: the surplus went to the wallet at settlement.');
+
+        $order->forceFill(['status' => OrderStatus::Cancelled, 'cancelled_at' => now()])->save();
+
+        $this->runQueuedFulfilment();
+        $this->runQueuedFulfilment();
+
+        $this->assertSame(
+            $invoice->total_minor + 500,
+            $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
+            'The customer handed over total + 500 and must hold exactly that, not more.',
+        );
+    }
+
+    #[Test]
+    public function money_already_refunded_on_the_invoice_is_not_credited_again(): void
+    {
+        /*
+         * The verifier's second B2 probe: the paid invoice of a cancelled
+         * order is refunded in full by an operator, and the failed job is
+         * retried afterwards. The refund already gave the money back.
+         */
+        [$customer] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        Queue::fake();
+
+        $this->settle($invoice, $customer);
+        $order->forceFill(['status' => OrderStatus::Cancelled, 'cancelled_at' => now()])->save();
+
+        app(RecordInvoiceRefund::class)->execute($invoice->refresh(), Money::ofMinor($invoice->total_minor, 'KWD'));
+
+        $this->runQueuedFulfilment();
+
+        $ledger = app(WalletLedger::class);
+        $this->assertSame(0, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
+
+        // And the action reports what it did: nothing, on this run and the next.
+        $this->assertSame(0, app(CreditWhatACancelledOrderPaid::class)->execute((string) $order->getKey()));
+    }
+
+    #[Test]
+    public function the_credit_reports_what_it_moved_once_and_nothing_on_a_retry(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        Queue::fake();
+
+        $this->settle($invoice, $customer);
+        $order->forceFill(['status' => OrderStatus::Cancelled, 'cancelled_at' => now()])->save();
+
+        $credit = app(CreditWhatACancelledOrderPaid::class);
+
+        $this->assertSame($invoice->total_minor, $credit->execute((string) $order->getKey()));
+        $this->assertSame(0, $credit->execute((string) $order->getKey()));
     }
 
     // ---- case C: the capture lands after cancellation ---------------------
