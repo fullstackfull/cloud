@@ -171,9 +171,14 @@ final readonly class ReserveNodeCapacity
                 /*
                  * Written inside the same transaction as the counters, so the
                  * attribution and the commitment can never disagree. The unique
-                 * index on reservation_key is the real guard: two workers that
-                 * both passed the check above serialise here, and the loser's
-                 * transaction rolls back with its counter increment.
+                 * index on reservation_key among live rows is the real guard:
+                 * two workers that both passed the check above serialise here,
+                 * and the loser's transaction rolls back with its counter
+                 * increment. Among LIVE rows only, because a key whose
+                 * reservation was released — a create settled in review after
+                 * its automatic retries ran out — must be committable again by
+                 * the operator's retry of the same job; the released row stays
+                 * as the record of what was given back.
                  */
                 NodeCapacityReservation::create([
                     'node_id' => $locked->getKey(),

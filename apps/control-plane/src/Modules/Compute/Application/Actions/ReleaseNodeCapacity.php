@@ -46,12 +46,20 @@ final readonly class ReleaseNodeCapacity
             $reservation = null;
 
             if ($reservationKey !== null) {
+                /*
+                 * The LIVE reservation for the key. A key can carry released
+                 * rows beside it — a create whose automatic retries ran out is
+                 * released in review and committed again by the operator's
+                 * retry, under the same key — and reading one of those would
+                 * make the release of the live commitment a no-op.
+                 */
                 $reservation = NodeCapacityReservation::query()
                     ->where('reservation_key', $reservationKey)
+                    ->whereNull('released_at')
                     ->lockForUpdate()
                     ->first();
 
-                if ($reservation === null || ! $reservation->isLive()) {
+                if ($reservation === null) {
                     return $node->fresh() ?? $node;
                 }
             }
