@@ -103,7 +103,7 @@ independent re-audit follows. The specification is
 |---|---|---|---|
 | 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | re-verifying after repair | `708bfb1` |
 | 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | verifying | `505cbba` |
-| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | verifying | `c86647f` |
+| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | rejected (withdrawn profile strands a chassis), repairing | `c86647f` |
 | 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | verifying | `defcd5c` |
 | 05 | F-16 `--env` disarms production guards; operator RBAC (role removal, permission emptying, invite atomicity, bootstrap promotion); F-03 test; EndpointPolicy 5f00::/16 | upheld with reservations; merged `a607ea2`, full suite 5,199/5,199, 628 suites `skipped="0"`, exit 0 | `31c8357` |
 | 06 | F-26 empty reserved-zone default and preflight wording; I-3 customer blamed for operator misconfiguration | upheld with reservations; sentences narrowed in `862f416`; merged `306aa57` | `862f416` |
