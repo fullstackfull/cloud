@@ -30,22 +30,24 @@ subset `code_lines` follows, the constructs it stops at and the rules
 `reads_as_bash` applies are what attack on this gate has found so far, not a
 boundary inside which bash and this reading agree.
 
-Measured in the tree today, where this script prints 1 workflow file and 44
-run steps (`python3 infrastructure/scripts/check-ci-cannot-apply.py .`):
-20 `uses:` steps (`grep -E '^\\s+(- )?uses:' .github/workflows/*.yml`), of
-seven actions -- actions/checkout, cache, setup-node, setup-python and
-upload-artifact, opentofu/setup-opentofu and shivammathur/setup-php -- which
-check out, cache, install a toolchain or upload a file; no job-level `uses:`;
-no step read as another shell, every job being `runs-on: ubuntu-latest` with
-no `shell:` or `container:`; no `make` call; 11 steps that run a script file
-from this repository -- nine of the Python validators and self-tests here,
-pint, and test_safety_gate.sh, which runs ansible-playbook without --check
-against the runner itself through a throwaway `ansible_connection: local`
-inventory, running only `assert` and `debug`; 5 bash steps where `code_lines`
-stops early; and no step whose verdict removing comments changes, since no
-step's text matches a pattern in `APPLYING` even with its comments left in.
-The other steps run tools -- composer, npm and npx, php artisan, ansible-lint,
-tofu fmt and validate, git -- whose code is not read either. No package.json
+How much of the tree falls in each part is printed on every run, not written
+here, because a count typed into this docstring outlived the two steps that
+made it wrong: the output line gives the workflow files, the `run:` steps
+inspected, how many of those are read as bash and how many of those run past
+a construct where `code_lines` stops following, and the `uses:` steps whose
+code is not read. What those steps were when this paragraph was last revised,
+without the counts: the `uses:` steps are actions that check out, cache,
+install a toolchain or upload a file, and there is no job-level `uses:`; no
+step is read as another shell, every job being `runs-on: ubuntu-latest` with
+no `shell:` or `container:`; no step calls `make`; the steps that run a script
+file from this repository run the Python validators and self-tests here, pint,
+and test_safety_gate.sh, which runs ansible-playbook without --check against
+the runner itself through a throwaway `ansible_connection: local` inventory,
+running only `assert` and `debug`; and no step's verdict changes when its
+comments are removed, since no step's text matches a pattern in `APPLYING`
+even with its comments left in. The other steps run tools -- composer, npm and
+npx, php artisan, ansible-lint, tofu fmt, init and validate, git -- whose code
+is not read either. No package.json
 script names an applying command (`git ls-files '*package.json' | xargs grep
 -lE 'tofu|terraform|ansible-playbook|apply\\.sh'` finds none); the backend
 test suite that `php artisan test` runs holds application code that builds an
@@ -108,7 +110,7 @@ def both_readings(text: str) -> str:
     return text + "\n" + _CONTINUATION.sub(r"\1", text)
 
 
-def code_lines(text: str) -> str:
+def code_lines(text: str, stops: list[int] | None = None) -> str:
     """`text` with comments removed and line continuations joined, by a
     reading of a subset of bash's grammar.
 
@@ -128,9 +130,9 @@ def code_lines(text: str) -> str:
     written, and with continuations joined. Those are the constructs attack
     has found so far, not every place bash and this reading part: one not
     listed that bash reads differently
-    could make this remove a line bash runs. In the tree today it stops early
-    in 5 of the 44 `run:` steps, and in none does removing comments change the
-    verdict (the module docstring has the measurement).
+    could make this remove a line bash runs. How many steps it stops early
+    in is printed on every run; `stops`, when given, is appended the offset
+    where it stopped.
     """
     out: list[str] = []
     quote = ""  # the quote open here: "", "'", '"' or "$'"
@@ -192,6 +194,8 @@ def code_lines(text: str) -> str:
         at += 1
     else:
         return "".join(out)
+    if stops is not None:
+        stops.append(at)
     return "".join(out) + both_readings(text[at:])
 
 
@@ -233,8 +237,8 @@ def command_words(body: str, start: int) -> list[str] | None:
     removed by shlex's POSIX rules, so `-e "x --check"` is one word and not a
     flag. None when the quoting does not close under those rules -- `$'it\\'s'`
     is one such, being bash's and not POSIX's -- which the caller treats as no
-    check flag. In the tree today there is one `ansible-playbook` in any
-    `run:` text, with --syntax-check among its own words.
+    check flag. When this was last revised, every `ansible-playbook` in any
+    `run:` text had --syntax-check among its own words.
     """
     quote = None
     at = start
@@ -308,11 +312,13 @@ def main(argv: list[str]) -> int:
         return 1
 
     problems: list[str] = []
-    checked = 0
+    checked = as_bash = stopped = unread = 0
 
     for path in workflows:
         workflow = yaml.safe_load(path.read_text()) or {}
         for job_name, job, step in steps_of(workflow):
+            if step.get("uses"):
+                unread += 1
             command = step.get("run")
             if not command:
                 continue
@@ -324,7 +330,10 @@ def main(argv: list[str]) -> int:
             # rule, so they are removed only in a step `reads_as_bash` picks
             # out, and only as far as `code_lines` follows.
             if reads_as_bash(workflow, job, step):
-                body = code_lines(command)
+                as_bash += 1
+                stops: list[int] = []
+                body = code_lines(command, stops)
+                stopped += bool(stops)
             else:
                 body = both_readings(command)
             for applies, what in APPLYING:
@@ -334,7 +343,11 @@ def main(argv: list[str]) -> int:
                         f"'{step.get('name', '<unnamed>')}' {what}"
                     )
 
-    print(f"{len(workflows)} workflow file(s), {checked} run step(s) inspected")
+    print(
+        f"{len(workflows)} workflow file(s), {checked} run step(s) inspected: "
+        f"{as_bash} read as bash, {stopped} of them past a construct code_lines "
+        f"stops at; {unread} `uses:` step(s), whose code is not read"
+    )
 
     # A gate that inspected nothing is not a gate that found nothing. There are
     # workflow files here and not one of them has a non-empty `run:` step,

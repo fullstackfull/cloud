@@ -140,6 +140,9 @@ infra-validate: ## Static checks over the infrastructure tree (no network, no ho
 	python3 infrastructure/scripts/test_validate_runbook_alerts.py
 	python3 infrastructure/scripts/check-ci-cannot-apply.py .
 	python3 infrastructure/scripts/test_check_ci_cannot_apply.py
+	python3 infrastructure/scripts/list-tofu-root-modules.py .
+	python3 infrastructure/scripts/test_list_tofu_root_modules.py
+	python3 infrastructure/scripts/test_ci_steps.py
 	@# ansible-lint discovers its own corpus and says nothing about its size,
 	@# so each subject is asserted present first. This is CI's "Ansible lint"
 	@# step (.github/workflows/ci.yml), which says why; change one, change both.

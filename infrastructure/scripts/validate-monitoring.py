@@ -735,27 +735,94 @@ def receivers_for(
     return found or [receiver]
 
 
-def alertmanager_model_problems(monitoring: Path) -> list[str]:
-    """The Alertmanager that loads alertmanager.yml must be the one modelled.
+def _image_name(image: object) -> str:
+    """The repository's last path segment of a compose `image`, without tag or
+    digest: `prom/alertmanager:v0.28.1` is `alertmanager`."""
+    if not isinstance(image, str):
+        return ""
+    name = image.split("@", 1)[0].rsplit("/", 1)[-1]
+    return name.split(":", 1)[0]
 
-    Read from the compose file that runs it. With no compose file, or no
-    alertmanager service in it, there is nothing to hold the model to.
-    """
-    compose_path = monitoring / "docker-compose.monitoring.yml"
+
+def _bind_mounts(service: dict, compose_path: Path) -> list[tuple[Path, PurePosixPath]]:
+    """(source on disk, target in the container) for each short-form bind
+    mount (`./source:/target[:mode]` or `/source:/target[:mode]`) of a compose
+    service. A named volume starts empty and a long-form mount is not read."""
+    mounts: list[tuple[Path, PurePosixPath]] = []
+    for volume in service.get("volumes") or []:
+        if not isinstance(volume, str):
+            continue
+        parts = volume.split(":")
+        if len(parts) < 2 or not parts[0].startswith((".", "/")):
+            continue
+        mounts.append((
+            (compose_path.parent / parts[0]).resolve(),
+            PurePosixPath(parts[1].rstrip("/") or "/"),
+        ))
+    return mounts
+
+
+def _compose_services(compose_path: Path) -> dict | None:
+    """The compose file's `services`, {} when it has none, or None when the file
+    is absent or does not parse (reported with every file that does not)."""
     if not compose_path.exists():
-        return []
+        return None
     try:
         compose = yaml.safe_load(compose_path.read_text()) or {}
     except yaml.YAMLError:
+        return None
+    services = compose.get("services") if isinstance(compose, dict) else None
+    return services if isinstance(services, dict) else {}
+
+
+def alertmanager_model_problems(monitoring: Path) -> list[str]:
+    """The Alertmanager that loads alertmanager.yml must be the one modelled.
+
+    Called only when alertmanager/alertmanager.yml exists, so there is a file
+    whose routing the walk has just vouched for. What runs it is read from the
+    compose file: every service named `alertmanager`, running an image named
+    `alertmanager` from any registry, or bind-mounting that file. With no
+    compose file, or no such service in it, nothing says which Alertmanager
+    loads the file, and that is refused: a model held to nothing is a check
+    that reads nothing and passes. A compose file that does not parse is
+    reported with every other such file.
+    """
+    compose_path = monitoring / "docker-compose.monitoring.yml"
+    walked = (monitoring / "alertmanager" / "alertmanager.yml").resolve()
+    services = _compose_services(compose_path)
+    if services is None and compose_path.exists():
         return []  # reported with every other file that does not parse
-    service = ((compose or {}).get("services") or {}).get("alertmanager")
-    if not isinstance(service, dict):
-        return []
+    running = [
+        (key, service)
+        for key, service in (services or {}).items()
+        if isinstance(service, dict) and (
+            key == "alertmanager"
+            or _image_name(service.get("image")) == "alertmanager"
+            or any(source == walked for source, _ in _bind_mounts(service, compose_path))
+        )
+    ]
+    if not running:
+        return [
+            "alertmanager/alertmanager.yml is walked as Alertmanager "
+            f"{MODELLED_ALERTMANAGER.pattern} reads it, and no service in "
+            "docker-compose.monitoring.yml runs Alertmanager (none is named "
+            "`alertmanager`, runs an image of that name or mounts the file), so "
+            "nothing holds the model to the Alertmanager that loads it"
+        ]
+    problems: list[str] = []
+    for key, service in running:
+        problems.extend(_alertmanager_service_problems(key, service))
+    return problems
+
+
+def _alertmanager_service_problems(key: str, service: dict) -> list[str]:
+    """The model check for one compose service that runs Alertmanager."""
     problems: list[str] = []
     image = service.get("image")
     if not isinstance(image, str) or not MODELLED_ALERTMANAGER.match(image):
         problems.append(
-            f"docker-compose.monitoring.yml runs Alertmanager {image!r}, and the "
+            f"docker-compose.monitoring.yml runs Alertmanager {image!r} (service "
+            f"`{key}`), and the "
             f"route walk models {MODELLED_ALERTMANAGER.pattern}. Check the new "
             f"version's matcher parsers against the port in validate-monitoring.py "
             f"before widening MODELLED_ALERTMANAGER"
@@ -764,7 +831,7 @@ def alertmanager_model_problems(monitoring: Path) -> list[str]:
     arguments = command if isinstance(command, list) else [command]
     if any(UNMODELLED_ALERTMANAGER_FEATURE in str(argument) for argument in arguments):
         problems.append(
-            f"docker-compose.monitoring.yml starts Alertmanager with "
+            f"docker-compose.monitoring.yml starts Alertmanager (service `{key}`) with "
             f"{UNMODELLED_ALERTMANAGER_FEATURE}, under which only its UTF-8 matcher "
             f"parser runs; the route walk ports the classic parser and would "
             f"misread the file"
@@ -792,52 +859,73 @@ def alert_relabelling(monitoring: Path) -> bool:
     )
 
 
-def _yaml_mapping(path: Path) -> dict:
-    """A YAML file's top-level mapping, or {} when it is absent, unparsable or not one.
-
-    An unparsable file is reported with every other file that does not parse.
-    """
-    if not path.exists():
-        return {}
-    try:
-        document = yaml.safe_load(path.read_text())
-    except yaml.YAMLError:
-        return {}
-    return document if isinstance(document, dict) else {}
-
-
 # Go's flag package, which Loki's command line goes through: one dash or two,
 # the value after `=` or as the next argument.
 _LOKI_ALERTMANAGER_FLAG = re.compile(r"--?ruler\.alertmanager-url(?:=(.*))?", re.DOTALL)
+_LOKI_CONFIG_FLAG = re.compile(r"--?config\.file(?:=(.*))?", re.DOTALL)
+
+
+def _command_arguments(service: dict) -> list[str] | None:
+    """A compose service's `command` as arguments: a list as the arguments it
+    is, a string split as Compose splits one, like a shell. None when unset."""
+    command = service.get("command")
+    if isinstance(command, list):
+        return [str(argument) for argument in command]
+    if isinstance(command, str):
+        try:
+            return shlex.split(command)
+        except ValueError:
+            return command.split()
+    return None
+
+
+def _last_flag(arguments: list[str], flag: re.Pattern) -> str | None:
+    """The value of the last occurrence of a Go-style flag, or None. Every
+    argument is read, including any after the point where Go's flag parsing
+    would stop."""
+    value: str | None = None
+    for index, argument in enumerate(arguments):
+        found = flag.fullmatch(argument)
+        if not found:
+            continue
+        if found.group(1) is not None:
+            value = found.group(1)
+        elif index + 1 < len(arguments):
+            value = arguments[index + 1]
+    return value
 
 
 def _loki_flag_alertmanager_url(service: dict) -> str | None:
     """The last -ruler.alertmanager-url in a compose service's `command`, or None.
 
-    A list is read as the arguments it is; a string is split as Compose splits
-    one, like a shell. Every argument is read, including any after the point
-    where Go's flag parsing would stop, which can only make the check stricter.
+    Every argument is read, including any after the point where Go's flag
+    parsing would stop, which can only make the check stricter.
     """
-    command = service.get("command")
-    if isinstance(command, list):
-        arguments = [str(argument) for argument in command]
-    elif isinstance(command, str):
-        try:
-            arguments = shlex.split(command)
-        except ValueError:
-            arguments = command.split()
-    else:
-        return None
-    url: str | None = None
-    for index, argument in enumerate(arguments):
-        found = _LOKI_ALERTMANAGER_FLAG.fullmatch(argument)
-        if not found:
-            continue
-        if found.group(1) is not None:
-            url = found.group(1)
-        elif index + 1 < len(arguments):
-            url = arguments[index + 1]
-    return url
+    arguments = _command_arguments(service)
+    return None if arguments is None else _last_flag(arguments, _LOKI_ALERTMANAGER_FLAG)
+
+
+def _loki_config_source(service: dict, compose_path: Path) -> tuple[Path | None, str]:
+    """The file on disk a Loki service loads as its configuration, or None and
+    why not: its last -config.file, mapped back through the deepest short-form
+    bind mount (_bind_mounts) at or above that path, as Docker resolves it."""
+    config_file = _last_flag(_command_arguments(service) or [], _LOKI_CONFIG_FLAG)
+    if not config_file:
+        return None, (
+            "names no -config.file in its command, so the configuration it loads "
+            "is the image's own, which is not in this tree"
+        )
+    target = PurePosixPath(config_file)
+    best: tuple[Path, PurePosixPath] | None = None
+    for source, mounted in _bind_mounts(service, compose_path):
+        if (target == mounted or mounted in target.parents) and (
+            best is None or len(mounted.parts) > len(best[1].parts)
+        ):
+            best = (source, mounted)
+    if best is None:
+        return None, f"loads {config_file}, and no bind mount here supplies it"
+    source, mounted = best
+    return source.joinpath(*target.relative_to(mounted).parts), ""
 
 
 def loki_ruler_problems(monitoring: Path) -> list[str]:
@@ -845,53 +933,111 @@ def loki_ruler_problems(monitoring: Path) -> list[str]:
 
     What this reads, exactly:
 
-      * Whether the ruler is wired: `ruler.alertmanager_url` in
-        loki/loki-config.yml, or a -ruler.alertmanager-url argument in the
-        `command` of the compose service named `loki`
+      * Which Loki: every service in docker-compose.monitoring.yml named `loki`
+        or running an image named `loki` from any registry. With none, a
+        `loki/` directory holding YAML here is refused as configuration
+        nothing runs; with no `loki/` either, there is no Loki to check.
+      * Its configuration: the file its last -config.file names, mapped back
+        through its bind mounts (_loki_config_source). A service that names
+        none, or one whose file no bind mount supplies, or supplies from a
+        file that is missing or does not parse, is refused: the subject of
+        this check is that file, and not finding it is not a pass.
+      * Whether the ruler is wired: `ruler.alertmanager_url` in that file, or
+        a -ruler.alertmanager-url argument in the service's `command`
         (_loki_flag_alertmanager_url). Loki applies its flags after its
         config file (pkg/util/cfg DynamicUnmarshal), so either wires it.
-      * Where the rules must be: `ruler.storage.local.directory` in
-        loki/loki-config.yml.
-      * What is there: the `loki` service's short-form bind mounts
-        (`./source:/target[:mode]`) at or under that directory, and in each
-        the rules of the `*.yml` and `*.yaml` files that land at
-        `<directory>/<tenant>/<file>`, read with PyYAML. That depth is what
-        Loki 3.5's local rule store (pkg/ruler/rulestore/local) reads: a file
-        directly in the directory is not a tenant, and a directory inside a
-        tenant is skipped. The tenant is `fake` while `auth_enabled` is false.
+      * Where the rules must be: `ruler.storage.local.directory` in that file.
+      * What is there: the service's short-form bind mounts at or under that
+        directory, and in each the rules of the `*.yml` and `*.yaml` files
+        that land at `<directory>/<tenant>/<file>`, read with PyYAML. That
+        depth is what Loki 3.5's local rule store (pkg/ruler/rulestore/local)
+        reads: a file directly in the directory is not a tenant, and a
+        directory inside a tenant is skipped. The tenant is `fake` while
+        `auth_enabled` is false.
 
     A named volume starts empty and a long-form mount is not read, so neither
-    supplies a rule; that can only make the check stricter. `enable_api` would
-    let rules be pushed at runtime, but nothing here pushes any, and a ruler
-    that depends on an undocumented manual push is the configured-looking
-    empty ruler this refuses.
+    supplies a rule or a configuration; that can only make the check stricter.
+    `enable_api` would let rules be pushed at runtime, but nothing here pushes
+    any, and a ruler that depends on an undocumented manual push is the
+    configured-looking empty ruler this refuses.
 
-    Attack has found two escapes, and both are read now: a ruler wired by its
-    flag rather than in the config file, and rule files mounted at a depth
-    Loki never reads. That is where the attacks stopped, not the boundary.
-    Two forms this does not read, with their occupancy today from the
-    repository root, both 0 when this was written:
+    Attack has found four escapes, and all are read now: a ruler wired by its
+    flag rather than in the config file, rule files mounted at a depth Loki
+    never reads, a configuration file moved from the one path this used to
+    read, and a service key renamed from the one name it used to look up.
+    That is where the attacks stopped, not the boundary. Two forms this does
+    not read, with their occupancy from the repository root (both commands
+    printed 0 when this was written):
 
       another ruler flag, such as -ruler.storage.local.directory
           grep -cF -- '-ruler.' infrastructure/monitoring/docker-compose.monitoring.yml
       a Loki rule file Loki itself refuses (it would still be counted)
           find infrastructure/monitoring/loki -name '*.y*ml' ! -name loki-config.yml | wc -l
     """
-    config = _yaml_mapping(monitoring / "loki" / "loki-config.yml")
-    ruler = config.get("ruler") if isinstance(config.get("ruler"), dict) else {}
     compose_path = monitoring / "docker-compose.monitoring.yml"
-    services = _yaml_mapping(compose_path).get("services")
-    loki = (services.get("loki") if isinstance(services, dict) else None) or {}
-    loki = loki if isinstance(loki, dict) else {}
+    services = _compose_services(compose_path)
+    if services is None and compose_path.exists():
+        return []  # reported with every other file that does not parse
+    lokis = [
+        (str(key), service)
+        for key, service in (services or {}).items()
+        if isinstance(service, dict)
+        and (key == "loki" or _image_name(service.get("image")) == "loki")
+    ]
+    if not lokis:
+        loki_dir = monitoring / "loki"
+        if loki_dir.is_dir() and any(loki_dir.rglob("*.y*ml")):
+            return [
+                "loki/ holds Loki configuration, and no service in "
+                "docker-compose.monitoring.yml runs Loki (none is named `loki` or "
+                "runs an image of that name), so what its ruler evaluates cannot "
+                "be checked: run it, or remove it"
+            ]
+        return []
+
+    problems: list[str] = []
+    for key, service in lokis:
+        source, why = _loki_config_source(service, compose_path)
+        if source is None:
+            problems.append(f"the {key} service {why}; its ruler cannot be checked")
+            continue
+        try:
+            name = str(source.relative_to(monitoring.resolve()))
+        except ValueError:
+            name = str(source)
+        if not source.is_file():
+            problems.append(
+                f"the {key} service loads its configuration from {name}, which does "
+                f"not exist; its ruler cannot be checked"
+            )
+            continue
+        try:
+            document = yaml.safe_load(source.read_text())
+        except yaml.YAMLError:
+            problems.append(
+                f"the {key} service loads its configuration from {name}, which does "
+                f"not parse; its ruler cannot be checked"
+            )
+            continue
+        config = document if isinstance(document, dict) else {}
+        problems.extend(_loki_service_ruler_problems(key, service, name, config, compose_path))
+    return problems
+
+
+def _loki_service_ruler_problems(
+    key: str, service: dict, config_name: str, config: dict, compose_path: Path
+) -> list[str]:
+    """loki_ruler_problems for one service and the configuration it loads."""
+    ruler = config.get("ruler") if isinstance(config.get("ruler"), dict) else {}
 
     # Loki applies its flags after its config file, so either wires the ruler.
     # A flag set to empty over a configured URL unwires it; this reads it as
     # wired, which can only make the check stricter than Loki.
-    flagged = _loki_flag_alertmanager_url(loki)
+    flagged = _loki_flag_alertmanager_url(service)
     if flagged:
-        wired = f"the loki service's -ruler.alertmanager-url flag wires the ruler to {flagged}"
+        wired = f"the {key} service's -ruler.alertmanager-url flag wires the ruler to {flagged}"
     elif ruler.get("alertmanager_url"):
-        wired = f"loki/loki-config.yml wires the ruler to {ruler['alertmanager_url']}"
+        wired = f"{config_name} wires the ruler to {ruler['alertmanager_url']}"
     else:
         return []
 
@@ -901,17 +1047,10 @@ def loki_ruler_problems(monitoring: Path) -> list[str]:
     if not directory or not isinstance(directory, str):
         return [f"{wired} with no local rules directory; it has nothing to evaluate"]
 
-    for volume in loki.get("volumes") or []:
-        if not isinstance(volume, str):
-            continue
-        parts = volume.split(":")
-        if len(parts) < 2 or not parts[0].startswith((".", "/")):
-            continue  # a named volume starts empty; it is not a source of rules
-        root = PurePosixPath(directory.rstrip("/") or "/")
-        target = PurePosixPath(parts[1].rstrip("/") or "/")
+    root = PurePosixPath(directory.rstrip("/") or "/")
+    for source, target in _bind_mounts(service, compose_path):
         if target != root and root not in target.parents:
             continue
-        source = (compose_path.parent / parts[0]).resolve()
         rules = 0
         for path in sorted(source.rglob("*.y*ml")) if source.is_dir() else []:
             inside = target.joinpath(*path.relative_to(source).parts)
