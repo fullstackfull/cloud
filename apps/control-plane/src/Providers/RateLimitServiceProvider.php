@@ -152,7 +152,18 @@ final class RateLimitServiceProvider extends ServiceProvider
          * ThrottleRequests before `ResolveActingCustomer`, this closure found
          * no account, and the budget became one per administrator rather
          * than one per account. TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
-         * pins the attachment and the order;
+         * pins the attachment and the order on both invitation routes by
+         * name, and on any other route whose controller method uses the
+         * invitation mailer in a form its scan reads: a parameter of that
+         * type, the class's name, or a property of that type read with `->`,
+         * `?->` or `::`. That is not every way a route could reach the
+         * mailer — a helper, a service or a job between them is outside it,
+         * among other escapes attack has found, which are not the boundary.
+         * Its docblock lists the forms and the escapes, and records the two
+         * greps that measured the occupancy — the mailer's uses in src/ and
+         * app/ outside those forms — at 0 sites when it was written. This
+         * comment spells neither mail class's name, so that it does not add
+         * itself to what those greps count.
          * TheInvitationLimiterCannotBeRotatedByAHeaderTest pins the key — one
          * per account, shared by its administrators, and the same whether the
          * header carries nothing, junk, the account's own id in either case,

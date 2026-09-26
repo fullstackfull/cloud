@@ -56,42 +56,70 @@ use Tests\Feature\Team\TeamApiTestCase;
  *   invitation budget at all.
  *
  * **Which routes are "roads that post an invitation" is derived, not listed.**
- * A route is one when its controller method uses InvitationMailer in any of
- * these ways:
+ * A route is one when its controller method uses InvitationMailer in one of
+ * the forms below. They are the forms this scan reads. They are not every
+ * form PHP allows, and nobody has established where that larger set ends:
  *
  * - a parameter declared with that type — alone, nullable, or as a member of
  *   a union or an intersection;
  * - the class by name, in code — resolved the way PHP resolves it: imported,
  *   aliased (`use … as Postman`), qualified or fully qualified — or written
  *   out in a string, in any letter case;
- * - a property of the controller declared with that type, in the same sense
- *   as a parameter, and read with PHP's property syntax: `->mailer` or
- *   `?->mailer`, on `$this` or on anything else, or `::$mailer`, with any
- *   whitespace, line breaks or comments between the parts, and whatever is
- *   done with it next — a call on the same line or the next, a copy into a
- *   local, an argument, a closure. A property whose name is an expression
- *   (`->{…}`, `->$name`, `::$$name`) cannot be named without running the
- *   code, so in a controller that has such a property it counts as that
- *   property.
+ * - a property declared with that type, in the same sense as a parameter, on
+ *   the class that declares the method or on the routed controller (an
+ *   inherited action can read a protected property only the child declares),
+ *   and read as `->name`, `?->name` or `::$name`, on `$this` or on anything
+ *   else. The scan reads the operator and the one token after it, with
+ *   whitespace and comments between them dropped; what follows the name does
+ *   not matter to it. A name that is an expression — `->{…}`, `->$name`,
+ *   `?->{…}`, `?->$name`, `::$$name`, `::${…}` — cannot be read without
+ *   running the code, so in a controller that has such a property it counts
+ *   as that property.
  *
  * The body is read as PHP tokens; only the search for the class's name in a
  * string reads it as text. That search reads the whole of the method's text,
  * so the name in a comment, or inside an identifier such as
- * `$invitationMailer`, makes the route a road as well. That over-counts, and
- * over-counting can only add a road to check, never let one through.
- * the_scan_recognises_every_way_of_using_the_mailer_it_claims_to holds the
- * scan to this list with a fixture that uses the mailer each of these ways —
- * every layout above around `->`, `?->` and `::`, for a declared name and for
- * one that is an expression, included — bar a qualified or fully qualified
- * class name, which Pint rewrites into the import in a file that has one, and
- * with two near misses it must not count.
+ * `$invitationMailer`, makes the route a road as well; so does any bare name
+ * that matches an import, such as a property called `postman` in a file that
+ * imports the class as `Postman`. That over-counts, and over-counting can
+ * only add a road to check, never let one through.
+ *
+ * **What the fixture holds the scan to.**
+ * the_scan_recognises_each_use_of_the_mailer_the_fixture_holds runs the scan
+ * over SpellingsOfTheInvitationMailer and its parent, ParentOfTheSpellings,
+ * and goes red if it stops recognising any of their methods:
+ *
+ * - a parameter of each kind above;
+ * - the class by its imported name, by an alias, and in a string in two
+ *   letter cases;
+ * - a declared property name after `->`, `?->` and `::`; on `$this` and on
+ *   another handle; typed alone, nullable, as a union and as an intersection;
+ *   declared on the routed child and read by an inherited action, and private
+ *   to the parent and read by the parent's; used for a call, as an argument,
+ *   through a local and inside a closure; laid out with the call on the next
+ *   line, block comments between the parts, line breaks between the parts,
+ *   line comments around `?->`, and comments and a line break around `::`;
+ * - an expression name after `->` (`{'…'}` alone and after a comment, and
+ *   `$name` alone and after a line break and a comment), after `?->` (`{…}`
+ *   and `$name`), and after `::` (`$$name` alone, after a comment, and after
+ *   line comments and line breaks; and `${…}`);
+ *
+ * and it must not count two near misses: a property whose name starts the
+ * same, and a method with nothing to do with mail. Four spellings the scan
+ * reads are not in the fixture, because Pint rewrites them in a file that
+ * imports the class, as the fixture must: a qualified and a fully qualified
+ * class name, an alias written in another letter case, and whitespace beside
+ * `::` with no comment in it. Nothing here holds the scan to those four.
  *
  * A list of two route names would say nothing about the third road added next
- * to them; this rule does. The two names below are a floor under the
- * derivation, not the rule: if a refactor moves the send somewhere the scan
- * cannot see, the rule must fail rather than pass by checking nothing.
+ * to them; this rule does, for a third road that uses the mailer in one of the
+ * forms above. The two names below are a floor under the derivation, not the
+ * rule: if a refactor moves the send somewhere the scan cannot see, the rule
+ * must fail rather than pass by checking nothing.
  *
- * **What this does not cover:** a send reached indirectly — a helper method
+ * **What this does not cover.** These are the escapes attacking the scan has
+ * found. They are not the boundary: an attacker who stops has found the limit
+ * of the attack, not of the scan. A send reached indirectly — a helper method
  * (`__get` included), a service, a job, a listener or a console command
  * between the route and the mailer — or an InvitationMail posted without
  * InvitationMailer; a mailer property read other than by property syntax —
@@ -101,6 +129,18 @@ use Tests\Feature\Team\TeamApiTestCase;
  * `mixed`; closure routes; and the size of the budget, which is
  * configuration. The floor turns the first of those into a failure for the
  * two roads that exist today, not for a new one.
+ *
+ * What can be measured is how much of the tree sits outside the forms above.
+ * When this was written, from apps/control-plane,
+ * `grep -rlw -e InvitationMailer -e InvitationMail src app` listed 3 files:
+ * the mailer, its mail, and TeamController. The mail is built only inside
+ * the mailer, and TeamController's typed `$mailer` is read only as
+ * `$this->mailer->send(…)`, in `invite` and `resendInvitation`
+ * (`grep -rn -e '->mailer' src app`: 2 lines) — the floor's two roads, in a
+ * form the scan reads. The same grep over routes/ finds only the comment in
+ * routes/v1/team.php, so no closure route names it. Use of the mailer in
+ * src/ and app/ outside the forms above: 0 sites. That number, not the list
+ * of escapes, is what changes the day somebody writes one.
  *
  * **Why a test and not a check at boot.** Refusing to boot when a road that
  * posts an invitation lacks this limiter would make the mistake undeployable
@@ -197,17 +237,21 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
     }
 
     /**
-     * The scan reaches as far as this class's docblock says it does.
+     * The scan recognises each use of the mailer the fixture holds, and
+     * neither near miss.
      *
      * Every other test here trusts roadsThatPostAnInvitation(), so a scan
      * that missed a spelling would leave a third road unchecked while every
      * test stayed green — which is how a controller method that wrote
      * `$this->mailer` on one line and `->send()` on the next went unseen.
      * Each method of the fixture uses the mailer one way, or not at all, and
-     * the scan must give exactly this answer for every one of them.
+     * the scan must give exactly this answer for every one of them. A
+     * narrowing that stops recognising one of these methods goes red; one
+     * that touches only a spelling the fixture does not hold (the class
+     * docblock names those it knows of) does not.
      */
     #[Test]
-    public function the_scan_recognises_every_way_of_using_the_mailer_it_claims_to(): void
+    public function the_scan_recognises_each_use_of_the_mailer_the_fixture_holds(): void
     {
         $expected = [
             'theOrdinarySpelling' => true,
@@ -219,6 +263,11 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
             'aNameThatIsAVariableAfterALineBreakAndAComment' => true,
             'aNameThatIsALiteralAfterAComment' => true,
             'aStaticNameThatIsAVariableAfterAComment' => true,
+            'aStaticNameThatIsAVariableAfterALineBreakAndLineComments' => true,
+            'aNameInBracesAfterTheNullsafeOperator' => true,
+            'aNameThatIsAVariableAfterTheNullsafeOperator' => true,
+            'anInheritedActionReadingAPropertyTheChildDeclares' => true,
+            'anInheritedActionReadingAPropertyOnlyTheParentSees' => true,
             'asAnArgument' => true,
             'throughALocal' => true,
             'nullsafeAfterTheProperty' => true,
@@ -231,6 +280,7 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
             'aPropertyNamedByALiteral' => true,
             'aPropertyNamedByAVariable' => true,
             'aStaticPropertyNamedByAVariable' => true,
+            'aStaticPropertyNamedInBraces' => true,
             'theClassByAnAlias' => true,
             'theClassByItsImportedName' => true,
             'theClassInAString' => true,
@@ -247,7 +297,7 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
 
         foreach ((new ReflectionClass(SpellingsOfTheInvitationMailer::class))->getMethods() as $method) {
             if (! $method->isConstructor()) {
-                $answered[$method->getName()] = $this->usesTheInvitationMailer($method);
+                $answered[$method->getName()] = $this->usesTheInvitationMailer($method, SpellingsOfTheInvitationMailer::class);
             }
         }
 
@@ -355,7 +405,7 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
                 continue;
             }
 
-            if ($this->usesTheInvitationMailer(new ReflectionMethod($class, $method))) {
+            if ($this->usesTheInvitationMailer(new ReflectionMethod($class, $method), $class)) {
                 $roads[$route->getName() ?? $route->methods()[0].' '.$route->uri()] = $route;
             }
         }
@@ -364,15 +414,16 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
     }
 
     /**
-     * Whether a controller method uses InvitationMailer, in the ways the class
-     * docblock lists.
+     * Whether a controller method uses InvitationMailer in one of the forms
+     * the class docblock lists — no others.
      *
      * The body is read as PHP tokens rather than as text, so whitespace, line
-     * breaks and comments between `$this`, the operator and the name change
+     * breaks and comments between an operator and the name after it change
      * nothing, and a name is resolved against the file's own imports the way
-     * PHP resolves it.
+     * PHP resolves it. `$routed` is the controller the route names, which for
+     * an inherited action is not the class that declares the method.
      */
-    private function usesTheInvitationMailer(ReflectionMethod $method): bool
+    private function usesTheInvitationMailer(ReflectionMethod $method, string $routed): bool
     {
         foreach ($method->getParameters() as $parameter) {
             if ($this->isDeclaredAsTheMailer($parameter->getType())) {
@@ -399,11 +450,15 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
         $tokens = $this->significantTokensOf($file);
         [$namespace, $imports] = $this->namesInScopeAt($tokens, $first);
 
+        // The declaring class and the routed class both: an action inherited
+        // from a parent can read a property only the routed child declares.
         $properties = [];
 
-        foreach ((new ReflectionClass($method->class))->getProperties() as $property) {
-            if ($this->isDeclaredAsTheMailer($property->getType())) {
-                $properties[] = $property->getName();
+        foreach (array_unique([$method->class, $routed]) as $class) {
+            foreach ((new ReflectionClass($class))->getProperties() as $property) {
+                if ($this->isDeclaredAsTheMailer($property->getType())) {
+                    $properties[] = $property->getName();
+                }
             }
         }
 
@@ -416,8 +471,9 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
             $next = $body[$index + 1] ?? null;
 
             if ($next !== null && $token->is([T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR])) {
-                // `->mailer`, or `->{…}` / `->$name`: a name nobody can read
-                // without running the code, so any of them could be the mailer.
+                // `->mailer` / `?->mailer`, or `->{…}` / `->$name` and their
+                // `?->` forms: a name nobody can read without running the
+                // code, so any of them could be the mailer.
                 if ($next->is(T_STRING) ? in_array($next->text, $properties, true) : ($properties !== [] && ($next->text === '{' || $next->is(T_VARIABLE)))) {
                     return true;
                 }

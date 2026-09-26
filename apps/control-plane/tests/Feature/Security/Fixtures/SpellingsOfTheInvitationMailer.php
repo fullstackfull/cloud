@@ -12,24 +12,32 @@ use Lynomia\Modules\Identity\Infrastructure\Mail\InvitationMailer as Postman;
 
 /**
  * A controller nobody routes, whose methods use the invitation mailer in the
- * ways TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest says its scan
- * recognises — and two that must not count.
+ * forms TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest says its
+ * fixture holds — and two that must not count. Two more, inherited, are in
+ * ParentOfTheSpellings.
  *
  * The scan decides which routes must carry the invitation limiter, so how far
  * it reaches is a claim, and routes/v1/team.php repeats it. The only way to
  * test that claim used to be adding a route to TeamController by hand and
  * watching whether the rule went red; this is that experiment kept in the
  * tree. The scan is run over each method here and must answer as the test
- * expects, so narrowing it goes red.
+ * expects, so a narrowing that stops recognising one of these methods goes
+ * red. A narrowing that touches only a spelling not here stays green: these
+ * methods are not every way PHP can reach an object, only the forms the scan
+ * reads and the layouts of them written down so far, most of them after an
+ * attack found one the scan missed.
  *
  * The class is imported twice on purpose. `Postman` names it without
  * containing its name, the one spelling of "the class by name" a search for
- * the text cannot see. A qualified or fully qualified name is not here: in a
- * file that imports the class, as this one must, Pint rewrites either into
- * the import. The scan resolves both all the same, and both contain the
- * class's own name besides. Nothing calls these methods.
+ * the text cannot see. Four spellings the scan reads are not here, because in
+ * a file that imports the class, as this one must, Pint rewrites them: a
+ * qualified or fully qualified name, which it turns into the import (both
+ * contain the class's own name besides); an alias in another letter case,
+ * such as `postman::class`, which it turns into `Postman::class`; and
+ * whitespace beside `::` with no comment in it, which it removes. Nothing
+ * calls these methods.
  */
-final class SpellingsOfTheInvitationMailer
+final class SpellingsOfTheInvitationMailer extends ParentOfTheSpellings
 {
     private static ?Postman $spare = null;
 
@@ -38,6 +46,7 @@ final class SpellingsOfTheInvitationMailer
         private readonly Closure $mailerless,
         private readonly Postman|Closure $eitherSender,
         private readonly Postman&Countable $countedSender,
+        protected readonly Postman $courier,
     ) {}
 
     public function theOrdinarySpelling(IssuedInvitation $issued): void
@@ -91,6 +100,23 @@ final class SpellingsOfTheInvitationMailer
     public function aStaticNameThatIsAVariableAfterAComment(IssuedInvitation $issued, string $which): void
     {
         self:: /* whichever */ $$which?->send($issued);
+    }
+
+    public function aStaticNameThatIsAVariableAfterALineBreakAndLineComments(IssuedInvitation $issued, string $which): void
+    {
+        self // the class
+            :: // whichever
+            $$which?->send($issued);
+    }
+
+    public function aNameInBracesAfterTheNullsafeOperator(IssuedInvitation $issued, string $which): void
+    {
+        $this?->{$which}->send($issued);
+    }
+
+    public function aNameThatIsAVariableAfterTheNullsafeOperator(IssuedInvitation $issued, string $which): void
+    {
+        $this?->$which->send($issued);
     }
 
     public function asAnArgument(IssuedInvitation $issued): void
@@ -155,6 +181,11 @@ final class SpellingsOfTheInvitationMailer
     public function aStaticPropertyNamedByAVariable(IssuedInvitation $issued, string $which): void
     {
         self::$$which?->send($issued);
+    }
+
+    public function aStaticPropertyNamedInBraces(IssuedInvitation $issued, string $which): void
+    {
+        self::${$which}?->send($issued);
     }
 
     public function theClassByAnAlias(IssuedInvitation $issued): void

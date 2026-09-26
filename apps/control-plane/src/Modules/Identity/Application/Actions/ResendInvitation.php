@@ -27,8 +27,8 @@ use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
  *
  * **Not twice inside the cooldown.** The account's hourly invitation budget
  * bounds how much it sends, not where: without a wait of its own, one offer
- * resent in a loop put the whole budget into one inbox — thirty mails in
- * well under a second. So a resend earlier than
+ * resent in a loop put the whole budget into one inbox — thirty mails, back
+ * to back, as fast as the requests arrived. So a resend earlier than
  * {@see CustomerInvitation::mailableAgainAt()} is refused, and refused before
  * anything is written: the token, the expiry, `sent_count` and `last_sent_at`
  * stay as they were and no mail goes. The comparison is made under the same

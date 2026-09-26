@@ -27,11 +27,11 @@ use Tests\Feature\Team\TeamApiTestCase;
  *
  * The `team-invitations` limiter bounds how much an account sends in an hour
  * and nothing about where. Before the cooldown, an owner who invited one
- * address and pressed Resend in a loop sent that address thirty mails in well
- * under a second, every hour; withdrawing the offer and inviting the address
- * again was a second road to the same result, a fresh row and a fresh mail per
- * cycle. The audit's last clause on F-17 — "`ResendInvitation` has no
- * cooldown" — was that.
+ * address and pressed Resend in a loop sent that address thirty mails an
+ * hour, back to back, as fast as the requests arrived; withdrawing the offer
+ * and inviting the address again was a second road to the same result, a
+ * fresh row and a fresh mail per cycle. The audit's last clause on F-17 —
+ * "`ResendInvitation` has no cooldown" — was that.
  *
  * Each road is driven over HTTP, inside the wait and after it, and the refusal
  * is checked for what it must NOT do as well as for its code: no mail, and on
