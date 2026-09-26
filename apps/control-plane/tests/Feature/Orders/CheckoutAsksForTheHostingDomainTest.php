@@ -15,6 +15,7 @@ use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
 use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -185,6 +186,10 @@ final class CheckoutAsksForTheHostingDomainTest extends OrdersApiTestCase
         ]);
 
         HostingPackage::factory()->create(['plan_id' => $plan->getKey()]);
+
+        // Checkout asks the hosting scheduler for a node that could take the
+        // package (F-07), so a sellable plan needs one.
+        HostingNode::factory()->create();
 
         return $plan->fresh(['prices', 'product']);
     }

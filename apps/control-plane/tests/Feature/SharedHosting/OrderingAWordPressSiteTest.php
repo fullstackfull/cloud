@@ -19,6 +19,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressDomainSource;
 use Lynomia\Modules\SharedHosting\Domain\Enums\WordPressSiteState;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\WordPressSite;
 use PHPUnit\Framework\Attributes\Test;
@@ -82,6 +83,10 @@ final class OrderingAWordPressSiteTest extends TestCase
             'panel_package_name' => 'lyn_wordpress',
             'disk_quota_mib' => 10_240,
         ]);
+
+        // Checkout asks the hosting scheduler for a node that could take the
+        // package (F-07), so a sellable plan needs one.
+        HostingNode::factory()->create();
 
         return $plan->fresh(['prices', 'product']) ?? $plan;
     }

@@ -505,6 +505,18 @@ final class LayeringTest extends TestCase
             'src/Support/Lifecycle/EndOfService.php',
         ],
         'Lynomia\\Modules\\SharedHosting\\Application\\Actions\\EndHostingService' => [
+            /*
+             * Not a new door (I-1). The hosting-account route is already
+             * listed below as a caller of TerminateHostingAccount, under
+             * F-18's controller gate; it now calls
+             * EndHostingService::afterTheAccountEnded() only once that action
+             * has deleted the account at the panel, so the service that
+             * account served stops reading live and stops being billed. It
+             * destroys nothing the route could not already destroy, and the
+             * route makes the call only for an operator holding
+             * service.terminate — the key authorityOver() asks for.
+             */
+            'src/Modules/Admin/Http/Controllers/HostingController.php',
             'src/Support/Lifecycle/EndOfService.php',
         ],
         'Lynomia\\Modules\\SharedHosting\\Application\\Actions\\TerminateHostingAccount' => [

@@ -186,6 +186,12 @@ final readonly class ProvisionOrderedService
      * action knows: the service's own resources, and a hostname that cannot
      * exist until the service row does.
      *
+     * Configuration only (LocalPlacementFeasibility::resolve()), never the
+     * fleet's capacity at this moment: checkout asked that before the money
+     * moved, and a node that is full or loaded now is the job's to wait out
+     * as FailureClass::Capacity, which the engine retries. Parking the
+     * service here for it would leave a paid order with no job at all.
+     *
      * @return array<string, mixed>|null null when the platform cannot decide
      *                                   where this belongs
      */
