@@ -6,6 +6,7 @@ namespace Tests\Feature\Compute\Concerns;
 
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Tests\Support\TestDatabaseGuard;
 
 /**
  * Fixtures for tests that cannot use RefreshDatabase.
@@ -30,6 +31,8 @@ trait CreatesComputeFleet
     protected function wipe(): void
     {
         $this->fleetCluster = null;
+
+        TestDatabaseGuard::refuseToEmpty(DB::connection((string) config('database.default')));
 
         foreach ([
             'virtual_machines',

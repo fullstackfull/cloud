@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Support;
 
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
@@ -122,6 +123,36 @@ final class TestDatabaseGuard
             chosenConnection: is_string($chosen) ? $chosen : $default,
             configuredDatabase: (string) $app->make('config')->get("database.connections.{$default}.database"),
             connectionDatabase: (string) $db->connection($default)->getDatabaseName(),
+        );
+    }
+
+    /**
+     * Refuses unless a connection a test is about to empty tables on points at
+     * the test database this run chose.
+     *
+     * For the tests that commit for real and clean up with their own
+     * `TRUNCATE` or `->table(...)->delete()` — outside any destroying trait,
+     * often on a second connection or after repointing the default. The same
+     * conditions as {@see refuseAnythingButATestDatabase()}, over the
+     * connection handed in rather than the default: the environment is
+     * `testing`; the connection's database is the one the environment chose
+     * (the database of the connection `DB_CONNECTION` names); and that name
+     * says it is a test database. Called immediately before the statement.
+     * `TheTestSuiteRefusesToDropAnythingButATestDatabaseTest` refuses a test
+     * file that empties tables without asking.
+     */
+    public static function refuseToEmpty(ConnectionInterface $connection): void
+    {
+        $app = app();
+        $chosen = Env::get('DB_CONNECTION');
+        $chosen = is_string($chosen) ? $chosen : (string) $app->make('config')->get('database.default');
+
+        self::check(
+            environment: (string) $app->environment(),
+            defaultConnection: $chosen,
+            chosenConnection: $chosen,
+            configuredDatabase: (string) $app->make('config')->get("database.connections.{$chosen}.database"),
+            connectionDatabase: (string) $connection->getDatabaseName(),
         );
     }
 

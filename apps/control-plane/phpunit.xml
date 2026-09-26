@@ -51,18 +51,17 @@
             block. tests/Architecture/ThePhpunitPinsHoldAgainstAnExportedVariableTest
             holds that, and measures it through PHPUnit's own handler.
 
-            Five entries are deliberately NOT pinned and carry neither
-            attribute: DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME and DB_URL.
-            They say only where the suite's database lives, and choosing that
-            per run is how concurrent runs on one machine stay apart. What
-            arrives is checked rather than trusted:
+            Four entries are deliberately NOT pinned and carry neither
+            attribute: DB_HOST, DB_PORT, DB_USERNAME and DB_URL. They say only
+            where the suite's database server is, and an exported value
+            replaces them. Never give one of them a server entry: server
+            overrides an export unconditionally and would put every concurrent
+            run on one server. The database's NAME (DB_DATABASE) and where the
+            suite's Redis lives (REDIS_DB, REDIS_PORT) are not in this file at
+            all; the note below the database entries says why and what decides
+            them. What arrives is checked rather than trusted:
             Tests\Support\TestDatabaseGuard refuses a database not named as a
-            test database before RefreshDatabase drops anything. Never give
-            one of the five a server entry: server overrides an export
-            unconditionally and would put every concurrent run on one
-            database. Where the suite's Redis lives (REDIS_DB, REDIS_PORT) is
-            not in this file at all; the note below the database entries says
-            why and what decides it.
+            test database before anything is dropped or emptied.
 
             To measure the suite under a different value of a pinned variable:
 
@@ -97,18 +96,19 @@
             to would be worse than no suite at all.
 
             The connection is pinned; the address of the database it opens is
-            not (see the note at the top of this block).
+            not (see the note at the top of this block), and its name is not
+            here at all (see the note below).
         -->
         <env name="DB_CONNECTION" value="pgsql" force="true"/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_PORT" value="5432"/>
-        <env name="DB_DATABASE" value="lynomia_test"/>
         <env name="DB_USERNAME" value="lynomia"/>
         <env name="DB_URL" value=""/>
 
         <!--
-            The Redis index (REDIS_DB) and port (REDIS_PORT) are not named in
-            this file, by design, and nothing here may name them.
+            The database name (DB_DATABASE), the Redis index (REDIS_DB) and
+            the Redis port (REDIS_PORT) are not named in this file, by design,
+            and nothing here may name them.
 
             Precedence, for a php artisan test or vendor/bin/phpunit run:
 
@@ -118,22 +118,28 @@
                 php artisan test".
              2. Otherwise the value in .env.testing, which Laravel's dotenv
                 loads without overwriting anything already set.
-             3. Otherwise nothing: the two suites that flush a whole index
+                .env.testing.example names lynomia_test and a Redis index, so
+                a checkout made from it (and CI) has both.
+             3. Otherwise nothing. For the database, config/database.php
+                falls back to "laravel", and TestDatabaseGuard refuses it (as
+                it refuses "lynomia") before any test drops or empties
+                anything. For Redis, the two suites that flush a whole index
                 (WorkerHarness and ConsolePermitConcurrencyTest) refuse to
                 run, through Tests\Support\RedisIndexForThisRun, rather than
-                flush an index nobody chose. .env.testing.example names one,
-                so a checkout made from it (and CI) has one.
+                flush an index nobody chose.
 
             An entry here, even an unforced default, would break step 2: this
-            block is applied before dotenv, and dotenv never overwrites. That
-            is what a REDIS_DB default of 0 in this file did: a REDIS_DB in
+            block is applied before dotenv, and dotenv never overwrites. A
+            DB_DATABASE default of lynomia_test did exactly that: a
+            .env.testing naming lynomia_test_<slug> still ran on lynomia_test.
+            So did a REDIS_DB default of 0: a REDIS_DB in
             .env.testing reached no run while REDIS_PORT (never in this file)
             did, so every checkout that isolated itself through .env.testing
             shared index 0 of its port, which is also the application's own
             default index, and the flushing suites emptied it before every
             test. ThePhpunitPinsHoldAgainstAnExportedVariableTest measures this
             precedence through PHPUnit's own handler and dotenv, and refuses
-            an entry for either name.
+            an entry for any of the three names.
         -->
 
         <!--

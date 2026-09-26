@@ -221,9 +221,11 @@ abstract class WorkerHarness extends TestCase
      *    default connection — which {@see outsideTheTransaction()} does, and
      *    the concurrency tests do too — must not be able to point this at
      *    whatever was left set.
-     *  - **The database is the configured test database.** `phpunit.xml` names
-     *    it, so this compares against the same source PHPUnit reads rather
-     *    than against a pattern this class invented.
+     *  - **The database is the configured test database.** The run names it
+     *    (exported `DB_DATABASE`, else `.env.testing`'s; the precedence is in
+     *    phpunit.xml's comment), so this compares against the same
+     *    configuration the application reads rather than against a pattern
+     *    this class invented.
      *  - **The name says it is a test database.** The one that distrusts the
      *    configuration rather than the connection: `.env.testing` is a file
      *    people copy, and a copy that was never repointed satisfies all three

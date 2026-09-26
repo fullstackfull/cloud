@@ -74,9 +74,10 @@ vendor/bin/pint                               # formatting, before every commit
 tools/phpstan/vendor/bin/phpstan analyse -c tools/phpstan/phpstan.neon
 ```
 
-`APP_ENV=testing` matters: `phpunit.xml` and `.env.testing` point at the
-`lynomia_test` database, and `.env` points at `lynomia`. A census or a
-migration run without it touches the wrong one.
+`APP_ENV=testing` matters: `.env.testing` points at the `lynomia_test`
+database, and `.env` points at `lynomia`. A census or a migration run
+without it touches the wrong one. An exported `DB_DATABASE` or `REDIS_DB`
+wins over `.env.testing`; `phpunit.xml` names neither, and says why.
 
 **Never run two `php artisan test` invocations at once against the same
 database.** They share `lynomia_test`, and the failures that come back are

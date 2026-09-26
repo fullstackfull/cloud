@@ -8,6 +8,7 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Shared\Domain\Contracts\StateMachine;
+use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -72,8 +73,21 @@ use Tests\Support\EnumCaseReferences;
  *    `OrderStatus::ProvisioningFailed` "produced" after both of its real
  *    writers were changed to `ManualReview`, and 345 tests stayed green.
  *
- * `the_classifier_reads_*` below pin both on sources written for the purpose,
- * so neither depends on the tree staying as it is.
+ * A third was found by the verifier: `DedicatedServerStatus::Provisioning`
+ * stayed "produced" by `'required_status' => Provisioning->value` inside a
+ * refusal's `withContext([...])`, so removing `ProvisionDedicatedHandler`'s
+ * transition left the gate green. Anything inside an exception's context is
+ * now a read.
+ *
+ * `the_classifier_reads_*` below pin these on sources written for the
+ * purpose, so none depends on the tree staying as it is.
+ *
+ * One concealment is left and cannot be closed here: a list of cases returned
+ * as a set for a filter to read (`CustomerServiceState::underlyingStatuses()`)
+ * still counts as producing them, so `ServiceStatus::Reactivating` and
+ * `ServiceStatus::Failed` losing their one real writer each leaves this gate
+ * green. {@see EnumCaseReferences}' "WHAT IT DOES NOT SEE" names the
+ * behavioural test that goes red for each instead.
  */
 final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
 {
@@ -276,6 +290,25 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
         yield 'a case returned' => ['return Fixture::B;', 'producer'];
         yield 'an argument of a method that is not a guard' => ['$this->states->transition($model, Fixture::B);', 'producer'];
         yield 'a guard-named function that is not a method' => ['canTransition($from, Fixture::B);', 'producer'];
+        yield 'a scalar in a refusal\'s context' => ["return \$e->withContext(['required_status' => Fixture::B->value]);", 'exception context'];
+        yield 'a case nested in a refusal\'s context' => ["return \$e->withContext(['allowed' => [Fixture::B]]);", 'exception context'];
+        yield 'the same array given to anything else' => ["\$row->update(['status' => Fixture::B->value]);", 'producer'];
+        yield 'a context built outside the call' => ["\$context = ['status' => Fixture::B]; return \$e->withContext(\$context);", 'producer'];
+    }
+
+    /**
+     * The exception-context rule reads a method call by its name alone. That
+     * is safe only while the one declaration of the name is DomainException's,
+     * which stores the array on the exception and returns the exception.
+     */
+    #[Test]
+    public function an_exception_context_is_recognised_only_by_a_name_one_class_declares(): void
+    {
+        $this->assertSame(
+            ['src/Modules/Shared/Domain/Exceptions/DomainException.php:'.(new \ReflectionMethod(DomainException::class, 'withContext'))->getStartLine()],
+            EnumCaseReferences::contextMethodDeclarations(),
+            'Another production class declares withContext(), so a call to it would be read as an exception context and its arguments as reads. Rename it, or make the classifier resolve the receiver.',
+        );
     }
 
     /**
@@ -285,7 +318,7 @@ final class EveryStateAMachineCanEnterHasAProducerTest extends TestCase
      */
     #[Test]
     #[DataProvider('positions')]
-    public function the_classifier_reads_a_guard_argument_and_a_walked_list_as_reads_and_nothing_else(string $body, string $expected): void
+    public function the_classifier_reads_a_guard_argument_a_walked_list_and_an_exception_context_as_reads_and_nothing_else(string $body, string $expected): void
     {
         $source = "<?php\nnamespace App\\Probe;\nuse Tests\\Architecture\\Fixture;\nfinal class Probe\n{\n    public function run(): mixed\n    {\n        {$body}\n        return null;\n    }\n}\n";
 

@@ -420,6 +420,172 @@ final class TheTestSuiteRefusesToDropAnythingButATestDatabaseTest extends TestCa
         $this->assertSame([], $escapees, 'A test class that drops or empties a database is not reached by the guard.');
     }
 
+    /**
+     * A test that commits for real and cleans up after itself empties tables
+     * outside any destroying trait, so the trait guard never sees it. Each
+     * such statement asks the guard first, in the same function.
+     *
+     * What this reads, in every PHP file under `tests/`, by tokens:
+     *
+     *  - a string literal that begins, after whitespace and in any case, with
+     *    `truncate`, `delete from`, `drop table` or `drop database`;
+     *  - the chain `table(...)->delete()` with an empty argument list — a
+     *    whole-table delete through the query builder.
+     *
+     * A site is guarded when, between the nearest preceding `function` and the
+     * site, the file calls `TestDatabaseGuard::refuseToEmpty`,
+     * `TestDatabaseGuard::refuseAnythingButATestDatabase` or WorkerHarness's
+     * `refuseToTruncateAnythingButATestDatabase` (pinned by
+     * TheHarnessRefusesAnUnsafeDatabaseTest). A statement built another way —
+     * a string assembled from parts that do not start with one of those
+     * words, raw PDO — is not read. EXEMPT names the one site that may not ask.
+     */
+    #[Test]
+    public function every_statement_that_empties_tables_in_a_test_asks_the_guard_first(): void
+    {
+        $sites = 0;
+        $unguarded = [];
+
+        foreach (self::filesUnderTests() as $file) {
+            $relative = substr($file->getPathname(), strlen(dirname(__DIR__)) + 1);
+
+            foreach (self::emptyingSites((string) file_get_contents($file->getPathname())) as [$line, $guarded]) {
+                $sites++;
+
+                if (! $guarded && ! in_array($relative.':'.$line, self::exempt(), true)) {
+                    $unguarded[] = $relative.':'.$line;
+                }
+            }
+        }
+
+        $this->assertGreaterThanOrEqual(10, $sites, 'The sweep found too few statements that empty tables to mean anything.');
+        $this->assertSame([], $unguarded, 'These statements empty tables in a test without asking TestDatabaseGuard first, in the same function.');
+    }
+
+    /**
+     * The guard the committing tests ask reads the connection they hand it: a
+     * second connection pointed somewhere else is refused while the default
+     * still names the test database, and the connection this run chose is
+     * accepted.
+     */
+    #[Test]
+    public function the_guard_for_a_committing_test_reads_the_connection_it_is_handed(): void
+    {
+        $chosen = (string) config('database.default');
+        $absent = $this->aDatabaseThisServerDoesNotHave();
+
+        config()->set('database.connections.guard_elsewhere', [...(array) config("database.connections.{$chosen}"), 'database' => $absent]);
+
+        try {
+            TestDatabaseGuard::refuseToEmpty(DB::connection($chosen));
+
+            TestDatabaseGuard::refuseToEmpty(DB::connection('guard_elsewhere'));
+
+            $this->fail("The guard let a test empty \"{$absent}\" through a second connection.");
+        } catch (RuntimeException $refusal) {
+            $this->assertStringContainsString("refuses to drop or empty \"{$absent}\"", $refusal->getMessage());
+        } finally {
+            DB::purge('guard_elsewhere');
+        }
+    }
+
+    #[Test]
+    public function the_emptying_sweep_reads_what_it_says(): void
+    {
+        $source = <<<'PHP'
+            <?php
+            final class Probe
+            {
+                private function a(): void { DB::statement('TRUNCATE users CASCADE'); }
+                private function b(): void { TestDatabaseGuard::refuseToEmpty(DB::connection()); DB::statement('truncate users'); }
+                private function c(): void { foreach ($t as $x) { DB::connection()->table($x)->delete(); } }
+                private function d(): void { DB::table('users')->where('id', 1)->delete(); $m->delete(); }
+                private function e(): void { $c->statement("  delete from users"); }
+                private function f(): void { DB::statement('select 1'); }
+            }
+            PHP;
+
+        $this->assertSame([[4, false], [5, true], [6, false], [8, false]], self::emptyingSites($source));
+    }
+
+    /**
+     * The sites that may empty without asking, each with its reason.
+     *
+     * @return list<string> "path under tests/:line"
+     */
+    private static function exempt(): array
+    {
+        $line = 0;
+
+        foreach (explode("\n", (string) file_get_contents(__FILE__)) as $n => $text) {
+            if (str_contains($text, "->statement('drop database if exists \"'.")) {
+                $line = $n + 1;
+            }
+        }
+
+        // This file's own clean-up drops a database it generated and proved
+        // absent before pointing anything at it; its name is deliberately not
+        // a test database's, so the guard would refuse it.
+        return ['Architecture/'.basename(__FILE__).':'.$line];
+    }
+
+    /**
+     * @return list<array{int, bool}> [line, whether the guard was asked first in the same function]
+     */
+    private static function emptyingSites(string $source): array
+    {
+        $tokens = array_values(array_filter(
+            \PhpToken::tokenize($source),
+            static fn (\PhpToken $t): bool => ! $t->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT]),
+        ));
+        $found = [];
+        $asked = false;
+
+        foreach ($tokens as $i => $token) {
+            if ($token->is(T_FUNCTION)) {
+                $asked = false;
+
+                continue;
+            }
+
+            if ($token->is(T_STRING) && in_array($token->text, ['refuseToEmpty', 'refuseAnythingButATestDatabase', 'refuseToTruncateAnythingButATestDatabase'], true)
+                && ($tokens[$i + 1] ?? null)?->text === '(') {
+                $asked = true;
+
+                continue;
+            }
+
+            $emptying = false;
+
+            if ($token->is([T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE])) {
+                // The literal's own quotes only: a string that begins with a
+                // quote character is not a statement.
+                $text = strtolower(ltrim($token->is(T_CONSTANT_ENCAPSED_STRING) ? substr($token->text, 1, -1) : $token->text));
+                $emptying = (bool) preg_match('/\A(truncate|delete\s+from|drop\s+table|drop\s+database)\b/', $text);
+            } elseif ($token->is(T_STRING) && $token->text === 'delete'
+                && ($tokens[$i - 1] ?? null)?->is(T_OBJECT_OPERATOR)
+                && ($tokens[$i + 1] ?? null)?->text === '(' && ($tokens[$i + 2] ?? null)?->text === ')') {
+                // Walk back over one argument list to the method that owns it.
+                $j = $i - 2;
+                if (($tokens[$j] ?? null)?->text === ')') {
+                    for ($depth = 0; $j >= 0; $j--) {
+                        $depth += $tokens[$j]->text === ')' ? 1 : ($tokens[$j]->text === '(' ? -1 : 0);
+                        if ($depth === 0) {
+                            break;
+                        }
+                    }
+                    $emptying = ($tokens[$j - 1] ?? null)?->text === 'table';
+                }
+            }
+
+            if ($emptying) {
+                $found[] = [$token->line, $asked];
+            }
+        }
+
+        return $found;
+    }
+
     /** A database name this server does not have, established by asking it. */
     private function aDatabaseThisServerDoesNotHave(): string
     {

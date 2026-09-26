@@ -7,6 +7,7 @@ namespace Tests\Support;
 use BackedEnum;
 use FilesystemIterator;
 use Lynomia\Modules\Shared\Domain\Contracts\StateMachine;
+use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use PhpToken;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -67,9 +68,15 @@ use UnitEnum;
  *    type and at least one parameter (today `canTransition` and
  *    `assertCanTransition`, read from the interface by reflection, not
  *    listed). Such a call can neither write through its argument nor return
- *    it, and {@see guardNamesAreOnlyTheMachines()} holds the condition that
+ *    it, and {@see guardNamesDeclaredOutsideTheMachines()} holds the condition that
  *    makes the name enough: no class outside the machine closure declares a
- *    method so named.
+ *    method so named;
+ *  - anywhere inside the array given to `->withContext(...)`, the method
+ *    {@see DomainException} declares to attach a context to a refusal: it
+ *    stores the array on the exception and returns the exception, so
+ *    `'required_status' => Enum::X->value` there describes a refusal and
+ *    writes nothing. {@see contextMethodDeclarations()} holds that no other
+ *    class declares the name.
  *
  * The guard rule is why a `$states->assertCanTransition($from, Enum::X)`
  * beside the write is not itself counted as the write. Before it, the most
@@ -99,8 +106,9 @@ use UnitEnum;
  * stated safety condition: the callee must be unable to write through the
  * argument **and** unable to return an element of it. That is why
  * `array_merge` and `array_replace` are absent, and why a method call is not
- * recognised however it is spelled — the transition guards above are the one
- * exception, and they carry their own condition. **An unrecognised callee is
+ * recognised however it is spelled — the transition guards and `withContext`
+ * above are the two exceptions, and each carries its own condition. **An
+ * unrecognised callee is
  * treated as a producer.** Inside a haystack a call or an index is a
  * boundary: `[wrap(Enum::A)]` and `[$map[Enum::A], Enum::B]` each keep the
  * wrapped or indexed reference a producer.
@@ -143,7 +151,22 @@ use UnitEnum;
  *    scalar is spelled at a query, revert the spelling alone; a real writer
  *    survives that.**
  *  - **A bare case given to a query builder** — `where('status', Enum::X)` —
- *    counts as a producer. That over-counts, in the conservative direction.
+ *    counts as a producer, though it is a read. That over-counts writers, and
+ *    an over-counted writer can hide a real one's removal: the gate stays
+ *    green on a state whose only remaining mention is such a read. It never
+ *    calls a written state unwritten.
+ *  - **A list returned or handed on as a set.** Every other array literal
+ *    counts its elements as producers. `CustomerServiceState::
+ *    underlyingStatuses()` returns lists of `ServiceStatus` cases that a
+ *    filter reads, so the machine gate stays green when
+ *    `ServiceStatus::Reactivating`'s one real write
+ *    (`EnforceServiceStateForSubscription`) or `ServiceStatus::Failed`'s
+ *    (`RunProvisioningJob`) is removed. No rule here can tell such a list
+ *    from one that is written, so those two states are held by behavioural
+ *    tests instead: `SubscriptionSuspensionLifecycleTest::
+ *    payment_moves_the_service_through_reactivating_before_active` and
+ *    `RunProvisioningJobTest::a_permanent_failure_is_never_retried`, each of
+ *    which goes red when that write is removed.
  *  - **Nested literal shapes beyond arrays.** A haystack or a walked list is
  *    descended through array literals only; anything else inside it is a
  *    boundary.
@@ -165,6 +188,15 @@ final class EnumCaseReferences
      * @var list<string>
      */
     public const array MEMBERSHIP_PREDICATES = ['in_array', 'array_search'];
+
+    /**
+     * The one method whose array argument is an exception's context: declared
+     * only by {@see DomainException}, it stores the array on the exception and
+     * returns the exception, so a case named inside it describes a refusal and
+     * puts nothing into a row. {@see contextMethodDeclarations()} holds that it
+     * is declared nowhere else.
+     */
+    public const string CONTEXT_METHOD = 'withcontext';
 
     /** @var array<string, list<array{string, int, string}>>|null */
     private static ?array $sites = null;
@@ -365,6 +397,39 @@ final class EnumCaseReferences
         }
 
         return $outside;
+    }
+
+    /**
+     * Every `function withContext` declared in a production file, as
+     * "file:line". The exception-context rule reads a method call by its name
+     * alone, so it is safe only while this is exactly DomainException's.
+     *
+     * @return list<string>
+     */
+    public static function contextMethodDeclarations(): array
+    {
+        $root = (string) realpath(self::ROOT);
+        $found = [];
+
+        foreach (self::files(self::PRODUCTION) as $file) {
+            $source = (string) file_get_contents($file);
+
+            if (stripos($source, self::CONTEXT_METHOD) === false) {
+                continue;
+            }
+
+            $tokens = self::significant(PhpToken::tokenize($source));
+
+            foreach ($tokens as $i => $token) {
+                if ($token->is(T_FUNCTION)
+                    && ($tokens[$i + 1] ?? null)?->is(T_STRING)
+                    && strtolower($tokens[$i + 1]->text) === self::CONTEXT_METHOD) {
+                    $found[] = substr((string) realpath($file), strlen($root) + 1).':'.$token->line;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -729,8 +794,15 @@ final class EnumCaseReferences
             return 'match arm condition';
         }
 
-        if ($top !== null && $top['kind'] === 'call' && $top['callee'] !== null && str_starts_with($top['callee'], '->')) {
+        if ($top !== null && $top['kind'] === 'call' && $top['callee'] !== null && str_starts_with($top['callee'], '->') && $top['callee'] !== '->'.self::CONTEXT_METHOD) {
             return 'transition guard argument';
+        }
+
+        // Anywhere inside the array given to an exception's withContext().
+        for ($k = $depth - 1; $k >= 0 && $stack[$k]['kind'] === 'array'; $k--);
+
+        if ($k >= 0 && $k < $depth - 1 && $stack[$k]['kind'] === 'call' && $stack[$k]['callee'] === '->'.self::CONTEXT_METHOD) {
+            return 'exception context';
         }
 
         // The array literals directly enclosing the reference, innermost first.
@@ -790,7 +862,7 @@ final class EnumCaseReferences
                 // A method call is never a membership predicate; a transition
                 // guard is recognised by its name alone, which is safe only
                 // while guardNamesDeclaredOutsideTheMachines() is empty.
-                if (in_array(strtolower($prev->text), self::guardNames(), true)) {
+                if (in_array(strtolower($prev->text), [...self::guardNames(), self::CONTEXT_METHOD], true)) {
                     $frame['callee'] = '->'.strtolower($prev->text);
                 }
             } elseif (! $before?->is([T_DOUBLE_COLON, T_FUNCTION])) {

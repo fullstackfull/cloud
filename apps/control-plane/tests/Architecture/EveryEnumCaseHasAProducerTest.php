@@ -145,10 +145,10 @@ use Tests\Support\EnumCaseReferences;
  * These entries were written by reading each site at the time; "nothing
  * writes it" means nothing under `src/` or `app/` names it in a writing
  * position, and a string search for its value found no writer either. That
- * search is not repeated by this gate — a case that gains a string writer
- * stays excused as `unwritten` until somebody notices, which is the
- * conservative direction for the translation gate and the wrong one for
- * nothing else.
+ * search is not repeated by this gate. A case that gains a writer spelled as
+ * a string stays excused as `unwritten`, so this gate stays green and the
+ * translation gate stops demanding its strings for a state that now occurs.
+ * A writer the classifier can see fails the excuse as stale.
  */
 final class EveryEnumCaseHasAProducerTest extends TestCase
 {
