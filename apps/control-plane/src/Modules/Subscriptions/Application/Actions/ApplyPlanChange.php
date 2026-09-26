@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\IssueInvoice;
@@ -15,10 +16,14 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeOutcome;
 use Lynomia\Modules\Subscriptions\Application\DTOs\ProrationPlan;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
+use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\PlanChangeRefusedException;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
@@ -55,18 +60,33 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * by {@see ResizeOnPlanChangeSettlement}
  * when that invoice is paid. Before this, the bigger machine was handed over
  * at the moment confirm was pressed and the difference was never collected at
- * all.
+ * all. What the listener builds is what the paid invoice bought - the shape
+ * recorded on this change's {@see PlanChange} row - not whatever plan the
+ * subscription has moved on to by the time the money arrives.
+ *
+ * ---------------------------------------------------------------------------
+ * No money moves that was not collected
+ * ---------------------------------------------------------------------------
+ *
+ * Two rules, because the plan a subscription is on says what it costs and not
+ * what was paid for it. A change is refused while an invoice for the
+ * subscription is open ({@see PlanChangeRefusal::InvoiceOutstanding}), and a
+ * downgrade credit is held under the period's ceiling
+ * ({@see MoneyCollectedForThePeriod}). Without them, small -> large -> small
+ * three times over, paying nothing, left 162.000 KWD of spendable credit.
  *
  * ---------------------------------------------------------------------------
  * The quote is the gate
  * ---------------------------------------------------------------------------
  *
- * The same quote the customer was shown is recomputed here and refused if it
- * has stopped being available. A screen renders what it was given seconds ago;
- * between then and the confirmation a service can be suspended, a plan can be
- * withdrawn, or another operation can start on the machine — and the
- * disk-shrink refusal in particular must not be defeated by a client that
- * simply posts the plan id without asking.
+ * The same quote the customer was shown is recomputed here, under the
+ * subscription's lock, and refused if it has stopped being available. A screen
+ * renders what it was given seconds ago; between then and the confirmation a
+ * service can be suspended, a plan can be withdrawn or sold out, or another
+ * operation can start on the machine — and the disk-shrink refusal in
+ * particular must not be defeated by a client that simply posts the plan id
+ * without asking. The change is executed at the instant and the unit count
+ * the quote priced; the request cannot name another count.
  */
 final readonly class ApplyPlanChange
 {
@@ -79,6 +99,7 @@ final readonly class ApplyPlanChange
         private PricingEngine $pricing,
         private TaxResolver $taxResolver,
         private WalletLedger $wallet,
+        private PlanCapacity $capacity,
     ) {}
 
     /**
@@ -88,62 +109,142 @@ final readonly class ApplyPlanChange
         Subscription $subscription,
         Plan $plan,
         PlanPrice $price,
-        ?int $units = null,
         ?string $idempotencyKey = null,
         ?User $actor = null,
     ): PlanChangeOutcome {
-        $quote = $this->quotes->execute($subscription, $plan, $price);
-
-        if (! $quote->isAvailable()) {
-            /*
-             * Refused with its reasons, in the platform's own vocabulary, so
-             * the portal can say which of them applies. A generic 422 here
-             * would leave a customer guessing between "not sold in your
-             * currency" and "that would destroy your disk".
-             */
-            throw PlanChangeRefusedException::because($quote->refusals);
-        }
-
-        $proration = $this->changePlan->execute(
-            subscription: $subscription,
-            newPlan: $plan,
-            newPrice: $price,
-            units: $units,
-        );
-
         /*
-         * The money, made durable, before anything is handed over.
+         * One transaction for the move and its money.
          *
-         * An upgrade is invoiced and the machine is left alone until that
-         * invoice settles; a downgrade credits the wallet and goes through at
-         * once. Both halves used to be computed and dropped on the floor.
+         * ChangeSubscriptionPlan used to commit the move on its own, and the
+         * invoice or the credit was written after it. An invoice write that
+         * failed left the plan moved, the recurring amount raised, no invoice
+         * and no audit entry - and a retry was refused as "same plan", so the
+         * proration was lost for good (re-audit, F-01). Now the move, the
+         * invoice or the credit, the plan-change record and the audit entry
+         * commit together or not at all, and a failed attempt can simply be
+         * made again. The resize job row is written inside it too; the job is
+         * only dispatched once the transaction commits.
          */
-        $invoice = $this->settleTheDifference($subscription, $proration, $actor);
+        return DB::transaction(function () use ($subscription, $plan, $price, $idempotencyKey, $actor): PlanChangeOutcome {
+            /*
+             * The subscription row is the mutex for everything below: a second
+             * change for the same subscription waits here, and then finds the
+             * plan already moved, or the invoice this one left open.
+             */
+            /** @var Subscription $locked */
+            $locked = Subscription::query()->lockForUpdate()->findOrFail($subscription->getKey());
 
-        $resizeJob = $quote->changesInfrastructure && ! $proration->net()->isPositive()
-            ? $this->queueAtProvider->execute($subscription, $quote->planId, $quote->newResources, $idempotencyKey)
-            : null;
+            $quote = $this->quotes->execute($locked, $plan, $price);
 
-        $this->audit->execute(
-            action: AuditAction::PlanChanged,
-            subject: $subscription,
-            customerId: $subscription->customer_id,
-            context: [
-                'from_plan_id' => $quote->planId === (string) $subscription->plan_id ? null : (string) $subscription->plan_id,
+            if (! $quote->isAvailable()) {
+                /*
+                 * Refused with its reasons, in the platform's own vocabulary,
+                 * so the portal can say which of them applies. A generic 422
+                 * here would leave a customer guessing between "not sold in
+                 * your currency" and "that would destroy your disk".
+                 */
+                throw PlanChangeRefusedException::because($quote->refusals);
+            }
+
+            $this->claimTheUnit($locked, $plan, $quote->units);
+
+            $fromPlanId = $locked->plan_id;
+
+            /*
+             * Priced at the instant the quote used, and at the unit count the
+             * subscription holds - the count the quote priced, never one the
+             * client names.
+             */
+            $proration = $this->changePlan->execute(
+                subscription: $locked,
+                newPlan: $plan,
+                newPrice: $price,
+                changeAt: $quote->effectiveAt,
+            );
+
+            /*
+             * The money, made durable, before anything is handed over.
+             *
+             * An upgrade is invoiced and the machine is left alone until that
+             * invoice settles; a downgrade credits the wallet and goes through
+             * at once.
+             */
+            [$invoice, $walletCredit] = $this->settleTheDifference($locked, $fromPlanId, $proration, $actor);
+
+            PlanChange::query()->create([
+                'subscription_id' => (string) $locked->getKey(),
+                'from_plan_id' => $fromPlanId,
                 'to_plan_id' => (string) $plan->getKey(),
-                'amount_due_now_minor' => $quote->amountDueNow->minorUnits(),
-                'currency' => $quote->currentRecurring->currency(),
-                'resize_job_id' => $resizeJob === null ? null : (string) $resizeJob->getKey(),
+                'currency' => $proration->currency,
+                'units' => $quote->units,
+                'credit_minor' => $proration->credit->minorUnits(),
+                'charge_minor' => $proration->charge->minorUnits(),
+                'wallet_credit_minor' => $walletCredit,
                 'proration_invoice_id' => $invoice === null ? null : (string) $invoice->getKey(),
-            ],
-        );
+                'resources' => $quote->newResources->toArray(),
+                'changed_by_user_id' => $actor === null ? null : (string) $actor->getKey(),
+                'changed_at' => $proration->changeAt,
+            ]);
 
-        return new PlanChangeOutcome(
-            proration: $proration,
-            quote: $quote,
-            resizeJob: $resizeJob,
-            invoice: $invoice,
-        );
+            $resizeJob = $quote->changesInfrastructure && ! $proration->net()->isPositive()
+                ? $this->queueAtProvider->execute($locked, $quote->planId, $quote->newResources, $idempotencyKey)
+                : null;
+
+            $this->audit->execute(
+                action: AuditAction::PlanChanged,
+                subject: $locked,
+                customerId: $locked->customer_id,
+                context: [
+                    'from_plan_id' => $fromPlanId,
+                    'to_plan_id' => (string) $plan->getKey(),
+                    'amount_due_now_minor' => $quote->amountDueNow->minorUnits(),
+                    'currency' => $quote->currentRecurring->currency(),
+                    'resize_job_id' => $resizeJob === null ? null : (string) $resizeJob->getKey(),
+                    'proration_invoice_id' => $invoice === null ? null : (string) $invoice->getKey(),
+                ],
+            );
+
+            return new PlanChangeOutcome(
+                proration: $proration,
+                quote: $quote,
+                resizeJob: $resizeJob,
+                invoice: $invoice,
+            );
+        });
+    }
+
+    /**
+     * Take a unit of the plan being moved onto, under the rules a checkout
+     * obeys (F-06), or refuse.
+     *
+     * The quote already read the counts, as a courtesy. This is the claim: the
+     * plan row is locked through PlanCapacity::lock(), the lock every checkout
+     * takes, and the counts are read again under it. The unit this
+     * subscription holds on the plan it is leaving is given back by the same
+     * write that moves it, because capacity counts a unit against the plan
+     * its subscription is on.
+     *
+     * @throws PlanChangeRefusedException
+     */
+    private function claimTheUnit(Subscription $subscription, Plan $plan, int $units): void
+    {
+        $this->capacity->lock([(string) $plan->getKey()]);
+
+        /** @var Customer $customer */
+        $customer = $subscription->customer()->firstOrFail();
+
+        /** @var Plan $fresh */
+        $fresh = Plan::query()->findOrFail($plan->getKey());
+
+        $refused = match ($this->capacity->shortfall($fresh, $units, $customer)) {
+            PlanCapacity::OUT_OF_STOCK => PlanChangeRefusal::OutOfStock,
+            PlanCapacity::PER_CUSTOMER_LIMIT => PlanChangeRefusal::PerCustomerLimit,
+            default => null,
+        };
+
+        if ($refused !== null) {
+            throw PlanChangeRefusedException::because([$refused]);
+        }
     }
 
     /**
@@ -170,27 +271,30 @@ final readonly class ApplyPlanChange
      *  - **Exactly nothing** writes neither. A change between two equally
      *    priced plans is a real change, and billing it would be an invention.
      */
+    /**
+     * @return array{0: ?Invoice, 1: int} the invoice an upgrade left, and the
+     *                                    wallet credit a downgrade posted, in minor units
+     */
     private function settleTheDifference(
         Subscription $subscription,
+        ?string $fromPlanId,
         ProrationPlan $proration,
         ?User $actor,
-    ): ?Invoice {
+    ): array {
         $net = $proration->net();
 
         if ($net->isZero()) {
-            return null;
+            return [null, 0];
         }
 
         /** @var Customer $customer */
         $customer = $subscription->customer()->firstOrFail();
 
         if ($net->isNegative()) {
-            $this->creditTheCustomer($customer, $subscription, $proration, $actor);
-
-            return null;
+            return [null, $this->creditTheCustomer($customer, $subscription, $fromPlanId, $proration, $actor)];
         }
 
-        return $this->invoiceTheDifference($customer, $subscription, $proration);
+        return [$this->invoiceTheDifference($customer, $subscription, $proration), 0];
     }
 
     private function invoiceTheDifference(
@@ -233,6 +337,12 @@ final readonly class ApplyPlanChange
     /**
      * The unused remainder of the plan they left, returned as balance.
      *
+     * The amount is the proration's net, whose credit half ChangeSubscriptionPlan
+     * has already held under the period's ceiling: never more than the period
+     * collected, less what earlier changes returned. The amount posted is
+     * returned so the change's record can carry it, which is what the next
+     * change's ceiling subtracts.
+     *
      * Keyed on the subscription, the plan and the instant of the change, so a
      * retried request credits once. The ledger refuses a second entry under a
      * key it has already posted.
@@ -250,9 +360,10 @@ final readonly class ApplyPlanChange
     private function creditTheCustomer(
         Customer $customer,
         Subscription $subscription,
+        ?string $fromPlanId,
         ProrationPlan $proration,
         ?User $actor,
-    ): void {
+    ): int {
         $amount = $proration->net()->absolute();
         $wallet = $this->wallet->walletFor($customer, $proration->currency);
 
@@ -270,9 +381,11 @@ final readonly class ApplyPlanChange
             idempotencyKey: sprintf(
                 'plan-change-credit:%s:%s:%s',
                 $subscription->getKey(),
-                $subscription->plan_id,
+                $fromPlanId,
                 $proration->changeAt->getTimestamp(),
             ),
         );
+
+        return $amount->minorUnits();
     }
 }

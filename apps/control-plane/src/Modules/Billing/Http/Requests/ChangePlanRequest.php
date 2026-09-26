@@ -34,8 +34,16 @@ final class ChangePlanRequest extends FormRequest
         return [
             'plan_id' => ['required', 'string', 'exists:plans,id'],
             'price_id' => ['required', 'string', 'exists:plan_prices,id'],
-            // Only for plans sold by the unit. Absent means "keep what I have".
-            'units' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:1000'],
+            /*
+             * Refused rather than read. It used to be accepted (1-1000) and
+             * priced the change, while the quote the customer was shown -
+             * and the capacity and resources it checked - used the unit count
+             * the subscription already holds. So the change executed and the
+             * change quoted could price different counts. A plan change keeps
+             * the count; changing how many units a subscription holds is not
+             * a plan change, and no route offers it.
+             */
+            'units' => ['prohibited'],
         ] + $this->idempotencyKeyRules();
     }
 
@@ -55,12 +63,5 @@ final class ChangePlanRequest extends FormRequest
     public function priceId(): string
     {
         return (string) $this->validated('price_id');
-    }
-
-    public function units(): ?int
-    {
-        $units = $this->validated('units');
-
-        return is_int($units) ? $units : null;
     }
 }

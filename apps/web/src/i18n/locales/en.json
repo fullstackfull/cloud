@@ -1969,7 +1969,10 @@
       "subscription_not_running": "This subscription is not currently running.",
       "service_busy": "Something else is happening to this server. Try again when it has finished.",
       "service_not_active": "Your service is suspended or still changing state, so it cannot be moved onto another plan yet.",
-      "price_not_for_plan": "That price does not belong to that plan."
+      "price_not_for_plan": "That price does not belong to that plan.",
+      "invoice_outstanding": "An invoice for this subscription is still unpaid. Pay it before changing plan again.",
+      "out_of_stock": "This plan is sold out.",
+      "per_customer_limit": "Your account already holds as many of this plan as it may."
     },
     "warning": {
       "resize_required": "Your server will be resized as part of this change.",

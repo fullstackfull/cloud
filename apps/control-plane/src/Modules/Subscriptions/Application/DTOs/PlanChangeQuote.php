@@ -30,6 +30,9 @@ final readonly class PlanChangeQuote
     /**
      * @param  list<PlanChangeRefusal>  $refusals  Empty when the change may be made.
      * @param  list<string>  $warnings  True and worth saying, but not disqualifying.
+     * @param  int  $units  How many units of the plan the figures are priced at: the count
+     *                      the subscription holds now. The change is executed at the same
+     *                      count; a client cannot name another.
      */
     public function __construct(
         public string $planId,
@@ -47,6 +50,7 @@ final readonly class PlanChangeQuote
         public bool $changesInfrastructure,
         public array $refusals = [],
         public array $warnings = [],
+        public int $units = 1,
     ) {}
 
     public function isAvailable(): bool

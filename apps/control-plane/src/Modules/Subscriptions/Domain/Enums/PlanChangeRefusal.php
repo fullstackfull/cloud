@@ -66,4 +66,28 @@ enum PlanChangeRefusal: string
      * rather than reconciled.
      */
     case PriceNotForPlan = 'price_not_for_plan';
+
+    /**
+     * An invoice for this subscription is still open.
+     *
+     * Most often the one the last upgrade left behind. A plan move is priced
+     * from the plan the subscription is on, and while that plan's money is
+     * unpaid a second move would be priced from money that never arrived: the
+     * re-audit flapped small -> large -> small three times, paid nothing, and
+     * was left with 162.000 KWD of wallet credit. The customer settles what
+     * they owe on the subscription, or has it voided, and the change is
+     * theirs to make again.
+     */
+    case InvoiceOutstanding = 'invoice_outstanding';
+
+    /**
+     * Every unit the plan has is already held (`stock_limit`).
+     *
+     * The same rule a checkout obeys, under the same lock: a plan change was
+     * a second way onto a finite plan that never asked.
+     */
+    case OutOfStock = 'out_of_stock';
+
+    /** The account already holds as many of this plan as it may (`per_customer_limit`). */
+    case PerCustomerLimit = 'per_customer_limit';
 }
