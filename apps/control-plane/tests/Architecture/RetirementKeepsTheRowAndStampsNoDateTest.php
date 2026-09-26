@@ -22,10 +22,12 @@ use SplFileInfo;
  * WHY THIS EXISTS (F-47)
  * ===========================================================================
  *
- * `DedicatedServerStatus::Retired` had readers — a terminal predicate, the
- * model's `isRetired()`, an exclusion in the inventory sweep, and a race argued
- * in `SyncDedicatedServer` about a machine "Retired between the sweep and the
- * worker" — and no production writer; only a test factory produced it. F-12's
+ * `DedicatedServerStatus::Retired` had six readers — `isTerminal()`, the
+ * model's `isRetired()`, the retirement-date filters in
+ * `DedicatedServer::scopeAllocatable()` and `CustomerDedicatedServers::of()`,
+ * the inventory sweep's exclusion, and a race argued in `SyncDedicatedServer`
+ * about a machine "Retired between the sweep and the worker" — and no
+ * production writer; only a test factory produced it. F-12's
  * `RetireDedicatedServer` is now that writer, so the state half of the finding
  * is closed by a real operator act, and the general gate
  * ({@see EveryStateAMachineCanEnterHasAProducerTest}) holds it: that gate
@@ -204,8 +206,9 @@ final class RetirementKeepsTheRowAndStampsNoDateTest extends TestCase
             "The writers of dedicated_servers.retired_at are not exactly the test factory:\n  %s\n\n".
             'An empty list means the scan did not land, not that nothing writes. Any other file means one '.
             'of two things. A real writer is the event this census exists for: the two whereNull(\'retired_at\') '.
-            'clauses stop being inert, so rewrite the paragraph in DedicatedServerStatus that says they are, '.
-            'and rewrite this census for what is then true — do not add the new file to ONLY_WRITER. Or it is '.
+            'clauses stop being inert, so rewrite the paragraph in DedicatedServerStatus that says they are (and '.
+            'the comment beside each clause), and rewrite this census for what is then true — do not add the new '.
+            'file to ONLY_WRITER. Or it is '.
             'a read in a shape this classifier counts as a write (an array key in a query, say): if the only '.
             'change near the site is how a read is spelled, respell the read, and a real writer survives that.',
             $sites === [] ? '(nothing at all)' : implode("\n  ", array_merge(...array_values($sites))),

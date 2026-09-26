@@ -107,8 +107,10 @@ final class DedicatedInventorySweepTest extends TestCase
     #[Test]
     public function a_machine_that_disappeared_between_the_sweep_and_the_worker_is_not_an_error(): void
     {
-        // Retired and removed while the job sat on the queue. Failing here
-        // would page somebody about a machine deliberately taken away.
+        // A row deleted by hand while the job sat on the queue. Not a retired
+        // machine: retirement keeps the row, so a machine retired after the
+        // sweep is found by its worker (the next test). Failing here would
+        // page somebody about a machine a person deliberately took away.
         (new SyncDedicatedServer('01jnosuchserverxxxxxxxxxxx'))
             ->handle(app(SyncHardwareInventory::class));
 
