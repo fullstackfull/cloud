@@ -684,6 +684,7 @@ final class LayeringTest extends TestCase
                 return [InvoiceController::class, 'show'];
                 PHP,
             'an import after a comment and a docblock' => $file("// The invoice this order produces.\n/** @see InvoiceController */\nuse Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;", 'InvoiceController::class'),
+            'an import after a label' => $file('billing: use Lynomia\\Modules\\Billing;', 'Billing\\Http\\Controllers\\InvoiceController::class'),
             'an import after a class' => <<<'PHP'
                 <?php
 
@@ -1297,12 +1298,32 @@ final class LayeringTest extends TestCase
                     }
                 }
                 PHP),
+            'a module name chosen at runtime, in another letter case' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $module): string
+                    {
+                        return 'lynomia\\modules\\'.$module.'\\Http\\Controllers\\InvoiceController';
+                    }
+                }
+                PHP),
             'a layer chosen at runtime' => $file(<<<'PHP'
                 final class Planted
                 {
                     public function run(string $layer): string
                     {
                         return 'Lynomia\\Modules\\Billing\\'.$layer.'\\Controllers\\InvoiceController';
+                    }
+                }
+                PHP),
+            'a layer chosen at runtime, with single backslashes' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return <<<'NS'
+                            Lynomia\Modules\Billing\
+                            NS.$layer.'\Controllers\InvoiceController';
                     }
                 }
                 PHP),
@@ -1354,6 +1375,22 @@ final class LayeringTest extends TestCase
                     public const string C = Infrastructure\Models\Plan::class;
                 }
                 PHP),
+            'a class named through an import of a namespace inside its layer' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Infrastructure\Models;
+
+                final class Planted
+                {
+                    public const string C = Models\Plan::class;
+                }
+                PHP),
+            'a class named through an aliased import of a namespace inside its layer, in another letter case' => $file(<<<'PHP'
+                use Lynomia\Modules\Billing\Infrastructure\Models as BillingModels;
+
+                final class Planted
+                {
+                    public const string C = billingmodels\Invoice::class;
+                }
+                PHP),
             'a class named through a namespace declared above it' => <<<'PHP'
                 <?php
 
@@ -1384,6 +1421,22 @@ final class LayeringTest extends TestCase
                 declare(strict_types=1);
 
                 namespace /* every module */ /** at once */ Lynomia\Modules;
+
+                final class Planted
+                {
+                    public const string C = Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a class named through a namespace declared after a label' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions;
+
+                final class Earlier {}
+
+                modules: namespace Lynomia\Modules;
 
                 final class Planted
                 {
@@ -1503,6 +1556,19 @@ final class LayeringTest extends TestCase
                     public const string C = Domain\Enums\ProductKind::class;
                 }
                 PHP),
+            "a namespace declared by a name that begins with an import's alias, which PHP does not resolve" => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions;
+
+                use Lynomia\Modules\Catalog\Infrastructure\Models\Plan as Lynomia;
+
+                namespace Lynomia\Modules\Orders\Application\Services;
+
+                final class Planted {}
+                PHP,
             'a namespace outside the modules, and the name in prose' => $file(<<<'PHP'
                 final class Planted
                 {
