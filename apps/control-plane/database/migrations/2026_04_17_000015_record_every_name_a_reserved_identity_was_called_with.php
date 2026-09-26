@@ -19,10 +19,14 @@ use Illuminate\Support\Facades\Schema;
  * against every name a create under this identity sent, not only the latest.
  * `provisioning_jobs.payload` has exactly one writer in `src/` — the statement
  * that creates the row — so in practice the list holds one entry, and that
- * bound is pinned by tests rather than assumed. Nothing on the platform edits
- * a payload; the list is what keeps the comparison correct if something
- * outside the platform ever does, instead of letting a second name quietly
- * turn this build's own machine into a "stranger".
+ * bound is pinned by tests rather than assumed: a census of every form a
+ * write to the column takes in the source's text, which names the forms no
+ * reading of the text can see, and a behavioural pin that drives a create's
+ * job through the engine, every operator act on it and both sweepers.
+ * Nothing on the platform edits a payload; the list
+ * is what keeps the comparison correct if something outside the platform
+ * ever does, instead of letting a second name quietly turn this build's own
+ * machine into a "stranger".
  */
 return new class extends Migration
 {

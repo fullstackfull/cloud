@@ -53,6 +53,12 @@ final class AnswerLosingComputeProvider implements ComputeProvider
     /** When set, every read of a machine fails with this, as an unreachable node does. */
     public ?ComputeProviderException $failReadsWith = null;
 
+    /**
+     * When set, a machine is read back without its vCPU and memory figures,
+     * as the Proxmox adapter reports a figure the cluster gave unreadably.
+     */
+    public bool $reportNoFigures = false;
+
     public function __construct(public readonly FakeComputeProvider $fleet = new FakeComputeProvider) {}
 
     public function name(): string
@@ -146,7 +152,23 @@ final class AnswerLosingComputeProvider implements ComputeProvider
             throw $this->failReadsWith;
         }
 
-        return $this->fleet->getVm($nodeName, $providerId);
+        $machine = $this->fleet->getVm($nodeName, $providerId);
+
+        if ($machine === null || ! $this->reportNoFigures) {
+            return $machine;
+        }
+
+        return new RemoteVmState(
+            providerId: $machine->providerId,
+            nodeName: $machine->nodeName,
+            name: $machine->name,
+            powerState: $machine->powerState,
+            diskGib: $machine->diskGib,
+            uptimeSeconds: $machine->uptimeSeconds,
+            lock: $machine->lock,
+            startsOnBoot: $machine->startsOnBoot,
+            raw: $machine->raw,
+        );
     }
 
     public function listVms(string $nodeName): array

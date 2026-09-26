@@ -18,6 +18,7 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
@@ -43,7 +44,7 @@ use Tests\TestCase;
  * a stranger's machine licenses has its own file; the bound on the payload
  * that the ownership rule rests on has two (a behavioural pin in this band,
  * and a static census in the Provisioning band that fails on a new writer in
- * any of the shapes it scans — and names the shapes it cannot scan).
+ * any form of the shapes it scans — and names the forms it cannot read).
  */
 final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends TestCase
 {
@@ -254,6 +255,90 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
         $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->status);
         $this->assertSame(CreateVpsHandler::REASON_SHAPE_DIFFERS, $job->result['error']['reason'] ?? null);
         $this->assertSame([], $this->hypervisor->creates);
+    }
+
+    #[Test]
+    public function either_figure_differing_on_its_own_withholds_the_claim(): void
+    {
+        /*
+         * vCPU and memory are each evidence on their own: a machine named as
+         * called that differs from the plan in only one of them is not
+         * claimed either.
+         */
+        foreach (['vcpu alone' => [8, 4096], 'memory alone' => [2, 16384]] as $case => [$vcpu, $memoryMib]) {
+            $job = $this->createJob();
+            $this->aStrangerAt($this->derivedIdOf($job), name: 'web-01');
+            $this->hypervisor->fleet->resizeVm('pve-01', $this->derivedIdOf($job), new ResizeVmRequest(vcpu: $vcpu, memoryMib: $memoryMib));
+
+            $this->runWorker($job);
+
+            $this->assertSame(
+                CreateVpsHandler::REASON_SHAPE_DIFFERS,
+                $job->refresh()->result['error']['reason'] ?? null,
+                sprintf('A machine named as called, differing in %s, was claimed as this build\'s.', $case),
+            );
+        }
+    }
+
+    #[Test]
+    public function a_figure_the_hypervisor_does_not_report_contradicts_nothing(): void
+    {
+        /*
+         * A null vCPU or memory figure is the absence of an observation, not
+         * an observation of a different shape. A machine named as this job
+         * called it, whose figures are not reported, is recognised on its
+         * name — even though, had they been reported, they would differ.
+         */
+        $job = $this->createJob();
+        $this->aStrangerAt($this->derivedIdOf($job), name: 'web-01');
+        $this->hypervisor->reportNoFigures = true;
+
+        $this->runWorker($job);
+
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->refresh()->result['error']['code'] ?? null);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_AS_CALLED, $job->result['error']['reason'] ?? null);
+    }
+
+    #[Test]
+    public function the_identity_first_reserved_is_the_one_every_later_reservation_is_handed(): void
+    {
+        /*
+         * First writer wins, in the statement itself: a caller holding a
+         * copy of the job from before the reservation — a stale model, a
+         * concurrent claim — that offers another id is handed the one held,
+         * and its node joins the list rather than replacing it.
+         */
+        $job = $this->createJob();
+        $stale = ProvisioningJob::query()->findOrFail($job->id);
+
+        $first = $job->reserveProviderIdentity('20001', $this->cluster->id, 'pve-01', 'web-01');
+        $second = $stale->reserveProviderIdentity('20002', $this->cluster->id, 'pve-02', 'web-01');
+
+        $this->assertSame('20001', $first?->providerId);
+        $this->assertSame('20001', $second?->providerId);
+        $this->assertSame(['pve-01', 'pve-02'], $second->nodes);
+        $this->assertSame('20001', $stale->reserved_provider_id);
+        $this->assertSame('20001', DB::table('provisioning_jobs')->where('id', $job->id)->value('reserved_provider_id'));
+    }
+
+    #[Test]
+    public function an_identity_is_not_reserved_again_against_another_cluster(): void
+    {
+        /*
+         * The cluster is a condition of the statement, not only a value it
+         * writes: a reservation offered against another cluster writes
+         * nothing and is answered with null, whatever its caller was told.
+         */
+        $job = $this->createJob();
+        $other = ComputeCluster::factory()->create(['driver' => 'fake']);
+
+        $job->reserveProviderIdentity('20001', $this->cluster->id, 'pve-01', 'web-01');
+
+        $this->assertNull($job->reserveProviderIdentity('20001', $other->id, 'pve-09', 'web-01'));
+
+        $row = DB::table('provisioning_jobs')->where('id', $job->id)->first();
+        $this->assertSame($this->cluster->id, $row?->reserved_cluster_id);
+        $this->assertSame(['pve-01'], json_decode((string) $row?->reserved_provider_nodes, true));
     }
 
     #[Test]

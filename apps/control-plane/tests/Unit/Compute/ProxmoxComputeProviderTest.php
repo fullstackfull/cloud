@@ -290,8 +290,10 @@ final class ProxmoxComputeProviderTest extends TestCase
          * F-15. The VPS create compares a machine's shape against the plan to
          * decide whether a machine it finds is its own, and a null there is
          * "not observed". A 0 is an observation — of a machine with no memory
-         * — so an unparseable figure turned into 0 contradicts the plan and
-         * makes the create's own machine look like a stranger's.
+         * — so an unparseable figure turned into 0 contradicts the plan, and
+         * the create's own machine, named as it was called, stops at review
+         * as one whose ownership cannot be established (`shape_differs`)
+         * instead of being recognised.
          */
         Http::fake(['*' => Http::response(['data' => [
             'name' => 'web-01',

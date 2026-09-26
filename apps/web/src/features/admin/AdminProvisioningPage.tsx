@@ -50,11 +50,19 @@ function adoptableReference(job: AdminProvisioningJob): string | null {
  * Each carries what the runbook tells the operator to read (F-15): the finding
  * and its reason, the whole error rather than a truncation of it, and for a
  * VPS create the provider identity it reserved with every node and name a
- * create under it was sent with. And all three ways out are here — retry,
- * adopt, and repoint. Which of them a job may take is the server's to say,
- * and the page shows its refusal when it gives one. The page pre-empts only
- * one thing: it never prefills Adopt with an identity the job's current
- * finding says somebody else's machine holds (see adoptableReference).
+ * create under it was sent with. And the three ways out — retry, adopt and
+ * repoint — are offered wherever the page has what the act needs. Retry is
+ * offered on every job. Adopt attaches a reference rather than asking for
+ * one, so it is offered only where the page has one to attach (see
+ * adoptableReference): not on a job that has neither found a provider
+ * resource nor reserved an identity — which, until something is found, is
+ * every job but a VPS create; a shared-hosting create whose answer was lost
+ * is one, and the API can adopt it where this page cannot. Repoint is
+ * offered only on a job that holds a reserved identity, since that is all it
+ * can move. Beyond that, which of them a job may take is the server's to say,
+ * and the page shows its refusal when it gives one. The one thing the page
+ * withholds on its own reading of a finding is Adopt with an identity the
+ * job's current finding says somebody else's machine holds.
  */
 export function AdminProvisioningPage() {
   const { t } = useTranslation()

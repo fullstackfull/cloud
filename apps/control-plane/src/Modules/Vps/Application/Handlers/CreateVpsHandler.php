@@ -490,8 +490,11 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                     // Which identity the lost answer was about, as every
                     // finding about an identity says: it lands in the
                     // attempt's own record and in the job's finding, each of
-                    // which then names the id on its own. (The review list
-                    // reads the job's reserved_provider_id column, not this.)
+                    // which then names the id on its own. The review list
+                    // shows the id from the job's reserved_provider_id
+                    // column, and reads this one to decide whether the
+                    // finding is still current: after a repoint it is about
+                    // an identity the job no longer holds, and is not shown.
                     'reserved_provider_id' => $identity->providerId,
                 ],
             );

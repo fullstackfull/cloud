@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Route;
 use PHPUnit\Framework\Attributes\Test;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -38,10 +39,12 @@ use Tests\TestCase;
  * under its cover.
  *
  * Two pins, one per link. The behavioural one lives in the F-15 band and
- * drives every operator act the platform offers, asserting the payload comes
- * out byte-identical. This one is static: it reads every PHP file under
- * `src/` and counts the places that write a column called `payload`, in six
- * shapes, against a hand-written expectation.
+ * drives every act the platform offers an operator over a VPS create's job,
+ * and both sweepers that act on one without an operator, asserting the
+ * payload comes out byte-identical. This one is static: it reads every PHP
+ * file under `src/` and counts the places that write a column called
+ * `payload`, in six shapes, against a hand-written expectation — which is
+ * what covers a writer on a path the behavioural pin does not drive.
  *
  * ===========================================================================
  * THE EXPECTATION IS SPLIT, AND ONE HALF MUST NEVER GROW
@@ -69,12 +72,53 @@ use Tests\TestCase;
  * ===========================================================================
  *
  * Whole files, comment-stripped. It catches a second writer in any of the six
- * shapes below, anywhere under `src/`, including in a file that already
- * holds one — and nothing more than that. The raw-SQL shape reads across
- * lines, across string concatenation and across heredocs, because the only
- * thing it will not cross is a `;`; and it reads both forms a SET clause
- * assigns a column in, `set …, payload = …` and the row constructor
- * `set (…, payload) = (…)`.
+ * shapes below, in every form the comment on each shape lists, anywhere
+ * under `src/`, including in a file that already holds one — and nothing more
+ * than that. A shape that cannot run (PCRE gives up on it) fails the census
+ * rather than counting nothing.
+ *
+ * The raw-SQL shape reads across lines, across string concatenation and
+ * across heredocs, because the only thing it will not cross is a `;`. It
+ * reads a SET target in each form Postgres's grammar gives one: the column
+ * alone, `set …, payload = …`; the column with any number of subscripts,
+ * `set payload['k'] = …`, which is how a jsonb column is assigned one key at
+ * a time; and the row constructor, `set (…, payload) = (…)`, its items
+ * subscripted or not. Between the column, its subscripts and its `=` it
+ * reads whatever may stand there: whitespace, PHP's escapes for whitespace in
+ * a double-quoted string, a quote (a quoted identifier's, escaped or not, or
+ * a PHP string's), a concatenation seam, and a SQL comment of either kind.
+ * (Postgres's other indirection on a SET target, `payload.field`, is for
+ * composite columns; on a jsonb column it is an error, so it writes nothing.)
+ *
+ * The subscripted form is here because it was missing. The round-two
+ * verification planted `set payload['sent_for_review_at'] = to_jsonb(?::text)`
+ * in the task poller — this file's own predicted edit, written the way
+ * Postgres allows — and it ran, kept the hostname, and left this census, the
+ * never-grow list and the behavioural pin all green.
+ * `a_subscripted_writer_in_the_task_poller_is_a_new_writer_to_the_census`
+ * keeps that reproduction; the behavioural pin now drives the task poller
+ * too, and fails on it as well. The forms the shape comments list are driven
+ * by `each_shape_sees_what_it_must_and_nothing_it_must_not`. Those the same
+ * pass added — a qualified array key or JSON path key, compact(), `+=`,
+ * `->{'payload'}`, a model written as an array, a destructuring or foreach
+ * target, a setter taking the name by any argument (touch() and upsert()'s
+ * update list among them), a subscript with a function or a bracket in it,
+ * and a seam, an escaped quote, a PHP whitespace escape or a SQL comment
+ * between a SQL target and its `=` — were each missed before, and each
+ * fixture for one of them that is a write in itself wrote the payload of a
+ * real row on PostgreSQL 16 in a probe, keeping the hostname or, in
+ * touch()'s case, replacing the whole payload with a timestamp. Two fixtures
+ * are precautions rather than writes: `$columns['payload'] = …` builds an
+ * array that a write may later be handed, and `$job->payload[$keys['k']] = …`
+ * throws, as the next sentences say. Of the setters listed without a fixture,
+ * touchQuietly() writes as touch() does, and data_fill() and Arr::add() write
+ * only a payload that is absent. Some forms write nothing, and were probed so
+ * that none is taken for a gap: a subscripted overloaded property,
+ * `$job->payload['k'] = …`, and `$job['payload']['k'] = …` both throw
+ * "indirect modification … has no effect" (the property shape reads both
+ * anyway); `payload.k` in a SET clause is a Postgres error on a jsonb
+ * column; the query builder's touch('payload') is a JSON syntax error;
+ * increment('payload') and `.=` throw.
  *
  * The raw-SQL window is sized by a criterion, not a feeling: at least twice
  * the widest `UPDATE … SET` clause in `src/` today. An UPDATE is any `update`
@@ -109,27 +153,39 @@ use Tests\TestCase;
  * WHAT THIS SCAN STILL DOES NOT SEE
  * ===========================================================================
  *
- * - **A column name held in a variable** — `[$column => $value]`. The
- *   column is not spelled at the write site, so no textual scan can see it.
+ * - **A column name the source's text does not spell** — held in a variable
+ *   or a constant (`[$column => $value]`, `[Job::PAYLOAD => …]`,
+ *   `->setAttribute($name, …)`), passed to `sprintf()` or interpolated into
+ *   the SQL, split by a concatenation (`'pay'.'load'`), or spelled — the
+ *   name or its `=` — through an escape other than PHP's for whitespace:
+ *   PHP's `"pay\x6coad"`, SQL's `U&"…"`. The scan reads the characters the
+ *   source holds; what PHP or Postgres would make of them is evaluating the
+ *   program, not reading it.
  * - **A statement assembled across statements** — `$sql = 'update … set ';
  *   $sql .= 'payload = ?';`. Letting the raw-SQL shape cross a `;` is what
  *   would turn it into a false-positive machine across whole files.
- * - **A `;` in the statement's text before the column** — in a SQL string
- *   literal, `set note = 'a; b', payload = ?`, or in a SQL comment inside a
- *   heredoc. Same reason: the window stops at the first `;`, and so does the
- *   measure of how wide the window must be; telling a literal's or a
- *   comment's `;` from a statement's would take a SQL tokenizer, not a
- *   pattern.
+ * - **A `;` in the statement's text between its `set` and the column's `=`**
+ *   — in a SQL string literal, `set note = 'a; b', payload = ?`; inside a
+ *   subscript, `payload[';'] = ?`; or in a SQL comment. Same reason: the
+ *   window stops at the first `;`, and so does the measure of how wide the
+ *   window must be; telling a literal's or a comment's `;` from a
+ *   statement's would take a SQL tokenizer, not a pattern.
  * - **An UPDATE whose `update` is not in its statement's text before the
  *   `set`** — the verb held in a variable, or supplied after the `set` as a
  *   `sprintf()` argument. The raw-SQL shape does not need the verb and may
  *   still see the column; the measure does, and does not measure that
  *   statement.
- * - **Mass assignment** — `$job->update($request->validated())`. The model
- *   guards only `id`, so this would reach the column, and it is undecidable
- *   from the text. There is no such call anywhere in `src/`, `app/` or
- *   `routes/` today; what bounds it is the admin surface, which offers no
- *   route that edits a job — and that is asserted below rather than stated.
+ * - **Attributes handed over as data** — an array built by a call, not
+ *   written out: `$job->update($request->validated())`,
+ *   `$job->fill($other->only('payload'))`, `$job->forceFill($row)`,
+ *   `->upsert($rows, ['id'], $columns)`. The model guards only `id`, so any
+ *   of these reaches the column if the array holds it, and whether it does
+ *   is a question about data, not text. (An array built key by key in the
+ *   source, `$columns['payload'] = …`, is written out, and the property
+ *   shape reads it.) There is no mass assignment from a request onto a job
+ *   anywhere in `src/`, `app/` or `routes/` today; what bounds it is the
+ *   admin surface, which offers no route that edits a job — and that is
+ *   asserted below rather than stated.
  *
  * Scope is `src/`. The other places code lives were censused by hand when this
  * was written: `app/`, `routes/`, `bootstrap/`, `config/` and `database/`
@@ -169,26 +225,79 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
 
     /**
      * Six shapes a write to a column named `payload` takes in this codebase's
-     * idioms.
+     * idioms, each read in every form its own grammar gives it.
      *
      * @return array<string, string>
      */
     private static function writeShapes(): array
     {
+        /*
+         * A subscript, `[…]`, balanced to any depth and never across a `;`:
+         * SQL's `payload['a']['b']` and `payload[lower(?)]`, PHP's
+         * `->payload[$keys['k']]`.
+         */
+        $subscript = '(?<subscript>\[(?:[^\[\];]++|(?&subscript))*+\])';
+
+        // A parenthesised group, balanced, never across a `;`.
+        $parens = '(?<parens>\((?:[^();]++|(?&parens))*+\))';
+
+        /*
+         * What may stand between the tokens of a SQL SET target, and between
+         * the target and its `=`: whitespace; PHP's escape for it inside a
+         * double-quoted string or a heredoc (`\n`, `\t`); a quote, escaped or
+         * not, which is a quoted identifier's or a PHP string's; the `.` of a
+         * concatenation seam; and a SQL comment of either kind.
+         */
+        $gap = '(?:\s|\\\\[nrtvf]|\\\\?["\'`]|\.|/\*(?:[^*;]|\*(?!/))*+\*/|--[^\n;]*+\n)*+';
+
+        /*
+         * One piece of a row constructor's target list: anything but a paren,
+         * a bracket or a `;`, or a whole subscript, or a whole SQL block
+         * comment.
+         */
+        $rowItem = '(?:[^();\[/]|/(?!\*)|/\*(?:[^*;]|\*(?!/))*+\*/|(?&subscript))';
+
         return [
-            // ['payload' => …]: create(), update(), forceFill(), fill(), insert().
-            'array key' => '/["\']payload["\']\s*=>/',
-            // ['payload->hostname' => …]: a JSON path update.
-            'json path key' => '/["\']payload->[^"\']*["\']\s*=>/',
-            // $job->payload = …, $job->payload['x'] = …, $job->payload ??= ….
-            'property assignment' => '/->payload\s*(?:\[[^\]]*\]\s*)*(?:=(?![=>])|\?\?=)/',
-            // $job->setAttribute('payload', …).
-            'setAttribute' => '/setAttribute\(\s*["\']payload["\']/',
+            // ['payload' => …], ['provisioning_jobs.payload' => …] — create(),
+            // update(), forceFill(), fill(), insert(), updateOrInsert() — and
+            // compact('payload'), which is the same array spelled otherwise.
+            'array key' => '~["\'](?:\w+\.)*payload["\']\s*=>|\bcompact\s*\([^;()]*["\']payload["\']~',
+            // ['payload->hostname' => …], qualified or not: a JSON path update.
+            'json path key' => '~["\'](?:\w+\.)*payload->[^"\']*["\']\s*=>~',
+            // $job->payload = …, $job->{'payload'} = …, $job['payload'] = …
+            // (a model is ArrayAccess), each with or without subscripts, and
+            // with any assignment operator: =, ??=, +=, and the rest. And the
+            // property as an assignment target with no operator after it: in
+            // a destructuring list, [$a, $job->payload] = … or list(…) = …,
+            // at any depth and wherever an expression may stand, and as a
+            // foreach target, foreach (… as $job->payload). A destructuring
+            // list is told from an array access by what stands before its
+            // bracket: an access follows the end of an expression — a word,
+            // a variable, a closing bracket, a string — and a list follows
+            // anything else, or return, echo, print, yield, else, do, and,
+            // or, xor, or the opening tag. A `)` or `}` counts as anything
+            // else: after a call PHP refuses to write to an access, so there
+            // it can only be a list, and after `->{'name'}` the cost is a
+            // write counted that is not one.
+            'property assignment' => '~(?(DEFINE)'.$subscript.$parens.')'
+                .'(?:->\s*(?:payload\b|\{\s*["\']payload(?:->[^"\']*)?["\']\s*\})|\[\s*["\']payload(?:->[^"\']*)?["\']\s*\])\s*(?:(?&subscript)\s*)*(?:[-+*/.%|&^]|\*\*|<<|>>|\?\?)?=(?![=>])'
+                .'|(?:[^\w$\]\'"\s]|\b(?:return|echo|print|yield|else|do|and|or|xor)\b|<\?php)\s*(?:\[|\blist\s*\()(?=(?:(?![\])]\s*=(?![=>]))[^;])*?->\s*payload\b)(?:[^\[\]();]++|(?&subscript)|(?&parens))*+[\])]\s*=(?![=>])'
+                .'|\bforeach\s*\([^;]*?\bas\s+[^;)]*?->\s*payload\b~',
+            // $job->setAttribute('payload', …) and every other call that
+            // takes the attribute's name as an argument and sets it:
+            // offsetSet(), __set(), fillJsonAttribute(), data_set(),
+            // data_fill(), Arr::set(), Arr::add(), touch() and touchQuietly()
+            // — which write a timestamp over the whole payload — and
+            // upsert()'s list of columns to update; the name positional or
+            // named.
+            'setAttribute' => '~\b(?:setAttribute|offsetSet|__set|fillJsonAttribute|data_set|data_fill|Arr::set|Arr::add|touch|touchQuietly|upsert)\s*\((?:[^;]*?[,(\[])?\s*(?:\w+\s*:\s*)?["\']payload(?:["\'.]|->)~',
             // update … set …, payload = … — in a string, a concatenation or a
-            // heredoc — and the row-constructor form, set (…, payload) = (…).
-            'raw SQL' => '/\bset\b[^;]{0,'.self::RAW_SQL_WINDOW.'}?(?:\([^();]*?["\'`]?\bpayload\b["\'`]?[^();]*\)|["\'`]?\bpayload\b["\'`]?)\s*=(?![=>])/is',
-            // jsonb_set(payload, …) / jsonb_insert(payload, …): the value a SET would write.
-            'jsonb function' => '/\bjsonb_(?:set|insert)\s*\(\s*["\'`]?payload\b/i',
+            // heredoc — with the column subscripted or not, set payload['k']
+            // = …; and the row-constructor form, set (…, payload) = (…).
+            'raw SQL' => '~(?(DEFINE)'.$subscript.'(?<gap>'.$gap.'))\bset\b[^;]{0,'.self::RAW_SQL_WINDOW.'}?(?:\('.$rowItem.'*?\bpayload\b'.$rowItem.'*\)|\bpayload\b(?:(?&gap)(?&subscript))*)(?&gap)=(?![=>])~is',
+            // jsonb_set(payload, …), jsonb_set_lax(payload, …),
+            // jsonb_insert(payload, …): the value a SET would write.
+            'jsonb function' => '~\bjsonb_(?:set(?:_lax)?|insert)\s*\(\s*\\\\?["\'`]?payload\b~i',
         ];
     }
 
@@ -246,33 +355,137 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
     public function each_shape_sees_what_it_must_and_nothing_it_must_not(): void
     {
         $must = [
-            'array key' => ["ProvisioningJob::query()->create(['payload' => \$p]);", '$job->forceFill(["payload" => []]);'],
-            'json path key' => ["\$q->update(['payload->hostname' => 'x']);"],
-            'property assignment' => ['$job->payload = $p;', "\$job->payload['hostname'] = 'x';", '$job->payload ??= [];', '$job->payload   =   [];'],
-            'setAttribute' => ["\$job->setAttribute('payload', \$p);", '$job->setAttribute( "payload", $p);'],
+            'array key' => [
+                "ProvisioningJob::query()->create(['payload' => \$p]);",
+                '$job->forceFill(["payload" => []]);',
+                // Laravel's Postgres grammar drops the qualifier and writes the column.
+                "DB::table('provisioning_jobs')->update(['provisioning_jobs.payload' => \$p]);",
+                "\$q->update(['public.provisioning_jobs.payload' => \$p]);",
+                "\$job->update(compact('payload'));",
+                "\$job->update(compact('attempts', 'payload'));",
+            ],
+            'json path key' => [
+                "\$q->update(['payload->hostname' => 'x']);",
+                "\$q->update(['provisioning_jobs.payload->hostname' => 'x']);",
+            ],
+            'property assignment' => [
+                '$job->payload = $p;',
+                "\$job->payload['hostname'] = 'x';",
+                "\$job->payload[\$keys['k']] = 'x';",
+                '$job->payload ??= [];',
+                '$job->payload   =   [];',
+                "\$job->payload += ['sent_for_review_at' => \$now];",
+                "\$job->{'payload'} = \$p;",
+                "\$job->{'payload->hostname'} = 'x';",
+                "\$job['payload'] = \$p;",
+                "\$this->attributes['payload'] = \$p;",
+                "\$columns['payload'] = \$p;",
+                '[$job->payload] = $row;',
+                '[$a, $job->payload] = $row;',
+                "['k' => \$a, 'p' => \$job->payload] = \$row;",
+                'list($a, $job->payload) = $row;',
+                '[[$job->payload]] = $rows;',
+                'if ($x) [$job->payload] = $row;',
+                'if ($x) { $y = 1; } [$job->payload] = $row;',
+                'return [$job->payload] = $row;',
+                '$x = [$job->payload] = $row;',
+                'foo([$job->payload] = $row);',
+                'foreach ($rows as $job->payload) {}',
+                'foreach ($rows as $k => $job->payload) {}',
+                'foreach ($rows as [$a, $job->payload]) {}',
+            ],
+            'setAttribute' => [
+                "\$job->setAttribute('payload', \$p);",
+                '$job->setAttribute( "payload", $p);',
+                "\$job->setAttribute(value: \$p, key: 'payload');",
+                "\$job->setAttribute('payload->hostname', 'x');",
+                "\$job->offsetSet('payload', \$p);",
+                "\$job->__set('payload', \$p);",
+                "\$job->fillJsonAttribute('payload->hostname', 'x');",
+                "data_set(\$job, 'payload', \$p);",
+                "Arr::set(\$job, 'payload', \$p);",
+                "\$job->touch('payload');",
+                "DB::table('provisioning_jobs')->upsert(\$rows, ['id'], ['payload']);",
+                "\$q->upsert(\$rows, uniqueBy: 'id', update: ['payload']);",
+            ],
             'raw SQL' => [
                 "DB::update('update provisioning_jobs set payload = ? where id = ?', \$b);",
                 "DB::update('update provisioning_jobs set attempts = ?, payload = ? where id = ?', \$b);",
                 "DB::update('update provisioning_jobs set \"payload\" = ? where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set PAYLOAD = ? where id = ?', \$b);",
                 "DB::update('update provisioning_jobs set '\n    .'attempts = attempts + 1, '\n    .'payload = ? where id = ?', \$b);",
                 "DB::update(<<<'SQL'\n    update provisioning_jobs\n    set\n        payload = payload || ?::jsonb\n    where id = ?\n    SQL, \$b);",
                 "DB::update('update provisioning_jobs set (updated_at, payload) = (now(), payload || ?::jsonb) where id = ?', \$b);",
                 "DB::update('update provisioning_jobs set (payload) = row(?::jsonb) where id = ?', \$b);",
                 "DB::update('update provisioning_jobs set ('\n    .'updated_at, \"payload\", attempts'\n    .') = (select now(), ?::jsonb, 1) where id = ?', \$b);",
+                // A subscripted target (Postgres 14+): the verification's own reproduction first.
+                "DB::update(\"update provisioning_jobs set payload['sent_for_review_at'] = to_jsonb(?::text) where id = ?\", \$b);",
+                "DB::update('update provisioning_jobs set payload[\\'a\\'][\\'b\\'] = ? where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set \"payload\" [ \\'k\\' ] = ? where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set payload[lower(?)] = ? where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set payload[(array[\\'k\\'])[1]] = ? where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set (attempts, payload[\\'k\\']) = (1, ?) where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set (attempts, payload[lower(?)]) = (1, ?) where id = ?', \$b);",
+                // Whatever separates the target from its `=`: a concatenation seam, an
+                // escaped quote, a PHP escape for whitespace, a SQL comment.
+                "DB::update('update provisioning_jobs set payload'\n    .' = ? where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set payload'\n    .\"['k'] = ? where id = ?\", \$b);",
+                "DB::update('update provisioning_jobs set (attempts, payload)'.' = (1, ?) where id = ?', \$b);",
+                'DB::update("update provisioning_jobs set \\"payload\\" = ? where id = ?", $b);',
+                'DB::update("update provisioning_jobs set payload\\n    = ? where id = ?", $b);',
+                "DB::update('update provisioning_jobs set payload /* stamped */ = ? where id = ?', \$b);",
+                "DB::update(<<<'SQL'\n    update provisioning_jobs\n    set payload -- stamped for the screen\n        = ?\n    where id = ?\n    SQL, \$b);",
+                "DB::update('update provisioning_jobs set (attempts /* (sic) */, payload) = (1, ?) where id = ?', \$b);",
             ],
-            'jsonb function' => ["DB::update('update provisioning_jobs set x = 1, result = jsonb_set(payload, ...)');"],
+            'jsonb function' => [
+                "DB::update('update provisioning_jobs set x = 1, result = jsonb_set(payload, ...)');",
+                "DB::update('update provisioning_jobs set x = 1, result = jsonb_set_lax(payload, ...)');",
+            ],
         ];
 
         $mustNot = [
             '$payload = $job->payload;',
             '$job->payload === $other;',
+            '$job->payload == $other;',
+            '$job->payload != $other;',
+            '$job->payload <= $other;',
+            '$job->payload >= $other;',
             "\$job->payload['hostname'] ?? null;",
+            "\$data['payload'] ?? null;",
+            "\$data['payload'] === \$other;",
+            "\$data['payloads'] = 1;",
             '$fn = fn () => $job->payload;',
+            "\$job->getAttribute('payload');",
+            "data_get(\$job, 'payload');",
+            "compact('payloads');",
+            '$map[$job->payload] = 1;',
+            '$map [$job->payload] = 1;',
+            "\$map['k'][\$job->payload] = 1;",
+            '$this->map[$job->payload] = 1;',
+            '$x = [$job->payload] == $y;',
+            'return [$job->payload];',
+            '[$a, $b] = $job->payload;',
+            'list($a, $b) = $job->payload;',
+            'foo([$job->payload]);',
+            '$x = [$job->payload];',
+            'foreach ($job->payload as $k => $v) {}',
+            'foreach ($rows as $row) { $x = $row->payload; }',
+            '$job->touch();',
+            "DB::table('provisioning_jobs')->upsert(\$rows, ['id'], ['status']);",
+            "\$x = ['kind' => 'payload'];",
+            "\$q->update(['payload_version' => 2]);",
+            "\$q->update(['not_payload' => 2]);",
             "DB::select('select payload from provisioning_jobs where id = ?');",
             "\$q->where('payload->hostname', 'web-01');",
             "\$settings = ['payloads' => 1];",
             "DB::update('update provisioning_jobs set (updated_at, attempts) = (now(), 1) where id = ?', \$b);",
             "DB::update('update provisioning_jobs set (updated_at, payloads) = (now(), 1) where id = ?', \$b);",
+            "DB::update('update provisioning_jobs set payload_version = ? where id = ?', \$b);",
+            "DB::update('update provisioning_jobs set result = ? where id = ?', [\$payload]);",
+            // A write described in a comment is not a write: what normalise() is for.
+            "// \$job->payload = \$p;\n\$x = 1;",
+            "/* DB::update('update provisioning_jobs set payload = ? where id = ?', \$b); */\n\$x = 1;",
+            "/**\n * ['payload' => \$p], \$job->setAttribute('payload', \$p)\n */\n\$x = 1;",
         ];
 
         foreach ($must as $shape => $sources) {
@@ -385,9 +598,11 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
      * A second writer appended to the reservation statement itself — the one
      * the window is sized for — is seen.
      *
-     * This is the verification's own reproduction, kept: the column appended
+     * This is the verifications' own reproductions, kept: the column appended
      * to the end of the SET clause of the real statement, read out of the
-     * real file, so the gap is whatever that statement's gap is today.
+     * real file, so the gap is whatever that statement's gap is today — once
+     * whole, as round six's verification wrote it, and once by one key, as
+     * round two's did (it ran, and kept the hostname).
      */
     #[Test]
     public function a_writer_appended_to_the_reservation_statement_is_seen(): void
@@ -398,14 +613,84 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
 
         $this->assertSame(1, substr_count($source, $anchor), 'The reservation statement is not where this test expects it.');
 
-        $planted = str_replace(
-            $anchor,
-            "            .', payload = payload || jsonb_build_object(?::text, ?::text) '\n".$anchor,
-            $source,
-        );
-
         $this->assertSame(['array key' => 1], self::shapesIn($source));
-        $this->assertSame(['array key' => 1, 'raw SQL' => 1], self::shapesIn($planted));
+
+        // Round six's form, and round two's: the whole column, and one key of it.
+        foreach ([
+            "            .', payload = payload || jsonb_build_object(?::text, ?::text) '\n",
+            "            .\", payload['reserved_at'] = to_jsonb(?::text) \"\n",
+        ] as $writer) {
+            $planted = str_replace($anchor, $writer.$anchor, $source);
+
+            $this->assertSame(['array key' => 1, 'raw SQL' => 1], self::shapesIn($planted), $writer);
+        }
+    }
+
+    /**
+     * A subscripted SET target planted in the task poller is a new writer to
+     * the census over the whole tree, and nothing else changes.
+     *
+     * The round-two verification's reproduction, kept: the census docblock's
+     * own predicted edit — stamp something into the payload so the screen can
+     * show it — written the way Postgres lets a jsonb column be assigned one
+     * key at a time, in a file F-15 edits. It executes and keeps the hostname,
+     * and before the raw-SQL shape read subscripts the census, the never-grow
+     * list and every behavioural pin were green with it in place.
+     */
+    #[Test]
+    public function a_subscripted_writer_in_the_task_poller_is_a_new_writer_to_the_census(): void
+    {
+        $path = 'src/Modules/Compute/Application/Actions/PollProviderTasks.php';
+        $anchor = "        ])->save();\n\n        event(new ProvisioningJobNeedsReview(";
+        $planted = "        ])->save();\n"
+            ."        \\Illuminate\\Support\\Facades\\DB::update(\"update provisioning_jobs set payload['sent_for_review_at'] = to_jsonb(?::text) where id = ?\", [now()->toIso8601String(), \$job->getKey()]);\n\n"
+            .'        event(new ProvisioningJobNeedsReview(';
+
+        $clean = $this->census();
+        $source = (string) file_get_contents(base_path($path));
+
+        $this->assertSame(1, substr_count($source, $anchor), 'sendForReview() is not where this test expects it.');
+        $this->assertArrayNotHasKey($path, $clean);
+
+        $tree = $this->sourceTree();
+        $census = $this->census(static function () use ($tree, $path, $anchor, $planted): iterable {
+            foreach ($tree as $file => $contents) {
+                yield $file => $file === $path ? str_replace($anchor, $planted, $contents) : $contents;
+            }
+        });
+
+        $expected = [...$clean, $path => ['raw SQL' => 1]];
+        ksort($expected);
+
+        $this->assertSame($expected, $census);
+    }
+
+    /**
+     * A pattern that cannot run fails the census; it does not count nothing.
+     *
+     * PCRE gives up on a pattern that backtracks past its limit, and
+     * `preg_match_all()` then answers `false` — which, compared with `> 0`,
+     * reads exactly like "no writer here". Driven here with the limit made
+     * tiny and the JIT (which has limits of its own) off.
+     */
+    #[Test]
+    public function a_shape_that_cannot_run_fails_rather_than_counting_nothing(): void
+    {
+        $limit = ini_get('pcre.backtrack_limit');
+        $jit = ini_get('pcre.jit');
+
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+
+        try {
+            self::shapesIn("<?php\nDB::update('update provisioning_jobs set attempts = attempts + 1 where id = ?', \$b);");
+            $this->fail('A shape that could not run was read as finding nothing.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('could not be run', $e->getMessage());
+        } finally {
+            ini_set('pcre.backtrack_limit', (string) $limit);
+            ini_set('pcre.jit', (string) $jit);
+        }
     }
 
     /**
@@ -541,6 +826,11 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
     }
 
     /**
+     * A pattern that fails to run — it does not compile, or it hits PCRE's
+     * backtracking or recursion limit on a large file — counts nothing, and
+     * a census that counted nothing for that reason would agree with any
+     * expectation. So it throws instead.
+     *
      * @return array<string, int> shape => occurrences, only those that occur
      */
     private static function shapesIn(string $source): array
@@ -549,7 +839,11 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
         $found = [];
 
         foreach (self::writeShapes() as $shape => $pattern) {
-            $count = preg_match_all($pattern, $code);
+            $count = @preg_match_all($pattern, $code);
+
+            if ($count === false) {
+                throw new RuntimeException(sprintf('The %s shape could not be run: %s.', $shape, preg_last_error_msg()));
+            }
 
             if ($count > 0) {
                 $found[$shape] = $count;

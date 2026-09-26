@@ -83,13 +83,17 @@ final class ProvisioningController
      * senses `RepointReservedIdentity` requires before it acts on one: it is
      * stamped with the job's last attempt, and, where it is about a provider
      * identity, about the one the job holds now. Otherwise the row carries no
-     * finding. Every door into this list writes its own finding, and a
-     * successful attempt or an adoption removes the one before it; this is
-     * the reader's half of that, so that a door which one day does not — or
-     * a repoint, which moves the identity and leaves the finding that
-     * licensed it — is shown as "no current finding" rather than as one the
-     * job is no longer about, which would send the operator to the wrong
-     * runbook row.
+     * finding. The engine's settle, the stale sweep and the task poller each
+     * write their own finding as they move a job here, and a successful
+     * attempt or an adoption removes the one before it. One door writes none:
+     * an operator's verdict on a rebuild (`OperationsController`) moves a
+     * reinstall's job to failed and leaves its finding as it was, so the row
+     * shows what that job's last attempt found, if it found anything, and
+     * nothing older. That is this reader's half: a finding left behind by an
+     * earlier attempt — past a door that writes none, that one or one added
+     * later — or about an identity a repoint has since moved the job off is
+     * shown as "no current finding", rather than as one the job is no longer
+     * about, which would send the operator to the wrong runbook row.
      */
     public function needingReview(Request $request): JsonResponse
     {
