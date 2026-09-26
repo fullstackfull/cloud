@@ -273,7 +273,7 @@ final readonly class OrderPricing
      */
     private function assertDeliverable(Plan $plan): void
     {
-        $placement = $this->placement->resolve($plan);
+        $placement = $this->placement->resolveForSale($plan);
 
         if ($placement->isFeasible()) {
             return;

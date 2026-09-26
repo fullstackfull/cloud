@@ -219,7 +219,7 @@ final class AFreshDeploymentBecomesConfigurableTest extends TestCase
         $feasibility = app(LocalPlacementFeasibility::class);
 
         $vps = $feasibility->resolve(Plan::query()->with('product')->findOrFail($vpsPlan));
-        $hosting = $feasibility->resolve(Plan::query()->with('product')->findOrFail($hostingPlan));
+        $hosting = $feasibility->resolveForSale(Plan::query()->with('product')->findOrFail($hostingPlan));
 
         $this->assertTrue(
             $vps->isFeasible(),

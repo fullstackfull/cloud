@@ -75,7 +75,7 @@ final readonly class AssertOrderIsStillDeliverable
                 throw CheckoutRejectedException::becauseItCannotBeDelivered((string) $planId);
             }
 
-            $resolution = $this->placement->resolve($plan);
+            $resolution = $this->placement->resolveForSale($plan);
 
             if (! $resolution->isFeasible()) {
                 $this->recordTheRefusal($order, (string) $plan->getKey(), (string) $resolution->blockedReason);

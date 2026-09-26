@@ -37,7 +37,27 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  * second implementation of it: two copies of "can this be placed" drift, and
  * the copy that drifts is the one that takes the money. So the rule moved
  * here, the provisioning path resolves through it, and the checkout path asks
- * it the same question.
+ * it the same question — plus one more, below.
+ *
+ * ---------------------------------------------------------------------------
+ * Two questions: is it configured, and would the fleet take it now
+ * ---------------------------------------------------------------------------
+ *
+ * resolve() asks only about configuration: rows an operator writes and
+ * removes. The build path (ProvisionOrderedService) asks this, and when it
+ * refuses, the service is kept PENDING with the reason and no job is made,
+ * because no retry can conjure a package or a cluster nobody configured.
+ *
+ * resolveForSale() asks that and then whether the hosting fleet has a node
+ * that would take the package right now. Checkout and the payment-time
+ * recheck ask this, before any money moves. The build path deliberately does
+ * not: a fleet that is full, loaded or in maintenance at the moment a paid
+ * order is fulfilled is a condition that passes, and it belongs to the job —
+ * CreateHostingAccountHandler fails it as FailureClass::Capacity and the
+ * engine retries it. Asking the fleet at fulfilment would turn a race for the
+ * last slot, or a load spike, into a PENDING service with no job that nothing
+ * retries (measured by the verifier of round three; pinned by
+ * APaidHostingOrderWaitsForCapacityRatherThanStallingTest).
  *
  * ---------------------------------------------------------------------------
  * Local, and deliberately nothing more
@@ -52,13 +72,13 @@ use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
  * short of this):
  *
  *  - Shared Hosting: the plan resolves to exactly one package on sale
- *    ({@see HostingPackageForPlan}), AND the hosting fleet has a node the
- *    scheduler would place that package on. That second question is asked of
- *    {@see HostingNodeScheduler} itself, from the node rows it keeps
- *    (status, licence, openness, disk, account count, load, package fit), so
- *    checkout and the build refuse the same fleet for the same reasons. It
- *    used to be unasked: a package with zero nodes was sold, paid, built into
- *    a FAILED service and renewed.
+ *    ({@see HostingPackageForPlan}); and, for a sale only (resolveForSale()),
+ *    the hosting fleet has a node the scheduler would place that package on.
+ *    That second question is asked of {@see HostingNodeScheduler} itself, from
+ *    the node rows it keeps (status, licence, openness, disk, account count,
+ *    load, package fit), so checkout refuses the fleet the build's scheduler
+ *    would refuse, for the same reasons. It used to be unasked: a package with
+ *    zero nodes was sold, paid, built into a FAILED service and renewed.
  *  - VPS: a cluster, a customer IP pool and an OS image. A cluster or pool the
  *    plan declares by id must exist and be one the platform would itself pick
  *    — an ACTIVE cluster, an ACTIVE pool in a customer-allocatable scope. A
@@ -83,6 +103,39 @@ final readonly class LocalPlacementFeasibility
         private HostingNodeScheduler $scheduler,
     ) {}
 
+    /**
+     * Whether a paid line can be sold now: configuration, and for Shared
+     * Hosting a fleet that would take it. Checkout and the payment recheck.
+     */
+    public function resolveForSale(Plan $plan): PlacementResolution
+    {
+        $resolution = $this->resolve($plan);
+
+        if (! $resolution->isFeasible() || ! isset($resolution->values['hosting_package_id'])) {
+            return $resolution;
+        }
+
+        /*
+         * Asked of the scheduler the build uses, with the same request the
+         * build makes for a line that names no region or panel, so the two
+         * cannot disagree about the fleet. Only the answer is kept: the node
+         * is chosen again by the build's own scheduler run, and a slot is
+         * committed under the node's lock when the account is reserved.
+         */
+        try {
+            $this->scheduler->place(new HostingPlacementRequest(
+                packageId: (string) $resolution->values['hosting_package_id'],
+            ));
+        } catch (NoHostingCapacityException $e) {
+            return PlacementResolution::blocked($e->getMessage());
+        }
+
+        return $resolution;
+    }
+
+    /**
+     * Where a plan would be placed, from configuration alone. The build path.
+     */
     public function resolve(Plan $plan): PlacementResolution
     {
         /** @var array<string, mixed> $constraints */
@@ -119,21 +172,6 @@ final readonly class LocalPlacementFeasibility
 
         if ($choice->package === null) {
             return PlacementResolution::blocked($choice->reason);
-        }
-
-        /*
-         * And somewhere to put it. Asked of the scheduler the build uses,
-         * with the same request the build makes for a line that names no
-         * region or panel, so the two cannot disagree about the fleet. Only
-         * the answer is kept: the node is chosen again, under a lock, when the
-         * account is actually reserved.
-         */
-        try {
-            $this->scheduler->place(new HostingPlacementRequest(
-                packageId: (string) $choice->package->getKey(),
-            ));
-        } catch (NoHostingCapacityException $e) {
-            return PlacementResolution::blocked($e->getMessage());
         }
 
         return PlacementResolution::ready(['hosting_package_id' => (string) $choice->package->getKey()]);
