@@ -91,6 +91,13 @@ def block(run_text: str, shell: str | None = None) -> str:
     return GOOD + f"      - name: the step under test\n{chosen}        run: |\n{lines}"
 
 
+def job(run_text: str, header: str) -> str:
+    """GOOD with a second job, whose settings are `header`, holding one step
+    whose `run: |` block is `run_text`, verbatim."""
+    lines = "".join(f"          {line}\n" if line else "\n" for line in run_text.split("\n"))
+    return GOOD + f"  other:\n{header}    steps:\n      - name: the step under test\n        run: |\n{lines}"
+
+
 CASES: list[tuple[str, dict[str, str] | None, str | tuple[str, ...] | None]] = [
     ("a workflow that only validates passes", {"ci.yml": GOOD}, None),
     (
@@ -423,6 +430,73 @@ jobs:
         {"ci.yml": step("ansible-playbook -i hosts.yml site.yml -C")},
         None,
     ),
+    # F-38, round seven. One case per branch of the reading that no case above
+    # needed: each red one below went green with that branch taken out, and
+    # reached its apply when the shell named ran it with a stub standing in
+    # for tofu or ansible-playbook. They pin the branches; they are not a
+    # list of every way to misread a shell.
+    (
+        "a `\\'` inside $'...' does not close it, so the `#` line after is inside the quote",
+        {"ci.yml": block("echo $'it\\'s\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a backtick is not followed, so no comment line after it is removed",
+        {"ci.yml": block("echo `true #` 'x\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a $( inside double quotes is not followed, so no comment line after it is removed",
+        {"ci.yml": block("echo \"$(echo \" #\")\" 'x\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a backslash-escaped quote outside quotes opens nothing",
+        {"ci.yml": block("echo \\' 'x\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "after a heredoc, which is not followed, a line continuation is still joined",
+        {"ci.yml": block("cat <<EOF\nx\nEOF\ntofu \\\n  apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "an array subscript is not followed: bash reads `a[k #]` as one word",
+        {"ci.yml": block("declare -A a\na[k #]='x\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a --check inside a $'...' argument is not check mode",
+        {"ci.yml": step("ansible-playbook -i hosts.yml site.yml -e $'it\\'s --check'")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a step in a container job is not read as bash",
+        # GitHub's default shell inside a container is sh; on a Debian image
+        # that is dash, which ends the quote at the backslash and runs tofu.
+        {"ci.yml": job("echo $'a\\' '\n# '; tofu apply -auto-approve",
+                       "    runs-on: ubuntu-latest\n    container: debian:bookworm-slim\n")},
+        "applies OpenTofu",
+    ),
+    (
+        "a step on a Windows runner with no shell set is not read as bash",
+        # PowerShell is the default there; the block comment as above.
+        {"ci.yml": job("<#\nit's\n#>\necho 'x\n# '; tofu apply -auto-approve",
+                       "    runs-on: windows-latest\n")},
+        "applies OpenTofu",
+    ),
+    # And the other direction: these keep a comment line bash drops, which
+    # would turn a mention of an apply in prose into a red.
+    (
+        "a plain ${...} is read through, and the comment line after it is still one",
+        {"ci.yml": block("echo ${HOME}\n# tofu apply is for a person, never CI\ntofu plan")},
+        None,
+    ),
+    (
+        "a here-string is not a heredoc, and the comment line after it is still one",
+        {"ci.yml": block("cat <<< \"x\"\n# tofu apply is for a person, never CI\ntofu plan")},
+        None,
+    ),
 ]
 
 
@@ -431,7 +505,7 @@ jobs:
 # exists to refuse. The count is literal source in this file, maintained by
 # whoever edits the table, so adding or removing a case is a deliberate edit
 # of this number too.
-EXPECTED_CASES = 46
+EXPECTED_CASES = 57
 
 
 def main() -> int:

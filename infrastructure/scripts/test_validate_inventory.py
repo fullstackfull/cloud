@@ -332,6 +332,58 @@ control_plane:
 """,
         None,
     ),
+    # F-38, round seven. The two cases above put every variable on one
+    # declaration, so a reading that kept only one declaration's vars, or only
+    # the first value a variable was given, passed both. Measured against
+    # ansible-inventory 2.18.1: cp-1 below has bmc_password and the class from
+    # the second declaration; the class the later declaration gives wins.
+    (
+        "vars on two declarations of a group accumulate, one variable at a time",
+        """
+all:
+  children:
+    control_plane:
+      vars:
+        bmc_password: hunter2
+control_plane:
+  vars:
+    safety_class: CONFIGURATION_ALLOWED
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+""",
+        "reads as a secret",
+    ),
+    (
+        "where two declarations of a group set one variable, the later wins, as in Ansible",
+        """
+all:
+  children:
+    control_plane:
+      vars:
+        safety_class: REIMAGE_ALLOWED
+control_plane:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+      allow_reimage: true
+""",
+        "safety_class is 'DISCOVERY_ONLY'; only REIMAGE_ALLOWED may be wiped",
+    ),
+    # Ansible fails the whole file on each of these two; read as empty, the
+    # host or group under them would go unjudged.
+    (
+        "a host whose vars are a list, not a mapping, is refused",
+        GOOD + "        host-2: [bmc_password, hunter2]\n",
+        "has vars that are a list, not a mapping",
+    ),
+    (
+        "a group whose hosts entry is a list, not a mapping, is refused",
+        GOOD + "    other:\n      hosts:\n        - rogue-1\n",
+        "has a hosts entry that is a list, not a mapping",
+    ),
     (
         "a group's vars reach its hosts under whichever parent each is declared",
         """
@@ -688,7 +740,7 @@ all:
 # reject". The count is literal source in this file, maintained by whoever
 # edits the table, so adding or removing a case is a deliberate edit of this
 # number too.
-EXPECTED_CASES = 48
+EXPECTED_CASES = 52
 
 
 def run_tree(files: dict[str, str] | None) -> tuple[int, str]:
@@ -855,10 +907,48 @@ TREE_CASES: list[tuple[str, dict[str, str] | None, int, str | tuple[str, ...]]] 
         1,
         "in no environment directory",
     ),
+    # F-38, round seven. Ansible's YAML plugin refuses an empty document
+    # ("Parsed empty YAML file") and hands the file to the next plugin; INI
+    # takes the line as a host. Measured on ansible-core 2.18.1, each of these
+    # environments has a second host, named `{}`, `null` and `~`, in
+    # `ungrouped` -- and the validator read the file as an empty inventory and
+    # printed `ok` over the host it never judged.
+    (
+        "a source holding the empty document `{}` is refused, not read as no groups",
+        {"dev/hosts.yml": GOOD, "dev/placeholder.json": "{}\n"},
+        1,
+        "empty YAML document",
+    ),
+    (
+        "a source holding `null` is refused, not read as no groups",
+        {"dev/hosts.yml": GOOD, "dev/placeholder.yml": "null\n"},
+        1,
+        "empty YAML document",
+    ),
+    (
+        "a source holding `~` is refused, not read as no groups",
+        {"dev/hosts.yml": GOOD, "dev/placeholder": "~\n"},
+        1,
+        "empty YAML document",
+    ),
+    # Measured against ansible-inventory 2.18.1: host-1 has the password from
+    # the nested file, and Ansible fails on the list.
+    (
+        "a group_vars/<group>/ directory is read into its subdirectories",
+        {"dev/hosts.yml": GOOD, "dev/group_vars/group/nested/creds.yml": "bmc_password: hunter2\n"},
+        1,
+        "reads as a secret",
+    ),
+    (
+        "a vars file Ansible loads that is a list, not a mapping, is refused",
+        {"dev/hosts.yml": GOOD, "dev/group_vars/all.yml": "- bmc_password\n"},
+        1,
+        "holds a list, not a mapping of variables",
+    ),
 ]
 
 # Pinned for the same reason, and maintained the same way, as EXPECTED_CASES.
-EXPECTED_TREE_CASES = 18
+EXPECTED_TREE_CASES = 23
 
 
 def main() -> int:
