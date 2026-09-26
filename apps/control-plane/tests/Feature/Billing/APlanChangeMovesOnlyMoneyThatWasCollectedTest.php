@@ -26,14 +26,19 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
+use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 
@@ -289,7 +294,378 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->assertSame(9_000, $subscription->fresh()?->recurring_amount_minor);
     }
 
+    // ---- 5. each change's credit is its own ---------------------------------
+
+    #[Test]
+    public function two_downgrades_off_the_same_plan_within_one_second_are_each_credited_and_recorded_as_posted(): void
+    {
+        $shape = ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40];
+        $basic = $this->plan('basic', $shape, 9_000);
+        $pro = $this->plan('pro', $shape, 90_000);
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $basic);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $pro, 'second-up-1')->assertOk();
+        $this->settle($this->openProrationInvoice($subscription), $customer);
+        $this->finishEveryProvisioningJob();
+
+        // From here the settlement listener is on the queue, not yet run.
+        Event::fake([InvoicePaid::class]);
+
+        $this->travelTo(CarbonImmutable::parse('2026-04-21 00:10:00.100', 'UTC'));
+        $first = $this->changePlan($user, $subscription, $basic, 'second-down-1')->assertOk();
+
+        $this->travelTo(CarbonImmutable::parse('2026-04-21 00:10:00.300', 'UTC'));
+        $this->changePlan($user, $subscription, $pro, 'second-up-2')->assertOk();
+        $upgrade = $this->openProrationInvoice($subscription);
+
+        $this->travelTo(CarbonImmutable::parse('2026-04-21 00:10:00.500', 'UTC'));
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'second-wallet-pay-1')
+            ->postJson("/api/v1/invoices/{$upgrade->id}/wallet-credit", [])
+            ->assertOk();
+        $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
+
+        $this->travelTo(CarbonImmutable::parse('2026-04-21 00:10:00.900', 'UTC'));
+        $second = $this->changePlan($user, $subscription, $basic, 'second-down-2')->assertOk();
+
+        $credits = WalletTransaction::query()->where('kind', 'adjustment')->orderBy('created_at')->pluck('amount_minor')->all();
+        $this->assertCount(2, $credits, 'Two downgrades, two ledger entries: the second must not be replayed as the first.');
+
+        $this->assertSame(
+            [-$first->json('data.net.minor_units'), -$second->json('data.net.minor_units')],
+            $credits,
+            'What each response says was credited is what the ledger posted.',
+        );
+        $this->assertSame(
+            array_sum($credits),
+            (int) PlanChange::query()->sum('wallet_credit_minor'),
+            'The change record carries what was posted, which is what the next ceiling subtracts.',
+        );
+        $this->assertSame(
+            array_sum($credits) - $upgrade->total_minor,
+            $this->walletOf($customer),
+        );
+    }
+
+    // ---- 6. what earlier changes returned is subtracted --------------------
+
+    #[Test]
+    public function credits_across_one_period_never_come_to_more_than_the_period_collected(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        // Paid: 9.000 for the period, 27.000 for the upgrade. 36.000 in.
+        $this->changePlan($user, $subscription, $this->large, 'period-up-1')->assertOk();
+        $this->settle($this->openProrationInvoice($subscription), $customer);
+        $this->finishEveryProvisioningJob();
+
+        // 27.000 back, legitimately: large's 30.000 remainder less small's 3.000.
+        $this->changePlan($user, $subscription, $this->small, 'period-down-1')->assertOk();
+        $this->assertSame(27_000, $this->walletOf($customer));
+
+        // Up again, and that invoice is voided rather than paid.
+        $this->changePlan($user, $subscription, $this->large, 'period-up-2')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+
+        $this->changePlan($user, $subscription, $this->small, 'period-down-2')->assertOk();
+
+        /*
+         * 36.000 came in and 27.000 has already gone back, so 9.000 is all the
+         * second downgrade may return. Counting only what came in would hand
+         * back another 27.000 - 54.000 out of a period that took 36.000.
+         */
+        $this->assertSame(36_000, $this->walletOf($customer));
+    }
+
+    // ---- 7. the period an order bought counts its recurring money ----------
+
+    #[Test]
+    public function a_downgrade_in_the_period_an_order_bought_credits_the_full_remainder(): void
+    {
+        $cheaper = $this->plan('cheaper', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 80], 4_500);
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->boughtSubscription($customer, $this->mid, quantity: 1, setupPerUnit: 0);
+
+        $this->changePlan($user, $subscription, $cheaper, 'order-down-1')->assertOk();
+
+        // 3.333 unused on mid, less 1.500 on cheaper: the order paid for it.
+        $this->assertSame(3_333 - 1_500, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function the_setup_fee_an_order_collected_is_never_returned_as_credit(): void
+    {
+        $flat = ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40];
+        $unit = $this->plan('unit', $flat, 10_000);
+        $dear = $this->plan('dear', $flat, 90_000);
+        $cheap = $this->plan('cheap', $flat, 1_000);
+        [$customer, $user] = $this->accountWithOwner();
+
+        // Two units at 10.000, with 500 of setup on each unit: 21.000 paid, of
+        // which 20.000 bought the period and 1.000 bought the setup.
+        $subscription = $this->boughtSubscription($customer, $unit, quantity: 2, setupPerUnit: 500);
+
+        $this->changePlan($user, $subscription, $dear, 'setup-up-1')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+
+        $this->changePlan($user, $subscription, $cheap, 'setup-down-1')->assertOk();
+
+        /*
+         * The dear plan was never paid for, so the ceiling bites: what comes
+         * back is the period's recurring money, 20.000, and not a fils of the
+         * setup fee.
+         */
+        $this->assertSame(20_000, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function once_a_period_is_renewed_the_order_that_bought_an_earlier_one_is_not_counted_again(): void
+    {
+        $flat = ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40];
+        $unit = $this->plan('unit', $flat, 10_000);
+        $dear = $this->plan('dear', $flat, 90_000);
+        $cheap = $this->plan('cheap', $flat, 1_000);
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->boughtSubscription($customer, $unit, quantity: 1, setupPerUnit: 0);
+
+        // April was the order's; May is renewed and paid at 10.000.
+        $this->travelTo(CarbonImmutable::parse('2026-05-21 00:00:00', 'UTC'));
+        $subscription->forceFill([
+            'current_period_start' => CarbonImmutable::parse('2026-05-01 00:00:00', 'UTC'),
+            'current_period_end' => CarbonImmutable::parse('2026-05-31 00:00:00', 'UTC'),
+        ])->save();
+        $renewal = Invoice::factory()->paid()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'subtotal_minor' => 10_000,
+            'total_minor' => 10_000,
+            'amount_paid_minor' => 10_000,
+        ]);
+        InvoiceItem::query()->create([
+            'invoice_id' => $renewal->getKey(),
+            'kind' => InvoiceItemKind::Plan,
+            'description' => 'Renewal',
+            'quantity' => 1,
+            'unit_amount_minor' => 10_000,
+            'total_minor' => 10_000,
+            'period_start' => $subscription->current_period_start,
+            'period_end' => $subscription->current_period_end,
+            'subscription_id' => $subscription->getKey(),
+        ]);
+
+        $this->changePlan($user, $subscription, $dear, 'renewed-up-1')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->changePlan($user, $subscription, $cheap, 'renewed-down-1')->assertOk();
+
+        // May collected 10.000; April's order money bought April, not May.
+        $this->assertSame(10_000, $this->walletOf($customer));
+    }
+
+    // ---- 8. a later settled change decides the machine ---------------------
+
+    #[Test]
+    public function a_late_settlement_does_not_build_a_plan_a_settled_downgrade_has_since_replaced(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'late-up-1')->assertOk();
+        $upgrade = $this->openProrationInvoice($subscription);
+
+        // Paid, with its InvoicePaid still on the queue.
+        Event::fake([InvoicePaid::class]);
+        $this->settle($upgrade, $customer);
+
+        // Before the worker gets to it, the customer steps down to mid - which
+        // owes nothing, so its own resize is queued at once.
+        $this->changePlan($user, $subscription, $this->mid, 'late-down-1')->assertOk();
+
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+
+        $built = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->get()
+            ->map(static fn (ProvisioningJob $job): mixed => $job->payload['plan_id'] ?? null)->all();
+
+        $this->assertSame([$this->mid->id], $built, 'The machine is built to mid; the superseded large plan is not built on top of it.');
+    }
+
+    // ---- 9. nothing is dispatched for a change that did not happen ---------
+
+    #[Test]
+    public function a_change_that_rolls_back_dispatches_no_resize(): void
+    {
+        $cheaper = $this->plan('cheaper', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 80], 4_500);
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->mid);
+        $this->serviceWithMachine($customer, $subscription);
+
+        // Fails after the resize job row is written, before the commit.
+        AuditEntry::creating(static function (): void {
+            throw new RuntimeException('audit store unavailable');
+        });
+
+        try {
+            $this->changePlan($user, $subscription, $cheaper, 'rollback-down-1')->assertStatus(500);
+        } finally {
+            AuditEntry::flushEventListeners();
+        }
+
+        $this->assertSame($this->mid->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(0, ProvisioningJob::query()->count());
+        Queue::assertNotPushed(RunProvisioningJob::class);
+    }
+
+    // ---- 10. the quote shows the credit that is posted ---------------------
+
+    #[Test]
+    public function the_quoted_amount_is_the_amount_executed_when_the_ceiling_bites(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'quote-up-1')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+
+        $quoted = collect((array) $this->actingAs($user)
+            ->getJson("/api/v1/subscriptions/{$subscription->id}/plan-options")
+            ->assertOk()
+            ->json('data'))->keyBy('plan_id')[$this->small->id];
+
+        $executed = $this->changePlan($user, $subscription, $this->small, 'quote-down-1')->assertOk();
+
+        $this->assertSame(-9_000, $executed->json('data.net.minor_units'));
+        $this->assertSame($executed->json('data.net.minor_units'), $quoted['amount_due_now']['minor_units']);
+    }
+
+    // ---- 11. a count that cannot be derived is refused on both screens -----
+
+    #[Test]
+    public function a_subscription_whose_unit_count_cannot_be_derived_is_refused_the_same_way_on_the_quote_and_the_change(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        // A price the catalogue has since moved off: 8.500 is not a whole
+        // number of 9.000 units.
+        $subscription->forceFill(['recurring_amount_minor' => 8_500])->save();
+        $this->serviceWithMachine($customer, $subscription);
+
+        $options = collect((array) $this->actingAs($user)
+            ->getJson("/api/v1/subscriptions/{$subscription->id}/plan-options")
+            ->assertOk()
+            ->json('data'))->keyBy('plan_id');
+
+        $this->assertContains('unit_count_unknown', $options[$this->large->id]['refusals']);
+
+        $this->changePlan($user, $subscription, $this->large, 'grandfathered-up-1')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'subscription.plan_change_refused')
+            ->assertJsonPath('error.details.refusals', 'unit_count_unknown');
+    }
+
     // ---- helpers ------------------------------------------------------------
+
+    private function openProrationInvoice(Subscription $subscription): Invoice
+    {
+        return Invoice::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->where('status', InvoiceStatus::Open->value)
+            ->sole();
+    }
+
+    /**
+     * The resize a settlement queued has finished, so the service is no
+     * longer busy - as it would be minutes later on a real worker.
+     */
+    private function finishEveryProvisioningJob(): void
+    {
+        ProvisioningJob::query()->update(['status' => ProvisioningJobStatus::Succeeded->value]);
+    }
+
+    /**
+     * A subscription reached through an order line, paid through the order's
+     * invoice, in the period that order bought. Setup is charged per unit
+     * here, the reading under which subtracting one setup fee per line would
+     * count setup money as recurring.
+     */
+    private function boughtSubscription(Customer $customer, Plan $plan, int $quantity, int $setupPerUnit): Subscription
+    {
+        $unit = $this->priceOf($plan)->recurring_amount_minor;
+        $total = $unit * $quantity + $setupPerUnit * $quantity;
+
+        $order = Order::factory()->paid()->create(['customer_id' => $customer->getKey(), 'currency' => 'KWD']);
+
+        /** @var OrderItem $item */
+        $item = OrderItem::query()->create([
+            'order_id' => $order->getKey(),
+            'plan_id' => $plan->getKey(),
+            'kind' => 'plan',
+            'name' => $plan->slug,
+            'billing_period' => BillingPeriod::Monthly,
+            'quantity' => $quantity,
+            'unit_recurring_minor' => $unit,
+            'unit_setup_minor' => $setupPerUnit,
+            'total_minor' => $total,
+        ]);
+
+        $subscription = Subscription::factory()
+            ->startingOn(CarbonImmutable::parse('2026-04-01 00:00:00', 'UTC'))
+            ->create([
+                'customer_id' => $customer->getKey(),
+                'order_id' => $order->getKey(),
+                'plan_id' => $plan->getKey(),
+                'currency' => 'KWD',
+                'billing_period' => BillingPeriod::Monthly,
+                'recurring_amount_minor' => $unit * $quantity,
+            ]);
+
+        $invoice = Invoice::factory()->paid()->create([
+            'customer_id' => $customer->getKey(),
+            'order_id' => $order->getKey(),
+            'subtotal_minor' => $total,
+            'total_minor' => $total,
+            'amount_paid_minor' => $total,
+        ]);
+
+        InvoiceItem::query()->create([
+            'invoice_id' => $invoice->getKey(),
+            'kind' => InvoiceItemKind::Plan,
+            'description' => $plan->slug,
+            'quantity' => $quantity,
+            'unit_amount_minor' => $unit,
+            'total_minor' => $total,
+        ]);
+
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'order_id' => $order->getKey(),
+            'order_item_id' => $item->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'kind' => 'vps',
+            'resources' => $plan->resources,
+        ]);
+
+        VirtualMachine::factory()
+            ->onNode(ComputeNode::factory()->create(['cluster_id' => ComputeCluster::factory()->create()->getKey()]), 900)
+            ->forService($service)
+            ->create([
+                'vcpu' => $plan->resources['vcpu'],
+                'memory_mib' => $plan->resources['memory_mib'],
+                'disk_gib' => $plan->resources['disk_gib'],
+            ]);
+
+        return $subscription;
+    }
 
     private function changePlan(User $user, Subscription $subscription, Plan $plan, string $key): TestResponse
     {
@@ -365,11 +741,14 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
                 'recurring_amount_minor' => $recurring,
             ]);
 
+        // amount_paid_minor stated: the factory's paid() state reads the
+        // definition's total (9.000), not the one given here.
         $invoice = Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $recurring,
             'total_minor' => $recurring,
+            'amount_paid_minor' => $recurring,
         ] + ($refunded ? ['status' => InvoiceStatus::Refunded, 'amount_refunded_minor' => $recurring] : []));
 
         InvoiceItem::query()->create([

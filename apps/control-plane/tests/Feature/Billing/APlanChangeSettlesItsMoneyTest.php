@@ -464,6 +464,7 @@ final class APlanChangeSettlesItsMoneyTest extends BillingApiTestCase
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $subscription->recurring_amount_minor,
             'total_minor' => $subscription->recurring_amount_minor,
+            'amount_paid_minor' => $subscription->recurring_amount_minor,
         ]);
 
         InvoiceItem::query()->create([

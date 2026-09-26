@@ -266,6 +266,7 @@ final class ChangeSubscriptionPlanTest extends TestCase
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $minor,
             'total_minor' => $minor,
+            'amount_paid_minor' => $minor,
         ]);
 
         InvoiceItem::query()->create([

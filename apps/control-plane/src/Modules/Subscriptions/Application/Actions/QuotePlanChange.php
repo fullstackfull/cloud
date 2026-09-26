@@ -80,9 +80,24 @@ final readonly class QuotePlanChange
         $current = $this->currentResources($subscription, $service);
         $target = PlanResources::fromArray($plan->resources);
 
-        $units = $this->unitsOn($subscription);
+        $knownUnits = $this->unitsOn($subscription);
+        // Priced at one unit only for display; a count that cannot be derived
+        // is refused below, so nothing is ever executed at this figure.
+        $units = $knownUnits ?? 1;
 
         $refusals = $this->refusals($subscription, $plan, $price, $current, $target, $service, $units);
+
+        if ($knownUnits === null) {
+            /*
+             * The subscription bills a figure that is not a whole multiple of
+             * its plan's price (a grandfathered price), so how many units it
+             * holds cannot be derived. ChangeSubscriptionPlan refuses to guess,
+             * and the request cannot name a count; the options screen used to
+             * offer the change anyway and the confirmation then failed with an
+             * unrelated error. Refused here, so both say the same thing.
+             */
+            $refusals[] = PlanChangeRefusal::UnitCountUnknown;
+        }
 
         $newRecurring = $price->recurring()->multipliedBy($units);
 
@@ -401,7 +416,7 @@ final readonly class QuotePlanChange
      * a three-server subscription quoted at one unit of the new plan would
      * show the customer a third of what they are about to be charged.
      */
-    private function unitsOn(Subscription $subscription): int
+    private function unitsOn(Subscription $subscription): ?int
     {
         if ($subscription->recurring_amount_minor === 0) {
             return 1;
@@ -417,6 +432,6 @@ final readonly class QuotePlanChange
 
         return $unit > 0 && $subscription->recurring_amount_minor % $unit === 0
             ? intdiv($subscription->recurring_amount_minor, $unit)
-            : 1;
+            : null;
     }
 }

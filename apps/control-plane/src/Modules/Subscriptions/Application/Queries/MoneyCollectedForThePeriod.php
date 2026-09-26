@@ -45,8 +45,11 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    - the renewal that bought the period, and the proration invoices of
  *    changes made in it;
  *  - and, when no renewal line exists for the current period (the period the
- *    order bought), the order lines this subscription's services were built
- *    from, less their one-off setup fee, and never more than the order's own
+ *    order bought), the recurring part of the order lines this subscription's
+ *    services were built from - the line total less its setup fee, and never
+ *    more than `unit_recurring_minor x quantity`, so no setup money is counted
+ *    whether a line's setup was charged once (PricingLine::gross() charges it
+ *    once per line) or once per unit - and never more than the order's own
  *    invoices collected.
  *
  * Returned is the sum of `wallet_credit_minor` over the plan changes recorded
@@ -128,7 +131,7 @@ final readonly class MoneyCollectedForThePeriod
             ->join('order_items', 'order_items.id', '=', 'services.order_item_id')
             ->where('services.subscription_id', $subscription->getKey())
             ->groupBy('order_items.order_id')
-            ->selectRaw('order_items.order_id as order_id, sum(order_items.total_minor - order_items.unit_setup_minor) as line_minor')
+            ->selectRaw('order_items.order_id as order_id, sum(least(order_items.total_minor - order_items.unit_setup_minor, order_items.unit_recurring_minor * order_items.quantity)) as line_minor')
             ->get()
             ->all();
 

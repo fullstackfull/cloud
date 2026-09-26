@@ -200,6 +200,7 @@ final class APlanChangeIsHeldToTheCapacityACheckoutIsTest extends BillingApiTest
             'order_id' => $order->getKey(),
             'subtotal_minor' => $recurring,
             'total_minor' => $recurring,
+            'amount_paid_minor' => $recurring,
         ]);
 
         InvoiceItem::query()->create([

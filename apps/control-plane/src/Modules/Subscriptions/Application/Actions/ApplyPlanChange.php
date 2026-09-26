@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Subscriptions\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Application\Actions\IssueInvoice;
@@ -169,9 +170,21 @@ final readonly class ApplyPlanChange
              * invoice settles; a downgrade credits the wallet and goes through
              * at once.
              */
-            [$invoice, $walletCredit] = $this->settleTheDifference($locked, $fromPlanId, $proration, $actor);
+            /*
+             * The change's own id, taken before anything is written, so the
+             * wallet credit can be keyed on it. Keying the ledger entry on the
+             * subscription, the plan left and the second of the change let
+             * two different downgrades off the same plan inside one
+             * wall-clock second share a key: the ledger replayed the first
+             * and posted nothing for the second, while the response, this
+             * record and the period's ceiling all counted it as paid out.
+             */
+            $changeId = (string) Str::ulid();
 
-            PlanChange::query()->create([
+            [$invoice, $walletCredit] = $this->settleTheDifference($locked, $changeId, $proration, $actor);
+
+            (new PlanChange)->forceFill([
+                'id' => $changeId,
                 'subscription_id' => (string) $locked->getKey(),
                 'from_plan_id' => $fromPlanId,
                 'to_plan_id' => (string) $plan->getKey(),
@@ -184,7 +197,7 @@ final readonly class ApplyPlanChange
                 'resources' => $quote->newResources->toArray(),
                 'changed_by_user_id' => $actor === null ? null : (string) $actor->getKey(),
                 'changed_at' => $proration->changeAt,
-            ]);
+            ])->save();
 
             $resizeJob = $quote->changesInfrastructure && ! $proration->net()->isPositive()
                 ? $this->queueAtProvider->execute($locked, $quote->planId, $quote->newResources, $idempotencyKey)
@@ -277,7 +290,7 @@ final readonly class ApplyPlanChange
      */
     private function settleTheDifference(
         Subscription $subscription,
-        ?string $fromPlanId,
+        string $changeId,
         ProrationPlan $proration,
         ?User $actor,
     ): array {
@@ -291,7 +304,7 @@ final readonly class ApplyPlanChange
         $customer = $subscription->customer()->firstOrFail();
 
         if ($net->isNegative()) {
-            return [null, $this->creditTheCustomer($customer, $subscription, $fromPlanId, $proration, $actor)];
+            return [null, $this->creditTheCustomer($customer, $subscription, $changeId, $proration, $actor)];
         }
 
         return [$this->invoiceTheDifference($customer, $subscription, $proration), 0];
@@ -343,9 +356,12 @@ final readonly class ApplyPlanChange
      * returned so the change's record can carry it, which is what the next
      * change's ceiling subtracts.
      *
-     * Keyed on the subscription, the plan and the instant of the change, so a
-     * retried request credits once. The ledger refuses a second entry under a
-     * key it has already posted.
+     * Keyed on the id of this change's record, which is unique per change: a
+     * retried request is answered by the idempotency middleware or rolls the
+     * whole change back, and two different changes can never share a key. The
+     * earlier key (subscription, plan left, second of the change) collided for
+     * two downgrades off the same plan within one second, and the second
+     * credit was silently replayed as the first.
      *
      * Posted as an Adjustment, which the ledger will not accept without a
      * named user behind it. That rule is right and is honoured rather than
@@ -360,14 +376,14 @@ final readonly class ApplyPlanChange
     private function creditTheCustomer(
         Customer $customer,
         Subscription $subscription,
-        ?string $fromPlanId,
+        string $changeId,
         ProrationPlan $proration,
         ?User $actor,
     ): int {
         $amount = $proration->net()->absolute();
         $wallet = $this->wallet->walletFor($customer, $proration->currency);
 
-        $this->wallet->credit(
+        $entry = $this->wallet->credit(
             wallet: $wallet,
             amount: $amount,
             kind: WalletTransactionKind::Adjustment,
@@ -378,14 +394,14 @@ final readonly class ApplyPlanChange
                 'credit_minor' => $proration->credit->minorUnits(),
                 'charge_minor' => $proration->charge->minorUnits(),
             ],
-            idempotencyKey: sprintf(
-                'plan-change-credit:%s:%s:%s',
-                $subscription->getKey(),
-                $fromPlanId,
-                $proration->changeAt->getTimestamp(),
-            ),
+            idempotencyKey: 'plan-change-credit:'.$changeId,
         );
 
-        return $amount->minorUnits();
+        /*
+         * What the ledger actually posted for this change. A replayed entry
+         * was posted by something else and is not this change's money; it is
+         * recorded as nothing rather than counted twice.
+         */
+        return $entry->wasRecentlyCreated ? $entry->amount_minor : 0;
     }
 }

@@ -90,4 +90,13 @@ enum PlanChangeRefusal: string
 
     /** The account already holds as many of this plan as it may (`per_customer_limit`). */
     case PerCustomerLimit = 'per_customer_limit';
+
+    /**
+     * How many units the subscription holds cannot be derived from what it
+     * bills - a price the catalogue has since moved off, which the recurring
+     * amount no longer divides by. A plan change keeps the unit count and the
+     * request cannot name one, so the change waits for an operator to correct
+     * the subscription rather than guessing at one unit and under-billing.
+     */
+    case UnitCountUnknown = 'unit_count_unknown';
 }
