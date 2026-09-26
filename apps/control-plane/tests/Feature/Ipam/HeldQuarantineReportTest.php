@@ -56,11 +56,32 @@ final class HeldQuarantineReportTest extends TestCase
     #[Test]
     public function the_list_names_the_machine_each_address_is_waiting_for_oldest_first(): void
     {
+        /*
+         * The older wait is put on the higher address and the higher row id,
+         * so the two keys behind the release stamp would both list it second:
+         * only `released_at` can put it first. A fixture whose older release
+         * is also the lower address passes with the release-stamp key deleted,
+         * and this one once did, so the fixture checks it against the
+         * database's own ordering before anything is listed.
+         */
         $older = $this->chassis();
         $newer = $this->chassis();
 
-        $a = $this->assign($this->subnet, $older);
+        // The allocator hands out the lower address first.
         $b = $this->assign($this->subnet, $newer);
+        $a = $this->assign($this->subnet, $older);
+
+        $pair = [(string) $a->ip_address_id, (string) $b->ip_address_id];
+        $this->assertSame(
+            [(string) $b->ip_address_id, (string) $a->ip_address_id],
+            IpAddress::query()->whereKey($pair)->orderBy('address')->pluck('id')->all(),
+            'The fixture did not put the older wait on the higher address.',
+        );
+        $this->assertSame(
+            [(string) $b->ip_address_id, (string) $a->ip_address_id],
+            IpAddress::query()->whereKey($pair)->orderBy('id')->pluck('id')->all(),
+            'The fixture did not put the older wait on the higher row id.',
+        );
 
         $this->travel(-5)->days();
         $this->allocator->holdAssignment($a, ReleaseReason::ServiceTerminated);
@@ -71,7 +92,7 @@ final class HeldQuarantineReportTest extends TestCase
 
         $this->assertCount(2, $held);
 
-        $this->assertSame((string) $a->ip_address_id, $held[0]['address_id']);
+        $this->assertSame((string) $a->ip_address_id, $held[0]['address_id'], 'The longest wait was not listed first.');
         $this->assertSame($older->getMorphClass(), $held[0]['holder_type']);
         $this->assertSame((string) $older->getKey(), $held[0]['holder_id']);
         $this->assertSame((string) $a->getKey(), $held[0]['assignment_id']);
@@ -178,16 +199,36 @@ final class HeldQuarantineReportTest extends TestCase
         /*
          * Equal `released_at` is the ordinary case, not an edge: `released_at`
          * is `timestamp(0)`, so a machine that hands back four addresses in one
-         * decommission stamps all four in the same second. Two pools, released
-         * in opposite orders — one tied pair can agree with an undecided sort by
-         * accident; two pulling in opposite directions cannot both.
+         * decommission stamps all four in the same second.
+         *
+         * The address has to be what decides the tie, and the row id is the
+         * key behind it — so rows whose ids run in address order pass with the
+         * address key deleted. Seeded rows do: the seeder writes ids in
+         * numeric order, which agrees with text order everywhere except across
+         * a digit boundary (.9 against .10). Here the rows are written by hand
+         * with their ids running against their addresses, the lowest address
+         * carrying the highest id, and the fixture checks that against the
+         * database's own ordering before anything is listed.
+         *
+         * Two pools, released in opposite orders, for the case with neither
+         * key: one tied pair can agree with an undecided sort by accident; two
+         * pulling in opposite directions cannot both.
          */
         $this->freezeTime();
 
-        $second = IpPool::factory()->create();
-        $secondSubnet = $this->subnetIn($second, '192.0.2.0/28');
+        foreach ([['203.0.113', true], ['192.0.2', false]] as [$prefix, $highestFirst]) {
+            $pool = IpPool::factory()->create();
+            $subnet = $this->subnetIn($pool, $prefix.'.0/28', seed: false);
+            $byAddress = [$prefix.'.2', $prefix.'.3', $prefix.'.4'];
 
-        foreach ([[$this->pool, $this->subnet, true], [$second, $secondSubnet, false]] as [$pool, $subnet, $highestFirst]) {
+            $this->addressesWithIdsAgainstTheirOrder($subnet, $byAddress);
+
+            $this->assertSame(
+                array_reverse(IpAddress::query()->where('subnet_id', $subnet->getKey())->orderBy('address')->pluck('id')->all()),
+                IpAddress::query()->where('subnet_id', $subnet->getKey())->orderBy('id')->pluck('id')->all(),
+                'The fixture did not put the row ids against the addresses.',
+            );
+
             $chassis = $this->chassis();
             $assignments = [$this->assign($subnet, $chassis), $this->assign($subnet, $chassis), $this->assign($subnet, $chassis)];
 
@@ -200,11 +241,18 @@ final class HeldQuarantineReportTest extends TestCase
                 $this->allocator->holdAssignment($assignment, ReleaseReason::ServiceTerminated);
             }
 
-            $listed = array_column(app(HeldQuarantineAddresses::class)->inPool($pool), 'address');
-            $sorted = $listed;
-            sort($sorted, SORT_STRING);
+            $this->assertSame(
+                1,
+                IpAssignment::query()->whereKey(array_map(static fn (IpAssignment $a): string => (string) $a->getKey(), $assignments))
+                    ->distinct()->count('released_at'),
+                'The fixture did not produce a tie on released_at.',
+            );
 
-            $this->assertSame($sorted, $listed, 'Addresses released in the same second came back in no stated order.');
+            $this->assertSame(
+                $byAddress,
+                array_column(app(HeldQuarantineAddresses::class)->inPool($pool), 'address'),
+                'Addresses released in the same second were not listed by address.',
+            );
         }
     }
 
@@ -300,6 +348,25 @@ final class HeldQuarantineReportTest extends TestCase
     }
 
     #[Test]
+    public function a_pool_with_nothing_held_prints_no_list(): void
+    {
+        /*
+         * A live address and one on a clock: quarantined, but coming back on
+         * its own. Nothing is waiting for a person, and a line saying "0
+         * addresses are waiting for a person" under every pool would teach an
+         * operator to stop reading the line.
+         */
+        $chassis = $this->chassis();
+        $this->assign($this->subnet, $chassis);
+        $clocked = $this->assign($this->subnet, $chassis);
+        $this->allocator->releaseAssignment($clocked, ReleaseReason::ServiceTerminated);
+
+        $this->artisan('ipam:capacity', ['--pool' => 'held-public-v4'])
+            ->expectsOutputToContain('held-public-v4 — ')
+            ->doesntExpectOutputToContain('waiting for a person');
+    }
+
+    #[Test]
     public function the_report_states_the_true_total_when_it_lists_fewer(): void
     {
         $pool = IpPool::factory()->create(['slug' => 'held-large']);
@@ -367,6 +434,28 @@ final class HeldQuarantineReportTest extends TestCase
             ->where('status', IpAddressStatus::Available->value)
             ->orderBy('address')
             ->firstOrFail();
+    }
+
+    /**
+     * Free addresses whose row ids run against them: the first address given
+     * carries the highest id, the last the lowest.
+     *
+     * @param  list<string>  $addresses  in ascending address order
+     */
+    private function addressesWithIdsAgainstTheirOrder(Subnet $subnet, array $addresses): void
+    {
+        $ids = array_map(static fn (): string => strtolower((string) Str::ulid()), $addresses);
+        rsort($ids, SORT_STRING);
+
+        foreach ($addresses as $i => $address) {
+            (new IpAddress)->forceFill([
+                'id' => $ids[$i],
+                'subnet_id' => $subnet->getKey(),
+                'address' => $address,
+                'ip_version' => IpVersion::V4,
+                'status' => IpAddressStatus::Available,
+            ])->save();
+        }
     }
 
     private function historicAssignment(

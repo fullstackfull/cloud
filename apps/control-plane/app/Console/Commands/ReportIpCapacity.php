@@ -108,9 +108,10 @@ final class ReportIpCapacity extends Command
      * A held quarantine ends when somebody returns its machine to stock or
      * retires it, and nothing else. A machine left in maintenance and
      * forgotten keeps its addresses out of circulation for exactly as long as
-     * nobody reads this — so it is listed by name, oldest wait first, rather
-     * than folded into the quarantined column where it looks like capacity
-     * that is coming back.
+     * nobody reads this. The subnet table's quarantined column still counts
+     * these addresses, and there they look like capacity that is coming back;
+     * so they are also counted apart and listed by name, oldest wait first,
+     * directly below it. A pool with none prints nothing here.
      *
      * The count printed is the pool's total, not the length of the list. The
      * list stops at a limit, and a sentence saying "100 addresses are

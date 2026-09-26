@@ -69,7 +69,15 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  *  - `quarantined_until is null`. Held by the same test (an address already on
  *    a clock in the same pool).
  *  - `order by released_at asc`, oldest wait first. Held by
- *    `the_list_names_the_machine_each_address_is_waiting_for_oldest_first`.
+ *    `the_list_names_the_machine_each_address_is_waiting_for_oldest_first`,
+ *    both the clause and its direction. That test puts the older wait on the
+ *    higher address and the higher row id, so that each of the two keys
+ *    behind this one would list it second, and checks both against the
+ *    database's own ordering before it lists. A fixture whose older release
+ *    was also the lower address once let this whole clause be deleted with
+ *    every test green. An older release on a higher address is ordinary, and
+ *    the list is cut at its limit, so without this key the longest waits
+ *    would be the rows cut.
  *  - `nulls last`. Held by the unattributed test. Written out rather than left
  *    to Postgres's default for ascending order, because it is a decision: an
  *    undated row sorts after every dated one, and when the list is cut at its
@@ -85,9 +93,14 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  *    Equal `released_at` is the ordinary case, not an edge: a decommission
  *    releases every address a machine was wearing, and the stamps are equal
  *    because `released_at` is `timestamp(0)` — each release writes its own
- *    `now()`, and a transaction does not freeze the clock. The test ties two
- *    pools released in opposite orders, since one tied pair can agree with an
- *    undecided sort by accident.
+ *    `now()`, and a transaction does not freeze the clock. The row id is the
+ *    key behind this one, so the test writes its rows with their ids running
+ *    against their addresses and checks so before it lists: rows whose ids
+ *    run in address order — seeded rows do, except across a digit boundary
+ *    such as .9 and .10 — once let this clause be deleted with every test
+ *    green. The test also ties two pools released in opposite orders, for the
+ *    case with neither key, since one tied pair can agree with an undecided
+ *    sort by accident.
  *  - `order by ip_addresses.id`, the last key. Held by
  *    `one_address_in_two_overlapping_subnets_is_still_ordered`. The address is
  *    not unique at the scope this query works at: the constraint is
@@ -102,6 +115,17 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  *    `held_since` are held by the unattributed test's null assertions;
  *    `holder_type`'s by `an_assignment_with_no_holder_type_is_reported_unattributed`,
  *    where a cast null would print as an empty holder instead.
+ *  - The six columns in `get([...])`. Held by every test that reads a row:
+ *    the map reads each one by its alias, and a missing one is an undefined
+ *    property, which fails the test.
+ *  - `->values()` after the map. Inert: the rows come back keyed 0 to n-1 and
+ *    `map` keeps the keys, so there is nothing to renumber. Kept because it
+ *    is what makes the `list<…>` return type true by construction rather
+ *    than by the collection's history.
+ *  - `->all()` on the subnet ids. Inert, and only because the early return
+ *    above is: without it `$subnetIds` is a collection, `=== []` is never
+ *    true, and the query runs its `whereIn` over an empty collection, which
+ *    compiles to `0 = 1` exactly as an empty array does.
  *
  * Nothing else in `tests/`, `routes/` or `bootstrap/` calls this method, so
  * a clause no bullet here names is a clause no test holds. A line added to
