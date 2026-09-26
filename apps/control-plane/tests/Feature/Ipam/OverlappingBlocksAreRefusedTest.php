@@ -160,6 +160,21 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
         $this->assertRefusedOver($this->register($other, '203.0.113.64/26'), '203.0.113.0/24', 'north-public', 'kw-north');
     }
 
+    #[Test]
+    public function a_block_in_an_inactive_pool_still_holds_its_addresses(): void
+    {
+        $held = $this->pool('kw-north', IpPoolScope::Public, 'north-public');
+        $other = $this->pool('kw-south', IpPoolScope::Public);
+
+        $this->register($held, '203.0.113.0/24')->assertCreated();
+
+        // The pool's switch stops new allocation from every subnet in it. The
+        // customers already holding its addresses are still holding them.
+        $held->forceFill(['is_active' => false])->save();
+
+        $this->assertRefusedOver($this->register($other, '203.0.113.64/26'), '203.0.113.0/24', 'north-public', 'kw-north');
+    }
+
     // ---- across buildings --------------------------------------------------
 
     #[Test]

@@ -70,6 +70,30 @@ succeed.
 The reservation is written in the same transaction as the state change, so there is no
 window in which an address is marked reserved but nothing records why.
 
+## Blocks in one realm never overlap
+
+Everything above is keyed on the `ip_addresses` row, and none of it can see that two rows
+under two overlapping subnets hold the same address *string*. `203.0.113.0/24` in one pool
+and `203.0.113.0/25` in another become two rows each holding `203.0.113.10`; every lock and
+unique index is satisfied, and two customers are handed one address.
+
+So the only place that can refuse it is where a block is registered
+(`RegisterSubnet`, behind `POST /api/admin/infrastructure/ip-pools/{pool}/subnets`). It
+compares parsed blocks, under one platform-wide advisory lock, and refuses an overlap with
+`422 infrastructure.subnet_overlaps`, naming the block in the way, its pool and its
+datacenter, when the two are in one realm:
+
+- **the same datacenter, always**, whatever the space;
+- **any two datacenters, when either block is not wholly inside space designated for
+  reuse** — RFC 1918, RFC 6598 shared space, link-local, loopback, and IPv6 `fd00::/8`
+  and `fe80::/64`. Anything else, documentation space included, is unique in the world
+  and so unique on the platform.
+
+The same RFC 1918 block in two datacenters is accepted: that is a normal estate. The
+pool's `scope` is not consulted — the label is what the estate believes, and the address
+is what the world is. Inactive subnets still count, because deactivating a subnet stops
+allocation from it without releasing what it already handed out.
+
 ## Reservations expire
 
 A provisioning job that dies between reserving an address and using it must not leak that
