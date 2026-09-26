@@ -15,7 +15,9 @@ declare(strict_types=1);
  * exclusively while it starts every racer; each racer blocks taking it in
  * shared mode and all are woken by the single unlock.
  *
- * Arguments: subscription id, plan id, price id. Writes one line of JSON.
+ * Arguments: subscription id, plan id, price id, and optionally the id of the
+ * user making the change (a downgrade credit is attributed to a person).
+ * Writes one line of JSON.
  */
 
 use Illuminate\Contracts\Console\Kernel;
@@ -23,6 +25,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
@@ -36,6 +39,7 @@ $app = require_once __DIR__.'/../../../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
 [$subscriptionId, $planId, $priceId] = [$argv[1], $argv[2], $argv[3]];
+$actor = isset($argv[4]) ? User::query()->findOrFail($argv[4]) : null;
 
 $subscription = Subscription::query()->findOrFail($subscriptionId);
 $plan = Plan::query()->findOrFail($planId);
@@ -47,7 +51,7 @@ DB::select('SELECT pg_advisory_lock_shared(424243)');
 $outcome = ['accepted' => false, 'code' => null, 'refusals' => []];
 
 try {
-    $app->make(ApplyPlanChange::class)->execute($subscription, $plan, $price);
+    $app->make(ApplyPlanChange::class)->execute($subscription, $plan, $price, actor: $actor);
     $outcome = ['accepted' => true, 'code' => null, 'refusals' => []];
 } catch (PlanChangeRefusedException $e) {
     $outcome = [

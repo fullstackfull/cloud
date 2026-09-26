@@ -66,9 +66,14 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * still waiting on its invoice, this one is the newest thing paid for, and it
  * is built.
  *
- * A proration invoice with no recorded change (one issued before the record
- * existed) builds nothing and says so in the log. Building from the
- * subscription instead would be the defect above.
+ * A proration invoice with no recorded change can only be one issued before
+ * the record existed: every change since writes its row in the transaction
+ * that issues its invoice. Such an invoice was issued under the old rule, and
+ * while it was open no further change could be made, so the plan the
+ * subscription holds is the plan it bought. It is built as it always was,
+ * from that plan, and the fallback says so in the log. Building nothing would
+ * take a customer's money for an upgrade issued the day before this record
+ * was deployed and never deliver it.
  *
  * Queued on payments beside the other settlement work, and idempotent twice
  * over: the provisioning job is keyed on the invoice that paid for it, so a
@@ -117,15 +122,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
         $change = PlanChange::query()->where('proration_invoice_id', $event->invoiceId)->first();
 
         if ($change === null) {
-            /*
-             * Recorded rather than thrown, for the same reason its siblings on
-             * this event are: five retries cannot make the row appear, and
-             * failing the job would leave a settled payment looking unhandled.
-             */
-            Log::warning('A paid proration invoice has no recorded plan change, so nothing was resized.', [
-                'invoice_id' => $event->invoiceId,
-                'subscription_id' => $event->subscriptionId,
-            ]);
+            $this->buildTheCurrentPlanForAnInvoiceIssuedBeforeTheRecord($event);
 
             return;
         }
@@ -149,6 +146,37 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             subscription: $subscription,
             planId: $change->to_plan_id,
             resources: PlanResources::fromArray($change->resources),
+            idempotencyKey: 'invoice:'.$event->invoiceId,
+        );
+    }
+
+    /**
+     * The rule proration invoices issued before `subscription_plan_changes`
+     * existed were issued under: build the plan the subscription holds.
+     */
+    private function buildTheCurrentPlanForAnInvoiceIssuedBeforeTheRecord(InvoicePaid $event): void
+    {
+        $subscription = Subscription::query()->find($event->subscriptionId);
+        $plan = $subscription?->plan()->first();
+
+        if ($subscription === null || $plan === null) {
+            Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+            ]);
+
+            return;
+        }
+
+        Log::info('A paid proration invoice predates the plan-change record; building the plan the subscription holds.', [
+            'invoice_id' => $event->invoiceId,
+            'subscription_id' => $event->subscriptionId,
+        ]);
+
+        $this->queueAtProvider->execute(
+            subscription: $subscription,
+            planId: (string) $plan->getKey(),
+            resources: PlanResources::fromArray($plan->resources),
             idempotencyKey: 'invoice:'.$event->invoiceId,
         );
     }

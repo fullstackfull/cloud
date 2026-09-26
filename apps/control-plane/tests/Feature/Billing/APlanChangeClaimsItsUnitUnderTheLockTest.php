@@ -7,16 +7,20 @@ namespace Tests\Feature\Billing;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\Process\Process;
 use Tests\Support\LeavesNothingCommitted;
@@ -83,8 +87,77 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
         $this->assertSame(1, app(PlanCapacity::class)->claimed((string) $large->getKey()));
     }
 
+    #[Test]
+    public function two_changes_asking_two_units_each_of_three_left_move_one_subscription(): void
+    {
+        $product = Product::factory()->create(['kind' => 'vps']);
+        $small = $this->plan($product, 'small', 9_000, null);
+        $big = $this->plan($product, 'big', 18_000, 3);
+
+        // Two units each: the claim must ask for two, not one.
+        $subscriptions = array_map(fn (): Subscription => $this->boughtSubscription($small, quantity: 2), range(1, 2));
+        $price = PlanPrice::query()->where('plan_id', $big->getKey())->sole();
+
+        $results = $this->race(array_map(
+            static fn (Subscription $s): array => [(string) $s->getKey(), (string) $big->getKey(), (string) $price->getKey()],
+            $subscriptions,
+        ));
+
+        $accepted = array_values(array_filter($results, static fn (array $r): bool => $r['accepted']));
+        $refused = array_values(array_filter($results, static fn (array $r): bool => ! $r['accepted']));
+
+        $this->assertCount(1, $accepted, 'Three units left, two asked twice: one change fits.');
+        $this->assertSame(['out_of_stock'], $refused[0]['refusals'] ?? null);
+        $this->assertSame(2, app(PlanCapacity::class)->claimed((string) $big->getKey()));
+    }
+
+    #[Test]
+    public function two_subscriptions_of_one_order_downgrading_at_once_draw_its_money_once(): void
+    {
+        $product = Product::factory()->create(['kind' => 'vps']);
+        $large = $this->plan($product, 'large', 90_000, null);
+        // Two different targets, so the plan-row lock cannot serialise them:
+        // only the lock on the order they share can.
+        $targets = [$this->plan($product, 'small-a', 9_000, null), $this->plan($product, 'small-b', 9_000, null)];
+
+        $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $user = User::factory()->create();
+        app(WalletLedger::class)->walletFor($customer, 'KWD');
+
+        $order = Order::factory()->paid()->create(['customer_id' => $customer->getKey(), 'currency' => 'KWD']);
+        $subscriptions = [
+            $this->boughtSubscription($large, customer: $customer, order: $order, unit: 90_000),
+            $this->boughtSubscription($large, customer: $customer, order: $order, unit: 90_000),
+        ];
+
+        // Paid 180.000, then 150.000 refunded: the order kept 30.000.
+        Invoice::factory()->paid()->create([
+            'customer_id' => $customer->getKey(),
+            'order_id' => $order->getKey(),
+            'subtotal_minor' => 180_000,
+            'total_minor' => 180_000,
+            'amount_paid_minor' => 180_000,
+            'amount_refunded_minor' => 150_000,
+        ]);
+
+        $results = $this->race(array_map(
+            static fn (int $i): array => [
+                (string) $subscriptions[$i]->getKey(),
+                (string) $targets[$i]->getKey(),
+                (string) PlanPrice::query()->where('plan_id', $targets[$i]->getKey())->sole()->getKey(),
+                (string) $user->getKey(),
+            ],
+            [0, 1],
+        ));
+
+        $this->assertSame([true, true], array_column($results, 'accepted'), json_encode($results));
+
+        $credited = (int) WalletTransaction::query()->where('kind', 'adjustment')->sum('amount_minor');
+        $this->assertSame(30_000, $credited, 'Two siblings together may take back what the order kept, and no more.');
+    }
+
     /**
-     * @param  list<array{0: string, 1: string, 2: string}>  $arguments
+     * @param  list<list<string>>  $arguments
      * @return list<array{accepted: bool, code: ?string, refusals: list<string>}>
      */
     private function race(array $arguments): array
@@ -162,10 +235,15 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
         return $plan;
     }
 
-    private function boughtSubscription(Plan $plan): Subscription
-    {
-        $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
-        $order = Order::factory()->paid()->create(['customer_id' => $customer->getKey(), 'currency' => 'KWD']);
+    private function boughtSubscription(
+        Plan $plan,
+        int $quantity = 1,
+        ?Customer $customer = null,
+        ?Order $order = null,
+        int $unit = 9_000,
+    ): Subscription {
+        $customer ??= Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $order ??= Order::factory()->paid()->create(['customer_id' => $customer->getKey(), 'currency' => 'KWD']);
 
         /** @var OrderItem $item */
         $item = OrderItem::query()->create([
@@ -174,21 +252,21 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
             'kind' => 'plan',
             'name' => $plan->slug,
             'billing_period' => BillingPeriod::Monthly,
-            'quantity' => 1,
-            'unit_recurring_minor' => 9_000,
+            'quantity' => $quantity,
+            'unit_recurring_minor' => $unit,
             'unit_setup_minor' => 0,
-            'total_minor' => 9_000,
+            'total_minor' => $unit * $quantity,
         ]);
 
         $subscription = Subscription::factory()
-            ->startingOn(CarbonImmutable::now()->subDays(10))
+            ->startingOn(CarbonImmutable::now()->subDays(20))
             ->create([
                 'customer_id' => $customer->getKey(),
                 'order_id' => $order->getKey(),
                 'plan_id' => $plan->getKey(),
                 'currency' => 'KWD',
                 'billing_period' => BillingPeriod::Monthly,
-                'recurring_amount_minor' => 9_000,
+                'recurring_amount_minor' => $unit * $quantity,
             ]);
 
         Service::factory()->active()->create([

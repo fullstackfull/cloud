@@ -101,6 +101,7 @@ final readonly class ApplyPlanChange
         private TaxResolver $taxResolver,
         private WalletLedger $wallet,
         private PlanCapacity $capacity,
+        private MoneyCollectedForThePeriod $collected,
     ) {}
 
     /**
@@ -134,6 +135,14 @@ final readonly class ApplyPlanChange
              */
             /** @var Subscription $locked */
             $locked = Subscription::query()->lockForUpdate()->findOrFail($subscription->getKey());
+
+            /*
+             * The order this subscription was bought on is a pool of money
+             * its sibling subscriptions draw credit from too. Locked before
+             * the quote reads it, so two siblings downgrading at once cannot
+             * both draw the same pool.
+             */
+            $this->collected->lockTheOrdersBehind($locked);
 
             $quote = $this->quotes->execute($locked, $plan, $price);
 
@@ -356,9 +365,12 @@ final readonly class ApplyPlanChange
      * returned so the change's record can carry it, which is what the next
      * change's ceiling subtracts.
      *
-     * Keyed on the id of this change's record, which is unique per change: a
-     * retried request is answered by the idempotency middleware or rolls the
-     * whole change back, and two different changes can never share a key. The
+     * Keyed on the id of this change's record, which is unique per change, so
+     * two different changes can never share a key. A change that fails rolls
+     * back whole, ledger entry included, and whatever retries it is a new
+     * change with a new id. A retry of a change that succeeded - even under
+     * the same Idempotency-Key - finds the subscription already on the plan
+     * and is refused (409, `same_plan`); nothing replays the first response. The
      * earlier key (subscription, plan left, second of the change) collided for
      * two downgrades off the same plan within one second, and the second
      * credit was silently replayed as the first.

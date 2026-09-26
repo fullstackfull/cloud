@@ -45,7 +45,9 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    - the renewal that bought the period, and the proration invoices of
  *    changes made in it;
  *  - and, when no renewal line exists for the current period (the period the
- *    order bought), the recurring part of the order lines this subscription's
+ *    order bought), this subscription's share of the order's pool (see
+ *    collectedByTheOrder(): the pool is shared by every subscription the
+ *    order bought, and what siblings already drew is taken out) - the recurring part of the order lines this subscription's
  *    services were built from - the line total less its setup fee, and never
  *    more than `unit_recurring_minor x quantity`, so no setup money is counted
  *    whether a line's setup was charged once (PricingLine::gross() charges it
@@ -53,7 +55,7 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    invoices collected.
  *
  * Returned is the sum of `wallet_credit_minor` over the plan changes recorded
- * for this subscription since the period began.
+ * for this subscription inside the current period.
  *
  * The figure is money, not time: it is not prorated. When every invoice was
  * paid it sits well above any remainder a downgrade can compute, so it never
@@ -70,18 +72,17 @@ final readonly class MoneyCollectedForThePeriod
 {
     public function stillReturnable(Subscription $subscription): Money
     {
-        $collected = $this->collectedOnTheSubscription($subscription);
+        $from = $subscription->current_period_start;
+        $until = $subscription->current_period_end;
+        $id = (string) $subscription->getKey();
+
+        $collected = $this->collectedOnTheSubscription($id, $subscription->currency, $from, $until);
 
         if (! $this->periodWasRenewed($subscription)) {
             $collected += $this->collectedByTheOrder($subscription);
         }
 
-        $returned = (int) DB::table('subscription_plan_changes')
-            ->where('subscription_id', $subscription->getKey())
-            ->where('changed_at', '>=', $subscription->current_period_start)
-            ->sum('wallet_credit_minor');
-
-        return Money::ofMinor(max(0, $collected - $returned), $subscription->currency);
+        return Money::ofMinor(max(0, $collected - $this->returned($id, $from, $until)), $subscription->currency);
     }
 
     /**
@@ -100,18 +101,59 @@ final readonly class MoneyCollectedForThePeriod
         return $credit->isGreaterThan($ceiling) ? $ceiling : $credit;
     }
 
-    private function collectedOnTheSubscription(Subscription $subscription): int
+    /**
+     * Take `SELECT ... FOR UPDATE` on every order this subscription's services
+     * were bought on, in sorted id order.
+     *
+     * The money an order collected is one pool, shared by every subscription
+     * that order bought. Two of them downgrading at once would each read the
+     * pool before the other's credit was written and both draw on it in full.
+     * ApplyPlanChange calls this under the subscription's lock and before it
+     * quotes, so sibling changes queue on the order row and the second reads
+     * what the first returned.
+     */
+    public function lockTheOrdersBehind(Subscription $subscription): void
+    {
+        $orderIds = DB::table('services')
+            ->join('order_items', 'order_items.id', '=', 'services.order_item_id')
+            ->where('services.subscription_id', $subscription->getKey())
+            ->distinct()
+            ->pluck('order_items.order_id')
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->sort()
+            ->values()
+            ->all();
+
+        foreach ($orderIds as $orderId) {
+            DB::table('orders')->where('id', $orderId)->lockForUpdate()->first();
+        }
+    }
+
+    private function collectedOnTheSubscription(string $subscriptionId, string $currency, mixed $from, mixed $until): int
     {
         return (int) DB::table('invoices')
-            ->where('subscription_id', $subscription->getKey())
-            ->where('currency', $subscription->currency)
+            ->where('subscription_id', $subscriptionId)
+            ->where('currency', $currency)
             ->whereExists(fn (Builder $lines): Builder => $lines
                 ->selectRaw('1')
                 ->from('invoice_items')
                 ->whereColumn('invoice_items.invoice_id', 'invoices.id')
-                ->where('invoice_items.period_start', '>=', $subscription->current_period_start)
-                ->where('invoice_items.period_start', '<', $subscription->current_period_end))
+                ->where('invoice_items.period_start', '>=', $from)
+                ->where('invoice_items.period_start', '<', $until))
             ->sum(DB::raw('amount_paid_minor - amount_refunded_minor'));
+    }
+
+    /**
+     * What plan changes of one subscription gave back as wallet credit inside
+     * the window.
+     */
+    private function returned(string $subscriptionId, mixed $from, mixed $until): int
+    {
+        return (int) DB::table('subscription_plan_changes')
+            ->where('subscription_id', $subscriptionId)
+            ->where('changed_at', '>=', $from)
+            ->where('changed_at', '<', $until)
+            ->sum('wallet_credit_minor');
     }
 
     private function periodWasRenewed(Subscription $subscription): bool
@@ -124,8 +166,27 @@ final readonly class MoneyCollectedForThePeriod
             ->exists();
     }
 
+    /**
+     * This subscription's share of what its order collected.
+     *
+     * Its own lines' recurring money, never more than what is left of the
+     * order's pool - the order's invoices, paid less refunded - once every
+     * sibling subscription bought on the same order has taken what it drew
+     * from it. A sibling's draw is what its plan changes returned in the
+     * period beyond what its own invoices collected: credit funded by its own
+     * proration invoices is not the order's money. Siblings share this
+     * subscription's period, because one checkout bills every line on one
+     * cycle, so the same window measures them.
+     *
+     * Without the siblings' draw, each subscription saw the whole pool: an
+     * order paid 180.000 and refunded 150.000 let two 90.000 subscriptions
+     * each take 27.000 back, 54.000 out of 30.000 collected.
+     */
     private function collectedByTheOrder(Subscription $subscription): int
     {
+        $from = $subscription->current_period_start;
+        $until = $subscription->current_period_end;
+
         /** @var list<object{order_id: string, line_minor: int|string}> $lines */
         $lines = DB::table('services')
             ->join('order_items', 'order_items.id', '=', 'services.order_item_id')
@@ -143,7 +204,23 @@ final readonly class MoneyCollectedForThePeriod
                 ->where('currency', $subscription->currency)
                 ->sum(DB::raw('amount_paid_minor - amount_refunded_minor'));
 
-            $collected += max(0, min((int) $line->line_minor, $paid));
+            $siblings = DB::table('services')
+                ->join('order_items', 'order_items.id', '=', 'services.order_item_id')
+                ->where('order_items.order_id', $line->order_id)
+                ->whereNotNull('services.subscription_id')
+                ->where('services.subscription_id', '!=', $subscription->getKey())
+                ->distinct()
+                ->pluck('services.subscription_id');
+
+            $drawn = 0;
+
+            foreach ($siblings as $sibling) {
+                $sibling = (string) $sibling;
+                $drawn += max(0, $this->returned($sibling, $from, $until)
+                    - $this->collectedOnTheSubscription($sibling, $subscription->currency, $from, $until));
+            }
+
+            $collected += max(0, min((int) $line->line_minor, $paid - $drawn));
         }
 
         return $collected;

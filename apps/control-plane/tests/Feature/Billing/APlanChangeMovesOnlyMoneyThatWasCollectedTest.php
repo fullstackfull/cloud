@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
+use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
@@ -34,6 +35,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -465,6 +467,127 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->assertSame(10_000, $this->walletOf($customer));
     }
 
+    #[Test]
+    public function two_subscriptions_bought_on_one_partly_refunded_order_share_what_it_collected(): void
+    {
+        $bigDiskSmall = $this->plan('bigdisk-small', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        [$customer, $user] = $this->accountWithOwner();
+
+        // One order, two 90.000 lines, paid 180.000 - then 150.000 refunded.
+        [$first, $second, $invoice] = $this->oneOrderOfTwoLines($customer, $this->large, 90_000, $this->large, 90_000);
+        app(RecordInvoiceRefund::class)->execute($invoice->fresh(), Money::ofMinor(150_000, 'KWD'));
+
+        $this->changePlan($user, $first, $bigDiskSmall, 'siblings-down-1')->assertOk();
+        $this->changePlan($user, $second, $bigDiskSmall, 'siblings-down-2')->assertOk();
+
+        /*
+         * The order kept 30.000. Each subscription alone would compute 27.000
+         * back; together they may have 30.000 and no more.
+         */
+        $this->assertSame(30_000, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_sibling_credit_its_own_payments_funded_takes_nothing_from_the_order(): void
+    {
+        $flat = ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40];
+        $unit = $this->plan('unit', $flat, 10_000);
+        $dear = $this->plan('dear', $flat, 90_000);
+        $cheap = $this->plan('cheap', $flat, 1_000);
+        [$customer, $user] = $this->accountWithOwner();
+        [$mine, $sibling] = $this->oneOrderOfTwoLines($customer, $unit, 10_000, $unit, 10_000);
+
+        // The sibling pays for an upgrade itself, then steps back down: that
+        // credit is its own proration money coming back, not the order's.
+        $this->changePlan($user, $sibling, $dear, 'own-up-1')->assertOk();
+        $this->settle($this->openProrationInvoice($sibling), $customer);
+        $this->finishEveryProvisioningJob();
+        $siblingCredit = -$this->changePlan($user, $sibling, $unit, 'own-down-1')->assertOk()->json('data.net.minor_units');
+
+        $this->changePlan($user, $mine, $dear, 'mine-up-1')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($mine), 'forgiven by an operator');
+        $this->changePlan($user, $mine, $cheap, 'mine-down-1')->assertOk();
+
+        // This subscription's 10.000 of the order is still all there.
+        $this->assertSame($siblingCredit + 10_000, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function an_order_line_counts_what_it_was_sold_for_after_its_discount(): void
+    {
+        $flat = ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40];
+        $unit = $this->plan('unit', $flat, 10_000);
+        $dear = $this->plan('dear', $flat, 90_000);
+        $cheap = $this->plan('cheap', $flat, 1_000);
+        [$customer, $user] = $this->accountWithOwner();
+
+        // Line one was sold at half price (5.000); line two at list (10.000).
+        [$discounted] = $this->oneOrderOfTwoLines($customer, $unit, 5_000, $unit, 10_000);
+
+        $this->changePlan($user, $discounted, $dear, 'discount-up-1')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($discounted), 'forgiven by an operator');
+        $this->changePlan($user, $discounted, $cheap, 'discount-down-1')->assertOk();
+
+        // 5.000 bought this subscription's period; the list price never arrived.
+        $this->assertSame(5_000, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function only_this_periods_money_and_this_periods_credits_count(): void
+    {
+        $flat = ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 40];
+        $unit = $this->plan('unit', $flat, 10_000);
+        $half = $this->plan('half', $flat, 5_000);
+        $dear = $this->plan('dear', $flat, 90_000);
+        $cheap = $this->plan('cheap', $flat, 1_000);
+        [$customer, $user] = $this->accountWithOwner();
+
+        // April: paid 10.000, and a downgrade gives some of it back.
+        $subscription = $this->paidSubscriptionOn($customer, $unit);
+        $this->serviceWithMachine($customer, $subscription);
+        $april = -$this->changePlan($user, $subscription, $half, 'window-down-1')->assertOk()->json('data.net.minor_units');
+        $this->assertGreaterThan(0, $april);
+
+        // May: renewed at 5.000 and paid.
+        $this->travelTo(CarbonImmutable::parse('2026-05-21 00:00:00', 'UTC'));
+        $subscription->refresh()->forceFill([
+            'current_period_start' => CarbonImmutable::parse('2026-05-01 00:00:00', 'UTC'),
+            'current_period_end' => CarbonImmutable::parse('2026-05-31 00:00:00', 'UTC'),
+        ])->save();
+        $this->renewalPaid($subscription, 5_000);
+
+        $this->changePlan($user, $subscription, $dear, 'window-up-1')->assertOk();
+        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->changePlan($user, $subscription, $cheap, 'window-down-2')->assertOk();
+
+        /*
+         * May collected 5.000 and has given nothing back, so 5.000 is May's
+         * to return. April's 10.000 is not May's money, and April's credit was
+         * April's to give.
+         */
+        $this->assertSame($april + 5_000, $this->walletOf($customer));
+    }
+
+    #[Test]
+    public function a_proration_invoice_issued_before_the_change_record_existed_still_delivers_its_plan(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'legacy-up-1')->assertOk();
+        $invoice = $this->openProrationInvoice($subscription);
+
+        // As an invoice issued before the migration: no change row behind it.
+        PlanChange::query()->delete();
+
+        $this->settle($invoice, $customer);
+
+        $jobs = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->get();
+        $this->assertCount(1, $jobs, 'Paid money for an upgrade must deliver it, record or no record.');
+        $this->assertSame($this->large->id, $jobs->sole()->payload['plan_id'] ?? null);
+    }
+
     // ---- 8. a later settled change decides the machine ---------------------
 
     #[Test]
@@ -574,6 +697,110 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
     }
 
     // ---- helpers ------------------------------------------------------------
+
+    private function renewalPaid(Subscription $subscription, int $minor): void
+    {
+        $invoice = Invoice::factory()->paid()->create([
+            'customer_id' => $subscription->customer_id,
+            'subscription_id' => $subscription->getKey(),
+            'subtotal_minor' => $minor,
+            'total_minor' => $minor,
+            'amount_paid_minor' => $minor,
+        ]);
+
+        InvoiceItem::query()->create([
+            'invoice_id' => $invoice->getKey(),
+            'kind' => InvoiceItemKind::Plan,
+            'description' => 'Renewal',
+            'quantity' => 1,
+            'unit_amount_minor' => $minor,
+            'total_minor' => $minor,
+            'period_start' => $subscription->current_period_start,
+            'period_end' => $subscription->current_period_end,
+            'subscription_id' => $subscription->getKey(),
+        ]);
+    }
+
+    /**
+     * One paid order of two single-unit lines, each fulfilled into its own
+     * subscription, service and machine, in the period the order bought.
+     *
+     * @return array{0: Subscription, 1: Subscription, 2: Invoice}
+     */
+    private function oneOrderOfTwoLines(Customer $customer, Plan $firstPlan, int $firstTotal, Plan $secondPlan, int $secondTotal): array
+    {
+        $order = Order::factory()->paid()->create(['customer_id' => $customer->getKey(), 'currency' => 'KWD']);
+        $subscriptions = [];
+
+        foreach ([[$firstPlan, $firstTotal], [$secondPlan, $secondTotal]] as $i => [$plan, $total]) {
+            $unit = $this->priceOf($plan)->recurring_amount_minor;
+
+            /** @var OrderItem $item */
+            $item = OrderItem::query()->create([
+                'order_id' => $order->getKey(),
+                'plan_id' => $plan->getKey(),
+                'kind' => 'plan',
+                'name' => $plan->slug.'-'.$i,
+                'billing_period' => BillingPeriod::Monthly,
+                'quantity' => 1,
+                'unit_recurring_minor' => $unit,
+                'unit_setup_minor' => 0,
+                'discount_minor' => $unit - $total,
+                'total_minor' => $total,
+            ]);
+
+            $subscription = Subscription::factory()
+                ->startingOn(CarbonImmutable::parse('2026-04-01 00:00:00', 'UTC'))
+                ->create([
+                    'customer_id' => $customer->getKey(),
+                    'order_id' => $order->getKey(),
+                    'plan_id' => $plan->getKey(),
+                    'currency' => 'KWD',
+                    'billing_period' => BillingPeriod::Monthly,
+                    'recurring_amount_minor' => $unit,
+                ]);
+
+            $service = Service::factory()->active()->create([
+                'customer_id' => $customer->getKey(),
+                'order_id' => $order->getKey(),
+                'order_item_id' => $item->getKey(),
+                'subscription_id' => $subscription->getKey(),
+                'kind' => 'vps',
+                'resources' => $plan->resources,
+            ]);
+
+            VirtualMachine::factory()
+                ->onNode(ComputeNode::factory()->create(['cluster_id' => ComputeCluster::factory()->create()->getKey()]), 900)
+                ->forService($service)
+                ->create([
+                    'vcpu' => $plan->resources['vcpu'],
+                    'memory_mib' => $plan->resources['memory_mib'],
+                    'disk_gib' => $plan->resources['disk_gib'],
+                ]);
+
+            $subscriptions[] = $subscription;
+        }
+
+        $paid = $firstTotal + $secondTotal;
+        $invoice = Invoice::factory()->paid()->create([
+            'customer_id' => $customer->getKey(),
+            'order_id' => $order->getKey(),
+            'subtotal_minor' => $paid,
+            'total_minor' => $paid,
+            'amount_paid_minor' => $paid,
+        ]);
+
+        InvoiceItem::query()->create([
+            'invoice_id' => $invoice->getKey(),
+            'kind' => InvoiceItemKind::Plan,
+            'description' => 'Order',
+            'quantity' => 2,
+            'unit_amount_minor' => intdiv($paid, 2),
+            'total_minor' => $paid,
+        ]);
+
+        return [$subscriptions[0], $subscriptions[1], $invoice];
+    }
 
     private function openProrationInvoice(Subscription $subscription): Invoice
     {
