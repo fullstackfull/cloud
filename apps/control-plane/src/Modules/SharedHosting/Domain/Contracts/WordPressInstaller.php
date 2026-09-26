@@ -61,8 +61,9 @@ interface WordPressInstaller
      * detail: it is what lets a WordPress order fail at the install and leave
      * a working hosting account behind rather than nothing at all.
      *
-     * The administrator's password travels in the request and is not returned.
-     * The platform shows it to the customer once and stores no copy.
+     * The administrator's password travels in the request and is not returned,
+     * so nothing here gives the platform a way to read it back. Getting it to
+     * the customer is not part of this contract.
      *
      * @throws HostingProviderException when the panel refuses, or does not
      *                                  answer — and `isIndeterminate()` is the
