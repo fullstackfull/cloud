@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -16,27 +17,32 @@ import { describe, expect, it } from 'vitest'
  * surface, `PlansPage`'s Compute-plan button on `desired.data?.data === null`,
  * live while the desired state it computes from was unread. Both are a strict
  * comparison against a sentinel, evaluated on a value that can be absent. Both
- * are fixed in the components; this file keeps them fixed — each of the two
- * must be judged, and judged shut, so rewriting either into a shape this file
- * cannot read fails here as surely as reverting it.
+ * are fixed in the components; this file keeps them fixed. Each of the two
+ * controls is found as a control — every `Button` in its file that renders
+ * its label — and not by its file or its query, and the gate on it must be
+ * judged, and judged shut, waiting on its own query. So rewriting either gate
+ * into a shape this file cannot read fails here as surely as reverting it,
+ * and so does leaving it live while something else in the file waits
+ * correctly in its place. `FINDING_GATES` says what it cannot find.
  *
  * ## What this gate asserts, exactly
  *
- * **No `disabled=` or `ready=` JSX prop in a `.tsx` file under `src` whose
- * resolved text literally contains `.data` leaves its control live while the
- * query behind that `.data` is unresolved.** "Live" means `disabled` comes out
- * anything but `true`, or `ready` anything but `false` — `Button` disables only
- * on `disabled === true`, and `ConfirmDialog`'s `ready` defaults to true. And
- * **F-21's own two gates are always among those judged shut**
+ * **No `disabled=` or `ready=` JSX attribute in a `.tsx` file under `src`
+ * whose resolved text literally contains `.data` leaves its control live while
+ * the query behind that `.data` is unresolved.** "Live" means `disabled` comes
+ * out anything but `true`, or `ready` anything but `false` — `Button` disables
+ * only on `disabled === true`, and `ConfirmDialog`'s `ready` defaults to true.
+ * And **every `Button` that renders the label of one of F-21's own two
+ * controls, Create account and Compute plan, carries a `disabled=` that is
+ * judged shut waiting on that control's own query, with no spread after it**
  * (`FINDING_GATES`).
  *
  * It narrows exactly where that sentence does, and the narrowing is a pattern
  * match applied before the evaluation: a prop whose resolved text does not
  * contain `.data` is never judged, however it came by its value. The shapes
  * that walks past are listed under "What it cannot see", with the sites in
- * this tree that have them. Where the text cannot tell what a name in a gate
- * holds, steps 1 and 2 below hide or refuse that name rather than substitute
- * a guess.
+ * this tree that have them. Which binding a name in a gate reads is never
+ * guessed: it is the one TypeScript's own binder gives it (step 1).
  *
  * ## How: evaluate, do not pattern-match
  *
@@ -44,71 +50,60 @@ import { describe, expect, it } from 'vitest'
  * which is how the second instance survived a grep. So each prop is
  * **evaluated**:
  *
- *  1. Its expression is resolved by substituting `const` initialisers to a
- *     fixpoint. A name is looked up in the gate's own region first — a region
- *     runs from one column-zero declaration (a `function`, a named `class`, a
- *     `const`, `let` or `var`, exported or not, or any `export default`) to
- *     the next — and then among the file's column-zero `const`s, exported or
- *     not. A parameter of the region's own declaration — the first function's
- *     or arrow's parameter list opening on its line (or the next, when the
- *     line ends on its `=`), wrapped in a call such as `memo(…)` or not —
- *     hides a column-zero `const` of the same name, and so does any
- *     declaration opening its own line in the region (a destructured `const`,
- *     a `let`, an inner `function` or `class`). A `const` initialised by a
- *     hook call is never substituted: it is the query itself. Only an
- *     initialiser that is the whole statement on its own line is substituted:
- *     the line closes every bracket it opens, holds one declarator and one
- *     statement, and does not end on an operator, and the next line of code
- *     is not indented deeper and does not open with something that can only
- *     continue an expression (`?`, `:`, `||`, `&&`, `??`, `.`, `(`, `as`, and
- *     the rest). Any other `const` only hides. That reading errs toward
- *     hiding — a comma between generic arguments counts as a second
- *     declarator — because a statement taken to end early is substituted as
- *     something it is not, and can certify a live gate as shut, where one
- *     taken to carry on only hides.
- *  2. Resolution **refuses** rather than guesses in five cases, and a refusal
- *     is reported like any other gate that cannot be judged — whether or not
- *     the text reaches `.data`, since what the refused name would have
- *     brought in is exactly what is not known. The cases:
- *      - a name declared more than once in the region, or, declared nowhere
- *        in it, more than once at column zero;
- *      - a parameter of the region's own declaration that is also declared
- *        inside it;
- *      - a name declared in the region that is also bound anywhere else in
- *        it, or a column-zero `const` bound anywhere in the region by
- *        anything but the region's own parameters (which hide it): by a
- *        parameter of an arrow function, a function or a method, whatever
- *        it holds — a pattern, a default with a call in it, a function type;
- *        by a `catch` or `for` binding, patterns included; by a declaration
- *        that does not open its line, or that follows another on one, or
- *        that is a `using`; by the name of a nested function or class. Which
- *        one a gate reads cannot be told from the text;
- *      - a column-zero `const` whose initialiser reads a name the region
- *        binds: written at module scope, it reads module scope, and
- *        substituted into the region its text would read the region's;
- *      - an expression that does not settle.
- *
- *     The bindings are read from text, not from a parse, and the reading
- *     errs one way on purpose. Declarations are read with comments blanked,
- *     so commented-out code declares nothing — and a declaration only the
- *     raw text shows, as behind a `/*` that was JSX text, counts as a
- *     binding besides. Every pair of parentheses is examined, inside strings
- *     and comments too, and the region is read both with its comments and
- *     without them, keeping every name either reading finds. A name wrongly
- *     taken for a binding costs a refusal; a binding missed would cost a
- *     verdict about a value the control never reads.
+ *  1. Each file is parsed and bound by the `typescript` package this
+ *     workspace builds with — one file at a time, with no library and no
+ *     import followed — and each name in a gate is looked up with the
+ *     compiler's own `getSymbolAtLocation`. A name therefore reads the binding
+ *     the compiler gives it: the innermost in scope, whatever declares it — a
+ *     parameter, a `catch` or `for` binding, a destructured name, a `const` in
+ *     a block or a callback, a function or class name, an import — and a
+ *     declaration in a block the gate is outside is not the one it reads. No
+ *     binding is found by reading text: the compiler's scanner and parser
+ *     deal with the brackets, strings, comments, regular expressions, types
+ *     and JSX text around it.
+ *  2. The expression is resolved by substituting `const` initialisers, to a
+ *     fixpoint. A name is replaced by its initialiser, in parentheses, only
+ *     when it is bound to a `const` declarator that has a name rather than a
+ *     pattern and an initialiser of its own, and that initialiser is not a
+ *     hook call — a call to a name that starts `use` and a capital or a
+ *     digit, bare or as a member (`queries.useThing()`), under any
+ *     parentheses, `await`, `as`, `satisfies` or `!`; a `const` initialised
+ *     by one is the query itself — and holds no function, class, method or
+ *     accessor, so that a `const` that is itself a function is never
+ *     evaluated as a value. The initialiser is the compiler's node for it,
+ *     so a statement written across lines is read whole, and a second
+ *     declarator on its line is not part of it. The names inside a
+ *     substituted initialiser are resolved
+ *     where it is written, not where the gate is: a module constant that
+ *     reads an import reads the import, whatever the component calls its own
+ *     query. Every other name stays a name, and each binding keeps its own:
+ *     two bindings that share a name in one resolved text are told apart by a
+ *     suffix (`answer`, `answer$2`). Resolution **refuses** in two cases — a
+ *     name bound by more than one declaration (a `var` declared twice, an
+ *     overloaded function), and constants that do not settle (a cycle, or
+ *     more than 32 deep) — and a refused gate is reported like any other
+ *     that cannot be judged, whether or not its text reaches `.data`.
  *  3. The resolved text is run against a stub of an unresolved query —
- *     twice, once **pending** and once **failed** — with every identifier
- *     written `X.data` or `X?.data` answering as that stub. Any other name
- *     reads as unknown, except the evaluable globals (`undefined` among them,
- *     so a correct `=== undefined` gate is judged rather than turned away).
- *     The stub answers only the fields an unresolved query is known to have;
- *     reading any other is also an unknown.
+ *     twice, once **pending** and once **failed**. A name written `X.data` or
+ *     `X?.data` answers as that stub when it is bound to a `const` initialised
+ *     by a hook call, and only then. Every other name reads as unknown — a
+ *     parameter (a query passed down as a prop among them), an import, a
+ *     `let`, a destructured name, `this` — except the evaluable globals
+ *     (`undefined` among them, so a correct `=== undefined` gate is judged
+ *     rather than turned away); a binding in the file named like one of them
+ *     is renamed, so it cannot pass for the global. The stub answers only the
+ *     fields an unresolved query is known to have; reading any other is also
+ *     an unknown.
  *  4. The verdict is **shut** in both states, **live** in either, or
  *     **unjudgeable**: it threw, read an unknown, came out as something other
- *     than a boolean, or its resolution was refused. Everything, the
- *     description of the value included, runs inside one `try`, so an
- *     unjudgeable gate is always reported with its file and line.
+ *     than a boolean, or its resolution was refused — or it came out shut
+ *     while a `const` it substituted, evaluated the same way, holds an object
+ *     or a function. A `const` binding cannot change, but what such a value
+ *     holds can be written to between its declaration and the control
+ *     (`state.shut = false`, `rows.push(row)`), and the text does not show
+ *     whether it was; a primitive cannot. Everything, the description of the
+ *     value included, runs inside one `try`, so an unjudgeable gate is always
+ *     reported with its file and line.
  *
  * A live gate is a failure, with the file, the line, the resolved expression
  * and the reason. An unjudgeable gate is a failure unless `GUARDED` names it
@@ -118,15 +113,17 @@ import { describe, expect, it } from 'vitest'
  *
  * ## The census, at the time of writing
  *
- * Dumped from this file's own machinery and then classified by hand.
+ * Dumped from this file's own machinery and then classified by hand. The
+ * compiler's binding replaced a text reader at 2453cce, and the two were
+ * measured against each other on this tree: the same 66 gates, each resolved
+ * to the same text, so the classification below carries over unchanged.
  *
- * **66** `disabled=`/`ready=` props in 37 files. **6** reach `.data`:
+ * **66** `disabled=`/`ready=` attributes in 37 files. **6** reach `.data`:
  * **4 shut** (`RegisterPage`'s Create account, `PlansPage`'s Compute plan and
  * Run, `InvoicesPage`'s pay-from-credit `ready`), **2 guarded**, 0 live, and
- * **0 refused** — the binding reading over-collects by design, and on this
- * tree none of what it collects collides with a name a gate reads. With the
- * two pre-fix lines restored, the same run reports exactly those two as live.
- * **60** are dropped by the `.data` filter:
+ * **0 refused**. Every name the six read `.data` of is a `const` initialised
+ * by a hook call. With the two pre-fix lines restored, the same run reports
+ * exactly those two as live. **60** are dropped by the `.data` filter:
  *
  *  - **25**, in 19 files, gate on a field of a server record the control is
  *    drawn for — a record a parent read and passed down as a prop, or a row of
@@ -153,29 +150,39 @@ import { describe, expect, it } from 'vitest'
  *
  * ## What it cannot see
  *
- * Six shapes pass silently. The site counts are measured on this tree.
+ * Seven shapes pass silently. The site counts are measured on this tree.
  *
  *  1. A query read through a destructured `data` — three sites, above.
  *  2. A gate passed as a spread, `<Button {...{ disabled: x }}>`: no
- *     `disabled=` text, so not even in the 66. No site.
+ *     `disabled=` attribute, so not even in the 66. No site. And a spread
+ *     after a `disabled=` can override it, where the attribute is what is
+ *     judged: one site, `Button`'s own `{...props}` after its `disabled=`,
+ *     which cannot, since `disabled` is destructured out of `props`. On
+ *     F-21's own two controls both are failures (`FINDING_GATES`).
  *  3. A value a parent read from a query and passed down, or a row of a list
- *     — 25 sites, and `AssignForm`'s, above.
- *  4. A value whose `const` is not substituted: one initialised through a
- *     hook (`useMemo`, `useState` from a query); one whose statement carries
- *     on past its line, or whose line holds a second declarator or statement
- *     (step 1); or one whose initialiser holds an arrow function — the last
- *     so a `const` that is itself a function is never evaluated as a value,
- *     which also stops `ProvidersPage`'s and `AssignForm`'s
- *     `.find((…) => …)`. Of the `const`s whose line is bracket-balanced, six
- *     in this tree hide for the second reason alone: five whose statement
- *     carries on past the line, and `OperatorsPage`'s
- *     `new Map<string, typeof catalogue>()`, whose generic-argument comma
- *     reads as a second declarator. None of the six reads `.data`, and no
- *     verdict turns on them.
+ *     — 25 sites, and `AssignForm`'s, above. A query passed down whole and
+ *     read for its `.data` is not silent: step 3 reads the parameter as an
+ *     unknown, and the gate is reported. No site.
+ *  4. A value whose `const` is not substituted: one initialised by a hook
+ *     call (`useMemo`, `useState` from a query), and one whose initialiser
+ *     holds a function — the last so a `const` that is itself a function is
+ *     never evaluated as a value, which also stops `ProvidersPage`'s and
+ *     `AssignForm`'s `.find((…) => …)`, the only two in this tree a gate
+ *     reads. Every other binding — a `let`, a `var`, a parameter, a
+ *     destructured name — stays a name, and reads as unknown if the gate
+ *     reaches `.data`.
  *  5. A gate computed in a `.ts` file, or by calling a function: the text
  *     holds a call, not a `.data`. No site.
  *  6. A control gated by a prop with another name (`aria-disabled`,
  *     `isDisabled`, `canSubmit`). No site under a gate-like name.
+ *  7. A global the program writes to. The evaluable globals are read as the
+ *     language's own, and a write to one — `Math.flag = false`, a replaced
+ *     `Number.isFinite` — can sit in any module, which the text of the
+ *     gate's file does not show. No write to any of them in `src`.
+ *
+ * A `const` whose value is an object, written to after its declaration, is
+ * not among them: step 4 reports it rather than judging it on what its
+ * initialiser built. No gate in this tree substitutes one.
  *
  * Widening to any of these is deliberately not done here: an unmeasured
  * widening is worse than a measured boundary.
@@ -191,37 +198,44 @@ interface SourceFile {
   text: string
 }
 
-interface Declaration {
-  line: number
-  /** The initialiser to substitute, or null for a binding that only hides. */
-  init: string | null
+/** What a name left standing in a resolved gate is bound to. */
+interface Leaf {
+  /** A `const` initialised by a hook call: the query itself, and the only binding the stub answers for. */
+  query: boolean
+  /** The binding, in the words a failure message uses. */
+  what: string
 }
 
-interface Region {
-  name: string
-  start: number
-  end: number
-  /** The parameters of the region's own declaration. */
-  params: Set<string>
-  /** Every other binding anywhere inside it, with what binds it: see `bindingsIn`. */
-  innerBindings: Map<string, string>
-  declarations: Map<string, Declaration[]>
-}
-
-interface FileModel {
+/** A JSX element, gated or not: what `FINDING_GATES` looks for a control among. */
+interface Element {
   file: string
-  lines: string[]
-  regions: Region[]
-  module: Map<string, Declaration[]>
+  /** Where its tag opens in the file: what a gate on it records as `element`. */
+  at: number
+  line: number
+  tag: string
+  /** The translation keys it renders (`labelsOf`). */
+  labels: string[]
 }
 
 interface Gate {
   file: string
   line: number
   prop: Prop
+  /** The attribute's own text, whitespace collapsed: what `GUARDED` is keyed on. */
   expression: string
+  /** The top-level declaration the gate is written in, for messages. */
   region: string
+  /** The element the attribute is on: its `at`, its tag and its labels. */
+  element: number
+  tag: string
+  labels: string[]
+  /** A spread follows the attribute on its element, and can override it. */
+  overridable: boolean
   resolved: string
+  /** Every name left standing in `resolved`, and what it is bound to. */
+  names: Map<string, Leaf>
+  /** Every `const` substituted into `resolved`, with its value as substituted. */
+  constants: Constant[]
   refusal: string | null
 }
 
@@ -268,936 +282,464 @@ function readSources(): SourceFile[] {
   return files
 }
 
-const IDENTIFIER_START = /[A-Za-z_$]/
-const IDENTIFIER_PART = /[\w$]/
-
-const KEYWORDS = new Set([
-  'true', 'false', 'null', 'typeof', 'instanceof', 'in', 'of', 'new', 'void', 'delete', 'this', 'as', 'satisfies',
-])
-
-/** The index just past the string literal that opens at `start`. */
-function endOfString(text: string, start: number): number {
-  const quote = text.charAt(start)
-  let index = start + 1
-
-  while (index < text.length) {
-    const character = text.charAt(index)
-
-    if (character === '\\') {
-      index += 2
-      continue
-    }
-
-    if (character === quote) return index + 1
-
-    index += 1
-  }
-
-  return text.length
-}
-
-/** The index of the bracket that closes the one at `open`, or -1. */
-function closing(text: string, open: number): number {
-  let depth = 0
-  let index = open
-
-  while (index < text.length) {
-    const character = text.charAt(index)
-
-    if (character === "'" || character === '"' || character === '`') {
-      index = endOfString(text, index)
-      continue
-    }
-
-    if (character === '(' || character === '[' || character === '{') depth += 1
-
-    if (character === ')' || character === ']' || character === '}') {
-      depth -= 1
-      if (depth === 0) return index
-    }
-
-    index += 1
-  }
-
-  return -1
-}
-
-function balanced(text: string): boolean {
-  let depth = 0
-  let index = 0
-
-  while (index < text.length) {
-    const character = text.charAt(index)
-
-    if (character === "'" || character === '"' || character === '`') {
-      const end = endOfString(text, index)
-      if (end >= text.length && text.charAt(text.length - 1) !== character) return false
-      index = end
-      continue
-    }
-
-    if (character === '(' || character === '[' || character === '{') depth += 1
-    if (character === ')' || character === ']' || character === '}') depth -= 1
-    if (depth < 0) return false
-
-    index += 1
-  }
-
-  return depth === 0
-}
-
-/**
- * Splits on `separator` where it is not inside brackets or a string.
- *
- * Angle brackets are not counted. Over a parameter list that splits a generic
- * type's arguments apart, which only adds names; counting them would let the
- * `>` of an arrow type, or a comparison in a default, swallow every parameter
- * after it.
- */
-function splitTopLevel(text: string, separator: string): string[] {
-  const parts: string[] = []
-  let depth = 0
-  let from = 0
-  let index = 0
-
-  while (index < text.length) {
-    const character = text.charAt(index)
-
-    if (character === "'" || character === '"' || character === '`') {
-      index = endOfString(text, index)
-      continue
-    }
-
-    if (character === '(' || character === '[' || character === '{') depth += 1
-    if (character === ')' || character === ']' || character === '}') depth -= 1
-
-    if (depth === 0 && character === separator) {
-      parts.push(text.slice(from, index))
-      from = index + 1
-    }
-
-    index += 1
-  }
-
-  parts.push(text.slice(from))
-
-  return parts
-}
-
-/** TypeScript's parameter-property modifiers, which come before the name they modify. */
-const MODIFIERS = /^(?:(?:public|private|protected|readonly|override)\s+)+/
-
-/** The names a parameter list or a destructuring pattern binds. */
-function bindingNames(list: string): string[] {
-  const names: string[] = []
-
-  for (const item of splitTopLevel(list, ',')) {
-    let piece = item.trim().replace(/^\.\.\./, '').replace(MODIFIERS, '')
-
-    if (piece === '') continue
-
-    if (piece.startsWith('{') || piece.startsWith('[')) {
-      const end = closing(piece, 0)
-      const inner = piece.slice(1, end === -1 ? piece.length : end)
-      const object = piece.startsWith('{')
-
-      for (const part of splitTopLevel(inner, ',')) {
-        let binding = part.trim().replace(/^\.\.\./, '')
-        const equals = splitTopLevel(binding, '=')[0] ?? binding
-        binding = equals.trim()
-
-        if (object) {
-          const colon = splitTopLevel(binding, ':')
-          binding = (colon.length > 1 ? colon.slice(1).join(':') : binding).trim()
-        }
-
-        if (binding.startsWith('{') || binding.startsWith('[')) {
-          names.push(...bindingNames(binding))
-        } else if (/^[A-Za-z_$][\w$]*$/.test(binding)) {
-          names.push(binding)
-        }
-      }
-
-      continue
-    }
-
-    piece = (splitTopLevel(piece, '=')[0] ?? piece).trim()
-    const name = /^([A-Za-z_$][\w$]*)/.exec(piece)?.[1]
-
-    if (name !== undefined) names.push(name)
-  }
-
-  return names
-}
-
-/**
- * Rewrites every identifier outside a string literal that is not a property
- * name. `replace` returns the replacement, or null to keep the name.
- */
-function mapIdentifiers(text: string, replace: (name: string) => string | null): string {
-  let out = ''
-  let index = 0
-
-  while (index < text.length) {
-    const character = text.charAt(index)
-
-    if (character === "'" || character === '"' || character === '`') {
-      const end = endOfString(text, index)
-      out += text.slice(index, end)
-      index = end
-      continue
-    }
-
-    if (/[0-9]/.test(character)) {
-      let end = index + 1
-      while (end < text.length && /[\w.]/.test(text.charAt(end))) end += 1
-      out += text.slice(index, end)
-      index = end
-      continue
-    }
-
-    if (IDENTIFIER_START.test(character)) {
-      let end = index + 1
-      while (end < text.length && IDENTIFIER_PART.test(text.charAt(end))) end += 1
-
-      const name = text.slice(index, end)
-      const property = out.trimEnd().endsWith('.')
-      const replacement = property || KEYWORDS.has(name) ? null : replace(name)
-
-      out += replacement ?? name
-      index = end
-      continue
-    }
-
-    out += character
-    index += 1
-  }
-
-  return out
-}
-
 /*
- * A column-zero declaration opens a region: a named function, class, `const`,
- * `let` or `var`, exported or not, and any `export default` — whose function
- * or class need not have a name.
+ * One file, parsed and bound on its own. No library and no import is read:
+ * a name from another file is an import binding here, and a global is a name
+ * bound nowhere in the file. Binding is all this needs from the compiler, and
+ * binding is per file.
  */
-const OPENER =
-  /^(?:(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function\b\s*\*?\s*([A-Za-z_$][\w$]*)?|class\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*))|export\s+default\b)/
-
-const DECLARATION = /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::\s*([^=]*?))?\s*=(?![=>])\s*(.*)$/
-
-/**
- * A `const` line's initialiser, when the line holds the whole of it and
- * nothing else, and it is not a hook call or a function. Whether the statement
- * carries on to the next line is `carriesOn`'s question, asked by the caller.
- */
-function substitutable(rest: string): string | null {
-  const init = rest.replace(/\s+\/\/.*$/, '').replace(/;\s*$/, '').trim()
-
-  if (init === '' || !balanced(init)) return null
-  // A second declarator (`= a, b = c`) or a second statement (`= a; f()`):
-  // the text after `=` is then not this constant's value.
-  if (splitTopLevel(init, ',').length > 1 || splitTopLevel(init, ';').length > 1) return null
-  if (/^(?:await\s+)?use[A-Z0-9]\w*\s*(?:<[^>]*>)?\s*\(/.test(init)) return null
-  if (/=>/.test(init) || /^(?:async\s+)?function\b/.test(init)) return null
-
-  return init
+const COMPILER_OPTIONS: ts.CompilerOptions = {
+  noLib: true,
+  noResolve: true,
+  types: [],
+  noEmit: true,
+  jsx: ts.JsxEmit.Preserve,
+  target: ts.ScriptTarget.Latest,
+  module: ts.ModuleKind.ESNext,
+  moduleDetection: ts.ModuleDetectionKind.Force,
 }
 
-/**
- * `text` with every comment blanked to spaces and its line breaks kept, so
- * offsets and line numbers do not move and nothing a comment says is read as
- * code. A `//` or `/*` written as JSX text is blanked too, which is why the
- * bindings are also read from the raw text (`modelOf`).
- */
-function withoutComments(text: string): string {
-  let out = ''
-  let index = 0
+interface Compiled {
+  file: ts.SourceFile
+  checker: ts.TypeChecker
+}
 
-  while (index < text.length) {
-    const character = text.charAt(index)
-
-    if (character === "'" || character === '"' || character === '`') {
-      const end = endOfString(text, index)
-      out += text.slice(index, end)
-      index = end
-      continue
-    }
-
-    if (character === '/' && text.charAt(index + 1) === '/') {
-      const newline = text.indexOf('\n', index)
-      const end = newline === -1 ? text.length : newline
-      out += ' '.repeat(end - index)
-      index = end
-      continue
-    }
-
-    if (character === '/' && text.charAt(index + 1) === '*') {
-      const close = text.indexOf('*/', index + 2)
-      const end = close === -1 ? text.length : close + 2
-      out += text.slice(index, end).replace(/[^\n]/g, ' ')
-      index = end
-      continue
-    }
-
-    out += character
-    index += 1
+function compile(source: SourceFile): Compiled {
+  const name = `/src/${source.file}`
+  const file = ts.createSourceFile(name, source.text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const host: ts.CompilerHost = {
+    getSourceFile: (requested) => (requested === name ? file : undefined),
+    getDefaultLibFileName: () => '/lib.d.ts',
+    writeFile: () => undefined,
+    getCurrentDirectory: () => '/',
+    getCanonicalFileName: (requested) => requested,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    fileExists: (requested) => requested === name,
+    readFile: () => undefined,
   }
+  const program = ts.createProgram({ rootNames: [name], options: COMPILER_OPTIONS, host })
 
-  return out
-}
+  if (program.getSourceFile(name) !== file) throw new Error(`${source.file} was not bound as the file it was parsed as`)
 
-/** Text that, ending a line, leaves the expression on it unfinished. */
-const UNFINISHED =
-  /(?:[=+\-*/%&|^!~?:<>,.([{]|(?<![\w$])(?:typeof|instanceof|in|of|new|await|void|delete|as|satisfies|yield|keyof))$/
-
-/** Text that, opening a line, can only carry on the expression before it. */
-const CONTINUING = /^(?:[^\w$\s})\];]|(?:as|satisfies|instanceof|in|of)(?![\w$]))/
-
-/** The next line of code after a line break: its indentation and its text. */
-const NEXT_LINE = /(?:[ \t]*\r?\n)*([ \t]*)(\S[^\n]*)?/y
-
-/**
- * Whether the statement whose line ends at `lineEnd` carries on to the next
- * line: that line leaves its expression unfinished, or the next line of code
- * is indented deeper than `indent` (the statement's own line), or opens with
- * something that can only continue an expression — `?`, `:`, `||`, `&&`,
- * `??`, `.`, `(`, `as`, and the rest. `text` has its comments blanked, so a
- * comment between two lines of one statement is a blank line here.
- *
- * It says yes when in doubt, and that direction is the point: a statement
- * taken to end early is substituted as something it is not, and can certify a
- * live gate as shut; a statement taken to carry on only hides.
- */
-function carriesOn(text: string, lineEnd: number, indent: number): boolean {
-  const lineStart = text.lastIndexOf('\n', lineEnd - 1) + 1
-
-  if (UNFINISHED.test(text.slice(lineStart, lineEnd).trimEnd())) return true
-
-  NEXT_LINE.lastIndex = lineEnd + 1
-  const next = lineEnd >= text.length ? null : NEXT_LINE.exec(text)
-  const nextText = next?.[2]
-
-  if (next === null || nextText === undefined) return false
-
-  return (next[1]?.length ?? 0) > indent || CONTINUING.test(nextText)
+  return { file, checker: program.getTypeChecker() }
 }
 
 // ---------------------------------------------------------------------------
-// Every other binding in a region
+// What a name is bound to
 // ---------------------------------------------------------------------------
 
-function skipSpace(text: string, index: number): number {
-  let at = index
-  while (at < text.length && /\s/.test(text.charAt(at))) at += 1
-  return at
-}
+/** Past parentheses, `await`, and the type-only wrappers, to the expression that does the work. */
+function unwrapped(expression: ts.Expression): ts.Expression {
+  let at = expression
 
-function identifierEnd(text: string, index: number): number {
-  let at = index + 1
-  while (at < text.length && IDENTIFIER_PART.test(text.charAt(at))) at += 1
-  return at
-}
-
-/** The indentation of the line that `index` is on. */
-function indentAt(text: string, index: number): number {
-  const lineStart = text.lastIndexOf('\n', index - 1) + 1
-  return /^[ \t]*/.exec(text.slice(lineStart, index))?.[0].length ?? 0
-}
-
-/** Words after which a type is still expected, so a `{` is an object type and not a body. */
-const TYPE_OPERATORS = new Set(['keyof', 'typeof', 'extends', 'is', 'infer', 'readonly', 'unique', 'asserts'])
-
-/**
- * What follows the `)` at `close`: `=>`, which makes the brackets an arrow
- * function's parameters; `{`, a function or method body; or neither. A return
- * type between them — `(row): Row =>`, `(): () => void =>`,
- * `(): { ok: boolean } =>` — is read through, bracket by bracket.
- */
-function afterParameters(text: string, close: number): 'arrow' | 'body' | null {
-  let at = skipSpace(text, close + 1)
-
-  if (text.startsWith('=>', at)) return 'arrow'
-  if (text.charAt(at) === '{') return 'body'
-  if (text.charAt(at) !== ':') return null
-
-  at += 1
-  let angle = 0
-  let expectingType = true
-  const limit = Math.min(text.length, at + 500)
-
-  while (at < limit) {
-    const character = text.charAt(at)
-
-    if (/\s/.test(character)) {
-      at += 1
-      continue
-    }
-
-    if (text.startsWith('=>', at)) {
-      if (angle === 0) return 'arrow'
-      at += 2
-      expectingType = true
-      continue
-    }
-
-    if (character === '{' && !expectingType && angle === 0) return 'body'
-
-    if (character === '(' || character === '[' || character === '{') {
-      const end = closing(text, at)
-      if (end === -1) return null
-      at = end + 1
-      expectingType = false
-      continue
-    }
-
-    if (character === "'" || character === '"' || character === '`') {
-      at = endOfString(text, at)
-      expectingType = false
-      continue
-    }
-
-    if (character === '<') {
-      angle += 1
-      at += 1
-      expectingType = true
-      continue
-    }
-
-    if (character === '>') {
-      if (angle === 0) return null
-      angle -= 1
-      at += 1
-      expectingType = false
-      continue
-    }
-
-    if ('|&?:,.'.includes(character)) {
-      if (character === ',' && angle === 0) return null
-      at += 1
-      expectingType = character !== '.'
-      continue
-    }
-
-    if (IDENTIFIER_PART.test(character)) {
-      const end = identifierEnd(text, at)
-      expectingType = TYPE_OPERATORS.has(text.slice(at, end))
-      at = end
-      continue
-    }
-
-    return null
-  }
-
-  return null
-}
-
-/** Statement heads whose parenthesised part is followed by a body and binds nothing. */
-const CONTROL_HEADS = new Set(['if', 'for', 'while', 'switch', 'with'])
-
-/**
- * What the brackets from `open` to `close` are, when they bind names: a
- * `catch` binding, or the parameters of an arrow function, a function or a
- * method. Null when they bind nothing.
- */
-function parameterListKind(text: string, open: number, close: number): string | null {
-  const before = text.slice(Math.max(0, open - 200), open)
-
-  if (/(?<![\w$.])catch\s*$/.test(before)) return 'a `catch` binding'
-
-  const after = afterParameters(text, close)
-
-  if (after === 'arrow') return 'a callback parameter'
-  if (/(?<![\w$.])function\b\s*\*?\s*(?:[A-Za-z_$][\w$]*)?\s*(?:<[^()]*>)?\s*$/.test(before)) {
-    return 'a parameter of a nested function'
-  }
-
-  if (after === 'body') {
-    const head = /([A-Za-z_$][\w$]*)\s*(?:<[^()]*>)?\s*$/.exec(before)?.[1]
-    if (head === undefined || !CONTROL_HEADS.has(head)) return 'a method parameter'
-  }
-
-  return null
-}
-
-/**
- * Where a type annotation that starts at `index`, just past its `:`, ends: at
- * the `=`, `,`, `;` or closing bracket after it, or at a line break the
- * statement does not carry on past.
- */
-function endOfType(text: string, index: number, indent: number): number {
-  let at = index
-  let angle = 0
-
-  while (at < text.length) {
-    const character = text.charAt(at)
-
-    if (character === "'" || character === '"' || character === '`') {
-      at = endOfString(text, at)
-      continue
-    }
-
-    if (character === '(' || character === '[' || character === '{') {
-      const close = closing(text, at)
-      if (close === -1) return text.length
-      at = close + 1
-      continue
-    }
-
-    if (character === '=' && text.charAt(at + 1) === '>') {
-      at += 2
-      continue
-    }
-
-    if (character === '<') angle += 1
-    if (character === '>' && angle > 0) angle -= 1
-
-    if (angle === 0 && '=,;)]}'.includes(character)) return at
-    if (character === '\n' && angle === 0 && !carriesOn(text, at, indent)) return at
-
-    at += 1
+  while (
+    ts.isParenthesizedExpression(at) ||
+    ts.isAwaitExpression(at) ||
+    ts.isAsExpression(at) ||
+    ts.isSatisfiesExpression(at) ||
+    ts.isNonNullExpression(at) ||
+    ts.isTypeAssertionExpression(at)
+  ) {
+    at = at.expression
   }
 
   return at
 }
 
-/**
- * Where an initialiser that starts at `index`, just past its `=`, ends: at a
- * `,` or `;` outside brackets, at the bracket that closes around it, or at a
- * line break the statement does not carry on past.
- */
-function endOfInitialiser(text: string, index: number, indent: number): number {
-  let at = index
+/** A call to `use…` or `something.use…`: a hook, whose result this file takes to be the query itself. */
+function isHookCall(expression: ts.Expression): boolean {
+  const call = unwrapped(expression)
+  if (!ts.isCallExpression(call)) return false
 
-  while (at < text.length) {
-    const character = text.charAt(at)
+  const callee = call.expression
+  const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : ''
 
-    if (character === "'" || character === '"' || character === '`') {
-      at = endOfString(text, at)
-      continue
-    }
-
-    if (character === '(' || character === '[' || character === '{') {
-      const close = closing(text, at)
-      if (close === -1) return text.length
-      at = close + 1
-      continue
-    }
-
-    if (',;)]}'.includes(character)) return at
-    if (character === '\n' && !carriesOn(text, at, indent)) return at
-
-    at += 1
-  }
-
-  return at
+  return /^use[A-Z0-9]/.test(name)
 }
 
-/**
- * The names bound by the declarator list that starts at `index`, just past a
- * `const`, `let`, `var` or `using`: every declarator, pattern or name, however
- * many there are and whatever their types and initialisers hold.
- */
-function declaratorNames(text: string, index: number): string[] {
-  const indent = indentAt(text, index)
-  const names: string[] = []
-  let at = index
+/** Whether `node` is, or anywhere holds, a function, a class, a method or an accessor. */
+function holdsFunction(node: ts.Node): boolean {
+  if (ts.isFunctionLike(node) || ts.isClassLike(node)) return true
 
-  for (;;) {
-    at = skipSpace(text, at)
-    const character = text.charAt(at)
-
-    if (character === '{' || character === '[') {
-      const close = closing(text, at)
-      if (close === -1) break
-      names.push(...bindingNames(text.slice(at, close + 1)))
-      at = close + 1
-    } else if (IDENTIFIER_START.test(character)) {
-      const end = identifierEnd(text, at)
-      names.push(text.slice(at, end))
-      at = end
-    } else {
-      break
-    }
-
-    at = skipSpace(text, at)
-    if (text.charAt(at) === '!') at = skipSpace(text, at + 1)
-    if (text.charAt(at) === ':') at = skipSpace(text, endOfType(text, at + 1, indent))
-    if (text.charAt(at) === '=' && text.charAt(at + 1) !== '=' && text.charAt(at + 1) !== '>') {
-      at = endOfInitialiser(text, at + 1, indent)
-    }
-
-    if (text.charAt(at) !== ',') break
-    at += 1
-  }
-
-  return names
+  return ts.forEachChild(node, (child) => (holdsFunction(child) ? true : undefined)) ?? false
 }
 
-/**
- * Every name `text` binds other than by the declarations that open their own
- * line, which the region records itself — each with what binds it:
- *
- *  - every bracket pair that is a parameter list: an arrow function's (its
- *    return type read through), a function's, a method's, and a `catch`
- *    binding, whatever the parameters hold — patterns, defaults with calls in
- *    them, function types;
- *  - a bare arrow parameter, `row => …`;
- *  - every declarator of a `const`, `let` or `var` that does not open its
- *    line — which is every `for` binding — and every declarator after the
- *    first of one that does; and every declarator of a `using`, which the
- *    region's own declarations do not record;
- *  - the name of a function or class that does not open its line.
- *
- * It reads text, not a parse, and it errs one way on purpose: every bracket
- * pair is examined, inside strings and comments too, so a name wrongly taken
- * for a binding costs a refusal, where a binding missed would cost a verdict
- * about a value the gate never reads.
- */
-function bindingsIn(text: string): Map<string, string> {
-  const bindings = new Map<string, string>()
-  const bind = (names: string[], kind: string): void => {
-    for (const name of names) if (name !== '' && !bindings.has(name)) bindings.set(name, kind)
-  }
+/** Which keyword declares a variable: `let`, `const`, `using` (or `await using`) or `var`. */
+function keywordOf(declaration: ts.VariableDeclaration): 'let' | 'const' | 'using' | 'var' {
+  const flags: ts.NodeFlags = ts.getCombinedNodeFlags(declaration) & ts.NodeFlags.BlockScoped
 
-  const onlyIndentBefore = (index: number, allowing = ''): boolean => {
-    const lineStart = text.lastIndexOf('\n', index - 1) + 1
-    return new RegExp(`^[ \\t]+${allowing}$`).test(text.slice(lineStart, index))
-  }
+  if (flags === ts.NodeFlags.Let) return 'let'
+  if (flags === ts.NodeFlags.Const) return 'const'
 
-  for (let index = text.indexOf('('); index !== -1; index = text.indexOf('(', index + 1)) {
-    const close = closing(text, index)
-    const kind = close === -1 ? null : parameterListKind(text, index, close)
-    if (kind !== null) bind(bindingNames(text.slice(index + 1, close)), kind)
-  }
-
-  for (const match of text.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*=>/g)) {
-    bind([match[1] ?? ''], 'a callback parameter')
-  }
-
-  for (const match of text.matchAll(/(?<![\w$.])(const|let|var|using(?=\s+[A-Za-z_$][\w$]*\s*=))\s+(?=[A-Za-z_$[{])/g)) {
-    const names = declaratorNames(text, match.index + match[0].length)
-    const inFor = /(?<![\w$.])for\s*(?:await\s*)?\(\s*$/.test(text.slice(Math.max(0, match.index - 40), match.index))
-
-    if (match[1] === 'using') {
-      bind(names, 'a `using` declaration')
-    } else if (onlyIndentBefore(match.index)) {
-      bind(names.slice(1), 'a second declarator on a line')
-    } else {
-      bind(names, inFor ? 'a `for` binding' : 'a declaration that does not open its line')
-    }
-  }
-
-  for (const match of text.matchAll(/(?<![\w$.])(function\b\s*\*?\s*|class\s+)([A-Za-z_$][\w$]*)/g)) {
-    if (!onlyIndentBefore(match.index, '(?:async\\s+)?')) {
-      bind([match[2] ?? ''], match[1]?.startsWith('class') === true ? 'a nested class' : 'a nested function')
-    }
-  }
-
-  return bindings
+  return flags === ts.NodeFlags.None ? 'var' : 'using'
 }
 
-function addDeclaration(into: Map<string, Declaration[]>, name: string, declaration: Declaration): void {
-  const existing = into.get(name) ?? []
-  existing.push(declaration)
-  into.set(name, existing)
+/** A declaration, in the words a failure message uses. */
+function describeDeclaration(declaration: ts.Declaration): string {
+  if (ts.isParameter(declaration)) return 'a parameter'
+
+  if (ts.isBindingElement(declaration)) {
+    let pattern: ts.Node = declaration.parent
+    while (ts.isBindingElement(pattern.parent) || ts.isObjectBindingPattern(pattern.parent) || ts.isArrayBindingPattern(pattern.parent)) {
+      pattern = pattern.parent
+    }
+
+    return ts.isParameter(pattern.parent) ? 'a destructured parameter' : 'a destructured name'
+  }
+
+  if (ts.isImportClause(declaration) || ts.isImportSpecifier(declaration) || ts.isNamespaceImport(declaration) || ts.isImportEqualsDeclaration(declaration)) {
+    return 'an import'
+  }
+
+  if (ts.isVariableDeclaration(declaration)) {
+    if (ts.isCatchClause(declaration.parent)) return 'a `catch` binding'
+
+    const statement = declaration.parent.parent
+    if (ts.isForStatement(statement) || ts.isForInStatement(statement) || ts.isForOfStatement(statement)) return 'a `for` binding'
+
+    const keyword = keywordOf(declaration)
+    if (keyword !== 'const') return `a \`${keyword}\``
+    if (declaration.initializer === undefined) return 'a `const` with no initialiser'
+    if (isHookCall(declaration.initializer)) return 'a hook call'
+
+    return 'a `const` that holds a function'
+  }
+
+  if (ts.isFunctionDeclaration(declaration) || ts.isFunctionExpression(declaration)) return 'a function'
+  if (ts.isClassDeclaration(declaration) || ts.isClassExpression(declaration)) return 'a class'
+
+  return `a ${ts.SyntaxKind[declaration.kind]}`
 }
 
-/** The parameters of the declaration that opens at `offset` in `text`. */
-/**
- * The parameters of the declaration that opens at `offset`: the first
- * function's or arrow's parameter list that opens on its line — wrapped in a
- * call or not, so `memo(function X({ … }) {` and `forwardRef((props, ref) =>`
- * are read like `function X({ … }) {` — or else a bare arrow parameter. A line
- * that ends on its `=` is read with the next.
- */
-function openerParams(text: string, offset: number, lineEnd: number): string[] {
-  const nextBreak = text.indexOf('\n', lineEnd + 1)
-  const searchEnd = /=\s*$/.test(text.slice(offset, lineEnd)) ? (nextBreak === -1 ? text.length : nextBreak) : lineEnd
-  const head = text.slice(offset, searchEnd)
+type Binding =
+  | { kind: 'substitute'; init: ts.Expression }
+  | { kind: 'leaf'; leaf: Leaf }
+  | { kind: 'refused'; reason: string }
 
-  for (let open = text.indexOf('(', offset); open !== -1 && open < searchEnd; open = text.indexOf('(', open + 1)) {
-    const close = closing(text, open)
-    if (close === -1) break
+const GLOBAL: Leaf = { query: false, what: 'bound nowhere in this file' }
 
-    const kind = parameterListKind(text, open, close)
-    if (kind === 'a callback parameter' || kind === 'a parameter of a nested function') {
-      return bindingNames(text.slice(open + 1, close))
-    }
-  }
+function bindingOf(symbol: ts.Symbol | undefined, name: string): Binding {
+  // A type that shares the name reads nothing at run time.
+  const declarations = (symbol?.declarations ?? []).filter(
+    (declaration) =>
+      !ts.isInterfaceDeclaration(declaration) && !ts.isTypeAliasDeclaration(declaration) && !ts.isTypeParameterDeclaration(declaration),
+  )
 
-  const bareArrow = /=\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>/.exec(head)
-
-  return bareArrow?.[1] === undefined ? [] : [bareArrow[1]]
-}
-
-/** The names an indented line declares at its start: a pattern's, or one `const`, `let`, `var`, `function` or `class`. */
-function lineStartNames(text: string, offset: number, line: string): string[] {
-  if (!/^\s+/.test(line)) return []
-
-  const pattern = /^\s+(?:const|let|var)\s+([{[])/.exec(line)
-  if (pattern !== null) {
-    const open = offset + pattern[0].length - 1
-    const close = closing(text, open)
-    return bindingNames(text.slice(open, close === -1 ? open + 1 : close + 1))
-  }
-
-  const other =
-    /^\s+(?:(?:let|var|const)\s+([A-Za-z_$][\w$]*)|(?:async\s+)?function\b\s*\*?\s*([A-Za-z_$][\w$]*)|class\s+([A-Za-z_$][\w$]*))/.exec(line)
-  const name = other?.[1] ?? other?.[2] ?? other?.[3]
-
-  return name === undefined ? [] : [name]
-}
-
-function modelOf(source: SourceFile): FileModel {
-  // Comments blanked, so commented-out code declares nothing and an
-  // apostrophe in a comment cannot open a string. Same length, same lines.
-  const text = withoutComments(source.text)
-  const lines = text.split('\n')
-  const rawLines = source.text.split('\n')
-  const offsets: number[] = []
-  let running = 0
-
-  for (const line of lines) {
-    offsets.push(running)
-    running += line.length + 1
-  }
-
-  const lineEndOf = (index: number): number => (offsets[index] ?? 0) + (lines[index]?.length ?? 0)
-
-  /** A `const` line's initialiser, when the statement is complete on that line. */
-  const initialiserOn = (index: number, rest: string): string | null => {
-    const init = substitutable(rest)
-    const indent = /^[ \t]*/.exec(lines[index] ?? '')?.[0].length ?? 0
-
-    return init !== null && !carriesOn(text, lineEndOf(index), indent) ? init : null
-  }
-
-  const openers: { line: number; name: string; head: number }[] = []
-  const module = new Map<string, Declaration[]>()
-
-  lines.forEach((line, index) => {
-    const match = OPENER.exec(line)
-    if (match === null) return
-
-    openers.push({ line: index, name: match[1] ?? match[2] ?? match[3] ?? '(anonymous)', head: match[0].length })
-
-    // A column-zero `const`, exported or not, is visible to every region.
-    const declaration = DECLARATION.exec(line)
-    if (declaration?.[1] !== undefined && /^(?:export\s+)?const\b/.test(line)) {
-      addDeclaration(module, declaration[1], { line: index, init: initialiserOn(index, declaration[3] ?? '') })
-    } else if (match[3] !== undefined || match[1] !== undefined || match[2] !== undefined) {
-      addDeclaration(module, match[1] ?? match[2] ?? match[3] ?? '', { line: index, init: null })
-    }
-  })
-
-  const regions: Region[] = []
-  const firstOpener = openers[0]?.line ?? lines.length
-
-  regions.push({ name: '(module)', start: 0, end: firstOpener, params: new Set(), innerBindings: new Map(), declarations: new Map() })
-
-  openers.forEach((opener, position) => {
-    const start = opener.line
-    const end = openers[position + 1]?.line ?? lines.length
-    const startOffset = offsets[start] ?? 0
-    const params = openerParams(text, startOffset, lineEndOf(start))
-    const endOffset = offsets[end] ?? text.length
-
-    const declarations = new Map<string, Declaration[]>()
-
-    for (let index = start + 1; index < end; index += 1) {
-      const line = lines[index] ?? ''
-      const declaration = /^\s+/.test(line) ? DECLARATION.exec(line) : null
-
-      if (declaration?.[1] !== undefined) {
-        addDeclaration(declarations, declaration[1], { line: index, init: initialiserOn(index, declaration[3] ?? '') })
-        continue
-      }
-
-      for (const name of lineStartNames(text, offsets[index] ?? 0, line)) {
-        addDeclaration(declarations, name, { line: index, init: null })
-      }
-    }
-
-    /*
-     * Everything after the opener's own name, its parameter list included:
-     * the region's own parameters are then found twice, which `lookup` reads
-     * the same as once. Read twice more, with comments and without, keeping
-     * every name either reading finds: the raw text can hide a binding behind
-     * an apostrophe in a comment, the blanked text behind a `//` that was
-     * JSX text rather than a comment.
-     */
-    const bodyStart = startOffset + opener.head
-    const innerBindings = bindingsIn(text.slice(bodyStart, endOffset))
-    for (const [name, kind] of bindingsIn(source.text.slice(bodyStart, endOffset))) {
-      if (!innerBindings.has(name)) innerBindings.set(name, kind)
-    }
-
-    // A declaration opening its line that only the raw text shows — blanked
-    // as a comment, which is right for commented-out code and wrong for a
-    // `/*` that was JSX text — is one more binding the gate cannot place.
-    const seen = new Map<string, number>()
-    for (let index = start + 1; index < end; index += 1) {
-      for (const name of lineStartNames(source.text, offsets[index] ?? 0, rawLines[index] ?? '')) {
-        seen.set(name, (seen.get(name) ?? 0) + 1)
-      }
-    }
-    for (const [name, count] of seen) {
-      if (count > (declarations.get(name)?.length ?? 0) && !innerBindings.has(name)) {
-        innerBindings.set(name, 'a declaration inside what reads as a comment')
-      }
-    }
-
-    regions.push({
-      name: opener.name,
-      start,
-      end,
-      params: new Set(params),
-      innerBindings,
-      declarations,
-    })
-  })
-
-  return { file: source.file, lines, regions, module }
-}
-
-type Lookup = { kind: 'substitute'; init: string } | { kind: 'free' } | { kind: 'refused'; reason: string }
-
-function lookup(name: string, model: FileModel, region: Region): Lookup {
-  const local = region.declarations.get(name) ?? []
-  const parameter = region.params.has(name)
-  const inner = region.innerBindings.get(name)
-  // The shadow filter, in this one place: a parameter of the region's own
-  // declaration hides a column-zero `const` of the same name.
-  const module = parameter ? [] : (model.module.get(name) ?? [])
-
-  if (local.length > 1) {
-    return { kind: 'refused', reason: `\`${name}\` is declared ${String(local.length)} times in ${region.name}` }
-  }
-
-  if (local.length === 1 && parameter) {
+  if (declarations.length > 1) {
     return {
       kind: 'refused',
-      reason: `\`${name}\` is a parameter of ${region.name} and is also declared inside it, so which one this gate reads cannot be told from the text`,
+      reason: `\`${name}\` is declared ${String(declarations.length)} times, so what it holds cannot be told from any one of them`,
     }
   }
 
-  if (inner !== undefined && (local.length > 0 || module.length > 0)) {
-    const where = local.length > 0 ? `in ${region.name} and is also ${inner} there` : `at module scope and is also ${inner} in ${region.name}`
+  const [declaration] = declarations
 
-    return {
-      kind: 'refused',
-      reason: `\`${name}\` is declared ${where}, so which one this gate reads cannot be told from the text`,
-    }
+  if (declaration === undefined) return { kind: 'leaf', leaf: GLOBAL }
+
+  if (
+    ts.isVariableDeclaration(declaration) &&
+    ts.isIdentifier(declaration.name) &&
+    ts.isVariableDeclarationList(declaration.parent) &&
+    keywordOf(declaration) === 'const' &&
+    declaration.initializer !== undefined
+  ) {
+    const init = declaration.initializer
+
+    if (isHookCall(init)) return { kind: 'leaf', leaf: { query: true, what: 'a hook call' } }
+    if (!holdsFunction(init)) return { kind: 'substitute', init }
   }
 
-  if (local.length === 0 && module.length > 1) {
-    return { kind: 'refused', reason: `\`${name}\` is declared ${String(module.length)} times at module scope` }
-  }
+  return { kind: 'leaf', leaf: { query: false, what: describeDeclaration(declaration) } }
+}
 
-  const found = local[0] ?? module[0]
+/**
+ * Whether `identifier` reads a binding. A property's name, a declaration's own
+ * name, a label, a JSX tag or attribute name, and an import or export
+ * specifier do not.
+ */
+function isReference(identifier: ts.Identifier): boolean {
+  const parent = identifier.parent
 
-  if (found === undefined || found.init === null) return { kind: 'free' }
+  if ('name' in parent && parent.name === identifier && !ts.isShorthandPropertyAssignment(parent)) return false
+  if (ts.isBindingElement(parent) && parent.propertyName === identifier) return false
+  if (ts.isJsxOpeningElement(parent) || ts.isJsxSelfClosingElement(parent) || ts.isJsxClosingElement(parent)) return false
+  if (ts.isLabeledStatement(parent) || ts.isBreakOrContinueStatement(parent)) return false
+  if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return false
+
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Resolving a gate
+// ---------------------------------------------------------------------------
+
+const PRINTER = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed })
+
+/** How many `const`s deep a substitution may go before it is said not to settle. */
+const DEPTH = 32
+
+const EVALUABLE_GLOBALS = new Set(['undefined', 'NaN', 'Infinity', 'Number', 'String', 'Boolean', 'Math', 'Array', 'Object'])
+
+/** A `const` a gate's resolution substituted, and its initialiser as substituted. */
+interface Constant {
+  name: string
+  value: string
+}
+
+interface Resolution {
+  resolved: string
+  names: Map<string, Leaf>
+  constants: Constant[]
+  refusal: string | null
+}
+
+function resolve(expression: ts.Expression, compiled: Compiled): Resolution {
+  const { checker, file } = compiled
 
   /*
-   * A column-zero `const` is written at module scope, and its initialiser
-   * reads module scope. Substituted as text into a gate, every name in it
-   * would be read in the gate's region instead — so a name the region binds
-   * too would be read as the region's, which is how an imported object's
-   * `.data` becomes the component's own query and is judged as one.
+   * Built in two passes. The first substitutes, and leaves every name that
+   * stays a name as a placeholder that remembers its binding; the second
+   * gives each binding one name, a suffixed one when another binding in the
+   * same text already has it. A binding's own name is only its label: two
+   * bindings of one name are different values.
    */
-  if (local.length === 0) {
-    const captured = [...namesIn(found.init)].find(
-      (read) => region.declarations.has(read) || region.params.has(read) || region.innerBindings.has(read),
-    )
+  const placeholders = new Map<ts.Node, { key: ts.Symbol | string; text: string; leaf: Leaf }>()
+  // Each substitution made, by the name it stands for.
+  const substitutions = new Map<ts.Node, string>()
+  let refusal: string | null = null
 
-    if (captured !== undefined) {
-      return {
-        kind: 'refused',
-        reason: `\`${name}\` is a column-zero constant whose initialiser reads \`${captured}\`, which ${region.name} binds as well, so substituted here it would read the wrong one`,
+  const placeholder = (text: string, key: ts.Symbol | string, leaf: Leaf): ts.Identifier => {
+    const node = ts.factory.createIdentifier(text)
+    placeholders.set(node, { key, text, leaf })
+    return node
+  }
+
+  const substitute = (node: ts.Expression, chain: readonly ts.Symbol[]): ts.Expression => {
+    const valueOf = (reference: ts.Identifier, symbol: ts.Symbol | undefined): ts.Expression => {
+      const binding = bindingOf(symbol, reference.text)
+
+      if (binding.kind === 'refused') {
+        refusal ??= binding.reason
+        return placeholder(reference.text, symbol ?? reference.text, { query: false, what: 'refused' })
       }
+
+      if (binding.kind === 'leaf' || symbol === undefined) {
+        const leaf = binding.kind === 'leaf' ? binding.leaf : GLOBAL
+        return placeholder(reference.text, leaf === GLOBAL || symbol === undefined ? reference.text : symbol, leaf)
+      }
+
+      if (chain.includes(symbol) || chain.length >= DEPTH) {
+        refusal ??= `its constants do not settle: \`${reference.text}\` is reached again, or more than ${String(DEPTH)} deep`
+        return placeholder(reference.text, symbol, { query: false, what: 'a constant that does not settle' })
+      }
+
+      // Placed where the reference was written, so the printer lays the
+      // substitution out as the reference was laid out rather than breaking
+      // the line wherever the initialiser happened to sit in the file.
+      const substitution = ts.setTextRange(ts.factory.createParenthesizedExpression(substitute(binding.init, [...chain, symbol])), reference)
+      substitutions.set(substitution, reference.text)
+
+      return substitution
+    }
+
+    const visit = (child: ts.Node): ts.Node => {
+      // A type is not evaluated, so nothing in it is resolved.
+      if (ts.isTypeNode(child)) return child
+
+      if (ts.isShorthandPropertyAssignment(child)) {
+        return ts.factory.createPropertyAssignment(
+          ts.factory.createIdentifier(child.name.text),
+          valueOf(child.name, checker.getShorthandAssignmentValueSymbol(child)),
+        )
+      }
+
+      if (ts.isIdentifier(child)) return isReference(child) ? valueOf(child, checker.getSymbolAtLocation(child)) : child
+
+      return ts.visitEachChild(child, visit, undefined)
+    }
+
+    return visit(node) as ts.Expression
+  }
+
+  const substituted = substitute(expression, [])
+
+  // A global keeps its own name, the only one it can be evaluated under; a
+  // binding takes its own unless a global or an earlier binding has it, or it
+  // is one of the evaluable globals it would otherwise pass for.
+  const entries = [...placeholders.values()]
+  const nameOf = new Map<ts.Symbol | string, string>()
+  const taken = new Set<string>()
+
+  for (const entry of entries) {
+    if (typeof entry.key === 'string') {
+      nameOf.set(entry.key, entry.text)
+      taken.add(entry.text)
     }
   }
 
-  return { kind: 'substitute', init: found.init }
+  for (const entry of entries) {
+    if (nameOf.has(entry.key)) continue
+
+    let name = entry.text
+    for (let suffix = 2; taken.has(name) || EVALUABLE_GLOBALS.has(name); suffix += 1) name = `${entry.text}$${String(suffix)}`
+
+    nameOf.set(entry.key, name)
+    taken.add(name)
+  }
+
+  const names = new Map<string, Leaf>()
+  const constants: Constant[] = []
+  const rename = (node: ts.Node): ts.Node => {
+    const entry = placeholders.get(node)
+
+    if (entry !== undefined) {
+      const name = nameOf.get(entry.key) ?? entry.text
+      names.set(name, entry.leaf)
+      return ts.factory.createIdentifier(name)
+    }
+
+    const renamed = ts.visitEachChild(node, rename, undefined)
+    const constant = substitutions.get(node)
+    if (constant !== undefined) constants.push({ name: constant, value: PRINTER.printNode(ts.EmitHint.Expression, renamed, file) })
+
+    return renamed
+  }
+
+  const resolved = PRINTER.printNode(ts.EmitHint.Expression, rename(substituted), file)
+
+  return { resolved, names, constants, refusal }
 }
 
-/** The names `text` reads: every identifier that is not a property name or a keyword. */
-function namesIn(text: string): Set<string> {
-  const names = new Set<string>()
+/** The top-level statement a node is written in, named for messages. */
+function regionOf(node: ts.Node): string {
+  let statement = node
+  while (!ts.isSourceFile(statement.parent)) statement = statement.parent
 
-  mapIdentifiers(text, (name) => {
-    names.add(name)
-    return null
-  })
+  if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) return statement.name?.text ?? '(anonymous)'
 
-  return names
+  if (ts.isVariableStatement(statement)) {
+    const [first] = statement.declarationList.declarations
+    return first !== undefined && ts.isIdentifier(first.name) ? first.name.text : '(anonymous)'
+  }
+
+  return ts.isExportAssignment(statement) ? '(anonymous)' : '(module)'
 }
 
-function resolve(expression: string, model: FileModel, region: Region): { resolved: string; refusal: string | null } {
-  let text = expression
+type JsxTag = ts.JsxOpeningElement | ts.JsxSelfClosingElement
 
-  for (let pass = 0; pass < 32; pass += 1) {
-    // An object rather than two `let`s, because both are written inside the
-    // callback, where the compiler's flow analysis cannot follow them.
-    const outcome: { changed: boolean; refusal: string | null } = { changed: false, refusal: null }
+/** An element's tag, as written: `Button`, `Dialog.Close`. */
+function tagOf(element: JsxTag): string {
+  return element.tagName.getText()
+}
 
-    const next = mapIdentifiers(text, (name) => {
-      const found = lookup(name, model, region)
+/**
+ * The keys of every `t('…')` inside `element` — in its attributes or among its
+ * children, at any depth, and through any `const` they read that step 2 would
+ * substitute — except inside an element of the same tag nested in it, which
+ * is the one that renders them. So a `Button` is labelled by what it renders
+ * and no other `Button` is; which element around a label is the control is
+ * what `FINDING_GATES` says by tag.
+ */
+function labelsOf(element: JsxTag, checker: ts.TypeChecker): string[] {
+  const tag = tagOf(element)
+  const labels: string[] = []
+  const followed = new Set<ts.Symbol>()
 
-      if (found.kind === 'refused') {
-        outcome.refusal ??= found.reason
-        return null
+  const walk = (node: ts.Node): void => {
+    if (ts.isJsxElement(node) && tagOf(node.openingElement) === tag) return
+    if (ts.isJsxSelfClosingElement(node) && tagOf(node) === tag) return
+
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 't') {
+      const [key] = node.arguments
+      if (key !== undefined && ts.isStringLiteralLike(key)) labels.push(key.text)
+    }
+
+    if (ts.isIdentifier(node) && isReference(node)) {
+      const symbol = checker.getSymbolAtLocation(node)
+      const binding = bindingOf(symbol, node.text)
+
+      if (symbol !== undefined && binding.kind === 'substitute' && !followed.has(symbol)) {
+        followed.add(symbol)
+        walk(binding.init)
       }
+    }
 
-      if (found.kind === 'free') return null
-
-      outcome.changed = true
-      return `(${found.init})`
-    })
-
-    if (outcome.refusal !== null) return { resolved: next, refusal: outcome.refusal }
-    if (!outcome.changed) return { resolved: next, refusal: null }
-
-    text = next
+    ts.forEachChild(node, walk)
   }
 
-  return { resolved: text, refusal: 'its constants do not settle after 32 substitutions' }
+  ts.forEachChild(element, walk)
+  if (ts.isJsxOpeningElement(element)) for (const child of element.parent.children) walk(child)
+
+  return labels
 }
 
-const GATE = /(?<![\w$.-])(disabled|ready)=\{/g
+/** Whether a spread follows `attribute` on its element: a later prop wins, so it can override the gate. */
+function overridable(attribute: ts.JsxAttribute): boolean {
+  const attributes = attribute.parent.properties
 
-function gatesOf(source: SourceFile): Gate[] {
-  const model = modelOf(source)
-  const gates: Gate[] = []
+  return attributes.slice(attributes.indexOf(attribute) + 1).some((later) => ts.isJsxSpreadAttribute(later))
+}
 
-  for (const match of source.text.matchAll(GATE)) {
-    const open = match.index + match[0].length - 1
-    const close = closing(source.text, open)
-    if (close === -1) continue
+/** A file's gates, and every element in it, gated or not. */
+interface Reading {
+  gates: Gate[]
+  elements: Element[]
+}
 
-    const expression = source.text.slice(open + 1, close).replace(/\s+/g, ' ').trim()
-    const line = source.text.slice(0, match.index).split('\n').length
-    const region =
-      [...model.regions].reverse().find((candidate) => candidate.start <= line - 1 && line - 1 < candidate.end) ??
-      model.regions[0]
+const READINGS = new Map<string, Reading>()
 
-    if (region === undefined) continue
+function readingOf(source: SourceFile): Reading {
+  const cacheKey = `${source.file}\n${source.text}`
+  const cached = READINGS.get(cacheKey)
+  if (cached !== undefined) return cached
 
-    const { resolved, refusal } = resolve(expression, model, region)
+  const compiled = compile(source)
+  const reading: Reading = { gates: [], elements: [] }
+  const lineOf = (node: ts.Node): number => compiled.file.getLineAndCharacterOfPosition(node.getStart(compiled.file)).line + 1
 
-    gates.push({
-      file: source.file,
-      line,
-      prop: match[1] === 'ready' ? 'ready' : 'disabled',
-      expression,
-      region: region.name,
-      resolved,
-      refusal,
-    })
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const at = node.getStart(compiled.file)
+      const tag = tagOf(node)
+      const labels = labelsOf(node, compiled.checker)
+
+      reading.elements.push({ file: source.file, at, line: lineOf(node), tag, labels })
+
+      for (const attribute of node.attributes.properties) {
+        if (
+          ts.isJsxAttribute(attribute) &&
+          ts.isIdentifier(attribute.name) &&
+          (attribute.name.text === 'disabled' || attribute.name.text === 'ready') &&
+          attribute.initializer !== undefined &&
+          ts.isJsxExpression(attribute.initializer) &&
+          attribute.initializer.expression !== undefined
+        ) {
+          const expression = attribute.initializer.expression
+
+          reading.gates.push({
+            file: source.file,
+            line: lineOf(attribute),
+            prop: attribute.name.text === 'ready' ? 'ready' : 'disabled',
+            expression: expression.getText(compiled.file).replace(/\s+/g, ' ').trim(),
+            region: regionOf(attribute),
+            element: at,
+            tag,
+            labels,
+            overridable: overridable(attribute),
+            ...resolve(expression, compiled),
+          })
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit)
   }
 
-  return gates
+  visit(compiled.file)
+  READINGS.set(cacheKey, reading)
+
+  return reading
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,12 +748,15 @@ function gatesOf(source: SourceFile): Gate[] {
 
 const REACHES_DATA = /\.data\b/
 
-/** Every `X` written `X.data` or `X?.data`: the queries this gate waits on. */
-function queryRoots(text: string): Set<string> {
+/** Every `X` written `X.data` or `X?.data`. */
+function dataRoots(text: string): Set<string> {
   return new Set([...text.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\s*(?:\?\.|\.)data\b/g)].map((match) => match[1] ?? ''))
 }
 
-const EVALUABLE_GLOBALS = new Set(['undefined', 'NaN', 'Infinity', 'Number', 'String', 'Boolean', 'Math', 'Array', 'Object'])
+/** The queries a gate waits on: the names it reads `.data` of that are bound to a hook call. */
+function queriesOf(gate: Gate): Set<string> {
+  return new Set([...dataRoots(gate.resolved)].filter((name) => gate.names.get(name)?.query === true))
+}
 
 /** What an unresolved TanStack query answers, and nothing else. */
 const UNRESOLVED_QUERY: Record<QueryState, Record<string, unknown>> = {
@@ -1266,57 +811,103 @@ function describeThrown(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : `a thrown ${typeof error}`
 }
 
+/** A name the gate read and could not be answered, with what it is bound to. */
+function describeUnknown(gate: Gate, name: string): string {
+  const leaf = gate.names.get(name)
+
+  if (leaf === undefined) return name
+  if (leaf.query) return `${name} (a hook call, read here for something other than its \`.data\`)`
+
+  return `${name} (${leaf.what})`
+}
+
+function unanswerable(name: string): unknown {
+  return new Proxy(() => undefined, {
+    get() {
+      throw new Unknowable(name)
+    },
+    apply() {
+      throw new Unknowable(name)
+    },
+    construct() {
+      throw new Unknowable(name)
+    },
+  })
+}
+
+/**
+ * `text`, one of a gate's resolved expressions, evaluated with the gate's
+ * queries unresolved in `state`. It throws `Unknowable` on reading a name that
+ * cannot be answered, and lists in `unknown` the fields of a stub it read that
+ * an unresolved query does not have.
+ */
+function evaluateIn(gate: Gate, state: QueryState, text: string): { value: unknown; unknown: string[] } {
+  const queries = queriesOf(gate)
+  const unknown: string[] = []
+
+  const stubFor = (root: string): unknown =>
+    new Proxy(UNRESOLVED_QUERY[state], {
+      get(target, key) {
+        if (typeof key === 'symbol') return undefined
+        if (key in target) return target[key]
+        unknown.push(`${root}.${key}`)
+        return undefined
+      },
+    })
+
+  const scope = new Proxy(
+    {},
+    {
+      has: () => true,
+      get(_target, key) {
+        if (key === Symbol.unscopables) return undefined
+
+        const name = String(key)
+
+        if (queries.has(name)) return stubFor(name)
+        // A binding in the file never has one of these names (`resolve`
+        // renames it), so a name here is the global itself.
+        if (EVALUABLE_GLOBALS.has(name)) return (globalThis as Record<string, unknown>)[name]
+
+        unknown.push(describeUnknown(gate, name))
+        return unanswerable(describeUnknown(gate, name))
+      },
+    },
+  )
+
+  // Evaluated, not parsed: this is the whole design, and `with` is the only
+  // way to route every free name through the stub scope above. `this` is not
+  // a name `with` can route, so it is bound to an unknown as well.
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- evaluating the gate is the point
+  const evaluate = new Function('scope', `with (scope) { return (${text}\n) }`) as (this: unknown, scope: object) => unknown
+
+  return { value: evaluate.call(unanswerable('this'), scope), unknown }
+}
+
+/**
+ * The first `const` the gate substituted whose value, evaluated as the gate
+ * was, is an object or a function: what it holds when the control renders
+ * can have been written to since its declaration, and the text does not say.
+ */
+function mutableConstant(gate: Gate, state: QueryState): string | null {
+  for (const constant of gate.constants) {
+    let value: unknown
+
+    try {
+      ;({ value } = evaluateIn(gate, state, constant.value))
+    } catch {
+      continue
+    }
+
+    if ((typeof value === 'object' && value !== null) || typeof value === 'function') return constant.name
+  }
+
+  return null
+}
+
 function judgeIn(gate: Gate, state: QueryState): Verdict {
   try {
-    const roots = queryRoots(gate.resolved)
-    const unknown: string[] = []
-
-    const stubFor = (root: string): unknown =>
-      new Proxy(UNRESOLVED_QUERY[state], {
-        get(target, key) {
-          if (typeof key === 'symbol') return undefined
-          if (key in target) return target[key]
-          unknown.push(`${root}.${key}`)
-          return undefined
-        },
-      })
-
-    const unanswerable = (name: string): unknown =>
-      new Proxy(() => undefined, {
-        get() {
-          throw new Unknowable(name)
-        },
-        apply() {
-          throw new Unknowable(name)
-        },
-        construct() {
-          throw new Unknowable(name)
-        },
-      })
-
-    const scope = new Proxy(
-      {},
-      {
-        has: () => true,
-        get(_target, key) {
-          if (key === Symbol.unscopables) return undefined
-
-          const name = String(key)
-
-          if (roots.has(name)) return stubFor(name)
-          if (EVALUABLE_GLOBALS.has(name)) return (globalThis as Record<string, unknown>)[name]
-
-          unknown.push(name)
-          return unanswerable(name)
-        },
-      },
-    )
-
-    // Evaluated, not parsed: this is the whole design, and `with` is the
-    // only way to route every free name through the stub scope above.
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- evaluating the gate is the point
-    const evaluate = new Function('scope', `with (scope) { return (${gate.resolved}\n) }`) as (scope: object) => unknown
-    const value = evaluate(scope)
+    const { value, unknown } = evaluateIn(gate, state, gate.resolved)
 
     if (unknown.length > 0) {
       return { kind: 'unjudgeable', state, reason: `reads ${[...new Set(unknown)].join(', ')}, which an unresolved query cannot answer` }
@@ -1328,7 +919,21 @@ function judgeIn(gate: Gate, state: QueryState): Verdict {
 
     const live = gate.prop === 'disabled' ? !value : value
 
-    return live ? { kind: 'live', state, value } : { kind: 'shut' }
+    if (live) return { kind: 'live', state, value }
+
+    const mutable = mutableConstant(gate, state)
+
+    if (mutable !== null) {
+      return {
+        kind: 'unjudgeable',
+        state,
+        reason:
+          `reads \`${mutable}\`, a \`const\` that holds an object here, and is shut on what its initialiser built; ` +
+          'an object can have been written to between its declaration and the control, which the text does not show',
+      }
+    }
+
+    return { kind: 'shut' }
   } catch (error) {
     if (error instanceof Unknowable) {
       return { kind: 'unjudgeable', state, reason: `reads ${error.message}, which an unresolved query cannot answer` }
@@ -1365,6 +970,7 @@ function explainUnjudgeable(gate: Gate, verdict: Verdict & { kind: 'unjudgeable'
 }
 
 interface Report {
+  elements: Element[]
   gates: Gate[]
   reaching: Gate[]
   live: string[]
@@ -1373,7 +979,9 @@ interface Report {
 }
 
 function report(sources: SourceFile[]): Report {
-  const gates = sources.flatMap(gatesOf)
+  const readings = sources.map(readingOf)
+  const elements = readings.flatMap((reading) => reading.elements)
+  const gates = readings.flatMap((reading) => reading.gates)
   const reaching = gates.filter((gate) => gate.refusal !== null || REACHES_DATA.test(gate.resolved))
   const live: string[] = []
   const unjudgeable = new Map<string, string>()
@@ -1387,7 +995,7 @@ function report(sources: SourceFile[]): Report {
     else shut.push(gate)
   }
 
-  return { gates, reaching, live, unjudgeable, shut }
+  return { elements, gates, reaching, live, unjudgeable, shut }
 }
 
 function probe(text: string, file = 'probe/Probe.tsx'): Report {
@@ -1399,22 +1007,51 @@ function probe(text: string, file = 'probe/Probe.tsx'): Report {
 // ---------------------------------------------------------------------------
 
 /**
- * The finding's own two gates, each named by its file and the query it waits
- * on. Each must always be judged, and judged shut: rewritten into a shape this
- * file cannot read — a `const` across lines, a destructured `data`, a hook —
- * it would otherwise drop out of the judged set in silence, and the defect
- * could come back with it.
+ * The finding's own two controls: in each file, every `Button` that renders
+ * the control's label (`labelsOf`), gated or not. Each must carry the named
+ * prop, and every gate on it must be judged shut, wait on the named query,
+ * and have no spread after it that could override it. So a control's gate
+ * cannot drop out in silence — rewritten into a shape this file cannot read,
+ * a `const` behind a hook, a destructured `data` — while something else
+ * stands in for it: another control in the file waiting on the same query,
+ * an element of another tag around it or inside it, a `ready=` beside it, a
+ * gated copy of it beside an ungated one. A file in which no `Button`
+ * renders the label is named too. What it cannot find is a `Button` that
+ * gets its label by a route `labelsOf` does not follow — a prop, a function,
+ * a hook — beside one that renders it and is gated correctly.
  */
 const FINDING_GATES = [
-  { file: 'features/auth/RegisterPage.tsx', query: 'options', control: 'Create account' },
-  { file: 'features/controlCenter/PlansPage.tsx', query: 'desired', control: 'Compute plan' },
+  { file: 'features/auth/RegisterPage.tsx', tag: 'Button', label: 'common.register', prop: 'disabled', query: 'options', control: 'Create account' },
+  { file: 'features/controlCenter/PlansPage.tsx', tag: 'Button', label: 'admin.plans.compute', prop: 'disabled', query: 'desired', control: 'Compute plan' },
 ] as const
 
-/** Those of the finding's own gates that `result` did not judge shut. */
+/** Every `tag` element in `file` that renders `label`. */
+function controlsOf(result: Report, file: string, tag: string, label: string): Element[] {
+  return result.elements.filter((element) => element.file === file && element.tag === tag && element.labels.includes(label))
+}
+
+/** The gates on `control`. */
+function gatesOn(result: Report, control: Element): Gate[] {
+  return result.gates.filter((gate) => gate.file === control.file && gate.element === control.at)
+}
+
+/** Those of the finding's own controls not gated by their prop, judged shut, on their query. */
 function findingGatesNotJudgedShut(result: Report): string[] {
-  return FINDING_GATES.filter(
-    ({ file, query }) => !result.shut.some((gate) => gate.file === file && queryRoots(gate.resolved).has(query)),
-  ).map(({ file, control }) => `${file} (${control})`)
+  return FINDING_GATES.filter(({ file, tag, label, prop, query }) => {
+    const controls = controlsOf(result, file, tag, label)
+
+    return (
+      controls.length === 0 ||
+      controls.some((control) => {
+        const gates = gatesOn(result, control)
+
+        return (
+          !gates.some((gate) => gate.prop === prop) ||
+          gates.some((gate) => gate.overridable || !result.shut.includes(gate) || !queriesOf(gate).has(query))
+        )
+      })
+    )
+  }).map(({ file, control }) => `${file} (${control})`)
 }
 
 describe('a control that waits on an answer is not live before the answer', () => {
@@ -1430,9 +1067,18 @@ describe('a control that waits on an answer is not live before the answer', () =
     // And the finding's own gates are always among those judged, and shut.
     expect(
       findingGatesNotJudgedShut(tree()),
-      'One of F-21’s own gates is no longer judged shut. If it was rewritten into a shape this file cannot read, ' +
+      'One of F-21’s own controls is no longer judged shut. If its gate was rewritten into a shape this file cannot read, ' +
         'rewrite it into one it can: this file is what keeps it fixed.',
     ).toEqual([])
+  })
+
+  it('finds each of F-21’s own controls by the label it renders, once, with one gate on it', () => {
+    for (const { file, tag, label } of FINDING_GATES) {
+      const controls = controlsOf(tree(), file, tag, label)
+
+      expect(controls, `${file} renders t('${label}') in one <${tag}>`).toHaveLength(1)
+      expect(controls.flatMap((control) => gatesOn(tree(), control)), `${file}'s <${tag}> for t('${label}') has one gate`).toHaveLength(1)
+    }
   })
 
   it('leaves no control live while the query behind it is unresolved', () => {
@@ -1478,6 +1124,14 @@ describe('the gate reddens on the defect it exists for', () => {
   const REGISTER_BROKEN = 'disabled={registrationClosed}'
   const PLANS_FIXED = 'disabled={desired.data === undefined || desired.data.data === null}'
   const PLANS_BROKEN = 'disabled={desired.data?.data === null}'
+  const PERMITTED_LINE = '  const registrationPermitted = permitted === true\n'
+  const CLOSED_LINE = '  const registrationClosed = permitted === false\n'
+  const DESIRED_LINE = '  const desired = useDesiredState(server.id)\n'
+  const TERMS_HINT = '        hint={legalDocuments(options.data?.legal, t)}\n'
+  const CURRENCY_FIXED = "disabled={country === ''}"
+  // A correct gate on another control, waiting on the same query as Create
+  // account: the one F-21's own gate must not be confused with.
+  const CURRENCY_WAITING = "disabled={options.data === undefined || country === ''}"
 
   /** The tree, with each file's `[from, to]` pairs applied in order. */
   function withLines(replacements: Record<string, [string, string] | [string, string][]>): SourceFile[] {
@@ -1519,14 +1173,140 @@ describe('the gate reddens on the defect it exists for', () => {
     expect(live.some((line) => line.startsWith(`${PLANS}:`) && line.includes('desired.data?.data === null'))).toBe(true)
   })
 
-  it('does not certify F-21’s own defect written across lines, and names the gate it can no longer judge', () => {
-    // "Not knowing is permission", in the codebase's own multi-line style. The
-    // first line alone is bracket-balanced and reads as a gate that waits.
+  it('judges F-21’s own defect written across lines live, beside a sibling that waits correctly', () => {
+    // "Not knowing is permission", in the codebase's own multi-line style,
+    // with the currency select waiting on the same query as it should.
     const result = report(
       withLines({
         [REGISTER]: [
-          '  const registrationPermitted = permitted === true\n',
-          '  const registrationPermitted = options.data !== undefined\n    ? permitted === true\n    : true\n',
+          [CURRENCY_FIXED, CURRENCY_WAITING],
+          [PERMITTED_LINE, '  const registrationPermitted = options.data !== undefined\n    ? permitted === true\n    : true\n'],
+        ],
+      }),
+    )
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+    expect(result.live).toHaveLength(1)
+    expect(result.live[0]).toContain(`${REGISTER}:`)
+    // The sibling is judged, shut, and is no alarm.
+    expect(result.shut.filter((gate) => gate.file === REGISTER).map((gate) => gate.expression)).toEqual([
+      "options.data === undefined || country === ''",
+    ])
+  })
+
+  it('judges the Compute-plan twin written across lines live too', () => {
+    const result = report(
+      withLines({
+        [PLANS]: [
+          [DESIRED_LINE, `${DESIRED_LINE}  const computeClosed = desired.data\n    ?.data === null\n`],
+          [PLANS_FIXED, 'disabled={computeClosed}'],
+        ],
+      }),
+    )
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${PLANS} (Compute plan)`])
+    expect(result.live.some((line) => line.startsWith(`${PLANS}:`))).toBe(true)
+  })
+
+  /*
+   * The finding's own gate, left live or hidden, while another control in the
+   * same file waits on the same query and is judged shut. Identified by its
+   * file and its query, F-21's gate would be taken to be that other one.
+   */
+  it('names Create account when its own gate is live and another control waits on its query', () => {
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          [REGISTER_FIXED, 'disabled={!canSubmit}'],
+          [TERMS_HINT, `${TERMS_HINT}        disabled={!registrationPermitted}\n`],
+          [CLOSED_LINE, `${CLOSED_LINE}  const canSubmit = options.data !== undefined\n    ? registrationPermitted\n    : true\n`],
+        ],
+      }),
+    )
+
+    expect(result.shut.filter((gate) => gate.file === REGISTER).map((gate) => gate.expression)).toEqual(['!registrationPermitted'])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it('names Create account when its own gate goes where this file cannot see, and another control waits on its query', () => {
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          [REGISTER_FIXED, 'disabled={!canSubmit}'],
+          [TERMS_HINT, `${TERMS_HINT}        disabled={!registrationPermitted}\n`],
+          [CLOSED_LINE, `${CLOSED_LINE}  const canSubmit = useMemo(() => options.data === undefined || registrationPermitted, [options.data, registrationPermitted])\n`],
+        ],
+      }),
+    )
+
+    // Nothing is live: only the finding's own anchor can see this.
+    expect(result.live).toEqual([])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it('names Compute plan the same way', () => {
+    const result = report(
+      withLines({
+        [PLANS]: [
+          [PLANS_FIXED, 'disabled={computeClosed}'],
+          ['disabled={!canRun}', 'disabled={!canRun || desired.data === undefined}'],
+          [DESIRED_LINE, `${DESIRED_LINE}  const computeClosed = useMemo(() => desired.data?.data === null, [desired.data])\n`],
+        ],
+      }),
+    )
+
+    expect(result.live).toEqual([])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${PLANS} (Compute plan)`])
+  })
+
+  it('names Create account when its gate is shut on some other query, not on its own', () => {
+    // Shut while every query is unresolved, and so judged shut; but it waits
+    // on the session, and is live once that arrives with the options still
+    // on their way.
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          [REGISTER_FIXED, 'disabled={session.data === undefined}'],
+          [CLOSED_LINE, `${CLOSED_LINE}  const session = useSession()\n`],
+        ],
+      }),
+    )
+
+    expect(result.shut.filter((gate) => gate.file === REGISTER).map((gate) => gate.expression)).toEqual(['session.data === undefined'])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it.each([
+    ['inside it, around its label', [["        {t('common.register')}\n      </Button>", `        <Tooltip ${REGISTER_FIXED}>{t('common.register')}</Tooltip>\n      </Button>`]]],
+    [
+      'around it',
+      [
+        ['      <Button\n        type="submit"', `      <Tooltip ${REGISTER_FIXED}>\n      <Button\n        type="submit"`],
+        ["        {t('common.register')}\n      </Button>", "        {t('common.register')}\n      </Button>\n      </Tooltip>"],
+      ],
+    ],
+  ] as [string, [string, string][]][])('names Create account when an element %s carries the gate and it carries none', (_where, pairs) => {
+    const result = report(withLines({ [REGISTER]: [[`        ${REGISTER_FIXED}\n`, ''], ...pairs] }))
+
+    expect(result.shut.filter((gate) => gate.file === REGISTER).map((gate) => gate.expression)).toEqual(['!registrationPermitted'])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it.each([
+    ['a spread after its gate, which can override it', `${REGISTER_FIXED}\n        {...{ disabled: false }}`],
+    ['a ready= in place of its disabled=', 'ready={registrationPermitted}'],
+  ])('names Create account when it carries %s', (_shape, replacement) => {
+    const result = report(withLines({ [REGISTER]: [REGISTER_FIXED, replacement] }))
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it('names Create account when its gate reads an object written to after its declaration', () => {
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          [REGISTER_FIXED, 'disabled={!state.permitted}'],
+          [CLOSED_LINE, `${CLOSED_LINE}  const state = { permitted: registrationPermitted }\n  state.permitted = true\n`],
         ],
       }),
     )
@@ -1535,20 +1315,24 @@ describe('the gate reddens on the defect it exists for', () => {
     expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
   })
 
-  it('names the Compute-plan gate too when its twin is written across lines', () => {
+  it('names Create account when it gets its label through a constant and a gated copy of it does not', () => {
     const result = report(
       withLines({
-        [PLANS]: [
-          [
-            '  const desired = useDesiredState(server.id)\n',
-            '  const desired = useDesiredState(server.id)\n  const computeClosed = desired.data\n    ?.data === null\n',
-          ],
-          [PLANS_FIXED, 'disabled={computeClosed}'],
+        [REGISTER]: [
+          [`        ${REGISTER_FIXED}\n`, ''],
+          ["        {t('common.register')}\n      </Button>", `        {registerLabel}\n      </Button>\n      {false && <Button ${REGISTER_FIXED}>{t('common.register')}</Button>}`],
+          [CLOSED_LINE, `${CLOSED_LINE}  const registerLabel = t('common.register')\n`],
         ],
       }),
     )
 
-    expect(findingGatesNotJudgedShut(result)).toEqual([`${PLANS} (Compute plan)`])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it('names a control whose label it can no longer find', () => {
+    const result = report(withLines({ [REGISTER]: ["{t('common.register')}", '{label}'] }))
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
   })
 })
 
@@ -1633,7 +1417,7 @@ function Second() {
     expect(result.live[0]).toContain('probe/Probe.tsx:10')
   })
 
-  it('opens a region at a top-level arrow component too', () => {
+  it('resolves each arrow component’s constants in that component too', () => {
     const result = probe(`const First = () => {
   const answer = useProbeAnswer()
   const shut = answer.data?.data === undefined
@@ -1662,18 +1446,23 @@ function Second() {
   return <Button disabled={verdict || answer.data?.data === undefined}>x</Button>
 }`)
 
-    expect(result.unjudgeable.get('probe/Probe.tsx::verdict || answer.data?.data === undefined')).toContain('reads verdict')
+    expect(result.unjudgeable.get('probe/Probe.tsx::verdict || answer.data?.data === undefined')).toContain(
+      'reads verdict (bound nowhere in this file)',
+    )
   })
 
-  it('lets a parameter hide a module constant of the same name', () => {
+  it('lets a parameter hide a module constant of the same name, and does not take the parameter for a query', () => {
     const result = probe(`const answer = { data: { data: null } }
 
 export function Probe({ answer }: { answer: Answer }) {
   return <Button disabled={answer.data?.data === null}>x</Button>
 }`)
 
-    // Substituting the module constant would evaluate to true and bless it.
-    expect(result.live).toHaveLength(1)
+    // Substituting the module constant would evaluate to true and bless it;
+    // and what the parameter holds is not something this file can see.
+    expect(result.shut).toEqual([])
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['answer.data?.data === null'])
+    expect(result.unjudgeable.get('probe/Probe.tsx::answer.data?.data === null')).toContain('reads answer (a destructured parameter)')
   })
 
   it.each([
@@ -1694,7 +1483,7 @@ ${component}`)
     expect(result.gates.map((gate) => gate.resolved)).toEqual(['!ready'])
   })
 
-  it('refuses a module constant whose initialiser reads a name the component binds too', () => {
+  it('reads a module constant’s initialiser where it is written, not in the component', () => {
     const direct = `import { answer } from './fixtures'
 
 const shut = answer.data === undefined
@@ -1709,14 +1498,104 @@ export function Probe() {
     for (const text of [direct, transitive]) {
       const result = probe(text)
 
-      // Substituted as text, the imported object's `.data` would be read as
-      // the component's own query: pending, so undefined, so "shut".
+      // Read in the component, the imported object's `.data` would be the
+      // component's own query: pending, so undefined, so "shut".
       expect(result.shut).toEqual([])
-      expect([...result.unjudgeable.values()].join('\n')).toContain('whose initialiser reads `answer`, which Probe binds as well')
+      expect([...result.unjudgeable.values()].join('\n')).toContain('reads answer (an import)')
     }
   })
 
-  it('refuses a name declared twice in one component rather than picking one', () => {
+  it('tells two bindings of one name apart in one resolved gate', () => {
+    const result = probe(`import { answer } from './fixtures'
+
+const shut = answer.data === undefined
+
+export function Probe() {
+  const answer = useProbeAnswer()
+  return <Button disabled={shut || answer.data === undefined}>x</Button>
+}`)
+
+    const [gate] = result.gates
+
+    // The import is met first and keeps the name; the component's query is
+    // the second binding of it. Read as one, the import's `.data` would be
+    // the pending query's: undefined, so "shut".
+    expect(gate?.resolved).toBe('(answer.data === undefined) || answer$2.data === undefined')
+    expect(gate?.names.get('answer')).toEqual({ query: false, what: 'an import' })
+    expect(gate?.names.get('answer$2')).toEqual({ query: true, what: 'a hook call' })
+    expect(result.shut).toEqual([])
+    expect([...result.unjudgeable.values()].join('\n')).toContain('reads answer (an import)')
+  })
+
+  it('takes a hook called as a member for the query too', () => {
+    const result = probe(`export function Probe() {
+  const answer = queries.useProbeAnswer()
+  return <Button disabled={answer.data === undefined}>x</Button>
+}`)
+
+    expect(result.shut).toHaveLength(1)
+    expect(result.gates[0]?.names.get('answer')).toEqual({ query: true, what: 'a hook call' })
+  })
+
+  it('reads a property’s name as a name, never as a binding to resolve or rename', () => {
+    // `undefined` is a property here. Renamed as the binding its object type
+    // gives it, the read would be of `.undefined$2`: not the value written.
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return <Button disabled={({ undefined: answer.data === undefined }).undefined}>x</Button>
+}`)
+
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['({ undefined: answer.data === undefined }).undefined'])
+    expect(result.shut).toHaveLength(1)
+  })
+
+  it('reads an object literal’s key as a key, even where a constant has its name', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const shut = answer.data === undefined
+  return <Button disabled={({ shut: false }).shut || shut}>x</Button>
+}`)
+
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['({ shut: false }).shut || (answer.data === undefined)'])
+    expect(result.shut).toHaveLength(1)
+  })
+
+  it('resolves a shorthand property to the binding it reads', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const shut = answer.data?.data === null
+  return <Button disabled={({ shut }).shut}>x</Button>
+}`)
+
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['({ shut: (answer.data?.data === null) }).shut'])
+    expect(result.live).toHaveLength(1)
+  })
+
+  it('does not let a binding pass for an evaluable global', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return rows.map((undefined) => <Button key="k" disabled={answer.data === undefined}>x</Button>)
+}`)
+
+    // Read as the global, the row would compare as `undefined`: shut.
+    expect(result.shut).toEqual([])
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['answer.data === undefined$2'])
+    expect([...result.unjudgeable.values()].join('\n')).toContain('reads undefined$2 (a parameter)')
+  })
+
+  it('reads `this` as an unknown rather than as the global object', () => {
+    const result = probe(`export class Probe extends Component {
+  render() {
+    return <Button disabled={this.data === undefined}>x</Button>
+  }
+}`)
+
+    // As the global object, `this.data` would be undefined: shut.
+    expect(result.shut).toEqual([])
+    expect(result.unjudgeable.get('probe/Probe.tsx::this.data === undefined')).toContain('reads this')
+  })
+
+  it('reads each block’s constant in its own block where one name is declared in two', () => {
     const result = probe(`export function Probe() {
   const answer = useProbeAnswer()
   return (
@@ -1733,56 +1612,123 @@ export function Probe() {
   )
 }`)
 
-    expect(result.live).toEqual([])
-    expect(result.shut).toEqual([])
-    expect([...result.unjudgeable.values()].every((line) => line.includes('declared 2 times in Probe'))).toBe(true)
-    expect(result.unjudgeable.size).toBe(1)
+    expect(result.shut.map((gate) => gate.line)).toEqual([7])
+    expect(result.live).toHaveLength(1)
+    expect(result.live[0]).toContain('probe/Probe.tsx:11')
   })
 
-  it('refuses a constant that a callback parameter shadows rather than reading the constant', () => {
+  it('refuses a name declared twice rather than picking one', () => {
     const result = probe(`export function Probe() {
   const answer = useProbeAnswer()
-  const ready = answer.data?.data.ok === true
-  return rows.map((ready) => <Button key={String(ready)} disabled={!ready}>x</Button>)
+  var shut = answer.data === undefined
+  var shut = answer.data?.data === null
+  return <Button disabled={shut}>x</Button>
 }`)
 
-    // Substituting the component's constant would come out true, and bless a
-    // gate that actually reads the row's own field.
     expect(result.shut).toEqual([])
-    expect(result.unjudgeable.get('probe/Probe.tsx::!ready')).toContain('also a callback parameter')
+    expect(result.unjudgeable.get('probe/Probe.tsx::shut')).toContain('`shut` is declared 2 times')
+  })
+
+  it('refuses constants that do not settle', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const first = second || answer.data === undefined
+  const second = first
+  return <Button disabled={first}>x</Button>
+}`)
+
+    expect(result.shut).toEqual([])
+    expect(result.unjudgeable.get('probe/Probe.tsx::first')).toContain('do not settle')
   })
 
   /*
-   * Every other way a name can be bound inside a component. Each of these
-   * probes, at the commit that introduced the refusal above, was reported
-   * shut on the component's constant: a verdict about a value the control
-   * never reads, in the direction that blesses it.
+   * A constant in a block, or in a callback, of the same name as the one a
+   * gate outside it reads. At 2453cce, when this file still read bindings
+   * from text, the first three were judged on the inner constant: shut,
+   * where the control the gate belongs to is live.
    */
   it.each([
-    ['a destructured `catch` binding', 'try { run() } catch ({ ready }) { return <Button disabled={!ready}>x</Button> }', 'a `catch` binding'],
-    ['a typed `catch` binding', 'try { run() } catch (ready: unknown) { return <Button disabled={!ready}>x</Button> }', 'a `catch` binding'],
-    ['a classic `for` binding', 'for (let ready = 0; ready < 1; ready++) out.push(<Button disabled={!ready}>x</Button>)', 'a `for` binding'],
-    ['a `for await` pattern', 'for await (const [ready] of stream) out.push(<Button disabled={!ready}>x</Button>)', 'a `for` binding'],
-    ['a bare arrow parameter', 'return rows.map(ready => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a callback parameter whose default holds a call', 'return rows.map((ready = Boolean(0)) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a callback parameter with a function type', 'return rows.map((ready: () => boolean) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a parameter after one with a function type', 'return rows.map((row: () => void, ready: boolean) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a pattern whose default is an arrow', 'return rows.map(({ ready = () => true }) => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a parameter behind a comment with an apostrophe', "return rows.map((\n    // the row's own flag\n    ready,\n  ) => <Button key=\"k\" disabled={!ready}>x</Button>)", 'a callback parameter'],
-    ['a parameter after JSX text with an apostrophe', "return <div><p>Don't</p>{rows.map((ready) => <Button key=\"k\" disabled={!ready}>x</Button>)}</div>", 'a callback parameter'],
-    ['a parameter after a `//` in JSX text', 'return <div><p>a // b</p>{rows.map((ready) => <Button key="k" disabled={!ready}>x</Button>)}</div>', 'a callback parameter'],
-    ['a parameter with a generic return type', 'return rows.map((ready): ReturnType<typeof draw> => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a parameter with a function return type', 'return rows.map((ready): (() => JSX.Element) => () => <Button key="k" disabled={!ready}>x</Button>)', 'a callback parameter'],
-    ['a parameter of a generic function expression', 'return rows.map(function <T>(ready: T) { return <Button key="k" disabled={!ready}>x</Button> })', 'a parameter of a nested function'],
-    ['the name of a function expression', 'return rows.map(function ready() { return <Button key="k" disabled={!ready}>x</Button> })', 'a nested function'],
-    ['the name of a class expression', 'const Cell = class ready { render() { return <Button disabled={!ready}>x</Button> } }', 'a nested class'],
-    ['a method parameter', 'const table = { cell(ready: boolean) { return <Button disabled={!ready}>x</Button> } }', 'a method parameter'],
-    ['a parameter property', 'const Cell = class { constructor(private readonly ready: boolean) { draw(<Button disabled={!ready}>x</Button>) } }', 'a method parameter'],
-    ['a setter parameter', 'const view = { set value(ready: boolean) { draw(<Button disabled={!ready}>x</Button>) } }', 'a method parameter'],
-    ['a declaration inside a line', 'return rows.map((row) => { const ready = row.ok; return <Button key={row.id} disabled={!ready}>x</Button> })', 'a declaration that does not open its line'],
-    ['a second declarator on a line', 'if (answer.isError) {\n    let seen: Map<string, number> = new Map(), ready = seen.size > 0\n    return <Button disabled={!ready}>x</Button>\n  }', 'a second declarator on a line'],
-    ['a `using` declaration', 'if (answer.isError) {\n    using ready = acquire()\n    return <Button disabled={!ready}>x</Button>\n  }', 'a `using` declaration'],
-  ])('refuses a constant that %s shadows rather than reading the constant', (_shape, body, kind) => {
+    [
+      'a module constant, beside a constant in an `if` block',
+      'const shut = false\n\nexport function Probe() {\n  const answer = useProbeAnswer()\n  if (answer.isError) {\n    const shut = answer.data === undefined\n    log(shut)\n  }\n  return <Button disabled={shut}>x</Button>\n}',
+      '(false)',
+    ],
+    [
+      'a module constant, beside a constant in a callback',
+      'const ready = true\n\nexport function Probe() {\n  const answer = useProbeAnswer()\n  return (\n    <>\n      {(answer.data?.data ?? []).map((row) => {\n        const ready = answer.data?.data.ok === true\n        return <span key={row}>{String(ready)}</span>\n      })}\n      <Button disabled={!ready}>x</Button>\n    </>\n  )\n}',
+      '!(true)',
+    ],
+    [
+      'an import, beside a constant in an `if` block',
+      "import { shut } from './flags'\n\nexport function Probe() {\n  const answer = useProbeAnswer()\n  if (answer.isError) {\n    const shut = answer.data?.data === undefined\n    log(shut)\n  }\n  return <Button disabled={shut}>x</Button>\n}",
+      'shut',
+    ],
+    [
+      'a parameter, beside a constant in an `if` block',
+      'export function Probe({ ready }: { ready: boolean }) {\n  const answer = useProbeAnswer()\n  if (answer.isError) {\n    const ready = answer.data?.data.ok === true\n    log(ready)\n  }\n  return <Button disabled={!ready}>x</Button>\n}',
+      '!ready',
+    ],
+  ])('reads %s from outside the block, not the block’s', (_shape, text, resolved) => {
+    const result = probe(text)
+
+    expect(result.shut).toEqual([])
+    expect(result.gates.map((gate) => gate.resolved)).toEqual([resolved])
+  })
+
+  it('reads a block’s constant from inside the block', () => {
+    const result = probe(`const shut = true
+
+export function Probe() {
+  const answer = useProbeAnswer()
+  if (answer.isError) {
+    const shut = answer.data?.data === null
+    return <Button disabled={shut}>x</Button>
+  }
+  return null
+}`)
+
+    expect(result.live).toHaveLength(1)
+    expect(result.live[0]).toContain('answer.data?.data === null')
+  })
+
+  /*
+   * Every other way a name can be bound inside a component. In each the gate
+   * reads the inner binding; judged on the component's constant instead, it
+   * would be shut, a verdict about a value the control never reads. The last
+   * three were judged shut at 2453cce, when this file still read bindings
+   * from text: a `)` in a regular expression, a `-` in a return type, and a
+   * return type past the 500 characters that reader looked through each hid
+   * the parameter from it.
+   */
+  it.each([
+    ['a destructured `catch` binding', 'try { run() } catch ({ ready }) { return <Button disabled={!ready}>x</Button> }', '!ready'],
+    ['a typed `catch` binding', 'try { run() } catch (ready: unknown) { return <Button disabled={!ready}>x</Button> }', '!ready'],
+    ['a classic `for` binding', 'for (let ready = 0; ready < 1; ready++) out.push(<Button disabled={!ready}>x</Button>)', '!ready'],
+    ['a `for await` pattern', 'for await (const [ready] of stream) out.push(<Button disabled={!ready}>x</Button>)', '!ready'],
+    ['a bare arrow parameter', 'return rows.map(ready => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a callback parameter', 'return rows.map((ready) => <Button key={String(ready)} disabled={!ready}>x</Button>)', '!ready'],
+    ['a callback parameter whose default holds a call', 'return rows.map((ready = Boolean(0)) => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a callback parameter with a function type', 'return rows.map((ready: () => boolean) => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a parameter after one with a function type', 'return rows.map((row: () => void, ready: boolean) => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a pattern whose default is an arrow', 'return rows.map(({ ready = () => true }) => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a parameter behind a comment with an apostrophe', "return rows.map((\n    // the row's own flag\n    ready,\n  ) => <Button key=\"k\" disabled={!ready}>x</Button>)", '!ready'],
+    ['a parameter after JSX text with an apostrophe', "return <div><p>Don't</p>{rows.map((ready) => <Button key=\"k\" disabled={!ready}>x</Button>)}</div>", '!ready'],
+    ['a parameter after a `//` in JSX text', 'return <div><p>a // b</p>{rows.map((ready) => <Button key="k" disabled={!ready}>x</Button>)}</div>', '!ready'],
+    ['a parameter with a generic return type', 'return rows.map((ready): ReturnType<typeof draw> => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a parameter with a function return type', 'return rows.map((ready): (() => JSX.Element) => () => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a parameter of a generic function expression', 'return rows.map(function <T>(ready: T) { return <Button key="k" disabled={!ready}>x</Button> })', '!ready'],
+    ['the name of a function expression', 'return rows.map(function ready() { return <Button key="k" disabled={!ready}>x</Button> })', '!ready'],
+    ['the name of a class expression', 'const Cell = class ready { render() { return <Button disabled={!ready}>x</Button> } }', '!ready'],
+    ['a method parameter', 'const table = { cell(ready: boolean) { return <Button disabled={!ready}>x</Button> } }', '!ready'],
+    ['a parameter property', 'const Cell = class { constructor(private readonly ready: boolean) { draw(<Button disabled={!ready}>x</Button>) } }', '!ready'],
+    ['a setter parameter', 'const view = { set value(ready: boolean) { draw(<Button disabled={!ready}>x</Button>) } }', '!ready'],
+    ['a declaration inside a line', 'return rows.map((row) => { const ready = row.ok; return <Button key={row.id} disabled={!ready}>x</Button> })', '!(row.ok)'],
+    ['a second declarator on a line', 'if (answer.isError) {\n    let seen: Map<string, number> = new Map(), ready = seen.size > 0\n    return <Button disabled={!ready}>x</Button>\n  }', '!ready'],
+    ['a `using` declaration', 'if (answer.isError) {\n    using ready = acquire()\n    return <Button disabled={!ready}>x</Button>\n  }', '!ready'],
+    ['a parameter whose default holds a regular expression with a `)`', "return rows.map((ready: string | boolean = /\\)/.test('x')) => <Button key=\"k\" disabled={!ready}>x</Button>)", '!ready'],
+    ['a parameter with a negative number in its return type', 'return rows.map((ready): -1 | JSX.Element => <Button key="k" disabled={!ready}>x</Button>)', '!ready'],
+    ['a parameter with a return type of 141 members', `return rows.map((ready): ${'A | '.repeat(140)}JSX.Element => <Button key="k" disabled={!ready}>x</Button>)`, '!ready'],
+  ])('reads the binding that %s makes, not the component’s constant', (_shape, body, resolved) => {
     const result = probe(`export function Probe() {
   const answer = useProbeAnswer()
   const ready = answer.data?.data.ok === true
@@ -1790,10 +1736,12 @@ export function Probe() {
 }`)
 
     expect(result.shut).toEqual([])
-    expect(result.unjudgeable.get('probe/Probe.tsx::!ready')).toContain(`is also ${kind} there`)
+    expect(result.gates.map((gate) => gate.resolved)).toEqual([resolved])
+    // It reads no query, so it is not judged at all: see "What it cannot see".
+    expect(result.reaching).toEqual([])
   })
 
-  it('reads a declaration behind a `/*` that was JSX text as a binding it cannot place', () => {
+  it('reads a `/*` in JSX text as text, and the declaration after it as code', () => {
     const result = probe(`import { probeState } from './fixtures'
 
 const shut = probeState.data === undefined
@@ -1805,50 +1753,57 @@ export function Probe() {
   return <Button disabled={shut}>{hint}</Button>
 }`)
 
-    // Blanked as a comment, the component's own `shut` would vanish and the
+    // Taken for a comment, the component's own `shut` would vanish and the
     // module's be judged in its place: shut, where the control is live.
     expect(result.shut).toEqual([])
-    expect(result.unjudgeable.get('probe/Probe.tsx::shut')).toContain('a declaration inside what reads as a comment')
-  })
-
-  it('refuses a name that is both a parameter of the component and declared inside it', () => {
-    const result = probe(`export function Probe({ ready }: { ready: boolean }) {
-  const answer = useProbeAnswer()
-  if (answer.isError) {
-    const ready = answer.data?.data.ok === true
-    log(ready)
-  }
-  return <Button disabled={!ready}>x</Button>
-}`)
-
-    expect(result.shut).toEqual([])
-    expect(result.unjudgeable.get('probe/Probe.tsx::!ready')).toContain('is a parameter of Probe and is also declared inside it')
+    expect(result.live).toHaveLength(1)
+    expect(result.live[0]).toContain('answer.data?.data === null')
   })
 
   /*
-   * A constant whose statement carries on past its line only hides. Its first
-   * line alone is bracket-balanced in every one of these, and substituted it
-   * would be judged as a gate it is not: the first two are live while pending
-   * or failed, and the third is F-21's own "not knowing is permission".
+   * A constant whose statement carries on past its first line. That line
+   * alone is a complete expression in every one of these, and read alone
+   * would be judged as a gate it is not; the compiler reads the statement
+   * whole, and every one of these is live.
    */
   it.each([
-    ['an `||` on the next line', 'const open = answer.data?.data.ok === true\n    || answer.isPending\n  return <Button disabled={!open}>x</Button>', '!open'],
-    ['an `&&` on the next line', 'const shut = answer.data === undefined\n    && answer.isFetching\n  return <Button disabled={shut}>x</Button>', 'shut'],
-    ['a ternary across lines', 'const permitted = answer.data?.data.ok\n  const open = answer.data !== undefined\n    ? permitted === true\n    : true\n  return <Button disabled={!open}>x</Button>', '!open'],
-    ['an operator ending the line, the next not indented', 'const shut = answer.data === undefined &&\n  answer.isFetching\n  return <Button disabled={shut}>x</Button>', 'shut'],
-    ['a comment between the lines', 'const open = answer.data?.data.ok === true\n    // pending counts as open\n    || answer.isPending\n  return <Button disabled={!open}>x</Button>', '!open'],
-    ['a call opening the next line, not indented', 'const shut = check\n  (answer.data)\n  return <Button disabled={shut}>x</Button>', 'shut'],
-    // The backstop: this codebase indents a statement it carries on, so a
-    // deeper line is read as one whatever it opens with.
-    ['a deeper next line, whatever it opens with', 'const shut = answer.data?.data === null\n    log(answer)\n  return <Button disabled={shut}>x</Button>', 'shut'],
-  ])('does not substitute the first line of a constant that carries on: %s', (_shape, body, resolved) => {
+    ['an `||` on the next line', 'const open = answer.data?.data.ok === true\n    || answer.isPending\n  return <Button disabled={!open}>x</Button>', 'pending'],
+    ['an `&&` on the next line', 'const shut = answer.data === undefined\n    && answer.isFetching\n  return <Button disabled={shut}>x</Button>', 'failed'],
+    ['a ternary across lines', 'const permitted = answer.data?.data.ok\n  const open = answer.data !== undefined\n    ? permitted === true\n    : true\n  return <Button disabled={!open}>x</Button>', 'pending'],
+    ['an operator ending the line, the next not indented', 'const shut = answer.data === undefined &&\n  answer.isFetching\n  return <Button disabled={shut}>x</Button>', 'failed'],
+    ['a comment between the lines', 'const open = answer.data?.data.ok === true\n    // pending counts as open\n    || answer.isPending\n  return <Button disabled={!open}>x</Button>', 'pending'],
+  ])('judges the whole of a constant written across lines: %s', (_shape, body, state) => {
     const result = probe(`export function Probe() {
   const answer = useProbeAnswer()
   ${body}
 }`)
 
     expect(result.shut).toEqual([])
-    expect(result.gates.map((gate) => gate.resolved)).toEqual([resolved])
+    expect(result.live).toHaveLength(1)
+    expect(result.live[0]).toContain(`(${state})`)
+  })
+
+  it('reads a call opening the next line as the call it is', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const shut = check
+  (answer.data)
+  return <Button disabled={shut}>x</Button>
+}`)
+
+    expect(result.gates.map((gate) => gate.resolved)).toEqual(['(check(answer.data))'])
+    expect(result.unjudgeable.get('probe/Probe.tsx::shut')).toContain('reads check (bound nowhere in this file)')
+  })
+
+  it('ends a statement where the language does, whatever the next line’s indentation', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const shut = answer.data?.data === null
+    log(answer)
+  return <Button disabled={shut}>x</Button>
+}`)
+
+    expect(result.live).toHaveLength(1)
   })
 
   it('still substitutes a constant whose statement ends on its own line', () => {
@@ -1862,7 +1817,7 @@ export function Probe() {
     expect(result.live).toHaveLength(1)
   })
 
-  it('does not substitute an initialiser that holds a second declarator or a second statement', () => {
+  it('reads only its own declarator when a line holds a second declarator or a second statement', () => {
     for (const line of ['const shut = answer.data?.data === null, other = true', 'const shut = answer.data?.data === null; const other = true']) {
       const result = probe(`export function Probe() {
   const answer = useProbeAnswer()
@@ -1870,16 +1825,17 @@ export function Probe() {
   return <Button disabled={shut}>x</Button>
 }`)
 
-      // Substituted whole, the first would be `(…, other = true)`: true, and shut.
+      // Taken whole, the first would be `(…, other = true)`: true, and shut.
       expect(result.shut, line).toEqual([])
-      expect(result.gates.map((gate) => gate.resolved), line).toEqual(['shut'])
+      expect(result.gates.map((gate) => gate.resolved), line).toEqual(['(answer.data?.data === null)'])
+      expect(result.live, line).toHaveLength(1)
     }
   })
 
   it.each([
     ['a function', 'export default function ({ ready }: { ready: boolean }) {\n  return <Button disabled={!ready}>x</Button>\n}'],
     ['an arrow', 'export default ({ ready }: { ready: boolean }) => <Button disabled={!ready}>x</Button>'],
-  ])('opens a region at an export default of %s that has no name', (_kind, exported) => {
+  ])('judges a component’s gate on its own constant beside an export default of %s that has no name', (_kind, exported) => {
     const result = probe(`function First() {
   const answer = useProbeAnswer()
   const ready = answer.data?.data.ok === true
@@ -1949,5 +1905,88 @@ ${exported}`)
 }`)
 
     expect(result.gates).toEqual([])
+  })
+
+  it('labels an element by what it renders at any depth, except what a nested element of its own tag renders', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return (
+    <form>
+      <p>{t('probe.heading')}</p>
+      <Button disabled={answer.data === undefined}>{answer.isError ? t('probe.retry') : t('probe.go')}</Button>
+      <Tooltip disabled={answer.data === undefined}>
+        <Button disabled={answer.data === undefined}>
+          <span>{t('probe.inner')}</span>
+        </Button>
+      </Tooltip>
+      <Button disabled={answer.data === undefined}>
+        <Button disabled={answer.data === undefined}>{t('probe.nested')}</Button>
+      </Button>
+      <Toggle disabled={answer.data === undefined} label={t('probe.toggle')} />
+    </form>
+  )
+}`)
+
+    expect(result.gates.map((gate) => [gate.tag, gate.labels])).toEqual([
+      ['Button', ['probe.retry', 'probe.go']],
+      ['Tooltip', ['probe.inner']],
+      ['Button', ['probe.inner']],
+      ['Button', []],
+      ['Button', ['probe.nested']],
+      ['Toggle', ['probe.toggle']],
+    ])
+  })
+
+  it('follows a constant to the label it holds', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const go = t('probe.go')
+  const label = answer.isError ? t('probe.retry') : go
+  return <Button disabled={answer.data === undefined}>{label}</Button>
+}`)
+
+    expect(result.gates.map((gate) => gate.labels)).toEqual([['probe.retry', 'probe.go']])
+  })
+
+  it.each([
+    ['an object literal written to afterwards', 'const state = { shut: answer.data === undefined }\n  state.shut = false\n  return <Button disabled={state.shut}>x</Button>', '`state`'],
+    ['an array a fallback made, pushed to afterwards', 'const rows = answer.data?.data ?? []\n  rows.push(1)\n  return <Button disabled={rows.length === 0}>x</Button>', '`rows`'],
+    ['an object another constant reads a field of', 'const inner = { shut: answer.data === undefined }\n  const outer = inner.shut\n  inner.shut = false\n  return <Button disabled={outer && inner.shut}>x</Button>', '`inner`'],
+    ['a function a global holds, given a property afterwards', 'const pick = Math.max\n  pick.shut = false\n  return <Button disabled={pick.shut ?? answer.data === undefined}>x</Button>', '`pick`'],
+  ])('does not judge shut on a constant that holds %s', (_shape, body, name) => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  ${body}
+}`)
+
+    // Judged on what the initialiser built, every one of these is shut, and
+    // the control is live.
+    expect(result.shut).toEqual([])
+    expect([...result.unjudgeable.values()].join('\n')).toContain(`reads ${name}, a \`const\` that holds an object`)
+  })
+
+  it('still judges a constant that holds a primitive, and one an unresolved query leaves empty', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  const record = answer.data?.data
+  const shut = record === undefined
+  return <Button disabled={shut}>x</Button>
+}`)
+
+    expect(result.shut).toHaveLength(1)
+  })
+
+  it('knows when a spread after a gate can override it, and when one before it cannot', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return (
+    <>
+      <Button {...rest} disabled={answer.data === undefined}>x</Button>
+      <Button disabled={answer.data === undefined} {...rest}>x</Button>
+    </>
+  )
+}`)
+
+    expect(result.gates.map((gate) => gate.overridable)).toEqual([false, true])
   })
 })
