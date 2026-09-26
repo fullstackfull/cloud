@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Dns\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Dns\Application\Jobs\PublishZone;
 use Lynomia\Modules\Dns\Application\Services\ConfiguredReservedZones;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
@@ -125,13 +126,32 @@ final readonly class ClaimZone
      * the estate preflight reports on, read from the same place, so an
      * operator who is told what is held is told what this refuses.
      *
+     * A list with an entry that is not a name holds everything: the claim is
+     * refused whatever it names, because the guard cannot tell what the
+     * operator meant to hold (I-3). The claimant's own name has already been
+     * read by then, so a name they did mistype is still answered as theirs.
+     * The refusal is the platform's condition — `dns.zone.unavailable`, 503,
+     * disclosing nothing — and the operator is told here, at error level,
+     * with counts and never the entries, and by the preflight's failure.
+     *
      * @throws DnsRefusedException
-     * @throws InvalidDomainNameException when a configured entry is not a name. Every claim is
-     *                                    refused until it is corrected, and the preflight says so.
      */
     private function assertNotReserved(DomainName $domain): void
     {
-        if ($this->reserved->read()->protects($domain)) {
+        $reserved = $this->reserved->read();
+        $malformed = $reserved->malformed();
+
+        if ($malformed > 0) {
+            Log::error('A zone claim was refused because DNS_RESERVED_ZONES holds an entry that is not a domain name; every claim by every account is refused until it is corrected.', [
+                'malformed_entries' => $malformed,
+                'entries' => count($reserved->configured()),
+                'preflight_finding' => 'dns.reserved_zones',
+            ]);
+
+            throw DnsRefusedException::reservationUnreadable();
+        }
+
+        if ($reserved->protects($domain)) {
             throw DnsRefusedException::zoneIsReserved($domain->value());
         }
     }

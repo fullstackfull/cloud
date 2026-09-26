@@ -332,6 +332,7 @@ return [
             'not_editable' => 'This zone cannot be changed in its current state.',
             'provider_cannot_create' => 'New zones cannot be created right now.',
             'reserved' => 'That name is reserved and cannot be hosted.',
+            'unavailable' => 'New zones cannot be added right now. Try again later.',
         ],
         'zone_file' => [
             'line_too_long' => 'A line in the zone file is too long.',

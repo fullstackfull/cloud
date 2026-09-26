@@ -42,9 +42,12 @@ return [
     |
     | Entries are ASCII: an internationalised name goes in its xn-- form. An
     | entry that is not a domain name, or not a string at all, refuses every
-    | claim until it is corrected. The estate preflight reports it as
-    | `dns.reserved_zones`, and reports an empty reservation there too, with
-    | the reason each address gave no name.
+    | claim until it is corrected — answered as `dns.zone.unavailable`, 503,
+    | and logged at error level. The estate preflight reports it as
+    | `dns.reserved_zones`, and reports there too a reservation that leaves a
+    | name beside the platform's hosts claimable: a warning in a rehearsal, a
+    | blocker in a production preflight. An empty list on a production estate
+    | whose hosts are not the domain itself is one of those.
     |
     */
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dns\Domain\ValueObjects;
 
+use Lynomia\Modules\Dns\Domain\Enums\NamesBeside;
 use Lynomia\Modules\Dns\Domain\Enums\NoDerivedName;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
 
@@ -30,7 +31,9 @@ use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
  * list — `panel.example.co.uk` would otherwise reserve `co.uk`. Holding the
  * host still covers every parent of it, so the registrable domain is refused
  * anyway; what it does not cover is a sibling, which is what
- * `DNS_RESERVED_ZONES` is for.
+ * `DNS_RESERVED_ZONES` is for. {@see self::namesBeside()} says, host by host,
+ * whether the siblings are held, and the estate preflight's verdict follows it:
+ * a pass is not given while a name beside a platform host is claimable.
  *
  * ---------------------------------------------------------------------------
  * The form a host is held in
@@ -97,8 +100,11 @@ use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
  * with it, and throws on the first that is not a name. Skipping a bad entry
  * would protect less than the operator asked for and say nothing; refusing
  * every claim until it is corrected protects exactly what was asked for and is
- * impossible to miss. The estate preflight reports this state as its one
- * failure, and counts the entries without quoting them.
+ * impossible to miss. The claim action checks {@see self::malformed()} first
+ * and answers the claim as the platform's condition, `dns.zone.unavailable`,
+ * rather than letting this throw reach the customer as their own invalid
+ * name (I-3); the estate preflight reports the state as a failure. Both
+ * count the entries without quoting them.
  */
 final readonly class ReservedZones
 {
@@ -222,6 +228,74 @@ final readonly class ReservedZones
         }
 
         return $names;
+    }
+
+    /**
+     * For each platform address that contributed a host, whether the names
+     * beside that host are held — see {@see NamesBeside}.
+     *
+     * A reserved name strictly above the host holds them, whether it was
+     * listed or derived from the other address (a portal on `example.net`
+     * holds every sibling of a control plane on `api.example.net`). A host of
+     * two labels has no sibling that is the platform's. A host listed exactly,
+     * with nothing above it, may or may not be a registrable domain, and this
+     * does not guess.
+     *
+     * @return array<string, NamesBeside>
+     *
+     * @throws InvalidDomainNameException when a listed entry is not a name — see the class docblock
+     */
+    public function namesBeside(): array
+    {
+        $held = $this->all();
+
+        $listed = array_map(
+            static fn (string $entry): DomainName => DomainName::fromString($entry),
+            $this->configured,
+        );
+
+        $beside = [];
+
+        foreach ($this->derived() as $variable => $value) {
+            $host = DomainName::fromString($value);
+
+            $beside[$variable] = match (true) {
+                self::anyStrictlyAbove($host, $held) => NamesBeside::Held,
+                $host->parent() === null => NamesBeside::OwnDomain,
+                self::anyEqual($host, $listed) => NamesBeside::OnlyItselfListed,
+                default => NamesBeside::Claimable,
+            };
+        }
+
+        return $beside;
+    }
+
+    /**
+     * @param  list<DomainName>  $names
+     */
+    private static function anyStrictlyAbove(DomainName $host, array $names): bool
+    {
+        foreach ($names as $name) {
+            if ($host->isWithin($name) && ! $host->equals($name)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<DomainName>  $names
+     */
+    private static function anyEqual(DomainName $host, array $names): bool
+    {
+        foreach ($names as $name) {
+            if ($host->equals($name)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

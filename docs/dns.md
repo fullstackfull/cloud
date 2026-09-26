@@ -264,14 +264,19 @@ they are domain names. An estate that has put the control plane and the portal
 on their real names is covered without saying so twice. The shipped
 configuration has not: both addresses are on `localhost`, which is not a
 domain name, so **nothing is reserved until an estate is given its names** —
-and the estate preflight says so, as a warning.
+and the estate preflight says so: as a warning in a rehearsal, and as a
+blocker in a production preflight.
 
 A host contributes itself, not its registrable domain — the registrable domain
 of `panel.example.co.uk` cannot be worked out without a public-suffix list, and
 guessing would reserve `co.uk`. Holding the host still refuses every parent of
 it, so the registrable domain cannot be claimed either; what it does not cover
 is a sibling. **List the registrable domain in `DNS_RESERVED_ZONES`** and every
-name beneath it is covered, siblings included.
+name beneath it is covered, siblings included. With the control plane on
+`api.lynomia.example`, the portal on `app.lynomia.example` and nothing listed,
+the two hosts, their parents and their children are refused, and
+`www.lynomia.example` and `mail.lynomia.example` can be claimed by any account;
+the preflight does not pass that state (below).
 
 A host written in Unicode is held in the form DNS carries: `https://münchen.example.net`
 reserves `xn--mnchen-3ya.example.net`, the name a resolver is asked for and the
@@ -305,16 +310,31 @@ the one caller that needs them strictest.
 An entry in `DNS_RESERVED_ZONES` that is not a domain name refuses **every**
 claim, by every account, until it is corrected. The whole list is read before
 any claim is compared with it; skipping a bad entry would protect less than was
-asked for and say nothing.
+asked for and say nothing. The refusal is the platform's condition, not the
+customer's mistake, and is answered as one: 503 `dns.zone.unavailable`, "New
+zones cannot be added right now. Try again later.", with nothing about the
+list in it. (A name the customer did mistype is still refused first, as their
+own `dns.invalid_name`.) Each such refusal is logged at error level with the
+number of entries and of malformed ones, never the entries themselves, beside
+the preflight's failure below.
 
 The estate preflight (`php artisan infra:preflight --mode=…`, or the Control
 Center) carries one finding about all of this, `dns.reserved_zones`:
 
+Each host `APP_URL` and `FRONTEND_URL` contributed is asked whether the names
+beside it are held: yes when a reserved name, listed or derived, lies strictly
+above it, or when it has two labels (its siblings are other people's domains);
+not established when it is listed exactly with nothing above it; claimable
+otherwise. Whether a listed name is the registrable domain is not checked —
+that would take a public-suffix list — so the names beside a listed name are
+not held, and a pass says so.
+
 | Status | When |
 | --- | --- |
-| `fail` | An entry in `DNS_RESERVED_ZONES` is not a domain name. The only blocking state. |
-| `warning` | Nothing is reserved at all, or `APP_URL` or `FRONTEND_URL` contributed no name — each named with its reason, from the table above. |
-| `pass` | Otherwise: a count of the entries held and the variables they came from. |
+| `fail` | An entry in `DNS_RESERVED_ZONES` is not a domain name. Blocks in every run. |
+| `blocked` | A production preflight (read-only-real, on a production installation) where nothing is reserved at all, or where a name beside a platform host can be claimed. |
+| `warning` | The same two states in any other run; or `APP_URL` or `FRONTEND_URL` contributed no name — each named with its reason, from the table above; or a platform host is listed exactly with nothing above it, which is complete only if it is a registrable domain. |
+| `pass` | Otherwise: a count of the entries held, the variables they came from, and what that covers. |
 
 It names variables and counts entries. It never quotes a reserved name or a
 configured value. The count is of entries, so a name and a host beneath it are
