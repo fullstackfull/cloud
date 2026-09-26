@@ -108,6 +108,7 @@ CASES = [
             "ansible_su_pass",
             "ansible_runas_pass",
             "ansible_paramiko_pass",
+            "ansible_paramiko_password",
             "ansible_winrm_pass",
             "ansible_httpapi_pass",
             "ansible_password",
@@ -785,7 +786,7 @@ all:
 # reject". The count is literal source in this file, maintained by whoever
 # edits the table, so adding or removing a case is a deliberate edit of this
 # number too.
-EXPECTED_CASES = 69
+EXPECTED_CASES = 70
 
 
 def run_tree(files: dict[str, str] | None) -> tuple[int, str]:

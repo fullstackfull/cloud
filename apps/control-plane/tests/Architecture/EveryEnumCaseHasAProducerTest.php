@@ -198,7 +198,7 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         WordPressPushScope::class => ['kind' => 'by value', 'site' => 'src/Modules/SharedHosting/Http/Requests/PushWordPressToProductionRequest.php', 'why' => 'The customer chooses what a push overwrites.'],
         DeploymentEnvironment::class => ['kind' => 'by value', 'site' => 'src/Modules/Providers/Http/Controllers/CredentialController.php', 'why' => 'An operator records a credential, licence or provider for an environment.'],
         TicketCategory::class => ['kind' => 'by value', 'site' => 'src/Modules/Support/Http/Requests/OpenTicketRequest.php', 'why' => 'The customer chooses the category of a ticket.'],
-        TicketPriority::class => ['kind' => 'by value', 'site' => 'src/Modules/Support/Http/Requests/OpenTicketRequest.php', 'why' => 'The customer, or an operator, chooses a ticket\'s priority.'],
+        TicketPriority::class => ['kind' => 'by value', 'site' => 'src/Modules/Support/Http/Controllers/OperatorTicketController.php', 'why' => 'An operator sets a ticket\'s priority, any of the four; a customer chooses from the lower three when opening one.'],
 
         CustomerCapability::class => ['kind' => 'vocabulary', 'site' => 'src/Modules/Identity/Http/Resources/TeamRoleResource.php', 'spelling' => 'CustomerCapability::cases()', 'why' => 'A capability is a question CustomerRole answers, not a value a row takes; the team permission matrix walks every case.'],
         LegalDocumentType::class => ['kind' => 'vocabulary', 'site' => 'src/Modules/Identity/Domain/Services/LegalDocuments.php', 'spelling' => 'LegalDocumentType::cases()', 'why' => 'Every document type is required: registration walks the cases and records an acceptance of each.'],
