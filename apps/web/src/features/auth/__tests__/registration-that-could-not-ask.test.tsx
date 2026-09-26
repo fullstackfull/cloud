@@ -41,8 +41,9 @@ import i18n from '@/i18n'
  * countries, currencies and both document links with the button greyed and no
  * sentence anywhere — which differs from a healthy page only in the grey.
  *
- * Every request the page makes is recorded, so "sends nothing" is measured
- * rather than inferred from a disabled attribute.
+ * Every call the page makes to `fetch` — which is how `lib/api` sends each
+ * request — is recorded, so "sends nothing" is measured rather than inferred
+ * from a disabled attribute.
  */
 
 type Answer =
@@ -86,7 +87,7 @@ const OPEN = options({ registration_permitted: true, documents: DOCUMENTS })
 
 /**
  * Answers `/registration/options` with each of `answers` in turn, repeating
- * the last, and records every request the page makes.
+ * the last, and records every call the page makes to `fetch`.
  */
 function stubFetch(answers: Answer[]): Recorded[] {
   const recorded: Recorded[] = []
@@ -334,6 +335,29 @@ describe('registration that could not ask whether it may register', () => {
     expect(optionReads(recorded)).toHaveLength(2)
     expect(registrations(recorded)).toEqual([])
     expect(createAccount()).toBeEnabled()
+  })
+
+  it('shows the second read under way on Try again, and takes no second press while it is', async () => {
+    const recorded = stubFetch([options({ documents: DOCUMENTS }), { kind: 'pending' }])
+    const user = userEvent.setup()
+
+    renderPage()
+
+    const tryAgain = within(await screen.findByRole('alert')).getByRole('button', { name: /try again/i })
+
+    await user.click(tryAgain)
+
+    await waitFor(() => {
+      expect(tryAgain).toHaveAttribute('aria-busy', 'true')
+    })
+    expect(tryAgain).toBeDisabled()
+
+    // Pressed again while the read is out, a live button would cancel it and
+    // ask a third time.
+    await user.click(tryAgain)
+
+    expect(optionReads(recorded)).toHaveLength(2)
+    expect(createAccount()).toBeDisabled()
   })
 
   it('keeps a good answer, and the form usable on it, when a later read of the options fails', async () => {

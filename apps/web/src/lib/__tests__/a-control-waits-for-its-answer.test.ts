@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 
+import { MutationObserver, QueryClient, QueryObserver, onlineManager } from '@tanstack/react-query'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
@@ -18,31 +19,38 @@ import { describe, expect, it } from 'vitest'
  * live while the desired state it computes from was unread. Both are a strict
  * comparison against a sentinel, evaluated on a value that can be absent. Both
  * are fixed in the components; this file keeps them fixed. Each of the two
- * controls is found as a control — every `Button` in its file that renders
- * its label — and not by its file or its query, and the gate on it must be
- * judged, and judged shut, waiting on its own query. So rewriting either gate
- * into a shape this file cannot read fails here as surely as reverting it,
- * and so does leaving it live while something else in the file waits
- * correctly in its place. `FINDING_GATES` says what it cannot find.
+ * controls is found by the label it renders, not by its file or its query,
+ * and the gate on it must be judged, and judged shut, waiting on its own
+ * query, with nothing else in the file drawing its label. So reverting either
+ * gate fails here, and so does each rewrite and stand-in `FINDING_GATES`
+ * names: the gate moved into a shape this file cannot read, or left live
+ * while something else in the file waits correctly in its place.
+ * `FINDING_GATES` says what it reads to find a control, and what attack found
+ * that it does not see.
  *
  * ## What this gate asserts, exactly
  *
  * **No `disabled=` or `ready=` JSX attribute in a `.tsx` file under `src`
- * whose resolved text literally contains `.data` leaves its control live while
- * the query behind that `.data` is unresolved.** "Live" means `disabled` comes
- * out anything but `true`, or `ready` anything but `false` — `Button` disables
- * only on `disabled === true`, and `ConfirmDialog`'s `ready` defaults to true.
- * And **every `Button` that renders the label of one of F-21's own two
- * controls, Create account and Compute plan, carries a `disabled=` that is
- * judged shut waiting on that control's own query, with no spread after it**
- * (`FINDING_GATES`).
+ * whose resolved text literally contains `.data` comes out live in any of the
+ * eight states step 3 puts a hook's result in, none of which holds an
+ * answer.** "Live" means `disabled` comes out anything but `true`, or `ready`
+ * anything but `false` — `Button` disables only on `disabled === true`, and
+ * `ConfirmDialog`'s `ready` defaults to true. And **each `Button` that renders
+ * the label of one of F-21's own two controls, Create account and Compute
+ * plan, carries a `disabled=` judged shut in those states and waiting on that
+ * control's own query, with no spread after it, and no element of another tag
+ * draws that label beside it** (`FINDING_GATES`).
  *
- * It narrows exactly where that sentence does, and the narrowing is a pattern
- * match applied before the evaluation: a prop whose resolved text does not
- * contain `.data` is never judged, however it came by its value. The shapes
- * that walks past are listed under "What it cannot see", with the sites in
- * this tree that have them. Which binding a name in a gate reads is never
- * guessed: it is the one TypeScript's own binder gives it (step 1).
+ * It narrows where that sentence does, in three places. The `.data` filter is
+ * a pattern match applied before the evaluation: a prop whose resolved text
+ * does not contain `.data` is never judged, however it came by its value. The
+ * eight states are those attack and reading found, not every state a hook's
+ * result can be in. And a name reads what steps 1 and 2 say it does, and no
+ * more. The shapes known to walk past are under "What it cannot see", each
+ * with the number of sites this tree has of it and the command that counted
+ * them; they are where the attacks on this file stopped, not its boundary.
+ * Which binding a name in a gate reads is never guessed: it is the one
+ * TypeScript's own binder gives it (step 1).
  *
  * ## How: evaluate, do not pattern-match
  *
@@ -68,7 +76,8 @@ import { describe, expect, it } from 'vitest'
  *     hook call — a call to a name that starts `use` and a capital or a
  *     digit, bare or as a member (`queries.useThing()`), under any
  *     parentheses, `await`, `as`, `satisfies` or `!`; a `const` initialised
- *     by one is the query itself — and holds no function, class, method or
+ *     by one is taken to be the hook's result, a query's or a mutation's
+ *     (step 3) — and holds no function, class, method or
  *     accessor, so that a `const` that is itself a function is never
  *     evaluated as a value. The initialiser is the compiler's node for it,
  *     so a statement written across lines is read whole, and a second
@@ -83,18 +92,26 @@ import { describe, expect, it } from 'vitest'
  *     overloaded function), and constants that do not settle (a cycle, or
  *     more than 32 deep) — and a refused gate is reported like any other
  *     that cannot be judged, whether or not its text reaches `.data`.
- *  3. The resolved text is run against a stub of an unresolved query —
- *     twice, once **pending** and once **failed**. A name written `X.data` or
- *     `X?.data` answers as that stub when it is bound to a `const` initialised
- *     by a hook call, and only then. Every other name reads as unknown — a
- *     parameter (a query passed down as a prop among them), an import, a
- *     `let`, a destructured name, `this` — except the evaluable globals
- *     (`undefined` among them, so a correct `=== undefined` gate is judged
- *     rather than turned away); a binding in the file named like one of them
- *     is renamed, so it cannot pass for the global. The stub answers only the
- *     fields an unresolved query is known to have; reading any other is also
- *     an unknown.
- *  4. The verdict is **shut** in both states, **live** in either, or
+ *  3. The resolved text is run once in each state `UNRESOLVED_STATES` names:
+ *     a query whose first read is on its way, whose read failed, that is not
+ *     enabled, that waits for the network, or that is being read again after
+ *     failing; and a mutation idle, running, or failed. The hook is imported,
+ *     and no import is followed, so this file cannot tell a query from a
+ *     mutation, and judges each in all eight. In each, a name written
+ *     `X.data` or `X?.data` answers as the result the library's own
+ *     observer gives in that state, when it is bound to a `const`
+ *     initialised by a hook call, and only then: a real client and real
+ *     observers are driven into the state (`driveUnresolved`) and the result
+ *     taken as it stands, so no field's value is typed out here. Every other
+ *     name reads as unknown — a parameter (a query passed down as a prop
+ *     among them), an import, a `let`, a destructured name, `this` — except
+ *     the evaluable globals (`undefined` among them, so a correct
+ *     `=== undefined` gate is judged rather than turned away); a binding in
+ *     the file named like one of them is renamed, so it cannot pass for the
+ *     global. Reading a field the state's result does not have is also an
+ *     unknown, so a gate on a field only a query has (`isFetching`) is
+ *     unjudgeable, not shut: in a mutation's states it reads an unknown.
+ *  4. The verdict is **shut** in every state, **live** in any, or
  *     **unjudgeable**: it threw, read an unknown, came out as something other
  *     than a boolean, or its resolution was refused — or it came out shut
  *     while a `const` it substituted, evaluated the same way, holds an object
@@ -113,10 +130,21 @@ import { describe, expect, it } from 'vitest'
  *
  * ## The census, at the time of writing
  *
- * Dumped from this file's own machinery and then classified by hand. The
- * compiler's binding replaced a text reader at 2453cce, and the two were
- * measured against each other on this tree: the same 66 gates, each resolved
- * to the same text, so the classification below carries over unchanged.
+ * Counted by this file's own reader, and then classified by hand. Run with
+ * `F21_CENSUS=1`, the first test prints every gate — its file and line, its
+ * element, its text, what it resolves to, its verdict, and what each name
+ * left in it is bound to. From `apps/web`:
+ *
+ *     F21_CENSUS=1 npx vitest run src/lib/__tests__/a-control-waits-for-its-answer.test.ts -t 'finds the gates to check'
+ *
+ * `CENSUS` below means that output. The compiler's binding replaced a text
+ * reader at 2453cce, and the two were measured against each other on this
+ * tree: the same 66 gates, each resolved to the same text up to whitespace
+ * (the printer writes `! x` as `!x`, which is five of them), so the
+ * classification below carries over. Step 3's states then went from two to
+ * eight, and the census retaken is unchanged: none of the six gates that
+ * reach `.data` reads a hook's result for anything but its `.data`, which
+ * none of the eight holds.
  *
  * **66** `disabled=`/`ready=` attributes in 37 files. **6** reach `.data`:
  * **4 shut** (`RegisterPage`'s Create account, `PlansPage`'s Compute plan and
@@ -150,48 +178,79 @@ import { describe, expect, it } from 'vitest'
  *
  * ## What it cannot see
  *
- * Seven shapes pass silently. The site counts are measured on this tree.
+ * These shapes pass silently. They are the ones the attacks on this file and
+ * the census found, which is where those stopped and not the boundary: a
+ * shape nobody has tried may pass too. Each is counted on this tree, from
+ * `apps/web`, by the command given. `rg` is ripgrep; `TSX` stands for
+ * `--glob '*.tsx' --glob '!__tests__' --glob '!*.test.tsx'`, the files this
+ * gate reads, and `TS` for `--glob '*.{ts,tsx}' --glob '!__tests__'
+ * --glob '!*.test.*'`.
  *
- *  1. A query read through a destructured `data` — three sites, above.
+ *  1. A query read through a destructured `data`.
+ *     `rg TSX '\{[^}]*\bdata\b[^}]*\}\s*=\s*(\w+\.)?use[A-Z0-9]' src | wc -l`
+ *     prints 87 destructurings; 3 gates read one (CENSUS: the three above,
+ *     each shut today by its own fallback or search).
  *  2. A gate passed as a spread, `<Button {...{ disabled: x }}>`: no
- *     `disabled=` attribute, so not even in the 66. No site. And a spread
- *     after a `disabled=` can override it, where the attribute is what is
- *     judged: one site, `Button`'s own `{...props}` after its `disabled=`,
- *     which cannot, since `disabled` is destructured out of `props`. On
- *     F-21's own two controls both are failures (`FINDING_GATES`).
- *  3. A value a parent read from a query and passed down, or a row of a list
- *     — 25 sites, and `AssignForm`'s, above. A query passed down whole and
- *     read for its `.data` is not silent: step 3 reads the parameter as an
- *     unknown, and the gate is reported. No site.
+ *     `disabled=` attribute, so not even in the 66.
+ *     `rg TSX '\.\.\.\{\s*(disabled|ready)\b' src | wc -l` prints 0. And a
+ *     spread after a `disabled=` can override it, where the attribute is
+ *     what is judged: `rg -U -l TSX '\b(disabled|ready)=\{[^}]*\}[^<>]*?\{\.\.\.' src`
+ *     prints one file, `components/Button.tsx`, whose `{...props}` follows
+ *     its `disabled=` and cannot override it, since `disabled` is
+ *     destructured out of `props`. On F-21's own two controls both are
+ *     failures (`FINDING_GATES`).
+ *  3. A value a parent read from a query and passed down, or a row of a
+ *     list: 25 sites, and `AssignForm`'s, above (CENSUS, classified by
+ *     hand). A query passed down whole and read for its `.data` is not
+ *     silent: step 3 reads the parameter as an unknown, and the gate is
+ *     reported; CENSUS has none.
  *  4. A value whose `const` is not substituted: one initialised by a hook
  *     call (`useMemo`, `useState` from a query), and one whose initialiser
  *     holds a function — the last so a `const` that is itself a function is
- *     never evaluated as a value, which also stops `ProvidersPage`'s and
- *     `AssignForm`'s `.find((…) => …)`, the only two in this tree a gate
- *     reads. Every other binding — a `let`, a `var`, a parameter, a
- *     destructured name — stays a name, and reads as unknown if the gate
- *     reaches `.data`.
+ *     never evaluated as a value. CENSUS: 10 gates read a hook-call `const`
+ *     for something other than its `.data` — 9 a mutation's `isPending`, 1
+ *     the record `useResource` hands down — and none reads a `useMemo` or a
+ *     `useState`; 2 read a `const` that holds a function, `ProvidersPage`'s
+ *     and `AssignForm`'s `.find((…) => …)`. Every other binding — a `let`, a
+ *     `var`, a parameter, a destructured name — stays a name, and reads as
+ *     unknown if the gate reaches `.data`.
  *  5. A gate computed in a `.ts` file, or by calling a function: the text
- *     holds a call, not a `.data`. No site.
- *  6. A control gated by a prop with another name (`aria-disabled`,
- *     `isDisabled`, `canSubmit`). No site under a gate-like name.
+ *     holds a call, not a `.data`. CENSUS: the one call in the 66 resolved
+ *     texts that is not a method call is `Number(vram)`, a global; 0.
+ *  6. A control gated by a prop with another name.
+ *     `rg TSX '\b(aria-disabled|isDisabled|canSubmit|isReady|enabled)=\{' src | wc -l`
+ *     prints 0.
  *  7. A global the program writes to. The evaluable globals are read as the
  *     language's own, and a write to one — `Math.flag = false`, a replaced
  *     `Number.isFinite` — can sit in any module, which the text of the
- *     gate's file does not show. No write to any of them in `src`.
+ *     gate's file does not show.
+ *     `rg -P TS '(?<![\w$.])(Math|Number|String|Boolean|Array|Object)\.[A-Za-z_$][\w$]*\s*=(?![=>])' src | wc -l`
+ *     prints 0.
+ *  8. A hook's result in a state step 3 does not drive: a query given
+ *     `placeholderData` or `initialData` (it has `data` before any answer)
+ *     or `select` (its `data` is what the selector made); a query read again
+ *     offline after failing; a mutation paused offline; the results of
+ *     `useInfiniteQuery`, `useQueries` or the suspense hooks, whose fields
+ *     are not these. `rg TS '\b(placeholderData|initialData|select)\s*:' src | wc -l`
+ *     prints 0, and
+ *     `rg TS '\buse(Infinite|Suspense|SuspenseInfinite)Query\b|\buse(Suspense)?Queries\b' src | wc -l`
+ *     prints 0. The two offline states differ from driven ones only in their
+ *     flags, and CENSUS has no gate that reaches `.data` and reads a flag.
+ *     (`app/queryClient.ts` reads queries offline-first, so in the app a
+ *     query waits for the network only on a retry: the result driven here,
+ *     but for `failureCount` and `failureReason`.)
  *
  * A `const` whose value is an object, written to after its declaration, is
  * not among them: step 4 reports it rather than judging it on what its
- * initialiser built. No gate in this tree substitutes one.
+ * initialiser built. CENSUS reports no gate for it.
  *
  * Widening to any of these is deliberately not done here: an unmeasured
- * widening is worse than a measured boundary.
+ * widening is worse than a named escape whose occupancy is measured.
  */
 
 const SOURCE = path.resolve(import.meta.dirname, '../..')
 
 type Prop = 'disabled' | 'ready'
-type QueryState = 'pending' | 'failed'
 
 interface SourceFile {
   file: string
@@ -211,6 +270,8 @@ interface Element {
   file: string
   /** Where its tag opens in the file: what a gate on it records as `element`. */
   at: number
+  /** Where it closes: past its closing tag, or its self-closing one. */
+  end: number
   line: number
   tag: string
   /** The translation keys it renders (`labelsOf`). */
@@ -241,8 +302,8 @@ interface Gate {
 
 type Verdict =
   | { kind: 'shut' }
-  | { kind: 'live'; state: QueryState; value: boolean }
-  | { kind: 'unjudgeable'; state: QueryState | null; reason: string }
+  | { kind: 'live'; state: UnresolvedState; value: boolean }
+  | { kind: 'unjudgeable'; state: UnresolvedState | null; reason: string }
 
 /**
  * Gates that reach `.data` and cannot be judged against an unresolved query,
@@ -704,7 +765,9 @@ function readingOf(source: SourceFile): Reading {
       const tag = tagOf(node)
       const labels = labelsOf(node, compiled.checker)
 
-      reading.elements.push({ file: source.file, at, line: lineOf(node), tag, labels })
+      const end = (ts.isJsxOpeningElement(node) ? node.parent : node).getEnd()
+
+      reading.elements.push({ file: source.file, at, end, line: lineOf(node), tag, labels })
 
       for (const attribute of node.attributes.properties) {
         if (
@@ -758,37 +821,96 @@ function queriesOf(gate: Gate): Set<string> {
   return new Set([...dataRoots(gate.resolved)].filter((name) => gate.names.get(name)?.query === true))
 }
 
-/** What an unresolved TanStack query answers, and nothing else. */
-const UNRESOLVED_QUERY: Record<QueryState, Record<string, unknown>> = {
-  pending: {
-    data: undefined,
-    error: null,
-    status: 'pending',
-    fetchStatus: 'fetching',
-    isPending: true,
-    isLoading: true,
-    isFetching: true,
-    isFetched: false,
-    isSuccess: false,
-    isError: false,
-    isRefetching: false,
-    isPlaceholderData: false,
-  },
-  failed: {
-    data: undefined,
-    error: new Error('the read failed'),
-    status: 'error',
-    fetchStatus: 'idle',
-    isPending: false,
-    isLoading: false,
-    isFetching: false,
-    isFetched: true,
-    isSuccess: false,
-    isError: true,
-    isRefetching: false,
-    isPlaceholderData: false,
-  },
+/**
+ * The states a hook's result is judged in, each one with no `data`. The file
+ * cannot tell a query from a mutation — the hook is imported, and no import
+ * is followed — so a `const` initialised by a hook call is judged as both.
+ *
+ * These are the states attack and reading found, not every state a result
+ * can be in: see "What it cannot see", 8.
+ */
+const UNRESOLVED_STATES = [
+  // A query's first read, on its way.
+  'pending',
+  // A query whose read failed.
+  'failed',
+  // A query with `enabled: false`: nothing asked, and nothing on its way.
+  'pending, not enabled',
+  // A query asked while offline: its read waits for the network.
+  'pending, offline',
+  // A query read again after failing. A read that starts on a query with no
+  // data puts it back to `pending` (query-core's `fetchState`), so this is
+  // `pending` and fetching, as the first read is, but with `isFetched` true.
+  'fetching again after failing',
+  // `useMutation`'s result before `mutate`, while it runs, and once it fails.
+  'an idle mutation',
+  'a pending mutation',
+  'a failed mutation',
+] as const
+
+type UnresolvedState = (typeof UNRESOLVED_STATES)[number]
+
+/**
+ * Each state's result, as `@tanstack/react-query`'s own observers give it: a
+ * real client, a `QueryObserver` (whose result `useQuery` returns) and a
+ * `MutationObserver` (whose result `useMutation` returns, with `mutateAsync`
+ * added) are driven into each state, and each result is taken as it stands
+ * then — the fields the library sets, and only those. No field's value is
+ * typed out here, so in a state it names the stub cannot disagree with the
+ * library about what a field holds; that each is the state it is named for
+ * is pinned in "the gate itself".
+ */
+async function driveUnresolved(): Promise<Record<UnresolvedState, Readonly<Record<string, unknown>>>> {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+  const never = (): Promise<never> => new Promise<never>(() => undefined)
+  const failing = (): Promise<never> => Promise.reject(new Error('the read failed'))
+  const unsubscribes: (() => void)[] = []
+  const taken = (result: object): Readonly<Record<string, unknown>> => Object.freeze({ ...result })
+
+  const watch = (key: string, queryFn: () => Promise<never>, enabled = true) => {
+    const observer = new QueryObserver(client, { queryKey: [key], queryFn, enabled })
+    unsubscribes.push(observer.subscribe(() => undefined))
+    return observer
+  }
+
+  try {
+    let reads = 0
+    const pending = watch('pending', never)
+    const failed = watch('failed', failing)
+    const disabled = watch('not enabled', never, false)
+    const again = watch('again', () => (reads++ === 0 ? failing() : never()))
+    const idle = new MutationObserver<unknown, Error, void>(client, { mutationFn: never })
+    const running = new MutationObserver<unknown, Error, void>(client, { mutationFn: never })
+    const refused = new MutationObserver<unknown, Error, void>(client, { mutationFn: failing })
+
+    running.mutate().catch(() => undefined)
+    refused.mutate().catch(() => undefined)
+
+    // Every rejection above lands, and its observer hears of it.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    void again.refetch()
+
+    const results = {
+      pending: taken(pending.getCurrentResult()),
+      failed: taken(failed.getCurrentResult()),
+      'pending, not enabled': taken(disabled.getCurrentResult()),
+      'fetching again after failing': taken(again.getCurrentResult()),
+      'an idle mutation': taken(idle.getCurrentResult()),
+      'a pending mutation': taken(running.getCurrentResult()),
+      'a failed mutation': taken(refused.getCurrentResult()),
+    }
+
+    onlineManager.setOnline(false)
+
+    return { ...results, 'pending, offline': taken(watch('offline', never).getCurrentResult()) }
+  } finally {
+    for (const unsubscribe of unsubscribes) unsubscribe()
+    onlineManager.setOnline(true)
+    client.clear()
+  }
 }
+
+const UNRESOLVED = await driveUnresolved()
 
 class Unknowable extends Error {}
 
@@ -839,14 +961,14 @@ function unanswerable(name: string): unknown {
  * `text`, one of a gate's resolved expressions, evaluated with the gate's
  * queries unresolved in `state`. It throws `Unknowable` on reading a name that
  * cannot be answered, and lists in `unknown` the fields of a stub it read that
- * an unresolved query does not have.
+ * the result in `state` does not have.
  */
-function evaluateIn(gate: Gate, state: QueryState, text: string): { value: unknown; unknown: string[] } {
+function evaluateIn(gate: Gate, state: UnresolvedState, text: string): { value: unknown; unknown: string[] } {
   const queries = queriesOf(gate)
   const unknown: string[] = []
 
   const stubFor = (root: string): unknown =>
-    new Proxy(UNRESOLVED_QUERY[state], {
+    new Proxy(UNRESOLVED[state], {
       get(target, key) {
         if (typeof key === 'symbol') return undefined
         if (key in target) return target[key]
@@ -889,7 +1011,7 @@ function evaluateIn(gate: Gate, state: QueryState, text: string): { value: unkno
  * was, is an object or a function: what it holds when the control renders
  * can have been written to since its declaration, and the text does not say.
  */
-function mutableConstant(gate: Gate, state: QueryState): string | null {
+function mutableConstant(gate: Gate, state: UnresolvedState): string | null {
   for (const constant of gate.constants) {
     let value: unknown
 
@@ -905,12 +1027,12 @@ function mutableConstant(gate: Gate, state: QueryState): string | null {
   return null
 }
 
-function judgeIn(gate: Gate, state: QueryState): Verdict {
+function judgeIn(gate: Gate, state: UnresolvedState): Verdict {
   try {
     const { value, unknown } = evaluateIn(gate, state, gate.resolved)
 
     if (unknown.length > 0) {
-      return { kind: 'unjudgeable', state, reason: `reads ${[...new Set(unknown)].join(', ')}, which an unresolved query cannot answer` }
+      return { kind: 'unjudgeable', state, reason: `reads ${[...new Set(unknown)].join(', ')}, which nothing here can answer (${state})` }
     }
 
     if (typeof value !== 'boolean') {
@@ -936,7 +1058,7 @@ function judgeIn(gate: Gate, state: QueryState): Verdict {
     return { kind: 'shut' }
   } catch (error) {
     if (error instanceof Unknowable) {
-      return { kind: 'unjudgeable', state, reason: `reads ${error.message}, which an unresolved query cannot answer` }
+      return { kind: 'unjudgeable', state, reason: `reads ${error.message}, which nothing here can answer (${state})` }
     }
 
     return { kind: 'unjudgeable', state, reason: `throws ${describeThrown(error)}` }
@@ -946,7 +1068,7 @@ function judgeIn(gate: Gate, state: QueryState): Verdict {
 function judge(gate: Gate): Verdict {
   if (gate.refusal !== null) return { kind: 'unjudgeable', state: null, reason: gate.refusal }
 
-  const verdicts = (['pending', 'failed'] as const).map((state) => judgeIn(gate, state))
+  const verdicts = UNRESOLVED_STATES.map((state) => judgeIn(gate, state))
 
   return (
     verdicts.find((verdict) => verdict.kind === 'live') ??
@@ -961,7 +1083,7 @@ function keyOf(gate: Gate): string {
 function explainLive(gate: Gate, verdict: Verdict & { kind: 'live' }): string {
   return (
     `${gate.file}:${String(gate.line)} ${gate.prop}={${gate.expression}} resolves to ${gate.resolved}; ` +
-    `with the query unresolved (${verdict.state}) this is ${String(verdict.value)}, which leaves the control LIVE.`
+    `with its answer unresolved (${verdict.state}) this is ${String(verdict.value)}, which leaves the control LIVE.`
   )
 }
 
@@ -1002,23 +1124,67 @@ function probe(text: string, file = 'probe/Probe.tsx'): Report {
   return report([{ file, text }])
 }
 
+/**
+ * Every gate this file reads, one to a line: where it is, on what element,
+ * its text, what it resolves to, its verdict, and what each name left in it
+ * is bound to. What `F21_CENSUS=1` prints, and what the census in the header
+ * is counted from.
+ */
+function census(result: Report): string {
+  return result.gates
+    .map((gate) => {
+      const verdict = result.reaching.includes(gate) ? judge(gate).kind : 'not judged: no .data'
+      const names = [...gate.names].map(([name, leaf]) => `${name}: ${leaf.what}`).join('; ')
+
+      return `${gate.file}:${String(gate.line)} <${gate.tag}> ${gate.prop}={${gate.expression}} → ${gate.resolved.replace(/\s+/g, ' ')} [${verdict}] {${names}}`
+    })
+    .join('\n')
+}
+
 // ---------------------------------------------------------------------------
 // The gate
 // ---------------------------------------------------------------------------
 
 /**
- * The finding's own two controls: in each file, every `Button` that renders
- * the control's label (`labelsOf`), gated or not. Each must carry the named
- * prop, and every gate on it must be judged shut, wait on the named query,
- * and have no spread after it that could override it. So a control's gate
- * cannot drop out in silence — rewritten into a shape this file cannot read,
- * a `const` behind a hook, a destructured `data` — while something else
- * stands in for it: another control in the file waiting on the same query,
- * an element of another tag around it or inside it, a `ready=` beside it, a
- * gated copy of it beside an ungated one. A file in which no `Button`
- * renders the label is named too. What it cannot find is a `Button` that
- * gets its label by a route `labelsOf` does not follow — a prop, a function,
- * a hook — beside one that renders it and is gated correctly.
+ * The finding's own two controls, and what is read to find them. In each
+ * file: the elements whose `labelsOf` holds the control's label key, of any
+ * tag. Those whose tag is the control's (`Button`) are the control, gated or
+ * not; each must carry the named prop, and every gate on it must be judged
+ * shut, wait on the named query, and have no spread after it that could
+ * override it. Every other element that renders the label must be around one
+ * of them (the form, a tooltip) or inside one (a span around the label). One
+ * that is neither — a native `<button>`, a `SubmitButton` beside it — is a
+ * second thing drawing the control, whose gate is not the one judged, and
+ * the control is named. A file in which no `Button` renders the label is
+ * named too.
+ *
+ * So these are named, each red in "the gate reddens on the defect it exists
+ * for": the gate rewritten into a shape this file cannot read (a `const`
+ * behind a hook, a destructured `data`), or left live, while another control
+ * in the file waits on the same query; an element of another tag around the
+ * control or inside it carrying the gate; a spread after it; a `ready=` in
+ * place of its `disabled=`; a gate on another query; a gated copy beside an
+ * ungated one; an element of another tag drawing the label beside it.
+ *
+ * What attack found it does not see — where the attack stopped, not the
+ * boundary: a label that reaches an element by a route `labelsOf` does not
+ * follow (a prop, a function, a hook, a key that is not a string literal, a
+ * `t` under another name); a control drawn by a component written in another
+ * file, which is not read; and an element inside the control that is itself
+ * a control (a native `<button>` inside the `Button`), which is taken to be
+ * part of it. Measured today, from `apps/web`, with `TSX` as in the header:
+ *
+ *  - `rg TSX -c "common\.register|admin\.plans\.compute\b" src` prints one
+ *    line each for `RegisterPage.tsx`, `PlansPage.tsx` and `LoginPage.tsx`,
+ *    each with a count of 1; `LoginPage`'s is its link to the registration
+ *    page, and neither of the two files imports `LoginPage`. So each label
+ *    key is written once in its control's file, and in no component that
+ *    file draws.
+ *  - `rg -U -c "<Button[^<]*>\s*\{t\('common\.register'\)\}\s*</Button>" src/features/auth/RegisterPage.tsx`
+ *    prints 1, and the same with `admin\.plans\.compute` over
+ *    `src/features/controlCenter/PlansPage.tsx` prints 1: in each file that
+ *    one `t('…')` is its `Button`'s only child, so nothing sits inside
+ *    either control.
  */
 const FINDING_GATES = [
   { file: 'features/auth/RegisterPage.tsx', tag: 'Button', label: 'common.register', prop: 'disabled', query: 'options', control: 'Create account' },
@@ -1030,18 +1196,40 @@ function controlsOf(result: Report, file: string, tag: string, label: string): E
   return result.elements.filter((element) => element.file === file && element.tag === tag && element.labels.includes(label))
 }
 
+/**
+ * The elements in `file` that render `label` and are not a `tag`, nor around
+ * a `tag` that renders it, nor inside one: something else drawing the
+ * control's label, whose gate is not the one judged.
+ */
+function strangersTo(result: Report, file: string, tag: string, label: string): Element[] {
+  const controls = controlsOf(result, file, tag, label)
+  const within = (outer: Element, inner: Element): boolean => outer.at <= inner.at && inner.end <= outer.end
+
+  return result.elements.filter(
+    (element) =>
+      element.file === file &&
+      element.tag !== tag &&
+      element.labels.includes(label) &&
+      !controls.some((control) => within(control, element) || within(element, control)),
+  )
+}
+
 /** The gates on `control`. */
 function gatesOn(result: Report, control: Element): Gate[] {
   return result.gates.filter((gate) => gate.file === control.file && gate.element === control.at)
 }
 
-/** Those of the finding's own controls not gated by their prop, judged shut, on their query. */
+/**
+ * Those of the finding's own controls not gated by their prop, judged shut,
+ * on their query, or with something other than a `tag` drawing their label.
+ */
 function findingGatesNotJudgedShut(result: Report): string[] {
   return FINDING_GATES.filter(({ file, tag, label, prop, query }) => {
     const controls = controlsOf(result, file, tag, label)
 
     return (
       controls.length === 0 ||
+      strangersTo(result, file, tag, label).length > 0 ||
       controls.some((control) => {
         const gates = gatesOn(result, control)
 
@@ -1061,6 +1249,8 @@ describe('a control that waits on an answer is not live before the answer', () =
   const tree = (): Report => (built ??= report(readSources()))
 
   it('finds the gates to check', () => {
+    if (process.env.F21_CENSUS === '1') console.log(census(tree()))
+
     // Floors, so a broken reader cannot pass this file by finding nothing.
     expect(tree().gates.length).toBeGreaterThan(50)
     expect(tree().reaching.length).toBeGreaterThanOrEqual(5)
@@ -1078,25 +1268,29 @@ describe('a control that waits on an answer is not live before the answer', () =
 
       expect(controls, `${file} renders t('${label}') in one <${tag}>`).toHaveLength(1)
       expect(controls.flatMap((control) => gatesOn(tree(), control)), `${file}'s <${tag}> for t('${label}') has one gate`).toHaveLength(1)
+      expect(
+        strangersTo(tree(), file, tag, label).map((element) => `<${element.tag}> at line ${String(element.line)}`),
+        `${file}: nothing but its <${tag}>, and what is around or inside it, renders t('${label}')`,
+      ).toEqual([])
     }
   })
 
-  it('leaves no control live while the query behind it is unresolved', () => {
+  it('leaves no control whose gate reaches .data live in any state it drives with no answer', () => {
     expect(
       tree().live,
-      'A disabled= that is not true, or a ready= that is not false, while its query is pending or failed ' +
+      'A disabled= that is not true, or a ready= that is not false, in a state with no answer (UNRESOLVED_STATES) ' +
         'leaves the control pressable before the answer it depends on. Gate on the answer having arrived.',
     ).toEqual([])
   })
 
-  it('judges every gate that reaches a query, or names why it is correct without being judged', () => {
+  it('judges each gate whose text reaches .data, or names why it is correct without being judged', () => {
     const unexplained = [...tree().unjudgeable.entries()]
       .filter(([key]) => GUARDED[key] === undefined)
       .map(([, explanation]) => explanation)
 
     expect(
       unexplained,
-      'A gate this file cannot evaluate against an unresolved query. Make it evaluable, or add it to GUARDED with the reason it is correct.',
+      'A gate that reaches .data and that this file cannot evaluate in a state with no answer. Make it evaluable, or add it to GUARDED with the reason it is correct.',
     ).toEqual([])
   })
 
@@ -1244,6 +1438,25 @@ describe('the gate reddens on the defect it exists for', () => {
     expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
   })
 
+  it('names Create account when its gate reads a destructured data, and another control waits on its query', () => {
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          [REGISTER_FIXED, 'disabled={!canSubmit}'],
+          [TERMS_HINT, `${TERMS_HINT}        disabled={!registrationPermitted}\n`],
+          [CLOSED_LINE, `${CLOSED_LINE}  const { data: offered } = options\n  const canSubmit = offered?.legal?.registration_permitted !== false\n`],
+        ],
+      }),
+    )
+
+    // Its text no longer reaches `.data`, so it is not judged at all.
+    expect(result.gates.filter((gate) => gate.expression === '!canSubmit').map((gate) => gate.resolved)).toEqual([
+      '!(offered?.legal?.registration_permitted !== false)',
+    ])
+    expect(result.live).toEqual([])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
   it('names Compute plan the same way', () => {
     const result = report(
       withLines({
@@ -1334,6 +1547,55 @@ describe('the gate reddens on the defect it exists for', () => {
 
     expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
   })
+
+  /*
+   * The control handed to an element of another tag, whose gate this file
+   * does not judge, while a `Button` that renders the label, gated correctly
+   * and hidden, stays in the file. At 7573746, when only a `Button` could be
+   * the control, each of these was green.
+   */
+  const REGISTER_TAIL = "        className=\"w-full\"\n      >\n        {t('common.register')}\n      </Button>\n"
+  const HIDDEN_TAIL = "        className=\"hidden\"\n      >\n        {t('common.register')}\n      </Button>\n"
+  const SUBMITTABLE = `${CLOSED_LINE}  const submittable = useMemo(() => options.data === undefined || registrationPermitted, [options.data, registrationPermitted])\n`
+
+  it.each([
+    ['a native <button>', "      <button type=\"submit\" disabled={!submittable}>{t('common.register')}</button>\n"],
+    ['a component that takes its label as a prop', "      <SubmitButton disabled={!submittable} label={t('common.register')} />\n"],
+    ['a native <button> in a wrapper of its own', "      <div className=\"w-full\">\n        <button type=\"submit\">{t('common.register')}</button>\n      </div>\n"],
+  ])('names Create account when %s draws its label beside a hidden Button', (_shape, stranger) => {
+    const result = report(withLines({ [REGISTER]: [[REGISTER_TAIL, `${HIDDEN_TAIL}${stranger}`], [CLOSED_LINE, SUBMITTABLE]] }))
+
+    // The hidden Button is judged, and shut; nothing is live.
+    expect(result.live).toEqual([])
+    expect(result.shut.filter((gate) => gate.file === REGISTER).map((gate) => gate.expression)).toEqual(['!registrationPermitted'])
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${REGISTER} (Create account)`])
+  })
+
+  it('names Compute plan when a native <button> draws its label beside it', () => {
+    const result = report(
+      withLines({
+        [PLANS]: [
+          "            {t('admin.plans.compute')}\n          </Button>\n",
+          "            {t('admin.plans.compute')}\n          </Button>\n          <button type=\"button\" onClick={() => { compute.mutate({ serverId: server.id }); }}>{t('admin.plans.compute')}</button>\n",
+        ],
+      }),
+    )
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([`${PLANS} (Compute plan)`])
+  })
+
+  it('does not take what is around the control, or a span inside it around its label, for another control', () => {
+    const result = report(
+      withLines({
+        [REGISTER]: [
+          ['      <Button\n        type="submit"', '      <div className="w-full">\n      <Button\n        type="submit"'],
+          [REGISTER_TAIL, "        className=\"w-full\"\n      >\n        <span>{t('common.register')}</span>\n      </Button>\n      </div>\n"],
+        ],
+      }),
+    )
+
+    expect(findingGatesNotJudgedShut(result)).toEqual([])
+  })
 })
 
 /*
@@ -1397,6 +1659,70 @@ describe('the gate itself', () => {
 
     expect(result.live).toHaveLength(1)
     expect(result.live[0]).toContain('(failed)')
+  })
+
+  it('drives a real client into each state it names, with no answer in any', () => {
+    expect(Object.keys(UNRESOLVED).sort()).toEqual([...UNRESOLVED_STATES].sort())
+
+    for (const state of UNRESOLVED_STATES) {
+      expect(Object.keys(UNRESOLVED[state]), state).toContain('data')
+      expect(UNRESOLVED[state].data, state).toBeUndefined()
+    }
+
+    // Each is the state it is named for, as the library reports it. Taken too
+    // early, a failure would read as a read still pending, and be judged as one.
+    expect(UNRESOLVED.pending).toMatchObject({ status: 'pending', fetchStatus: 'fetching', isFetched: false })
+    expect(UNRESOLVED.failed).toMatchObject({ status: 'error', fetchStatus: 'idle', isError: true })
+    expect(UNRESOLVED['pending, not enabled']).toMatchObject({ status: 'pending', fetchStatus: 'idle', isEnabled: false })
+    expect(UNRESOLVED['pending, offline']).toMatchObject({ status: 'pending', fetchStatus: 'paused', isPaused: true })
+    expect(UNRESOLVED['fetching again after failing']).toMatchObject({ status: 'pending', fetchStatus: 'fetching', isFetched: true })
+    expect(UNRESOLVED['an idle mutation']).toMatchObject({ status: 'idle', isIdle: true })
+    expect(UNRESOLVED['a pending mutation']).toMatchObject({ status: 'pending', isPending: true })
+    expect(UNRESOLVED['a failed mutation']).toMatchObject({ status: 'error', isError: true })
+  })
+
+  /*
+   * Gates shut while a query's first read is on its way and once it has
+   * failed, and live in another state that has no answer either. At 7573746,
+   * which judged only those two states, each of these was judged shut.
+   */
+  it.each([
+    ['a read that is not enabled', 'answer.isLoading || answer.isError || answer.data?.data.ok === false', 'pending, not enabled'],
+    ['a read waiting for the network', 'answer.isLoading || answer.isError || answer.isEnabled === false || answer.data?.data.ok === false', 'pending, offline'],
+    ['a read made again after a failure', '!answer.isFetched || answer.isError || answer.data?.data.ok === false', 'fetching again after failing'],
+    ['a mutation not yet run', 'answer.isPending || answer.isError || answer.data?.data.ok === false', 'an idle mutation'],
+  ])('judges live a gate that forgets %s', (_forgets, gate, state) => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return <Button disabled={${gate}}>x</Button>
+}`)
+
+    expect(result.shut).toEqual([])
+    expect(result.live).toHaveLength(1)
+    expect(result.live[0]).toContain(`(${state})`)
+  })
+
+  it('does not judge shut a gate on a field only a query has, since the hook may be a mutation', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return <Button disabled={answer.isFetching || answer.data === undefined}>x</Button>
+}`)
+
+    // Shut in every query state; a mutation's result has no `isFetching`.
+    expect(result.shut).toEqual([])
+    expect(result.live).toEqual([])
+    expect([...result.unjudgeable.values()].join('\n')).toContain('reads answer.isFetching, which nothing here can answer (an idle mutation)')
+  })
+
+  it('does not answer a field the result does not have', () => {
+    const result = probe(`export function Probe() {
+  const answer = useProbeAnswer()
+  return <Button disabled={answer.hasNextPage === undefined || answer.data?.data === null}>x</Button>
+}`)
+
+    // Answered as `undefined`, the first clause would be true, and the gate shut.
+    expect(result.shut).toEqual([])
+    expect([...result.unjudgeable.values()].join('\n')).toContain('reads answer.hasNextPage')
   })
 
   it('resolves each component’s constants in that component, not in the first one', () => {
@@ -1692,7 +2018,8 @@ export function Probe() {
   })
 
   /*
-   * Every other way a name can be bound inside a component. In each the gate
+   * Other ways a name can be bound inside a component: the ones attacks on
+   * this file tried, not every one the language has. In each the gate
    * reads the inner binding; judged on the component's constant instead, it
    * would be shut, a verdict about a value the control never reads. The last
    * three were judged shut at 2453cce, when this file still read bindings
