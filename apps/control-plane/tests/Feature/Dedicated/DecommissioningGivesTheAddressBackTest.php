@@ -198,6 +198,11 @@ final class DecommissioningGivesTheAddressBackTest extends TestCase
         [$assignment] = $this->wear($this->server, 1);
         $this->terminate()->assertStatus(202);
 
+        // The expectation is the day the request was made, on a clock that
+        // cannot cross midnight while the request runs (F-44's shape).
+        $this->freezeTime();
+        $asked = now()->toImmutable();
+
         $this->actingAs($this->operator())
             ->postJson('/api/admin/dedicated/'.$this->server->getKey().'/return-to-stock', [
                 'evidence' => 'Disks wiped with a three-pass erase, verified from the console.',
@@ -208,7 +213,7 @@ final class DecommissioningGivesTheAddressBackTest extends TestCase
         $address = IpAddress::query()->findOrFail($assignment->ip_address_id);
         $this->assertSame(IpAddressStatus::Quarantined, $address->status);
         $this->assertNotNull($address->quarantined_until, 'The machine is empty and its address is still held.');
-        $this->assertSame(now()->addDays(7)->toDateString(), $address->quarantined_until->toDateString());
+        $this->assertSame($asked->addDays(7)->toDateString(), $address->quarantined_until->toDateString());
 
         $this->travel(8)->days();
 
@@ -230,6 +235,11 @@ final class DecommissioningGivesTheAddressBackTest extends TestCase
 
         $operator = $this->operator();
 
+        // The expectation is the day the request was made, on a clock that
+        // cannot cross midnight while the request runs (F-44's shape).
+        $this->freezeTime();
+        $asked = now()->toImmutable();
+
         $this->actingAs($operator)
             ->postJson('/api/admin/dedicated/'.$this->server->getKey().'/retire', [
                 'evidence' => 'Board failed; chassis sent for disposal, disks shredded on site.',
@@ -241,7 +251,7 @@ final class DecommissioningGivesTheAddressBackTest extends TestCase
         $this->assertSame(DedicatedServerStatus::Retired, $this->server->refresh()->status);
 
         $address = IpAddress::query()->findOrFail($assignment->ip_address_id);
-        $this->assertSame(now()->addDays(7)->toDateString(), $address->quarantined_until?->toDateString());
+        $this->assertSame($asked->addDays(7)->toDateString(), $address->quarantined_until?->toDateString());
 
         $entry = AuditEntry::query()->where('action', AuditAction::DedicatedServerRetired)->sole();
 
