@@ -11,6 +11,7 @@ use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Domains\Application\Listeners\RegisterDomainOnPayment;
 use Lynomia\Modules\Monitoring\Application\Listeners\RecordScheduledRun;
@@ -38,6 +39,7 @@ use Lynomia\Modules\SharedHosting\Application\Listeners\InstallWordPressOnceTheA
 use Lynomia\Modules\Subscriptions\Application\Listeners\EndTheSubscriptionWithItsService;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Listeners\RestorePlanOnVoidedUpgrade;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
 use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
@@ -55,6 +57,8 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  *                               the subscription, create the service and ask
  *                               for it to be built
  *     RefundIssued            → record the refund against the invoice it came off
+ *     InvoiceVoided           → put a subscription whose plan-change invoice
+ *                               was voided back on the plan it was paid at
  *     InvoiceRefunded         → record on the order that its money went back,
  *                               and nothing else (F-19)
  *     PaymentFailed           → start dunning on a renewal; record the decline
@@ -130,6 +134,15 @@ final class EventServiceProvider extends BaseEventServiceProvider
         ],
         RefundIssued::class => [
             RecordRefundAgainstTheInvoice::class,
+        ],
+        InvoiceVoided::class => [
+            /*
+             * A voided plan-change invoice is an upgrade that will never be
+             * paid for: the subscription goes back to the plan and amount it
+             * was paid at, instead of renewing as the plan it never bought.
+             * Synchronous, inside the void's transaction - see InvoiceVoided.
+             */
+            RestorePlanOnVoidedUpgrade::class,
         ],
         InvoiceRefunded::class => [
             // The money only. The service is kept, and what the order holds

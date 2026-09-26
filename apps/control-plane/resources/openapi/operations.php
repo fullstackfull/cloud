@@ -1204,8 +1204,8 @@ return [
     'api.v1.subscriptions.plan' => [
         'tag' => 'Billing',
         'summary' => 'Change a subscription\'s plan',
-        'description' => 'Mid-cycle. The unused remainder of the old plan is credited and the same remainder charged at the new one, through one proration call - so an upgrade and an immediate downgrade net to zero. The billing anniversary does not move: a plan change is not a renewal.',
-        'body' => ['plan_id', 'price_id', 'units'],
+        'description' => 'Mid-cycle. The unused remainder of the old plan is credited and the same remainder charged at the new one, through one proration call, at the unit count the subscription already holds - the count the plan-options quote priced; `units` is refused. An upgrade leaves an invoice and the machine is resized to what that invoice bought once it is paid; a downgrade credits the wallet with no more than the period collected. Refused (409 `subscription.plan_change_refused`) while an invoice for the subscription is open, and onto a plan that is sold out or at the account\'s limit. The move and its invoice or credit commit together. The billing anniversary does not move: a plan change is not a renewal.',
+        'body' => ['plan_id', 'price_id'],
         'response' => $one('PlanChange'),
     ],
     'api.admin.invoices.void' => [

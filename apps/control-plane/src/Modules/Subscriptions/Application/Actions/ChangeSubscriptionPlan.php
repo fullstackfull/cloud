@@ -17,6 +17,8 @@ use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\BillableLine;
 use Lynomia\Modules\Subscriptions\Application\DTOs\ProrationPlan;
+use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
+use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\IncompatibleBillingPeriodException;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\SubscriptionNotChangeableException;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -33,6 +35,16 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * opposite signs and net to exactly zero, rather than leaking a fils on every
  * change.
  *
+ * The credit is the one figure that can come out lower than the arithmetic:
+ * it is held under {@see MoneyCollectedForThePeriod::ceilCredit()}, which
+ * only bites when the period's money did not all arrive.
+ *
+ * This action moves the plan and prices the move; it does not settle the
+ * money. {@see ApplyPlanChange} calls it inside the transaction that writes
+ * the invoice or the credit, so the move and its money commit together. On
+ * its own it commits a move with no money behind it, which is the state F-01
+ * was about.
+ *
  * The period boundaries themselves never move. A plan change is not a renewal:
  * the customer keeps their billing anniversary, and the next invoice arrives
  * when it always would have.
@@ -41,6 +53,8 @@ final readonly class ChangeSubscriptionPlan
 {
     public function __construct(
         private PricingEngine $pricing,
+        private MoneyCollectedForThePeriod $collected,
+        private UnpaidUpgrade $unpaid,
     ) {}
 
     /**
@@ -93,11 +107,26 @@ final readonly class ChangeSubscriptionPlan
             $count = $units ?? $this->unitsOn($locked);
             $newRecurring = $newPrice->recurring()->multipliedBy($count);
 
-            $credit = $this->pricing
-                ->prorate($locked->recurringAmount(), $periodStart, $periodEnd, $now)
-                ->negated();
-
             $charge = $this->pricing->prorate($newRecurring, $periodStart, $periodEnd, $now);
+
+            /*
+             * The unused remainder of the plan being left, held under the
+             * period's ceiling: a downgrade returns no more than the period
+             * collected, less what earlier changes already returned. The
+             * recurring amount says what a plan costs, not what was paid for
+             * it, and pricing the credit from it alone minted wallet balance
+             * out of upgrades nobody paid for (F-01). And the remainder is of
+             * the amount the subscription has paid for: while the change that
+             * put it on this plan is unpaid (or voided without being undone),
+             * that is the amount it came from, not the one it moved to.
+             */
+            $credit = $this->collected
+                ->ceilCredit(
+                    $this->pricing->prorate($this->unpaid->recurringPaidFor($locked), $periodStart, $periodEnd, $now),
+                    $charge,
+                    $locked,
+                )
+                ->negated();
 
             $outgoingPlan = $locked->plan?->nameFor(app()->getLocale()) ?? 'previous plan';
             $incomingPlan = $newPlan->nameFor(app()->getLocale());

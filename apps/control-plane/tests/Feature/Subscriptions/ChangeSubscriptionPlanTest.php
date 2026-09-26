@@ -7,6 +7,8 @@ namespace Tests\Feature\Subscriptions;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
@@ -77,10 +79,19 @@ final class ChangeSubscriptionPlanTest extends TestCase
         [$large, $largePrice] = $this->plan('CX-8', 21777);
 
         $subscription = $this->subscriptionOn($small, 9333, '2026-02-01 00:00:00');
+        $this->paidFor($subscription, InvoiceItemKind::Plan, 9333, '2026-02-01 00:00:00');
 
         $this->travelTo(CarbonImmutable::parse('2026-02-14 07:13:11'));
 
         $up = $this->change->execute($subscription, $large, $largePrice);
+        /*
+         * The upgrade is paid for before it is undone. Round three held the
+         * downgrade credit under what the period actually collected, so an
+         * unpaid upgrade no longer nets to zero - it nets to what was paid,
+         * which is the point (F-01). The symmetry this test pins is of the
+         * arithmetic, over money that arrived.
+         */
+        $this->paidFor($subscription, InvoiceItemKind::Proration, $up->net()->minorUnits(), '2026-02-14 07:13:11');
         $down = $this->change->execute($subscription->refresh(), $small, $smallPrice);
 
         $this->assertTrue($up->net()->plus($down->net())->isZero());
@@ -100,10 +111,13 @@ final class ChangeSubscriptionPlanTest extends TestCase
 
         // Two servers of the small plan: the subscription bills 2 x 9.000.
         $subscription = $this->subscriptionOn($small, 18000, '2026-02-01 00:00:00');
+        $this->paidFor($subscription, InvoiceItemKind::Plan, 18000, '2026-02-01 00:00:00');
 
         $this->travelTo(CarbonImmutable::parse('2026-02-15 00:00:00'));
 
         $proration = $this->change->execute($subscription, $large, $largePrice);
+        // Paid, so the round trip below is over money that arrived.
+        $this->paidFor($subscription, InvoiceItemKind::Proration, $proration->net()->minorUnits(), '2026-02-15 00:00:00');
 
         // Half of February, at two units of each plan.
         $this->assertSame('-9.000', $proration->credit->toDecimalString());
@@ -239,6 +253,33 @@ final class ChangeSubscriptionPlanTest extends TestCase
         ]);
 
         return [$plan, $price];
+    }
+
+    /**
+     * A paid invoice against the subscription, with one line starting at the
+     * given instant - a renewal (Plan) or a plan change's (Proration).
+     */
+    private function paidFor(Subscription $subscription, InvoiceItemKind $kind, int $minor, string $from): void
+    {
+        $invoice = Invoice::factory()->paid()->create([
+            'customer_id' => $subscription->customer_id,
+            'subscription_id' => $subscription->getKey(),
+            'subtotal_minor' => $minor,
+            'total_minor' => $minor,
+            'amount_paid_minor' => $minor,
+        ]);
+
+        InvoiceItem::query()->create([
+            'invoice_id' => $invoice->getKey(),
+            'kind' => $kind,
+            'description' => $kind->value,
+            'quantity' => 1,
+            'unit_amount_minor' => $minor,
+            'total_minor' => $minor,
+            'period_start' => CarbonImmutable::parse($from),
+            'period_end' => $subscription->current_period_end,
+            'subscription_id' => $subscription->getKey(),
+        ]);
     }
 
     private function subscriptionOn(Plan $plan, int $recurringMinor, string $periodStart): Subscription

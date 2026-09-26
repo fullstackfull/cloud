@@ -6,12 +6,18 @@ namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
@@ -49,13 +55,32 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * Which plan gets built
  * ---------------------------------------------------------------------------
  *
- * The shape is re-derived from the plan the subscription holds now, not from
- * the invoice, which records money rather than resources. The subscription was
- * moved onto the target plan when the change was requested, so in the ordinary
- * case the two are the same. Where they are not — a second plan change while
- * the first invoice was still open — the current plan is the right answer
- * anyway: the machine should end up matching what the customer is being billed
- * for, not an instruction that has since been superseded.
+ * The one this invoice paid for, read from the {@see PlanChange} row that
+ * ApplyPlanChange wrote in the same transaction as the invoice: its target
+ * plan and the shape the quote stated. Not the plan the subscription holds
+ * when the money arrives. This used to read the subscription, on the theory
+ * that "the current plan is the right answer anyway", and the re-audit paid a
+ * 0.667 KWD invoice for small -> mid and was handed the 90.000 KWD large plan
+ * a later, unpaid change had moved the subscription onto (F-01).
+ *
+ * A later change can still make this invoice's shape the wrong one to build.
+ * If a change recorded after it has already been settled - it owed nothing
+ * and queued its own resize, or its own invoice was paid - that change
+ * decides the machine, and this one builds nothing. If every later change is
+ * still waiting on its invoice, this one is the newest thing paid for, and it
+ * is built.
+ *
+ * A proration invoice with no recorded change can only be one issued before
+ * the record existed: every change since writes its row in the transaction
+ * that issues its invoice. The old rule allowed further changes while such an
+ * invoice was open, so the plan the subscription holds now is not
+ * necessarily what it bought (small -> mid, then mid -> large, then only the
+ * first invoice paid). What it bought is read from the plan_changed audit
+ * entry the old code wrote beside it, which names the invoice and the plan it
+ * moved to. When a later proration invoice has already been paid, that one
+ * decides the machine and this builds nothing. When the audit entry cannot be
+ * found, the subscription's plan is built only if no later proration invoice
+ * exists - otherwise nothing is built, and the log says why, for an operator.
  *
  * Queued on payments beside the other settlement work, and idempotent twice
  * over: the provisioning job is keyed on the invoice that paid for it, so a
@@ -101,15 +126,47 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return;
         }
 
+        $change = PlanChange::query()->where('proration_invoice_id', $event->invoiceId)->first();
+
+        if ($change === null) {
+            $this->buildForAnInvoiceIssuedBeforeTheRecord($event);
+
+            return;
+        }
+
+        $subscription = Subscription::query()->find($change->subscription_id);
+
+        if ($subscription === null || $change->to_plan_id === null) {
+            Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $change->subscription_id,
+            ]);
+
+            return;
+        }
+
+        if ($this->aLaterChangeHasBeenSettled($change)) {
+            return;
+        }
+
+        $this->queueAtProvider->execute(
+            subscription: $subscription,
+            planId: $change->to_plan_id,
+            resources: PlanResources::fromArray($change->resources),
+            idempotencyKey: 'invoice:'.$event->invoiceId,
+        );
+    }
+
+    /**
+     * A proration invoice issued before `subscription_plan_changes` existed:
+     * build what it bought, read from the old code's audit entry.
+     */
+    private function buildForAnInvoiceIssuedBeforeTheRecord(InvoicePaid $event): void
+    {
         $subscription = Subscription::query()->find($event->subscriptionId);
 
         if ($subscription === null) {
-            /*
-             * Recorded rather than thrown, for the same reason its sibling on
-             * this event does: five retries cannot make the row reappear, and
-             * failing the job would leave a settled payment looking unhandled.
-             */
-            Log::warning('A paid proration invoice names a subscription that does not exist.', [
+            Log::warning('A paid proration invoice names a subscription that no longer exists.', [
                 'invoice_id' => $event->invoiceId,
                 'subscription_id' => $event->subscriptionId,
             ]);
@@ -117,7 +174,40 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return;
         }
 
-        $plan = $subscription->plan()->first();
+        $later = Invoice::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->where('id', '>', $event->invoiceId)
+            ->whereHas('items', static fn ($items) => $items->where('kind', InvoiceItemKind::Proration->value))
+            ->get(['id', 'status']);
+
+        if ($later->contains(static fn (Invoice $invoice): bool => $invoice->status === InvoiceStatus::Paid)) {
+            Log::info('A paid proration invoice predates the plan-change record and a later one is already paid; the later one decides the machine.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+            ]);
+
+            return;
+        }
+
+        $bought = AuditEntry::query()
+            ->where('action', AuditAction::PlanChanged->value)
+            ->where('context->proration_invoice_id', $event->invoiceId)
+            ->latest('id')
+            ->first();
+
+        $planId = is_array($bought?->context) ? ($bought->context['to_plan_id'] ?? null) : null;
+        $plan = is_string($planId) ? Plan::query()->find($planId) : null;
+
+        if ($plan === null && $later->isNotEmpty()) {
+            Log::warning('A paid proration invoice predates the plan-change record, what it bought cannot be established, and a later plan change followed it; nothing was built.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+            ]);
+
+            return;
+        }
+
+        $plan ??= $subscription->plan()->first();
 
         if ($plan === null) {
             Log::warning('A paid proration invoice names a subscription with no plan.', [
@@ -134,5 +224,29 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             resources: PlanResources::fromArray($plan->resources),
             idempotencyKey: 'invoice:'.$event->invoiceId,
         );
+    }
+
+    /**
+     * Whether a plan change made after this one has already been settled -
+     * it owed nothing, or its invoice was paid - and so has queued the
+     * machine's shape itself.
+     */
+    private function aLaterChangeHasBeenSettled(PlanChange $change): bool
+    {
+        return PlanChange::query()
+            ->where('subscription_id', $change->subscription_id)
+            ->where(static fn ($later) => $later
+                ->where('changed_at', '>', $change->changed_at)
+                ->orWhere(static fn ($same) => $same
+                    ->where('changed_at', $change->changed_at)
+                    ->where('id', '>', $change->id)))
+            ->where(static fn ($settled) => $settled
+                ->whereNull('proration_invoice_id')
+                ->orWhereExists(static fn ($paid) => $paid
+                    ->selectRaw('1')
+                    ->from('invoices')
+                    ->whereColumn('invoices.id', 'subscription_plan_changes.proration_invoice_id')
+                    ->where('invoices.status', InvoiceStatus::Paid->value)))
+            ->exists();
     }
 }

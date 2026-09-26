@@ -202,7 +202,6 @@ final class SubscriptionController
             subscription: $found,
             plan: $plan,
             price: $price,
-            units: $request->units(),
             idempotencyKey: $request->idempotencyKey(),
             /*
              * Who is changing the plan, carried through because a downgrade

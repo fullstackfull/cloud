@@ -8,16 +8,24 @@ use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\BillableLine;
 use Lynomia\Modules\Subscriptions\Application\DTOs\RenewalPlan;
+use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\SubscriptionNotRenewableException;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Repositories\CouponTermsRepository;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Advances a subscription into its next period and describes what to bill for
@@ -46,6 +54,9 @@ final readonly class RenewSubscription
 {
     public function __construct(
         private CouponTermsRepository $coupons,
+        private UnpaidUpgrade $unpaid,
+        private VoidInvoice $voidInvoice,
+        private WalletLedger $wallet,
     ) {}
 
     /**
@@ -59,6 +70,19 @@ final readonly class RenewSubscription
         $now = $at !== null ? CarbonImmutable::instance($at) : CarbonImmutable::now();
 
         return DB::transaction(function () use ($subscription, $now): ?RenewalPlan {
+            /*
+             * An upgrade still unpaid at the renewal lapses (below), which
+             * voids its invoice. VoidInvoice locks the invoice and then the
+             * subscription; the invoice is locked here first, before the
+             * subscription, so a renewal and an operator's void of the same
+             * invoice take the two rows in the same order.
+             */
+            $lapsing = $this->unpaid->openInvoiceOf($subscription);
+
+            if ($lapsing !== null) {
+                Invoice::query()->lockForUpdate()->find($lapsing->getKey());
+            }
+
             /** @var Subscription $locked */
             $locked = Subscription::query()
                 ->with('plan')
@@ -112,6 +136,31 @@ final readonly class RenewSubscription
 
             if ($dueAt->greaterThan($now)) {
                 return null;
+            }
+
+            /*
+             * An upgrade whose invoice is not paid in full by the time the next
+             * period is billed lapses - here, when the renewal is issued, which
+             * is at next_invoice_at and so may be before the period's end if
+             * this subscription invoices ahead. In this transaction, before the
+             * new period is billed: whatever was paid on the invoice goes back
+             * to the wallet, the invoice is voided, and the subscription goes
+             * back to the plan it has paid for.
+             *
+             * Renewing it instead - at either amount - let the customer pay
+             * the small proration invoice after the renewal and be built a
+             * whole period of the bigger plan, month after month (re-audit,
+             * B1). Leaving a part-paid invoice alone did the same with one fils
+             * paid first (re-audit, n06). A void invoice cannot be paid, so the
+             * upgrade cannot be revived afterwards.
+             */
+            $open = $this->unpaid->openInvoiceOf($locked);
+
+            if ($open !== null) {
+                $this->lapse($open);
+
+                /** @var Subscription $locked */
+                $locked = Subscription::query()->with('plan')->findOrFail($locked->getKey());
             }
 
             // Measured before anything moves: how far ahead of the period end
@@ -170,21 +219,85 @@ final readonly class RenewSubscription
         });
     }
 
+    /**
+     * The renewal bills the plan the subscription has paid for.
+     *
+     * That is the plan it is on, except while the plan change that moved it
+     * there is still waiting on its invoice. An upgrade moves the recurring
+     * amount the moment it is confirmed and hands over nothing until its
+     * invoice settles; renewing at the new amount before then billed a whole
+     * period of the bigger plan for a machine still running the smaller one,
+     * and left the customer two open invoices for one upgrade. An upgrade
+     * with an open invoice lapses before this is reached (see execute()); one
+     * whose invoice was never paid and is not open - uncollectible, or voided
+     * without being undone - is billed at what the subscription carried
+     * before the change. Once its invoice is paid, the next renewal bills the
+     * new plan.
+     */
     private function renewalLine(Subscription $subscription): BillableLine
     {
-        $description = $subscription->plan?->nameFor(app()->getLocale()) ?? 'Subscription renewal';
+        $unpaid = $this->unpaid->onto($subscription);
+
+        $billed = $unpaid === null
+            ? $subscription->plan
+            : Plan::query()->find($unpaid->from_plan_id);
+
+        $description = $billed?->nameFor(app()->getLocale()) ?? 'Subscription renewal';
 
         return new BillableLine(
             InvoiceItemKind::Plan,
             new PricingLine(
                 description: $description,
                 quantity: 1,
-                unitPrice: $subscription->recurringAmount(),
+                unitPrice: $unpaid === null
+                    ? $subscription->recurringAmount()
+                    : Money::ofMinor((int) $unpaid->from_recurring_amount_minor, $subscription->currency),
                 // Never on a renewal: standing the service up was a one-off
                 // charged with the first order.
                 setupFee: Money::zero($subscription->currency),
             ),
         );
+    }
+
+    /**
+     * Return what was paid on a lapsing upgrade's invoice, then void it.
+     *
+     * The money goes to the wallet as a top-up recorded against the invoice
+     * (`invoice_id`), which is how the platform records stored value it holds
+     * for an invoice that no delivery claims - and what stops the same money
+     * also being refunded to the card afterwards. Only what the invoice still
+     * holds is returned: what it took, less what was refunded, less what was
+     * already credited to the wallet against it. The ledger key names the
+     * invoice and the amount, so a retried renewal credits it once.
+     */
+    private function lapse(Invoice $invoice): void
+    {
+        $held = $invoice->amount_paid_minor
+            - $invoice->amount_refunded_minor
+            - (int) WalletTransaction::query()
+                ->where('invoice_id', $invoice->getKey())
+                ->where('kind', WalletTransactionKind::Topup->value)
+                ->sum('amount_minor');
+
+        if ($held > 0) {
+            /** @var Customer $customer */
+            $customer = $invoice->customer()->firstOrFail();
+
+            $this->wallet->credit(
+                wallet: $this->wallet->walletFor($customer, $invoice->currency),
+                amount: Money::ofMinor($held, $invoice->currency),
+                kind: WalletTransactionKind::Topup,
+                description: sprintf('Payment for invoice %s returned: the upgrade lapsed unpaid', $invoice->number),
+                metadata: [
+                    'invoice_id' => (string) $invoice->getKey(),
+                    'reason' => 'plan_change_lapsed',
+                ],
+                idempotencyKey: sprintf('invoice:%s:lapsed-upgrade:%d', $invoice->getKey(), $invoice->amount_paid_minor),
+                invoiceId: (string) $invoice->getKey(),
+            );
+        }
+
+        $this->voidInvoice->execute($invoice, 'The upgrade was not paid for in full before the next period was billed.');
     }
 
     /**

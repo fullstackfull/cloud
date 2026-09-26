@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -179,10 +180,23 @@ final readonly class QueuePlanChangeAtProvider
         );
     }
 
+    /**
+     * Dispatched once the caller's transaction commits, and at once when
+     * there is none.
+     *
+     * ApplyPlanChange writes the job row inside the transaction that moves the
+     * plan and settles its money. A worker handed the job before that commit
+     * would find no row - or, if the transaction then rolled back, would
+     * resize a machine for a plan change that never happened.
+     */
     private function dispatch(ProvisioningJob $job): ProvisioningJob
     {
         if ($job->wasRecentlyCreated) {
-            RunProvisioningJob::dispatch((string) $job->getKey());
+            $id = (string) $job->getKey();
+
+            DB::afterCommit(static function () use ($id): void {
+                RunProvisioningJob::dispatch($id);
+            });
         }
 
         return $job;

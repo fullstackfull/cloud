@@ -6,15 +6,21 @@ namespace Lynomia\Modules\Subscriptions\Application\Actions;
 
 use Carbon\CarbonImmutable;
 use DateTimeImmutable;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
+use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
+use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -31,7 +37,9 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * {@see ChangeSubscriptionPlan} makes when the change is applied, against the
  * same period boundaries and the same instant. The quote and the invoice are
  * therefore not two calculations that ought to agree — they are one
- * calculation performed twice.
+ * calculation performed twice. The credit on both sides is also held under
+ * the same ceiling, {@see MoneyCollectedForThePeriod::ceilCredit()}: a
+ * downgrade gives back no more than the period collected.
  *
  * A portal that computed proration itself would be a second implementation of
  * the platform's money rules, in a language with one numeric type, running on
@@ -53,6 +61,9 @@ final readonly class QuotePlanChange
 {
     public function __construct(
         private PricingEngine $pricing,
+        private PlanCapacity $capacity,
+        private MoneyCollectedForThePeriod $collected,
+        private UnpaidUpgrade $unpaid,
     ) {}
 
     /**
@@ -71,9 +82,25 @@ final readonly class QuotePlanChange
         $current = $this->currentResources($subscription, $service);
         $target = PlanResources::fromArray($plan->resources);
 
-        $refusals = $this->refusals($subscription, $plan, $price, $current, $target, $service);
+        $knownUnits = $this->unitsOn($subscription);
+        // Priced at one unit only for display; a count that cannot be derived
+        // is refused below, so nothing is ever executed at this figure.
+        $units = $knownUnits ?? 1;
 
-        $units = $this->unitsOn($subscription);
+        $refusals = $this->refusals($subscription, $plan, $price, $current, $target, $service, $units);
+
+        if ($knownUnits === null) {
+            /*
+             * The subscription bills a figure that is not a whole multiple of
+             * its plan's price (a grandfathered price), so how many units it
+             * holds cannot be derived. ChangeSubscriptionPlan refuses to guess,
+             * and the request cannot name a count; the options screen used to
+             * offer the change anyway and the confirmation then failed with an
+             * unrelated error. Refused here, so both say the same thing.
+             */
+            $refusals[] = PlanChangeRefusal::UnitCountUnknown;
+        }
+
         $newRecurring = $price->recurring()->multipliedBy($units);
 
         /*
@@ -84,7 +111,8 @@ final readonly class QuotePlanChange
          */
         $credit = $refusals === []
             ? $this->pricing->prorate(
-                $subscription->recurringAmount(),
+                // What was paid for; see ChangeSubscriptionPlan.
+                $this->unpaid->recurringPaidFor($subscription),
                 $subscription->current_period_start,
                 $subscription->current_period_end,
                 $now,
@@ -99,6 +127,13 @@ final readonly class QuotePlanChange
                 $now,
             )
             : Money::zero($subscription->currency);
+
+        /*
+         * The same ceiling ChangeSubscriptionPlan applies, so the credit the
+         * customer is shown is the credit they will get: never more than the
+         * period collected, less what earlier changes already gave back.
+         */
+        $credit = $this->collected->ceilCredit($credit, $charge, $subscription);
 
         return new PlanChangeQuote(
             planId: (string) $plan->getKey(),
@@ -123,6 +158,7 @@ final readonly class QuotePlanChange
             changesInfrastructure: $current->differsFrom($target),
             refusals: $refusals,
             warnings: $this->warnings($current, $target),
+            units: $units,
         );
     }
 
@@ -186,6 +222,7 @@ final readonly class QuotePlanChange
         PlanResources $current,
         PlanResources $target,
         ?Service $service,
+        int $units,
     ): array {
         $refusals = [];
 
@@ -252,6 +289,35 @@ final readonly class QuotePlanChange
 
         if ($service !== null && $this->serviceIsBusy($service)) {
             $refusals[] = PlanChangeRefusal::ServiceBusy;
+        }
+
+        if ($this->hasAnOpenInvoice($subscription)) {
+            /*
+             * The plan this subscription is on is not paid for yet - most
+             * often because the last upgrade's invoice is open. A move priced
+             * from it would price money that has not arrived: the re-audit
+             * flapped small -> large -> small, paid nothing and was credited
+             * 162.000 KWD. Pay, or have it voided, and the change is available.
+             */
+            $refusals[] = PlanChangeRefusal::InvoiceOutstanding;
+        }
+
+        if ($plan->getKey() !== $subscription->plan_id) {
+            /** @var Customer|null $customer */
+            $customer = $subscription->customer()->first();
+
+            /*
+             * The courtesy read. ApplyPlanChange asks the same question again
+             * under the plan row's lock, inside the transaction that moves the
+             * subscription, which is the answer that actually holds.
+             */
+            $shortfall = $customer === null ? null : $this->capacity->shortfall($plan, $units, $customer);
+
+            if ($shortfall === PlanCapacity::OUT_OF_STOCK) {
+                $refusals[] = PlanChangeRefusal::OutOfStock;
+            } elseif ($shortfall === PlanCapacity::PER_CUSTOMER_LIMIT) {
+                $refusals[] = PlanChangeRefusal::PerCustomerLimit;
+            }
         }
 
         return array_values(array_unique($refusals, SORT_REGULAR));
@@ -330,13 +396,30 @@ final readonly class QuotePlanChange
     }
 
     /**
+     * Whether an invoice issued against this subscription is still waiting
+     * to be paid.
+     */
+    private function hasAnOpenInvoice(Subscription $subscription): bool
+    {
+        $collectible = array_values(array_map(
+            static fn (InvoiceStatus $status): string => $status->value,
+            array_filter(InvoiceStatus::cases(), static fn (InvoiceStatus $status): bool => $status->isCollectible()),
+        ));
+
+        return Invoice::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->whereIn('status', $collectible)
+            ->exists();
+    }
+
+    /**
      * How many units of its plan a subscription pays for.
      *
      * The same division ChangeSubscriptionPlan makes, and for the same reason:
      * a three-server subscription quoted at one unit of the new plan would
      * show the customer a third of what they are about to be charged.
      */
-    private function unitsOn(Subscription $subscription): int
+    private function unitsOn(Subscription $subscription): ?int
     {
         if ($subscription->recurring_amount_minor === 0) {
             return 1;
@@ -352,6 +435,6 @@ final readonly class QuotePlanChange
 
         return $unit > 0 && $subscription->recurring_amount_minor % $unit === 0
             ? intdiv($subscription->recurring_amount_minor, $unit)
-            : 1;
+            : null;
     }
 }
