@@ -65,6 +65,7 @@ final readonly class IngestWebhookEvent
         private PaymentProviderRegistry $registry,
         private RecordPaymentCapture $recordCapture,
         private RecordPaymentFailure $recordFailure,
+        private SettleRefundFromProvider $settleRefund,
         private SecretRedactor $redactor,
     ) {}
 
@@ -160,10 +161,15 @@ final readonly class IngestWebhookEvent
         $transaction = match ($event->kind) {
             ProviderEventKind::PaymentSucceeded => $this->recordCapture->execute($provider->name(), $event),
             ProviderEventKind::PaymentFailed => $this->recordFailure->execute($provider->name(), $event),
-            // A refund's own webhook confirms a refund IssueRefund already
-            // recorded; there is nothing to create from it here. Recording and
-            // acknowledging it stops the provider redelivering.
-            ProviderEventKind::RefundSucceeded, ProviderEventKind::Unknown => null,
+            /*
+             * A refund's own webhook settles a refund IssueRefund recorded and
+             * the provider answered `pending`: nothing else ever moved such a
+             * row, so the money was promised to the customer, reserved against
+             * the capture, and never booked (SettleRefundFromProvider). One the
+             * provider answered final already is confirmed and left alone.
+             */
+            ProviderEventKind::RefundSucceeded => $this->settleRefund->execute($provider->name(), $event),
+            ProviderEventKind::Unknown => null,
         };
 
         $record->fill([

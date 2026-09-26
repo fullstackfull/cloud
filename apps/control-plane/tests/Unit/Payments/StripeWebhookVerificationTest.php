@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Payments;
 
 use Lynomia\Modules\Payments\Domain\Enums\ProviderEventKind;
+use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Infrastructure\Providers\StripePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
@@ -187,6 +188,44 @@ final class StripeWebhookVerificationTest extends TestCase
         // The transaction row was created from the intent, not the charge.
         $this->assertSame('pi_test_1', $event->providerReference);
         $this->assertTrue($event->amount?->equals(Money::ofMinor(2500, 'KWD')));
+    }
+
+    #[Test]
+    public function a_refund_update_names_the_refund_and_where_it_now_stands(): void
+    {
+        foreach (['refund.updated', 'charge.refund.updated'] as $type) {
+            foreach (['succeeded' => RefundStatus::Succeeded, 'failed' => RefundStatus::Failed, 'canceled' => RefundStatus::Cancelled, 'pending' => RefundStatus::Pending] as $stripe => $status) {
+                $event = $this->provider->parseWebhookEvent([
+                    'id' => 'evt_refund_'.$stripe,
+                    'type' => $type,
+                    'created' => time(),
+                    'data' => ['object' => [
+                        'id' => 're_test_1',
+                        'object' => 'refund',
+                        'payment_intent' => 'pi_test_1',
+                        'amount' => 2500,
+                        'currency' => 'kwd',
+                        'status' => $stripe,
+                    ]],
+                ]);
+
+                $this->assertNotNull($event);
+                $this->assertSame(ProviderEventKind::RefundSucceeded, $event->kind);
+                $this->assertSame('re_test_1', $event->refundReference, $type);
+                $this->assertSame($status, $event->refundStatus, $type.' '.$stripe);
+            }
+        }
+
+        // A charge.refunded carries the charge, and names no one refund.
+        $charge = $this->provider->parseWebhookEvent([
+            'id' => 'evt_refund_charge',
+            'type' => 'charge.refunded',
+            'created' => time(),
+            'data' => ['object' => ['id' => 'ch_test_1', 'object' => 'charge', 'payment_intent' => 'pi_test_1', 'amount' => 9000, 'currency' => 'kwd']],
+        ]);
+
+        $this->assertNull($charge?->refundReference);
+        $this->assertNull($charge?->refundStatus);
     }
 
     #[Test]

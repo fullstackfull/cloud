@@ -146,6 +146,12 @@ final readonly class IssueRefund
             'processed_at' => $result->status === RefundStatus::Succeeded ? now() : null,
         ])->save();
 
+        /*
+         * A refund answered pending is announced when the provider's own
+         * refund event settles it (SettleRefundFromProvider), which books it
+         * on the invoice the same way; one that fails there releases what it
+         * reserved.
+         */
         if ($result->status === RefundStatus::Succeeded) {
             event(new RefundIssued(
                 refundId: $refund->id,

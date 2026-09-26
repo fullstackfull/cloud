@@ -77,6 +77,14 @@ final class FakePaymentProvider implements PaymentProvider
         4 => 'processing_error',
     ];
 
+    /**
+     * The amount suffix a refund is answered `pending` for, as a real
+     * provider answers some refunds: accepted, and settled later by a
+     * `refund.updated` event (emitRefundUpdate()). Clear of DECLINE_CODES, so
+     * a payment of such an amount still succeeds.
+     */
+    private const int PENDING_REFUND_SUFFIX = 5;
+
     /** Ask the browser to visit the provider's own page. */
     public const string NEXT_ACTION_REDIRECT = 'redirect';
 
@@ -235,7 +243,9 @@ final class FakePaymentProvider implements PaymentProvider
             // here as well. A reference keyed on the parameters would hide the
             // very collision a real provider would silently make.
             reference: self::REFUND_PREFIX.substr(hash('sha256', $chargeReference.'|'.$idempotencyKey), 0, 24),
-            status: $failure !== null ? RefundStatus::Failed : RefundStatus::Succeeded,
+            status: $failure !== null
+                ? RefundStatus::Failed
+                : ($amount->minorUnits() % 100 === self::PENDING_REFUND_SUFFIX ? RefundStatus::Pending : RefundStatus::Succeeded),
             amount: $amount,
             failureReason: $failure,
             metadata: ['fake' => true, 'charge' => $chargeReference, 'reason' => $reason],
@@ -312,7 +322,33 @@ final class FakePaymentProvider implements PaymentProvider
             occurredAt: isset($payload['created']) && is_numeric($payload['created'])
                 ? CarbonImmutable::createFromTimestampUTC((int) $payload['created'])
                 : null,
+            refundReference: is_string($data['refund_reference'] ?? null) ? $data['refund_reference'] : null,
+            refundStatus: is_string($data['refund_status'] ?? null) ? RefundStatus::tryFrom($data['refund_status']) : null,
         );
+    }
+
+    /**
+     * The event a provider sends when a refund it answered `pending` settles
+     * (or fails): `refund.updated`, naming the refund and where it now stands,
+     * signed like every other webhook.
+     */
+    public function emitRefundUpdate(string $refundReference, RefundStatus $status, Money $amount, ?string $eventId = null): SignedWebhookPayload
+    {
+        $payload = [
+            'id' => $eventId ?? 'evt_fake_'.Str::lower((string) Str::ulid()),
+            'type' => 'refund.updated',
+            'created' => time(),
+            'data' => [
+                'reference' => $refundReference,
+                'refund_reference' => $refundReference,
+                'refund_status' => $status->value,
+                'amount_minor' => $amount->minorUnits(),
+                'currency' => $amount->currency(),
+                'metadata' => [],
+            ],
+        ];
+
+        return $this->signPayload(json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
     }
 
     /**
@@ -609,7 +645,7 @@ final class FakePaymentProvider implements PaymentProvider
         return match ($type) {
             'payment.succeeded' => ProviderEventKind::PaymentSucceeded,
             'payment.failed' => ProviderEventKind::PaymentFailed,
-            'refund.succeeded' => ProviderEventKind::RefundSucceeded,
+            'refund.succeeded', 'refund.updated' => ProviderEventKind::RefundSucceeded,
             default => ProviderEventKind::Unknown,
         };
     }
