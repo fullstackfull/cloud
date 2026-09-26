@@ -110,4 +110,4 @@ independent re-audit follows. The specification is
 | 07 | F-20 false rebuild label; F-42 vitest under load; F-21 gate budget | upheld with reservations; follow-up `46e5a17`; merged `0a4ffda`: vitest 642/642, tsc, eslint, Architecture 219/219 | `46e5a17` |
 | 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | upheld with reservations; follow-up before merge | `7faf903` |
 | 09 | F-38 `tofu validate` on no configuration; validator empty subjects and stale docstrings; CI grep exit codes | rejected again (lister comment sentence falsified), repairing | `c713457` |
-| 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | fixing | |
+| 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | verifying | `44990fd` |
