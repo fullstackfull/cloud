@@ -91,14 +91,25 @@ class ProxmoxConnectionTester extends HttpIdentityTester
      *    `Sys.Audit`, and a node's storage list shows only the pools the token
      *    may audit, so without `Datastore.Audit` the sync records no pool and
      *    the scheduler — which places only on recorded pools — places nothing.
-     *    `templates` needs the same privilege, so such a token is refused
-     *    either way; this entry is the one that names why placement fails.
+     *    `templates` is mapped to the same privilege, so such a token is
+     *    refused either way; this entry is the one that names why placement
+     *    fails.
+     *
+     * The privileges the storage list and `import-from=` check are this
+     * tester's reading of the Proxmox API; nothing in this repository
+     * verifies either against a cluster. If the API also admits
+     * `Datastore.AllocateSpace` where this map asks for `Datastore.Audit`,
+     * the map is stricter than it need be, which fails closed; the
+     * provisioning role grants both, so a token holding it is judged the same
+     * either way.
      *
      * `create` and `reinstall` ask for `VM.Config.Cloudinit` because every call
-     * that builds or rebuilds a machine hands the adapter a cloud-init config;
-     * the F-13 test reads every build call in both handlers' argument lists,
-     * and every other file for a build method named whole, to hold that
-     * premise.
+     * that builds or rebuilds a machine on a real hypervisor hands the adapter
+     * a cloud-init config; the only other file that builds one, a
+     * browser-suite seeder, does so on the fake hypervisor. The F-13 test
+     * reads every build call in both handlers' argument lists, and every other
+     * file for a build method named whole — called, or named in a string the
+     * way a callable names one — to hold that premise.
      *
      * Known to be short: `suspend` and `unsuspend` write `onboot` and `lock`,
      * which is `VM.Config.Options`, and ask here only for `VM.PowerMgmt`. No

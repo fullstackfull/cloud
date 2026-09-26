@@ -8,10 +8,7 @@ use FilesystemIterator;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -92,10 +89,12 @@ use Tests\TestCase;
  *     token short of any one mapped privilege does not. The converse is
  *     pinned too: the controlled hypervisor with every capability Supported
  *     reaches only ReadyForTest.
- *  4. `inventory_sync`. A token short of `Datastore.Audit` reads no storage
- *     pools, so the inventory sync records none, and the scheduler — which
- *     places only on recorded pools — places nothing. On Proxmox `templates`
- *     needs the same privilege, so such a token is refused either way;
+ *  4. `inventory_sync`. On the tester's reading of the Proxmox API — which
+ *     nothing in this repository verifies against a cluster — a token short
+ *     of `Datastore.Audit` reads no storage pools, so the inventory sync
+ *     records none, and the scheduler, which places only on recorded pools,
+ *     places nothing. The tester maps `templates` to the same privilege, so
+ *     such a token is refused either way;
  *     `inventory_sync` is the requirement that names why placement fails,
  *     and keeps the refusal if `templates` is ever settled some other way.
  *     It is a capability in four places (the category, the Proxmox
@@ -104,19 +103,22 @@ use Tests\TestCase;
  *     see all four removed together.
  *  5. The two premises the map rests on, each checked at source:
  *     - `create` and `reinstall` ask for `VM.Config.Cloudinit` because every
- *       call that builds or rebuilds a machine hands the adapter a
- *       cloud-init config. The cloud-init pin reads every call to either
- *       build method in each handler — not only the handler's own — token by
- *       token, so a comment or a string that merely quotes `cloudInit:` does
- *       not satisfy it. The caller set reads every file of the application
- *       and holds that no other file names a build method whole, apart from
- *       one browser-suite seeder whose every call is checked to be made on
- *       the fake hypervisor. And the map is held to its half: both build
+ *       call that builds or rebuilds a machine on a real hypervisor hands
+ *       the adapter a cloud-init config. The cloud-init pin reads every call
+ *       to either build method in each handler — not only the handler's own
+ *       — token by token, so a comment or a string that merely quotes
+ *       `cloudInit:` does not satisfy it. The caller set reads every file of
+ *       the application and holds that no other file names a build method
+ *       whole — called, taken as a callable, or named in a string the way PHP
+ *       and Laravel read a callable: alone, after `::` or after `@` — apart
+ *       from one browser-suite seeder whose every call is checked to be made
+ *       on the fake hypervisor. And the map is held to its half: both build
  *       capabilities still ask for `VM.Config.Cloudinit`.
  *     - `inventory_sync` is load-bearing because the inventory sync is the
  *       only production code that brings a ComputeStorage row into
- *       existence. The writer scan establishes that, and states exactly what
- *       it counts (below).
+ *       existence. The writer scan establishes that for every shape it
+ *       counts, and states exactly what those are and what it does not
+ *       count (below).
  *
  * ===========================================================================
  * WHAT THIS FILE DOES NOT REACH
@@ -138,7 +140,9 @@ use Tests\TestCase;
  *    still wrong for such a token, and that is recorded rather than fixed.
  *  - The cloud-init pin and the caller set see a build method only when its
  *    name is written whole: called or taken as a callable in any case, or
- *    named in a string. A name assembled at run time is invisible to both;
+ *    named in a string alone, after `::` or after `@` (`'Class@method'`, the
+ *    form Laravel's container calls). A name assembled at run time is
+ *    invisible to both;
  *    what stops that from removing cloud-init from the *last*
  *    machine-building call is the per-file backstop that each pinned file
  *    still calls its own method by name. So a hidden call site can add a
@@ -224,6 +228,12 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
 
     /** @var list<string>|null derived once per process: the files do not change under it */
     private static ?array $storageClasses = null;
+
+    /** @var list<string>|null derived once per process, like the storage classes */
+    private static ?array $relationClassNames = null;
+
+    /** @var array{kinds: array<string, string|null>, classes: list<string>}|null */
+    private static ?array $relationGrammar = null;
 
     protected function tearDown(): void
     {
@@ -461,28 +471,45 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         /*
          * WHAT THIS CHECK COUNTS. Every PHP file of the application is read
          * (src/, app/, database/, routes/, config/ and the rest — not tests/
-         * or vendor/). Comments are removed by the tokenizer and string
-         * literals are single tokens, so neither a comment nor a message
-         * quoting a creation can match or hide one. A file creates a
-         * ComputeStorage row when, in its code, any of these appears:
+         * or vendor/). Comments are removed by the tokenizer, so a comment can
+         * neither match nor hide a creation. A string literal is one token,
+         * read only where a shape below reads one — as SQL, a callable, a
+         * table name, or a name in a relation declaration: a sentence quoting
+         * `ComputeStorage::create(…)` matches nothing, and one quoting SQL
+         * that inserts into the table is counted, which fails closed. What a
+         * double-quoted string interpolates, `"{$node->storages()->create()}"`,
+         * is code and is read as code. A file creates a ComputeStorage row
+         * when, in its code, any of these appears:
          *
          *   ComputeStorage::<creator>(             static creator
          *   ComputeStorage::query()->…-><creator>( a query-built creator,
-         *                                          whatever comes before it
-         *   ->storages()->…-><creator>(            a relation, called or read as
-         *   ->storages->…-><creator>(              a property; its names derived
-         *                                          from the hasMany, hasOne,
-         *                                          morphMany, morphOne and
-         *                                          belongsToMany declarations
-         *                                          rather than listed
+         *                                          whatever comes before it on
+         *                                          the chain: calls, `::`
+         *                                          calls, indexes (`get()[0]`)
+         *                                          and property reads (`->map`)
+         *   ->storages()->…-><creator>(            a relation, called, read as
+         *   ->storages->…-><creator>(              a property or indexed, its
+         *   ->storages[0]->…-><creator>(           name written or in a literal
+         *                                          `->{'…'}`; its names
+         *                                          derived, not listed
+         *                                          (see relationsIn()): every
+         *                                          relation kind the model can
+         *                                          declare, belongsTo, the
+         *                                          *Through and morph kinds
+         *                                          included, one built by hand,
+         *                                          one narrowed from another,
+         *                                          and a has-through
          *   ->table('compute_storages')->…-><creator>(
+         *   ->from('compute_storages')->…-><creator>(
          *                                          the table, bypassing the
-         *                                          model, aliased or not
+         *                                          model, aliased or
+         *                                          schema-qualified or not
          *   new ComputeStorage                     an instance, saved or not
          *   [ComputeStorage::class, '<creator>']   a callable array, on the
          *   [<a chain above>, '<creator>']         class (or its name in a
          *                                          string) or on a chain
-         *   '…ComputeStorage::<creator>'           a callable string
+         *   '…ComputeStorage::<creator>'           a callable string, in PHP's
+         *   '…ComputeStorage@<creator>'            form or Laravel's
          *   'INSERT INTO compute_storages …'       SQL in a string: INSERT or
          *                                          MERGE INTO, or COPY … FROM
          *
@@ -494,13 +521,14 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
          * inside a file that declares one of them. `new class extends
          * ComputeStorage` counts as an instance.
          *
-         * <creator> is every method the framework's builders, relations,
-         * model and factories offer that makes a row, or an instance that
-         * saving makes into one — create…, insert…, upsert, …OrCreate, …OrNew,
-         * …OrInsert, save…, push…, make…, replicate…, newInstance — read off
-         * those classes by reflection rather than listed, matched in any case
-         * as PHP matches a method name, and read through a literal `->{'…'}(`
-         * too.
+         * <creator> is every method the framework's builders, relations
+         * (every class the model's relation-declaring methods return), model
+         * and factories offer whose name has one of the shapes of a method
+         * that makes a row, or an instance that saving makes into one —
+         * create…, insert…, upsert, …OrCreate, …OrNew, …OrInsert, save…,
+         * push…, make…, replicate…, newInstance — read off those classes by
+         * reflection rather than listed, matched in any case as PHP matches a
+         * method name, and read through a literal `->{'…'}(` too.
          *
          * One chain is not a creator: a row found by its id (find, findOrFail,
          * findMany), filled or not, and saved or pushed. That writes the row
@@ -513,11 +541,15 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
          * WHAT IT DOES NOT COUNT: anything reached through a variable — one
          * holding the class name, a query, a relation, an instance or a method
          * name, `$this` included (`$query->create(…)`,
-         * `$storage->replicate()->save()`, `->$method(…)`); the class name used
-         * as a value other than in a callable (`app(ComputeStorage::class)`,
-         * `class_alias(…)`); any name or SQL assembled at run time; and code
-         * in a Blade template, which the tokenizer reads as text. Each of
-         * those needs to know what a value will be, which a token scan cannot.
+         * `$storage->replicate()->save()`, `->$method(…)`), and a relation
+         * declared from one (`$this->newHasMany($instance->newQuery(), …)`);
+         * the class name used as a value other than in a callable or a
+         * relation declaration (`app(ComputeStorage::class)`,
+         * `class_alias(…)`); a mixin (`Builder::mixin(…)`), whose methods
+         * become macros only at run time; any name or SQL assembled at run
+         * time; and code in a Blade template, which the tokenizer reads as
+         * text. Each of those needs to know what a value will be, which a
+         * token scan cannot.
          */
         $relations = $this->storageRelations();
 
@@ -592,6 +624,20 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'new self, inside a subclass' => ["class Pool extends ComputeStorage {\n    public static function adopt(): self { return new self; }\n}", true];
         yield 'a factory of the model' => ["class PoolFactory extends Factory { protected \$model = ComputeStorage::class; }\nPoolFactory::new()->count(2)->create();", true];
         yield 'the model\'s own factory' => ['ComputeStorage::factory()->createOne();', true];
+        yield 'found rows indexed, replicated and saved' => ['ComputeStorage::query()->whereKey($id)->get()[0]->replicate()->save();', true];
+        yield 'found rows through a higher-order proxy' => ['ComputeStorage::query()->whereKey($id)->get()->map->replicate()->each->save();', true];
+        yield 'a relation read as a property and indexed' => ['$node->storages[0]->replicate()->save();', true];
+        yield 'a static call on what the chain returned' => ['ComputeStorage::query()->first()::create([]);', true];
+        yield 'a property named in a literal, then a creator' => ["ComputeStorage::query()->get()->{'map'}->replicate()->each->save();", true];
+        yield 'a relation named in a literal' => ["\$node->{'storages'}()->create([]);", true];
+        yield 'the table, schema-qualified' => ["DB::table('public.compute_storages')->insert([]);", true];
+        yield 'the table named in from()' => ["DB::query()->from('compute_storages')->insert([]);", true];
+        yield 'a callable string in Laravel\'s form' => ["app()->call('Lynomia\\Modules\\Compute\\Infrastructure\\Models\\ComputeStorage@create', []);", true];
+        yield 'code interpolated into a string' => ['$label = "{$node->storages()->create([])}";', true];
+        yield 'a message quoting SQL that inserts into the table, which fails closed' => ["throw new \\RuntimeException('Never INSERT INTO compute_storages from a controller');", true];
+        yield 'found rows indexed, only read' => ['ComputeStorage::query()->get()[0]->name;', false];
+        yield 'a relation indexed, only read' => ['$node->storages[0]->name;', false];
+        yield 'the table named in from(), only read' => ["DB::query()->from('public.compute_storages')->get();", false];
         yield 'an update by id' => ['ComputeStorage::query()->lockForUpdate()->findOrFail($id)->save();', false];
         yield 'an update by id, filled first' => ['ComputeStorage::query()->findOrFail($id)->forceFill([])->saveQuietly();', false];
         yield 'the reservation lock, verbatim' => ['$storage = ComputeStorage::query()->lockForUpdate()->findOrFail($storageId);', false];
@@ -628,8 +674,46 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'morphMany' => ["public function pools(): MorphMany { return \$this->morphMany(ComputeStorage::class, 'owner'); }", ['pools']];
         yield 'belongsToMany' => ['public function pools(): BelongsToMany { return $this->belongsToMany(ComputeStorage::class); }', ['pools']];
         yield 'another case' => ['public function Pools(): HasMany { return $this->HasMany(computestorage::class); }', ['pools']];
-        yield 'belongsTo, which cannot create the row it points at' => ['public function storage(): BelongsTo { return $this->belongsTo(ComputeStorage::class); }', []];
         yield 'another model' => ['public function nodes(): HasMany { return $this->hasMany(ComputeNode::class); }', []];
+
+        // Every kind the model can declare: each can create the row it reads.
+        yield 'belongsTo, whose create is forwarded to the related model' => ['public function storage(): BelongsTo { return $this->belongsTo(ComputeStorage::class); }', ['storage']];
+        yield 'morphOne' => ["public function pool(): MorphOne { return \$this->morphOne(ComputeStorage::class, 'owner'); }", ['pool']];
+        yield 'morphToMany' => ["public function pools(): MorphToMany { return \$this->morphToMany(ComputeStorage::class, 'owner'); }", ['pools']];
+        yield 'morphedByMany' => ["public function pools(): MorphToMany { return \$this->morphedByMany(ComputeStorage::class, 'owner'); }", ['pools']];
+        yield 'hasManyThrough to the model' => ['public function pools(): HasManyThrough { return $this->hasManyThrough(ComputeStorage::class, ComputeNode::class); }', ['pools']];
+        yield 'hasOneThrough to the model' => ['public function pool(): HasOneThrough { return $this->hasOneThrough(ComputeStorage::class, ComputeNode::class); }', ['pool']];
+        yield 'hasManyThrough to the model, named after the intermediate' => ['public function pools(): HasManyThrough { return $this->hasManyThrough(through: ComputeNode::class, related: ComputeStorage::class); }', ['pools']];
+        yield 'hasManyThrough with the model as the intermediate only' => ['public function snapshots(): HasManyThrough { return $this->hasManyThrough(Snapshot::class, ComputeStorage::class); }', []];
+        yield 'hasManyThrough with the model as the intermediate, named first' => ['public function snapshots(): HasManyThrough { return $this->hasManyThrough(through: ComputeStorage::class, related: Snapshot::class); }', []];
+        yield 'morphTo, which reads the related class off the row' => ['public function owner(): MorphTo { return $this->morphTo(); }', ['owner']];
+        yield 'self, inside the model' => ["class ComputeStorage extends Model {\n    public function children(): HasMany { return \$this->hasMany(self::class, 'parent_id'); }\n}", ['children']];
+
+        // Built by hand.
+        yield 'a factory method, from the model\'s query' => ["public function pools(): HasMany { return \$this->newHasMany(ComputeStorage::query(), \$this, 'node_id', 'id'); }", ['pools']];
+        yield 'constructed' => ["public function pools(): HasMany { return new HasMany(ComputeStorage::query(), \$this, 'node_id', 'id'); }", ['pools']];
+        yield 'constructed under an imported alias' => ["use Illuminate\\Database\\Eloquent\\Relations\\HasMany as Many;\npublic function pools(): Many { return new Many(ComputeStorage::query(), \$this, 'node_id', 'id'); }", ['pools']];
+        yield 'constructed from a subclass this code declares' => ["class PoolRelation extends HasMany {}\npublic function pools(): PoolRelation { return new PoolRelation(query: ComputeStorage::query(), parent: \$this, foreignKey: 'node_id', localKey: 'id'); }", ['pools']];
+        yield 'constructed for another model' => ["public function nodes(): HasMany { return new HasMany(ComputeNode::query(), \$this, 'cluster_id', 'id'); }", []];
+
+        // Reached through a relation already known.
+        $storages = "public function storages(): HasMany { return \$this->hasMany(ComputeStorage::class); }\n";
+
+        yield 'narrowed from a relation' => [$storages."public function activeStorages(): HasMany { return \$this->storages()->where('enabled', true); }", ['storages', 'activestorages']];
+        yield 'narrowed from a relation, parenthesised' => [$storages."public function activeStorages(): HasMany { return (\$this->storages())->where('enabled', true); }", ['storages', 'activestorages']];
+        yield 'a relation used, not returned' => [$storages."public function freeGib(): int { \$pools = \$this->storages()->get(); return \$pools->sum('free_gib'); }", ['storages']];
+        yield 'an accessor reading a relation' => [$storages.'protected function pools(): Attribute { return Attribute::get(fn () => $this->storages); }', ['storages', 'pools']];
+        yield 'an accessor in the older form' => [$storages.'public function getFreePoolsAttribute() { return $this->storages; }', ['storages', 'getfreepoolsattribute', 'freepools']];
+        yield 'a has-through, by name' => [$storages."public function clusterPools(): HasManyThrough { return \$this->through('nodes')->has('storages'); }", ['storages', 'clusterpools']];
+        yield 'a has-through, by magic' => [$storages.'public function clusterPools(): HasManyThrough { return $this->throughNodes()->hasStorages(); }', ['storages', 'clusterpools']];
+        yield 'a has-through, by closure' => [$storages."public function clusterPools(): HasManyThrough { return \$this->through('nodes')->has(fn (ComputeNode \$node) => \$node->storages()); }", ['storages', 'clusterpools']];
+        yield 'a has-through with the model as the intermediate' => [$storages."public function snapshots(): HasManyThrough { return \$this->through('storages')->has('snapshots'); }", ['storages']];
+        yield 'narrowed from a relation to another model' => ["public function nodes(): HasMany { return \$this->hasMany(ComputeNode::class); }\npublic function onlineNodes(): HasMany { return \$this->nodes()->where('online', true); }", []];
+
+        // Registered at boot under a name written whole.
+        yield 'resolveRelationUsing' => ["ComputeNode::resolveRelationUsing('pools', fn (\$node) => \$node->hasMany(ComputeStorage::class, 'node_id'));", ['pools']];
+        yield 'a macro' => ["EloquentBuilder::macro('pools', fn () => ComputeStorage::query());", ['pools']];
+        yield 'a macro for another model' => ["EloquentBuilder::macro('nodes', fn () => ComputeNode::query());", []];
     }
 
     /**
@@ -637,7 +721,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
      */
     #[Test]
     #[DataProvider('relationShapes')]
-    public function the_relation_names_are_derived_from_every_declaration_that_can_create(string $code, array $expected): void
+    public function the_relation_names_are_derived_from_each_declaration_shape_the_scan_claims(string $code, array $expected): void
     {
         $this->assertSame($expected, $this->relationsIn($this->tokensOf("<?php\n".$code."\n")));
     }
@@ -771,6 +855,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'another provider' => [$import.'(new ProxmoxComputeProvider)->createVirtualMachine($request);', false];
         yield 'through a variable' => [$import.'$fake = new FakeComputeProvider; $fake->createVirtualMachine($request);', false];
         yield 'a callable array' => [$import."call_user_func([new FakeComputeProvider, 'createVirtualMachine'], \$request);", false];
+        yield 'a callable string in Laravel\'s form, even on the fake' => [$import."app()->call(FakeComputeProvider::class.'@createVirtualMachine', ['request' => \$request]);", false];
     }
 
     #[Test]
@@ -793,6 +878,10 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'a callable array, kept for later' => ["\$build = [\$provider, 'reinstallVm'];", true];
         yield 'a method named in a string' => ["\$provider->{'createVirtualMachine'}(\$request);", true];
         yield 'a method named in a string, in another case' => ['$provider->{"createvirtualmachine"}($request);', true];
+        yield 'a callable string, in PHP\'s form' => ["app()->call('Lynomia\\Modules\\Compute\\Infrastructure\\Providers\\ProxmoxComputeProvider::createVirtualMachine');", true];
+        yield 'a callable string, in Laravel\'s form' => ["app()->call('Lynomia\\Modules\\Compute\\Infrastructure\\Providers\\ProxmoxComputeProvider@createVirtualMachine', ['request' => \$request]);", true];
+        yield 'Laravel\'s form, joined to the class' => ["app()->call(ProxmoxComputeProvider::class.'@reinstallVm');", true];
+        yield 'Laravel\'s form, in another case' => ["Route::post('/vms', 'ProxmoxComputeProvider@CREATEVIRTUALMACHINE');", true];
         yield 'a definition' => ['public function createVirtualMachine(CreateVmRequest $request): void {}', false];
         yield 'a comment' => ['// $provider->createVirtualMachine($request);', false];
         yield 'another method' => ['$provider->listNodes();', false];
@@ -825,6 +914,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'the other build method, with cloud-init' => [$good."\n\$provider->reinstallVm('a', 'b', new ReinstallVmRequest(templateReference: 'x', cloudInit: new CloudInitConfig(sshKeys: [])));", true];
         yield 'the other build method, handed the wrong request' => [$good."\n\$provider->reinstallVm('a', 'b', new CreateVmRequest(cloudInit: new CloudInitConfig(sshKeys: [])));", false];
         yield 'the other build method in a callable array' => [$good."\n\$rebuild = [\$provider, 'reinstallVm'];", false];
+        yield 'a build method in Laravel\'s callable string' => [$good."\napp()->call('Lynomia\\Modules\\Compute\\Infrastructure\\Providers\\ProxmoxComputeProvider@createVirtualMachine', ['request' => \$payload]);", false];
         yield 'the same method in another case, without cloud-init' => [$good."\n\$provider->CreateVirtualMachine(new CreateVmRequest(nodeName: 'b'));", false];
         yield 'the other build method in another case, without cloud-init' => [$good."\n\$provider->reinstallvm('a', 'b', new ReinstallVmRequest(templateReference: 'x'));", false];
     }
@@ -1059,8 +1149,11 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * The file's code, without whitespace or comments. Strings stay, each as
-     * one token, so nothing inside a string can be read as code.
+     * The file's code, without whitespace or comments. A string that
+     * interpolates nothing stays one token, so nothing inside it can be read
+     * as code. One that interpolates is split into its literal parts and the
+     * expressions it interpolates, and those are code: PHP runs
+     * `"{$node->storages()->create()}"`, and so they are read as code here.
      *
      * @return list<array{0: int|string, 1: string, 2: int}>
      */
@@ -1089,60 +1182,293 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Relation methods that return ComputeStorage rows, derived from the
-     * models rather than listed.
+     * The names under which the application declares a relation able to
+     * reach ComputeStorage rows ({@see self::relationsIn()}), read from every
+     * file to a fixed point, so a relation narrowed from, or built through,
+     * one declared in another file counts too.
      *
-     * @return list<string> lower-cased, as PHP resolves a method name
+     * @return list<string> {@see self::relationKey()}
      */
     private function storageRelations(): array
     {
+        $files = array_map(fn (string $path): array => $this->tokens($path), array_values($this->sourceFiles()));
         $relations = [];
 
-        foreach ($this->sourceFiles() as $path) {
-            $relations = [...$relations, ...$this->relationsIn($this->tokens($path))];
-        }
+        do {
+            $before = count($relations);
 
-        return array_values(array_unique($relations));
+            foreach ($files as $tokens) {
+                $relations = array_values(array_unique([...$relations, ...$this->relationsIn($tokens, $relations)]));
+            }
+        } while (count($relations) !== $before);
+
+        return $relations;
     }
 
     /**
-     * The methods in this code that declare a relation able to create a
-     * ComputeStorage row: hasMany, hasOne, morphMany, morphOne or
-     * belongsToMany, with the model — as `::class` under any name it goes
-     * by, or named in a string — as the related model, positional or named.
-     * belongsTo and the *Through relations are left out: neither can create
-     * the row it reads.
+     * The names under which this code declares a relation able to reach
+     * ComputeStorage rows. Every relation can create the row it reads: a
+     * create on any relation, belongsTo and the *Through kinds included, is
+     * forwarded to the related model's query, and most kinds define creators
+     * of their own besides. A method's name counts when, in its body:
+     *
+     *  - one of the model's relation-declaring methods is called — every one
+     *    the framework's model has, read off it by reflection
+     *    ({@see self::relationGrammar()}): hasOne … morphedByMany and the
+     *    newHasOne … newMorphToMany factories they call — or one of the
+     *    relation classes they return is constructed with `new` (the
+     *    framework's, one the application declares extending one, or either
+     *    under an imported alias), with the model, under any name it goes by,
+     *    in the argument that carries the related model (`$related`,
+     *    `$target` or `$query`, positional or named): `ComputeStorage::class`,
+     *    the class named in a string, `ComputeStorage::query()`;
+     *  - morphTo, or another of those methods that takes no related model, is
+     *    called: it reads the related class off the row at run time, so it
+     *    counts whatever it points at;
+     *  - a relation already known is returned from `$this`, called or read,
+     *    by `return` or an arrow function: one narrowed from another,
+     *    `return $this->storages()->where(…)`, or an accessor,
+     *    `Attribute::get(fn () => $this->storages)`;
+     *  - a has-through is built to a relation already known:
+     *    `through(…)->has('storages')`, `throughNodes()->hasStorages()` or
+     *    `through(…)->has(fn ($node) => $node->storages())`.
+     *
+     * An accessor declared as `getPoolsAttribute()` counts under the property
+     * it answers. A name registered with `macro(…)` or
+     * `resolveRelationUsing(…)` counts when what it is registered with names
+     * the model or reaches a relation already known. The relations known are
+     * those passed in and those found here, to a fixed point.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
-     * @return list<string> lower-cased, as PHP resolves a method name
+     * @param  list<string>  $known  {@see self::relationKey()}
+     * @return list<string> {@see self::relationKey()}
      */
-    private function relationsIn(array $tokens): array
+    private function relationsIn(array $tokens, array $known = []): array
     {
         $names = $this->modelNamesIn($tokens, $this->storageClasses());
+        $isModel = $this->modelMatcher($tokens, $names);
+        $kinds = $this->relationGrammar()['kinds'];
+        $classes = $this->modelNamesIn($tokens, $this->relationClassNames());
+        $objectOperators = [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR];
         $relations = [];
-        $method = null;
 
-        foreach ($tokens as $i => $token) {
-            if ($token[0] === T_FUNCTION && ($tokens[$i + 1][0] ?? null) === T_STRING) {
-                $method = strtolower($tokens[$i + 1][1]);
+        $mentionsModel = fn (int $at): bool => $isModel($tokens[$at] ?? null)
+            || (($tokens[$at][0] ?? null) === T_CONSTANT_ENCAPSED_STRING && $this->classAsValue($tokens, $at, $names) !== null);
+
+        do {
+            $before = $relations;
+            $all = [...$known, ...array_keys($relations)];
+            $method = null;
+            $through = null;
+            $registered = null;
+
+            foreach ($tokens as $i => $token) {
+                $next = $tokens[$i + 1] ?? null;
+                $call = $token[0] === T_STRING && ($next[1] ?? null) === '(';
+                $key = $this->relationKey($token[1]);
+                $onObject = in_array($tokens[$i - 1][0] ?? null, $objectOperators, strict: true);
+
+                if ($token[0] === T_FUNCTION && ($next[0] ?? null) === T_STRING) {
+                    $method = $next[1];
+                }
+
+                // macro('pools', …) and resolveRelationUsing('pools', …)
+                if ($call && in_array($key, ['macro', 'resolverelationusing'], strict: true) && ($tokens[$i + 2][0] ?? null) === T_CONSTANT_ENCAPSED_STRING) {
+                    $registered = ['name' => $this->relationKey(trim($tokens[$i + 2][1], '\'"')), 'close' => $this->closing($tokens, $i + 1)];
+                }
+
+                if ($call && $onObject && str_starts_with($key, 'through')) {
+                    $through = $method;
+                }
+
+                $declares = match (true) {
+                    // $this->hasMany(ComputeStorage::class), $this->morphTo()
+                    $call && array_key_exists(strtolower($token[1]), $kinds) => $kinds[strtolower($token[1])] === null
+                        || $this->argumentMentions($this->argumentFor($tokens, $i + 1, (string) $kinds[strtolower($token[1])]), $mentionsModel),
+                    // new HasMany(ComputeStorage::query(), …)
+                    $token[0] === T_NEW && $this->namesAny($next, $classes) && ($tokens[$i + 2][1] ?? null) === '(' => $this->argumentMentions($this->argumentFor($tokens, $i + 2, 'query'), $mentionsModel),
+                    // return $this->storages()->where(…), fn () => $this->storages
+                    $onObject && $token[0] === T_STRING && in_array($key, $all, strict: true)
+                        && ($tokens[$i - 2][1] ?? null) === '$this' => $this->isReturned($tokens, $i - 2),
+                    // ->through(…)->has('storages'), ->hasStorages()
+                    $call && $onObject && $through !== null && $through === $method && str_starts_with($key, 'has') => $this->hasReachesAKnownRelation($tokens, $i, $all),
+                    default => false,
+                };
+
+                if ($registered !== null && $i < $registered['close'] && ($declares || $mentionsModel($i) || ($onObject && in_array($key, $all, strict: true)))) {
+                    $relations[$registered['name']] = true;
+                }
+
+                if ($declares && $method !== null) {
+                    $relations[$this->relationKey($method)] = true;
+
+                    // getPoolsAttribute() answers ->pools and ->Pools alike.
+                    if (preg_match('/^get(\w+)attribute$/i', $method, $accessor) === 1) {
+                        $relations[$this->relationKey($accessor[1])] = true;
+                    }
+                }
             }
+        } while ($relations !== $before);
 
-            if ($method === null
-                || $token[0] !== T_STRING
-                || ! in_array(strtolower($token[1]), ['hasmany', 'hasone', 'morphmany', 'morphone', 'belongstomany'], strict: true)
-                || ($tokens[$i + 1][1] ?? null) !== '('
-            ) {
-                continue;
-            }
+        return array_keys($relations);
+    }
 
-            $related = ($tokens[$i + 2][1] ?? null) === 'related' && ($tokens[$i + 3][1] ?? null) === ':' ? $i + 4 : $i + 2;
+    /**
+     * Is the expression starting at $i what a `return` or an arrow
+     * function's `=>` hands back, parenthesised or not?
+     *
+     * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
+     */
+    private function isReturned(array $tokens, int $i): bool
+    {
+        $before = $i - 1;
 
-            if ($this->classAsValue($tokens, $related, $names) !== null) {
-                $relations[$method] = true;
+        while (($tokens[$before][1] ?? null) === '(') {
+            $before--;
+        }
+
+        return in_array($tokens[$before][0] ?? null, [T_RETURN, T_DOUBLE_ARROW], strict: true);
+    }
+
+    /**
+     * A relation's name as this file compares it: lower-cased, as PHP
+     * resolves a method name, and without underscores, so that an accessor
+     * is matched however its property is spelt (`free_pools`, `freePools`).
+     * Two relations that differ only by an underscore are therefore one here,
+     * which can only make the scan count more.
+     */
+    private function relationKey(string $name): string
+    {
+        return str_replace('_', '', strtolower($name));
+    }
+
+    /**
+     * The tokens of the argument bound to $parameter in the call whose list
+     * opens at $open: the one named for it, or else the first, when that is
+     * positional — the parameter that carries a related model is always the
+     * first.
+     *
+     * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
+     * @return list<array{0: int|string, 1: string, 2: int, 3?: int}>
+     */
+    private function argumentFor(array $tokens, int $open, string $parameter): array
+    {
+        $arguments = $this->arguments($tokens, $open);
+        $named = static fn (array $argument): bool => ($argument[0][0] ?? null) === T_STRING && ($argument[1][1] ?? null) === ':';
+
+        foreach ($arguments as $argument) {
+            if ($named($argument) && $argument[0][1] === $parameter) {
+                return array_slice($argument, 2);
             }
         }
 
-        return array_keys($relations);
+        $first = $arguments[0] ?? [];
+
+        return $named($first) ? [] : $first;
+    }
+
+    /**
+     * @param  list<array{0: int|string, 1: string, 2: int, 3?: int}>  $argument
+     * @param  callable(int): bool  $mentionsModel
+     */
+    private function argumentMentions(array $argument, callable $mentionsModel): bool
+    {
+        foreach ($argument as $token) {
+            if (isset($token[3]) && $mentionsModel($token[3])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Does the `has…(` at $i, on a pending has-through, reach a relation
+     * already known — `has('storages')`, `hasStorages()`, or a closure that
+     * calls or reads one?
+     *
+     * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
+     * @param  list<string>  $known  {@see self::relationKey()}
+     */
+    private function hasReachesAKnownRelation(array $tokens, int $i, array $known): bool
+    {
+        $key = $this->relationKey($tokens[$i][1]);
+
+        if ($key !== 'has') {
+            return in_array(substr($key, 3), $known, strict: true);
+        }
+
+        $close = $this->closing($tokens, $i + 1);
+
+        for ($j = $i + 2; $j < $close; $j++) {
+            $token = $tokens[$j];
+
+            if (($token[0] === T_CONSTANT_ENCAPSED_STRING && in_array($this->relationKey(trim($token[1], '\'"')), $known, strict: true))
+                || ($token[0] === T_STRING
+                    && in_array($this->relationKey($token[1]), $known, strict: true)
+                    && in_array($tokens[$j - 1][0] ?? null, [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], strict: true))
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * How the framework's model declares a relation, read off it by
+     * reflection rather than listed: every method of the model documented to
+     * return a relation, and the relation classes those return.
+     *
+     * `kinds` maps each such method to the parameter that carries the
+     * related model — its class (`$related`, `$target`) or its query
+     * (`$query`) — or to null when it takes none: morphTo reads the related
+     * class off the row at run time.
+     *
+     * @return array{kinds: array<string, string|null>, classes: list<string>}
+     */
+    private function relationGrammar(): array
+    {
+        if (self::$relationGrammar !== null) {
+            return self::$relationGrammar;
+        }
+
+        $kinds = [];
+        $classes = [];
+
+        foreach ((new ReflectionClass(Model::class))->getMethods() as $method) {
+            if (preg_match('/@return\s+\\\\?([\w\\\\]+)/', (string) $method->getDocComment(), $match) !== 1 || ! is_a($match[1], Relation::class, allow_string: true)) {
+                continue;
+            }
+
+            $first = $method->getParameters()[0] ?? null;
+            $kinds[strtolower($method->getName())] = $first !== null && in_array($first->getName(), ['related', 'target', 'query'], strict: true) ? $first->getName() : null;
+            $classes[] = $match[1];
+        }
+
+        // The derivation must at least find the kinds this file names.
+        foreach (['hasone', 'hasmany', 'morphone', 'morphmany', 'belongsto', 'belongstomany', 'morphtomany', 'morphedbymany', 'hasonethrough', 'hasmanythrough', 'newhasmany'] as $expected) {
+            $this->assertNotNull($kinds[$expected] ?? null, 'The relation kinds were not derived, so the relation half of the writer scan proves nothing.');
+        }
+
+        $this->assertArrayHasKey('morphto', $kinds);
+        $this->assertNull($kinds['morphto']);
+
+        return self::$relationGrammar = ['kinds' => $kinds, 'classes' => array_values(array_unique($classes))];
+    }
+
+    /**
+     * The relation classes the model's declaring methods return, and every
+     * class the application declares extending one, to a fixed point.
+     *
+     * @return list<string> lower-cased short names
+     */
+    private function relationClassNames(): array
+    {
+        return self::$relationClassNames ??= $this->classesDerivedFrom(array_values(array_unique(array_map(
+            static fn (string $class): string => strtolower(class_basename($class)),
+            $this->relationGrammar()['classes'],
+        ))));
     }
 
     /**
@@ -1156,12 +1482,20 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
      */
     private function storageClasses(): array
     {
-        if (self::$storageClasses !== null) {
-            return self::$storageClasses;
-        }
+        return self::$storageClasses ??= $this->classesDerivedFrom(['computestorage']);
+    }
 
+    /**
+     * These classes, and every class the application declares extending one
+     * of them or naming one as a factory's `$model`, to a fixed point.
+     *
+     * @param  list<string>  $seed  lower-cased short names
+     * @return list<string> lower-cased short names
+     */
+    private function classesDerivedFrom(array $seed): array
+    {
         $files = array_map(fn (string $path): array => $this->tokens($path), array_values($this->sourceFiles()));
-        $classes = ['computestorage'];
+        $classes = $seed;
 
         do {
             $before = $classes;
@@ -1180,7 +1514,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
             }
         } while ($classes !== $before);
 
-        return self::$storageClasses = $classes;
+        return $classes;
     }
 
     /**
@@ -1230,19 +1564,16 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
+     * Does this token name the model: one of these names, or — inside a file
+     * that declares the model, a subclass or its factory — `self`, `static`
+     * or `parent`?
+     *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
-     * @param  list<string>  $relations  lower-cased
+     * @param  list<string>  $names  lower-cased short names
+     * @return callable(array{0: int|string, 1: string, 2: int, 3?: int}|null): bool
      */
-    private function createsStorage(array $tokens, array $relations): bool
+    private function modelMatcher(array $tokens, array $names): callable
     {
-        $names = $this->modelNamesIn($tokens, $this->storageClasses());
-        $table = (new ComputeStorage)->getTable();
-        $count = count($tokens);
-
-        /*
-         * Inside a file that declares the model, a subclass or its factory,
-         * `self`, `static` and `parent` name it too.
-         */
         $declaresModel = false;
 
         foreach ($tokens as $i => $token) {
@@ -1251,8 +1582,20 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
             }
         }
 
-        $isModel = fn (?array $token): bool => $this->namesAny($token, $names)
+        return fn (?array $token): bool => $this->namesAny($token, $names)
             || ($declaresModel && $token !== null && ($token[0] === T_STATIC || ($token[0] === T_STRING && in_array(strtolower($token[1]), ['self', 'parent'], strict: true))));
+    }
+
+    /**
+     * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
+     * @param  list<string>  $relations  {@see self::relationKey()}
+     */
+    private function createsStorage(array $tokens, array $relations): bool
+    {
+        $names = $this->modelNamesIn($tokens, $this->storageClasses());
+        $table = (new ComputeStorage)->getTable();
+        $count = count($tokens);
+        $isModel = $this->modelMatcher($tokens, $names);
 
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
@@ -1263,7 +1606,8 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
             }
 
             // SQL in a string that puts rows into the table, and
-            // 'ComputeStorage::create' as a callable string.
+            // 'ComputeStorage::create' or 'ComputeStorage@create' as a
+            // callable string.
             if (in_array($token[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], strict: true)
                 && ($this->sqlWritesTable($token[1], $table) || $this->isStaticCreatorString($token[1], $names))
             ) {
@@ -1289,22 +1633,31 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
                 $chainStart = $i + 2;
             }
 
-            // DB::table('compute_storages')…, aliased or not
-            if ($token[0] === T_STRING && strtolower($token[1]) === 'table'
+            // DB::table('compute_storages')… or ->from('compute_storages')…,
+            // aliased or schema-qualified or not
+            if ($token[0] === T_STRING && in_array(strtolower($token[1]), ['table', 'from'], strict: true)
                 && ($tokens[$i + 1][1] ?? null) === '('
                 && ($tokens[$i + 2][0] ?? null) === T_CONSTANT_ENCAPSED_STRING
-                && preg_match('/^'.preg_quote($table, '/').'(\s+as\s+\w+)?$/i', trim($tokens[$i + 2][1], '\'"')) === 1
+                && preg_match('/^(\w+\.)?'.preg_quote($table, '/').'(\s+as\s+\w+)?$/i', trim($tokens[$i + 2][1], '\'"')) === 1
             ) {
                 $chainStart = $i + 1;
             }
 
-            // ->storages()… or ->storages->…
-            if (in_array($token[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], strict: true)
-                && ($tokens[$i + 1][0] ?? null) === T_STRING
-                && in_array(strtolower($tokens[$i + 1][1]), $relations, strict: true)
-                && in_array($tokens[$i + 2][1] ?? null, ['(', '->', '?->'], strict: true)
-            ) {
-                $chainStart = $i + 2;
+            // ->storages()…, ->storages->… or ->storages[0]…, and the same
+            // relation named in a literal, ->{'storages'}()…
+            if (in_array($token[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], strict: true)) {
+                $literal = ($tokens[$i + 1][1] ?? null) === '{'
+                    && ($tokens[$i + 2][0] ?? null) === T_CONSTANT_ENCAPSED_STRING
+                    && ($tokens[$i + 3][1] ?? null) === '}';
+                $name = $literal ? trim($tokens[$i + 2][1], '\'"') : (($tokens[$i + 1][0] ?? null) === T_STRING ? $tokens[$i + 1][1] : null);
+                $after = $literal ? $i + 4 : $i + 2;
+
+                if ($name !== null
+                    && in_array($this->relationKey($name), $relations, strict: true)
+                    && in_array($tokens[$after][1] ?? null, ['(', '->', '?->', '['], strict: true)
+                ) {
+                    $chainStart = $after;
+                }
             }
 
             if ($chainStart === null) {
@@ -1381,9 +1734,11 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
 
     /**
      * Every method that makes a row, or an instance that saving makes into
-     * one, read off the framework's builders, relations and model by
-     * reflection rather than listed — so a framework upgrade that adds one is
-     * counted without anybody remembering to.
+     * one, read off the framework's builders, relations (every class the
+     * model's relation-declaring methods return), model and factories by
+     * reflection rather than listed — so a framework upgrade that adds one
+     * under a name of these shapes is counted without anybody remembering
+     * to. A creator named otherwise is not; the shapes are the list.
      *
      * @return list<string> lower-cased, as PHP resolves a method name
      */
@@ -1395,7 +1750,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
 
         $creators = [];
 
-        foreach ([EloquentBuilder::class, QueryBuilder::class, HasMany::class, HasOne::class, MorphMany::class, BelongsToMany::class, Model::class, Factory::class] as $class) {
+        foreach ([EloquentBuilder::class, QueryBuilder::class, Model::class, Factory::class, ...$this->relationGrammar()['classes']] as $class) {
             foreach ((new ReflectionClass($class))->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
                 $name = $method->getName();
 
@@ -1460,14 +1815,15 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Is this string `'…ComputeStorage::create'` — a callable string naming a
-     * creator on the model?
+     * Is this string `'…ComputeStorage::create'` or `'…ComputeStorage@create'`
+     * — a callable string naming a creator on the model, in PHP's form or
+     * the one Laravel's container calls?
      *
      * @param  list<string>  $names  lower-cased short names
      */
     private function isStaticCreatorString(string $literal, array $names): bool
     {
-        return preg_match('/(?:^|\\\\)(\w+)::(\w+)$/', trim($literal, '\'"'), $match) === 1
+        return preg_match('/(?:^|\\\\)(\w+)(?:::|@)(\w+)$/', trim($literal, '\'"'), $match) === 1
             && in_array(strtolower($match[1]), $names, strict: true)
             && in_array(strtolower($match[2]), $this->creatorMethods(), strict: true);
     }
@@ -1507,7 +1863,10 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     /**
      * The method names called along a fluent chain starting at $i, skipping
      * each call's arguments, and where the chain ends. A method named in a
-     * literal, `->{'create'}(`, is that method.
+     * literal, `->{'create'}(`, is that method. The chain runs on through
+     * what a call returns however it is reached: `->` and `?->`, a static
+     * call on it (`::`), an index (`get()[0]`) and a property read that is
+     * followed by more chain (`->map->`, `->items[0]`).
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      * @return array{names: list<string>, end: int}
@@ -1516,12 +1875,19 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     {
         $names = [];
         $count = count($tokens);
+        $accessors = [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON];
 
         while ($i < $count) {
             $token = $tokens[$i];
 
             if ($token[1] === '(') {
                 $i = $this->closing($tokens, $i) + 1;
+
+                continue;
+            }
+
+            if ($token[1] === '[') {
+                $i = $this->closing($tokens, $i, '[', ']') + 1;
 
                 continue;
             }
@@ -1539,18 +1905,30 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
                 continue;
             }
 
-            if ($token[1] === '{'
+            $literal = $token[1] === '{'
                 && ($tokens[$i + 1][0] ?? null) === T_CONSTANT_ENCAPSED_STRING
-                && ($tokens[$i + 2][1] ?? null) === '}'
-                && ($tokens[$i + 3][1] ?? null) === '('
-            ) {
+                && ($tokens[$i + 2][1] ?? null) === '}';
+
+            if ($literal && ($tokens[$i + 3][1] ?? null) === '(') {
                 $names[] = trim($tokens[$i + 1][1], '\'"');
                 $i += 3;
 
                 continue;
             }
 
-            if (in_array($token[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], strict: true)) {
+            // A property read the chain goes on through: `->map->`,
+            // `->items[0]`, `->node::`, `->{'map'}->`.
+            $goesOn = static fn (?array $after): bool => in_array($after[0] ?? null, $accessors, strict: true) || ($after[1] ?? null) === '[';
+
+            if (in_array($tokens[$i - 1][0] ?? null, [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], strict: true)
+                && (($named && $goesOn($tokens[$i + 1] ?? null)) || ($literal && $goesOn($tokens[$i + 3] ?? null)))
+            ) {
+                $i += $named ? 1 : 3;
+
+                continue;
+            }
+
+            if (in_array($token[0], $accessors, strict: true)) {
                 $i++;
 
                 continue;
@@ -1572,8 +1950,9 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     /**
      * Every build method, checked in one file: each call to any of them must
      * hand the adapter its own request carrying cloud-init; none may be
-     * dispatched through a variable or named in a string; and the file's own
-     * method must be called by name at least once — the backstop.
+     * dispatched through a variable or named in a string the way a callable
+     * names one ({@see self::stringNames()}); and the file's own method must
+     * be called by name at least once — the backstop.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      * @return array{found: int, missing: list<string>, dynamic: list<int>}
@@ -1607,8 +1986,9 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     /**
      * Does this code name a build method whole — called, or taken as a
      * first-class callable, in any case; or named in a string, as a callable
-     * array, `call_user_func` or `->{'…'}(` name one? The same two readings
-     * the pin makes inside the pinned files, made of every file.
+     * array, `call_user_func`, `->{'…'}(`, `'Class::method'` or Laravel's
+     * `'Class@method'` name one? The same two readings the pin makes inside
+     * the pinned files, made of every file.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      */
@@ -1702,15 +2082,19 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Is this token a string whose content is the method's name — alone or as
-     * `Class::name`, in any case — the way PHP reads a callable?
+     * Is this token a string whose content is the method's name, in any case,
+     * the way a callable names one: alone (a callable array's method,
+     * `->{'…'}(`), as `Class::name` (PHP's callable string) or as
+     * `Class@name` (the one Laravel's container, routes and listeners call)?
+     * A class joined on at run time, `X::class.'@name'`, leaves the name
+     * whole in its own string, so it is read too.
      *
      * @param  array{0: int|string, 1: string, 2: int}  $token
      */
     private function stringNames(array $token, string $method): bool
     {
         return in_array($token[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], strict: true)
-            && preg_match('/(^|::)'.preg_quote($method, '/').'$/i', trim($token[1], " \t\n\r\0\x0B'\"")) === 1;
+            && preg_match('/(^|::|@)'.preg_quote($method, '/').'$/i', trim($token[1], " \t\n\r\0\x0B'\"")) === 1;
     }
 
     /**
@@ -1842,17 +2226,19 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
+     * Where the bracket that opens at $open closes.
+     *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      */
-    private function closing(array $tokens, int $open): int
+    private function closing(array $tokens, int $open, string $opening = '(', string $closing = ')'): int
     {
         $depth = 0;
         $count = count($tokens);
 
         for ($i = $open; $i < $count; $i++) {
-            if ($tokens[$i][1] === '(') {
+            if ($tokens[$i][1] === $opening) {
                 $depth++;
-            } elseif ($tokens[$i][1] === ')') {
+            } elseif ($tokens[$i][1] === $closing) {
                 $depth--;
 
                 if ($depth === 0) {
