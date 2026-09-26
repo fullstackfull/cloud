@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Billing\Application\Actions;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceRefunded;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceRefundExceedsPaymentException;
@@ -81,6 +82,31 @@ final readonly class RecordInvoiceRefund
             }
 
             $refundable = $locked->refundableAmount();
+
+            /*
+             * Less anything already handed back to the wallet against this
+             * invoice beyond what the document itself stopped counting — a
+             * cancelled order's credit, a compensated capture. The document's
+             * own figure (paid − refunded) does not see those, and booking a
+             * refund past them would record the same money going back twice.
+             * Only asked when such a credit exists: an invoice nobody has
+             * credited is refundable to exactly what it says. Measured against
+             * the refunds this document has already booked, which is what the
+             * row being recorded now is not yet among — the same captures and
+             * wallet credits WhatAnInvoiceStillHolds reads.
+             */
+            $creditedMinor = WhatAnInvoiceStillHolds::creditedToTheWalletMinor($locked);
+
+            if ($creditedMinor > 0) {
+                $stillHeld = Money::ofMinor(
+                    max(0, WhatAnInvoiceStillHolds::capturedMinor($locked) - $creditedMinor - $locked->amount_refunded_minor),
+                    $locked->currency,
+                );
+
+                if ($stillHeld->isLessThan($refundable)) {
+                    $refundable = $stillHeld;
+                }
+            }
 
             if ($amount->isGreaterThan($refundable)) {
                 throw InvoiceRefundExceedsPaymentException::forInvoice(

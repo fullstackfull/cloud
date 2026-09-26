@@ -41,9 +41,42 @@ final class RefundExceedsCaptureException extends DomainException
         ]);
     }
 
+    /**
+     * Part of the capture has already gone back to the customer's wallet
+     * against the invoice it paid, and a card refund of it would return the
+     * same money twice. Operator-facing: refunds are issued from the Control
+     * Center.
+     */
+    public static function becauseItWentToTheWallet(
+        string $transactionId,
+        string $invoiceId,
+        Money $requested,
+        Money $stillHeld,
+    ): self {
+        $exception = new self(sprintf(
+            'Cannot refund %s against transaction %s: only %s of invoice %s has not already been returned, part of it to the customer\'s wallet.',
+            (string) $requested,
+            $transactionId,
+            (string) $stillHeld,
+            $invoiceId,
+        ));
+
+        $exception->errorCode = 'payment.refund_exceeds_what_is_held';
+
+        return $exception->withContext([
+            'transaction_id' => $transactionId,
+            'invoice_id' => $invoiceId,
+            'requested_minor' => $requested->minorUnits(),
+            'refundable_minor' => $stillHeld->minorUnits(),
+            'currency' => $requested->currency(),
+        ]);
+    }
+
+    private string $errorCode = 'payment.refund_exceeds_capture';
+
     public function errorCode(): string
     {
-        return 'payment.refund_exceeds_capture';
+        return $this->errorCode;
     }
 
     public function httpStatus(): int

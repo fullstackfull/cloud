@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Payments\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
@@ -236,6 +238,8 @@ final readonly class IssueRefund
             );
         }
 
+        $this->assertNotAlreadyInTheWallet($locked, $amount);
+
         return Refund::create([
             'transaction_id' => $locked->id,
             'invoice_id' => $invoiceId,
@@ -245,6 +249,49 @@ final readonly class IssueRefund
             'status' => RefundStatus::Pending,
             'reason' => mb_substr($reason, 0, 255),
         ]);
+    }
+
+    /**
+     * Refuses to refund money that has already gone back to the wallet.
+     *
+     * The capture's own balance (captured − refunded) does not know that some
+     * of it was credited to the customer's wallet against the invoice it paid:
+     * an overpayment surplus SettleInvoice diverted, a capture compensated
+     * after its invoice was withdrawn, a cancelled order's credit
+     * (CreditWhatACancelledOrderPaid). Refunding it in full afterwards would
+     * return the same money twice, once as stored value and once to the card.
+     * So the refund is also held to what the invoice still holds
+     * (WhatAnInvoiceStillHolds), read under the invoice's row lock — taken
+     * after the transaction's, the order SettleInvoice uses.
+     *
+     * Nothing is clawed back. A wallet credit the customer has already spent
+     * stays spent; this refuses only the card refund of money that went to the
+     * wallet, which is returned through the wallet or not at all.
+     *
+     * @throws RefundExceedsCaptureException
+     */
+    private function assertNotAlreadyInTheWallet(Transaction $locked, Money $amount): void
+    {
+        if ($locked->invoice_id === null) {
+            return;
+        }
+
+        $invoice = Invoice::query()->lockForUpdate()->find($locked->invoice_id);
+
+        if ($invoice === null || WhatAnInvoiceStillHolds::creditedToTheWalletMinor($invoice) === 0) {
+            return;
+        }
+
+        $held = Money::ofMinor(max(0, WhatAnInvoiceStillHolds::minor($invoice)), $invoice->currency);
+
+        if ($amount->isGreaterThan($held)) {
+            throw RefundExceedsCaptureException::becauseItWentToTheWallet(
+                (string) $locked->id,
+                (string) $invoice->getKey(),
+                $amount,
+                $held,
+            );
+        }
     }
 
     private function assertRefundable(Transaction $transaction, Money $amount): void

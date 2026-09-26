@@ -5,15 +5,12 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Billing\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
-use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
-use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
-use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
-use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Credits the customer with what they paid for an order that was cancelled
@@ -36,10 +33,13 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *   − what has already gone to the wallet against it (a top-up carrying the
  *     invoice's id: SettleInvoice's overpayment surplus, a compensation for a
  *     late capture, or an earlier run of this action)
- *   − what has been refunded on it (`amount_refunded_minor`, whichever channel
- *     the refund went back through)
+ *   − what has been refunded on it, whichever channel the refund went back
+ *     through, including a card refund still pending at the provider
  *
- * and only that is credited. The first version credited every capture in
+ * and only that is credited. The figure is WhatAnInvoiceStillHolds, which
+ * IssueRefund and RecordInvoiceRefund read too: money credited here is then
+ * refused to a later card refund of the same capture, so the two orders — a
+ * refund then this credit, or this credit then a refund — agree. The first version credited every capture in
  * full, and the verifier measured both ways that was wrong: a 2.000 capture
  * on a 1.500 invoice, whose 0.500 surplus SettleInvoice had already sent to
  * the wallet, credited 2.000 more (2.500 back for 2.000 paid); and a paid
@@ -84,20 +84,11 @@ final readonly class CreditWhatACancelledOrderPaid
         /** @var Invoice $invoice */
         $invoice = Invoice::query()->lockForUpdate()->findOrFail($invoiceId);
 
-        $capturedMinor = (int) Transaction::query()
-            ->where('invoice_id', $invoice->getKey())
-            ->where('customer_id', $invoice->customer_id)
-            ->where('currency', $invoice->currency)
-            ->where('kind', TransactionKind::Charge->value)
-            ->where('status', TransactionStatus::Succeeded->value)
-            ->sum('amount_minor');
+        $capturedMinor = WhatAnInvoiceStillHolds::capturedMinor($invoice);
+        $alreadyInTheWalletMinor = WhatAnInvoiceStillHolds::creditedToTheWalletMinor($invoice);
+        $refundedMinor = WhatAnInvoiceStillHolds::refundedMinor($invoice);
 
-        $alreadyInTheWalletMinor = (int) WalletTransaction::query()
-            ->where('invoice_id', $invoice->getKey())
-            ->where('kind', WalletTransactionKind::Topup->value)
-            ->sum('amount_minor');
-
-        $remainderMinor = $capturedMinor - $alreadyInTheWalletMinor - $invoice->amount_refunded_minor;
+        $remainderMinor = $capturedMinor - $alreadyInTheWalletMinor - $refundedMinor;
 
         if ($remainderMinor <= 0) {
             return 0;
@@ -119,12 +110,12 @@ final readonly class CreditWhatACancelledOrderPaid
                 'order_id' => $invoice->order_id,
                 'captured_minor' => $capturedMinor,
                 'already_in_wallet_minor' => $alreadyInTheWalletMinor,
-                'refunded_minor' => $invoice->amount_refunded_minor,
+                'refunded_minor' => $refundedMinor,
             ],
             idempotencyKey: sprintf(
                 'invoice:%s:cancelled-order:%d',
                 $invoice->getKey(),
-                $capturedMinor - $invoice->amount_refunded_minor,
+                $capturedMinor - $refundedMinor,
             ),
             invoiceId: (string) $invoice->getKey(),
         );

@@ -140,7 +140,10 @@ under its own lock inside the cancel, because it hears about a payment before th
 does: the order leaves `PENDING_PAYMENT` only when the queued fulfilment job runs. A
 settlement that nevertheless finds a cancelled order delivers nothing and credits to the
 wallet what the invoice took less what has already gone back (an overpayment surplus
-already in the wallet, or a refund), once.
+already in the wallet, or a refund), once. The reverse holds too: money already credited to
+the wallet against an invoice (an overpayment surplus, a compensated capture, a cancelled
+order's credit) is not refundable to the card afterwards (`payment.refund_exceeds_what_is_held`).
+A wallet credit the customer has spent is not clawed back.
 
 ## Renewal and the end of a service
 
