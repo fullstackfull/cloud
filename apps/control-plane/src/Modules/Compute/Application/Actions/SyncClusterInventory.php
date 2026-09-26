@@ -166,7 +166,9 @@ final readonly class SyncClusterInventory
                 // in the API has not necessarily been cabled, patched or added
                 // to the monitoring the platform relies on, and placing a
                 // customer on it the moment it answers a GET is how a machine
-                // ends up on a box somebody is still building.
+                // ends up on a box somebody is still building. A person puts
+                // it into service: ChangeComputeNodeStatus, behind
+                // PUT /api/admin/infrastructure/nodes/{node}/status.
                 'status' => NodeStatus::Maintenance,
                 // Defaults for the NOT NULL columns the guard above may have
                 // withheld: a node first discovered while it is offline is

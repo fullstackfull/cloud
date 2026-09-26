@@ -52,7 +52,8 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *
  * A VPS has to be built somewhere, and the catalogue is where that decision
  * belongs: a plan's `placement_constraints` may name `cluster_id` and
- * `ip_pool_id`. Where it does not, and exactly one active cluster or pool
+ * `ip_pool_id` (a Dedicated plan's, `datacenter_id`, `ip_pool_id` and
+ * `os_install_profile_slug`; see LocalPlacementFeasibility). Where it does not, and exactly one active cluster or pool
  * exists, that one is used — which is the shape of a first deployment. Where
  * the choice is genuinely ambiguous, **no job is created**: the service is left
  * PENDING with the reason recorded, because inventing a placement is how a
@@ -216,9 +217,7 @@ final readonly class ProvisionOrderedService
         }
 
         if ($placement->values === []) {
-            // A dedicated server resolves its own target inside its handler: a
-            // chassis is reserved from inventory, so the line's resources are
-            // the whole payload.
+            // Nothing to add: placement resolved no target for this kind.
             return $resources;
         }
 

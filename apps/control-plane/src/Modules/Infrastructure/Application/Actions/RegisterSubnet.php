@@ -10,6 +10,7 @@ use Lynomia\Modules\Audit\Application\DTOs\AuditedAct;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\SubnetRegistrationRefused;
+use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Domain\Exceptions\InvalidIpAddressException;
 use Lynomia\Modules\Ipam\Domain\ValueObjects\Cidr;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
@@ -99,6 +100,43 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * that from the token stream rather than from anything written here.
  *
  * ---------------------------------------------------------------------------
+ * A registered block is one the allocator can hand out
+ * ---------------------------------------------------------------------------
+ *
+ * The allocator does not read `subnets`; it hands out `ip_addresses` rows. This
+ * used to write the subnet and no rows, and the only writer of rows in `src/`
+ * was the reference topology loader, which refuses production — so a /24 an
+ * operator registered was a block `IpAllocator::reserve()` answered "0
+ * allocatable address(es) left" for, and every VPS and Dedicated build on an
+ * operator-built estate waited on capacity that could never arrive (F-02).
+ *
+ * So an IPv4 block is expanded by {@see SeedSubnetAddresses} in the
+ * transaction that registers it, after the overlap check and under the same
+ * lock: the subnet and its rows commit together or not at all, and a refused
+ * overlap writes neither. The seeder writes the network, broadcast and
+ * gateway addresses as unavailable rows, and so it writes any address the
+ * operator names in `reserved_addresses`; one of those outside the block is
+ * refused and the registration rolls back.
+ *
+ * Two kinds of block are registered without rows, and the answer says so
+ * (`allocatable_addresses: 0`):
+ *
+ *  - **IPv6.** It is delegated as a prefix per service and never expanded;
+ *    the allocator does not read v6 rows at all.
+ *  - **A block the operator registers as held space** (`allocatable: false`)
+ *    — an aggregate recorded so that nothing inside it can be registered
+ *    elsewhere, not a range to allocate from.
+ *
+ * And one kind is refused: an IPv4 block registered for allocation that holds
+ * more than {@see self::MAX_ADDRESSES_EXPANDED} addresses (a /16). One row per
+ * address is written inside this request's transaction, and a /8 is 16.7
+ * million of them. An estate either registers the pieces it allocates from,
+ * or registers the aggregate as held space — not both: held space is compared
+ * for overlaps like any block, so the pieces cannot then be registered inside
+ * it. The overlap check runs first, so a wide block that collides is told
+ * about the collision.
+ *
+ * ---------------------------------------------------------------------------
  * What it does not cover
  * ---------------------------------------------------------------------------
  *
@@ -124,17 +162,45 @@ final readonly class RegisterSubnet
      */
     private const string REGISTRATION_LOCK = 'infrastructure.register-subnet';
 
+    /**
+     * The widest IPv4 block one registration expands into address rows: a
+     * /16. SeedSubnetAddresses chunks its inserts, so this is not a memory
+     * limit; it is the most rows one operator request writes in one
+     * transaction.
+     */
+    public const int MAX_ADDRESSES_EXPANDED = 65_536;
+
     public function __construct(
         private RecordActAtomically $record,
+        private SeedSubnetAddresses $seed,
     ) {}
 
     /**
+     * @param  list<string>  $reservedAddresses  Addresses inside the block kept out of the allocator.
+     * @param  bool  $allocatable  False registers the block as held space: no address rows are written.
+     *
      * @throws InvalidIpAddressException
-     * @throws SubnetRegistrationRefused when the block shares an address with one in its realm
+     * @throws SubnetRegistrationRefused when the block shares an address with one in its realm, or is too
+     *                                   wide to expand
      */
-    public function execute(IpPool $pool, string $cidr, ?string $gateway, ?Network $network, User $operator): Subnet
-    {
+    public function execute(
+        IpPool $pool,
+        string $cidr,
+        ?string $gateway,
+        ?Network $network,
+        User $operator,
+        array $reservedAddresses = [],
+        bool $allocatable = true,
+    ): Subnet {
         $block = Cidr::fromString($cidr);
+        $expands = $allocatable && $block->version()->isEnumerable();
+
+        if ($reservedAddresses !== [] && ! $expands) {
+            throw InvalidIpAddressException::forCidr(
+                $cidr,
+                'reserved addresses are kept out of a block the platform allocates from, and this block is not one',
+            );
+        }
 
         if ($block->version() !== $pool->ip_version) {
             throw InvalidIpAddressException::forCidr(
@@ -154,14 +220,29 @@ final readonly class RegisterSubnet
             );
         }
 
+        // Filled by the act, read by the audit entry: what the registration
+        // actually made allocatable, rather than what the block's size implies.
+        $allocatableAddresses = 0;
+        $reserved = [];
+
         return $this->record->execute(
-            act: function () use ($pool, $network, $block, $gateway): Subnet {
+            act: function () use (
+                $pool, $network, $block, $gateway, $expands, $reservedAddresses, &$allocatableAddresses, &$reserved,
+            ): Subnet {
                 // Before the read, and inside the transaction the write commits in.
                 DB::statement('select pg_advisory_xact_lock(hashtext(?))', [self::REGISTRATION_LOCK]);
 
                 $this->assertNothingInItsRealmOverlaps($block, $pool);
 
-                return Subnet::query()->create([
+                if ($expands && $block->size() > self::MAX_ADDRESSES_EXPANDED) {
+                    throw SubnetRegistrationRefused::becauseItIsTooWideToAllocateFrom(
+                        (string) $block,
+                        $block->size(),
+                        self::MAX_ADDRESSES_EXPANDED,
+                    );
+                }
+
+                $subnet = Subnet::query()->create([
                     'ip_pool_id' => $pool->getKey(),
                     'network_id' => $network?->getKey(),
                     'cidr' => (string) $block,
@@ -170,18 +251,36 @@ final readonly class RegisterSubnet
                     'gateway' => $gateway,
                     'is_active' => true,
                 ]);
+
+                if ($expands) {
+                    // In this transaction: a seed that throws (a reserved
+                    // address outside the block) takes the subnet row with it.
+                    $seeded = $this->seed->execute($subnet, reservedAddresses: $reservedAddresses);
+
+                    $allocatableAddresses = $seeded->allocatable;
+                    $reserved = array_values(array_diff($seeded->unavailableAddresses, $subnet->nonHostAddresses()));
+                }
+
+                return $subnet;
             },
-            describe: fn (Subnet $subnet): AuditedAct => new AuditedAct(
-                action: AuditAction::SubnetRegistered,
-                subject: $subnet,
-                context: [
-                    'cidr' => (string) $block,
-                    'pool' => $pool->slug,
-                    'network' => $network?->slug,
-                    'usable_hosts' => $block->usableHostCount(),
-                    'operator' => (string) $operator->getKey(),
-                ],
-            ),
+            describe: function (Subnet $subnet) use ($block, $pool, $network, $operator, &$allocatableAddresses, &$reserved): AuditedAct {
+                return new AuditedAct(
+                    action: AuditAction::SubnetRegistered,
+                    subject: $subnet,
+                    context: [
+                        'cidr' => (string) $block,
+                        'pool' => $pool->slug,
+                        'network' => $network?->slug,
+                        // Null for IPv6, whose size PHP's integer cannot hold
+                        // and which is never expanded; reading it for v6 used
+                        // to throw here and refuse every v6 registration.
+                        'usable_hosts' => $block->version()->isEnumerable() ? $block->usableHostCount() : null,
+                        'allocatable_addresses' => $allocatableAddresses,
+                        'reserved_addresses' => $reserved,
+                        'operator' => (string) $operator->getKey(),
+                    ],
+                );
+            },
         );
     }
 

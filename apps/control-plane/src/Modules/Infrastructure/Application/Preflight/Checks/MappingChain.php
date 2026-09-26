@@ -54,6 +54,10 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  */
 final readonly class MappingChain
 {
+    public function __construct(
+        private IpAllocator $addresses,
+    ) {}
+
     /**
      * @return list<PreflightFinding>
      */
@@ -83,8 +87,9 @@ final readonly class MappingChain
     /**
      * Compute: a cluster that takes placement, a node that can hold something,
      * storage that can hold a disk, a template that can be installed, and an
-     * active address pool — which is less than an address to give out, and
-     * {@see self::addressFinding()} says by how much.
+     * address a customer machine can be given — which is less than an address
+     * for a particular order, and {@see self::addressFinding()} says by how
+     * much.
      *
      * The chain stops after the cluster check when no cluster takes
      * placement, and that finding fails. On every other path it emits all six
@@ -243,105 +248,102 @@ final readonly class MappingChain
     }
 
     /**
-     * Whether any address pool is active.
+     * Whether a customer machine could be given an address.
      *
      * ===========================================================================
-     * ACTIVE POOLS, NOT POOL ROWS
+     * ALLOCATABLE ADDRESSES, NOT ACTIVE POOLS
      * ===========================================================================
      *
-     * `is_active` on a pool is the allocator's kill switch: switched off, the
-     * pool gives out no address whether the allocator is handed the pool or
-     * one of its subnets. Counting rows would pass an estate whose only pool
-     * is off — a green nothing earned, which is the shape of the skipped
-     * check this method replaced, one level down.
+     * This used to pass when any pool was active, and said so: "1 of 1
+     * registered address pool(s) are active". That was green on an estate
+     * whose only pool held no address row at all — the operator's subnet route
+     * wrote none (F-02) — while IpAllocator::reserve() refused the same estate
+     * as exhausted and every VPS order waited on capacity (F-35 x F-02). A
+     * pass that meant less than its name was the defect.
+     *
+     * So the check now asks the allocator, through
+     * {@see IpAllocator::customerAllocatableCount()}, how many addresses it
+     * could hand a customer out of each active pool, and passes only when the
+     * total is at least one. That method is the allocator's own rules rather
+     * than a copy: it refuses a pool whose scope may not serve a customer, as
+     * reserve() does when handed a customer (every build is), reads the same
+     * subnet list reserve() locks from — the pool's active IPv4 subnets — and
+     * counts the rows there that are `available`.
      *
      * ===========================================================================
-     * WHAT A PASS HERE DOES NOT SAY
+     * WHAT A PASS HERE STILL DOES NOT SAY
      * ===========================================================================
      *
-     * That an address can be allocated. {@see IpAllocator::reserve()} asks
-     * more than this check does. The terms below were derived by walking that
-     * method from its first line and taking every path that throws or returns
-     * short, and each was run rather than read: an estate built to fail that
-     * one term, `mapping.network` read out of `infra:preflight`, then
-     * `reserve()` called on the same rows, beside a healthy estate that does
-     * allocate. It is an open list, of terms and not of estates, because one
-     * of them is not about the estate at all.
+     * Walked from reserve()'s first line, the terms a pass does not settle:
      *
-     *   (a) The pool is active. The one term this check asks.
+     *   (a) That the pool an order resolves to is one of the pools counted.
+     *       Placement picks a pool (LocalPlacementFeasibility); this counts
+     *       every active pool, so an estate with addresses in pool A and an
+     *       order placed on an empty pool B passes here and is refused.
      *
-     *   (b) A subnet in it is active. A pool with no subnet, or with only
-     *       inactive ones, passes here and is refused as exhausted. Handed a
-     *       subnet rather than a pool, the allocator wants that subnet and
-     *       its pool both active.
+     *   (b) That there are enough. An order asks for a count (`ipv4_count`),
+     *       which a preflight does not have; one available row passes here
+     *       and an order for two is refused.
      *
-     *   (c) Handed the pool, that subnet is IPv4. `subnetIdsFor()` filters on
-     *       `ip_version` in its pool branch and not in its subnet branch, so
-     *       an IPv6 subnet holding an available row is allocatable when named
-     *       and refused through its pool. Latent in this build: the only
-     *       insert into address rows in `src/` is `SeedSubnetAddresses`,
-     *       which refuses an IPv6 block, so reaching it takes a row written
-     *       by hand.
-     *
-     *   (d) The pool's scope may serve a customer — conditionally. When a
-     *       customer is named, a management pool is refused before any
-     *       address row is read. When none is named, `assertScopeMayServe()`
-     *       returns before its test, and a management pool serves the call.
-     *
-     *   (e) Enough rows in those subnets are `available` for the count asked
-     *       for. Nothing on the operator's route writes one: `RegisterSubnet`
-     *       creates the subnet and no address rows, and `SeedSubnetAddresses`
-     *       has one caller in `src/`, the reference topology loader for
-     *       simulation. A subnet that was never seeded, one whose rows are
-     *       all reserved, assigned, quarantined or unavailable, a /32 whose
-     *       one row is its own gateway, and one available row against an
-     *       order for two all pass here and are refused.
+     *   (c) Handed a subnet rather than a pool, the allocator reads that
+     *       subnet alone. Nothing in the build path does that today.
      *
      * And one term that is not about the estate: the allocator's read is
      * `FOR UPDATE SKIP LOCKED`, so a row another transaction holds and has
-     * not committed is not a candidate. An order can be refused while enough
-     * committed rows sit `available`, because they are locked elsewhere. No
-     * reading of the estate, and no count of estates, can answer that one,
-     * which is why the list is of terms.
-     *
-     * Not asked here, on purpose. The terms live in the allocator's private
-     * methods, and this class asks the models' own questions rather than
-     * writing a second copy of anybody's rules — a copy would answer
-     * differently the first time either side changed, and the difference
-     * would surface on the order that failed. (e) also turns on the count an
-     * order asks for, which a preflight does not have. So a pass here means
-     * an active pool exists, and the summary says exactly that much.
+     * not committed is not a candidate, and this count, which does not lock,
+     * cannot see that. An order can be refused while the count is positive.
+     * The summary says what was counted and no more.
      */
     private function addressFinding(string $target): PreflightFinding
     {
         $registered = IpPool::query()->count();
-        $active = IpPool::query()->active()->count();
+        $active = IpPool::query()->active()->get();
 
-        if ($active > 0) {
-            return PreflightFinding::pass(
+        if ($active->isEmpty()) {
+            return $registered === 0
+                ? PreflightFinding::fail(
+                    'mapping.network',
+                    CheckCategory::Mapping,
+                    $target,
+                    'No address pool is registered, so a machine cannot be given an address.',
+                    'Register an address pool and its subnets.',
+                )
+                : PreflightFinding::fail(
+                    'mapping.network',
+                    CheckCategory::Mapping,
+                    $target,
+                    sprintf('%d address pool(s) are registered and none of them is active, so a machine cannot be given an address.', $registered),
+                    'Return an address pool to active, or register one that is.',
+                );
+        }
+
+        $allocatable = (int) $active->sum(fn (IpPool $pool): int => $this->addresses->customerAllocatableCount($pool));
+
+        if ($allocatable < 1) {
+            return PreflightFinding::fail(
                 'mapping.network',
                 CheckCategory::Mapping,
                 $target,
-                sprintf('%d of %d registered address pool(s) are active.', $active, $registered),
-                EvidenceClass::Configuration,
+                sprintf(
+                    '%d of %d registered address pool(s) are active and they hold no address a customer machine can be given.',
+                    $active->count(),
+                    $registered,
+                ),
+                'Register a subnet for allocation in an active public or private pool, or free addresses in one.',
             );
         }
 
-        return $registered === 0
-            ? PreflightFinding::fail(
-                'mapping.network',
-                CheckCategory::Mapping,
-                $target,
-                'No address pool is registered, so a machine cannot be given an address.',
-                'Register an address pool and its subnets.',
-            )
-            : PreflightFinding::fail(
-                'mapping.network',
-                CheckCategory::Mapping,
-                $target,
-                sprintf('%d address pool(s) are registered and none of them is active, so a machine cannot be given an address.', $registered),
-                'Return an address pool to active, or register one that is.',
-            );
+        return PreflightFinding::pass(
+            'mapping.network',
+            CheckCategory::Mapping,
+            $target,
+            sprintf(
+                '%d address(es) a customer machine can be given, across %d active address pool(s).',
+                $allocatable,
+                $active->count(),
+            ),
+            EvidenceClass::Configuration,
+        );
     }
 
     /**

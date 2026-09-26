@@ -269,7 +269,10 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
         $east = $this->pool('kw-east', IpPoolScope::Private, 'east-private');
         $west = $this->pool('kw-west', IpPoolScope::Private);
 
-        $this->register($east, '172.0.0.0/11')->assertCreated();
+        // Held space: a /11 is too wide to be expanded into address rows
+        // (RegisterSubnet::MAX_ADDRESSES_EXPANDED), and what it is held for
+        // here is the overlap, which held space is compared on like any block.
+        $this->register($east, '172.0.0.0/11', allocatable: false)->assertCreated();
 
         $this->assertRefusedOver($this->register($west, '172.16.5.0/24'), '172.0.0.0/11', 'east-private', 'kw-east');
     }
@@ -315,8 +318,10 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
         $pool = $this->pool('kw-north', IpPoolScope::Public, 'north-public');
         $other = $this->pool('kw-north', IpPoolScope::Public);
 
-        $this->register($pool, '9.0.0.0/8')->assertCreated();
-        $this->register($pool, '10.0.0.0/8')->assertCreated();
+        // Held space, for the same reason as the /11 above: a /8 is not
+        // expanded into rows, and the order of the scan does not care.
+        $this->register($pool, '9.0.0.0/8', allocatable: false)->assertCreated();
+        $this->register($pool, '10.0.0.0/8', allocatable: false)->assertCreated();
 
         $refusal = $this->register($other, '8.0.0.0/5');
 
@@ -403,10 +408,13 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
     /**
      * @return TestResponse<JsonResponse>
      */
-    private function register(IpPool $pool, string $cidr): TestResponse
+    private function register(IpPool $pool, string $cidr, bool $allocatable = true): TestResponse
     {
         return $this->actingAs($this->operator)
-            ->postJson('/api/admin/infrastructure/ip-pools/'.$pool->id.'/subnets', ['cidr' => $cidr]);
+            ->postJson('/api/admin/infrastructure/ip-pools/'.$pool->id.'/subnets', [
+                'cidr' => $cidr,
+                'allocatable' => $allocatable,
+            ]);
     }
 
     /**

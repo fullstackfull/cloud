@@ -1412,9 +1412,9 @@ return [
     'api.admin.infrastructure.subnets.store' => [
         'tag' => 'Operator',
         'summary' => 'Add a block to a pool',
-        'description' => 'The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool.',
+        'description' => 'The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool. An IPv4 block is expanded into the address rows the allocator hands out, in the same transaction: network, broadcast, gateway and every address in `reserved_addresses` are written unavailable, the rest available, and `allocatable_addresses` in the answer says how many. IPv6 is delegated per service and never expanded, and `"allocatable": false` registers a block as held space with no rows; both answer `allocatable_addresses: 0`. An IPv4 block wider than a /16 registered for allocation is refused (422 `infrastructure.subnet_too_wide_to_allocate_from`); an overlap in the block\'s realm is refused (422 `infrastructure.subnet_overlaps`) first.',
         'permission' => 'ipam.manage',
-        'body' => ['cidr', 'gateway', 'network_id'],
+        'body' => ['cidr', 'gateway', 'network_id', 'allocatable', 'reserved_addresses'],
         'response' => $one('AdminSubnet', 201),
     ],
     'api.admin.infrastructure.ip_addresses.awaiting_clearance' => [
@@ -2001,6 +2001,56 @@ return [
         'description' => 'Deactivated, never deleted: machines already built point at the row, and "which image is this server running?" is the first question asked when a rebuild goes wrong. Placement and the customer reinstall list both filter on the same flag, so one call removes it from both.',
         'permission' => 'infrastructure.manage',
         'response' => $one('VmTemplate'),
+    ],
+    'api.admin.infrastructure.nodes.status' => [
+        'tag' => 'Operator',
+        'summary' => 'Put a hypervisor node into service, drain it, or take it out',
+        'description' => 'A node the reconcile sweep discovers is recorded in `maintenance`: discovery is not authorisation. This is the operator saying it is cabled, patched and monitored and may take customers (`active`), should take no new ones (`draining`), or is out (`maintenance`). `offline` is refused: nothing in this build writes or reads it as distinct from `maintenance`, and a node set to it by hand would stay there with nothing to bring it back but this route. The reason is required and audited. Placement still asks for a node that is healthy as well as active; health is the sweep\'s.',
+        'permission' => 'node.maintenance',
+        'body' => ['status', 'reason'],
+        'response' => $one('AdminComputeNodeStatus'),
+    ],
+    'api.admin.infrastructure.os_install_profiles.index' => [
+        'tag' => 'Operator',
+        'summary' => 'The answer files a Dedicated build installs from',
+        'description' => 'Withdrawn profiles are listed with `is_active: false`. The template is not returned, only its SHA-256, and of the defaults only their keys: a default may legitimately be a password hash.',
+        'permission' => 'infrastructure.view',
+        'response' => ['envelope' => 'list', 'schema' => 'AdminOsInstallProfile'],
+    ],
+    'api.admin.infrastructure.os_install_profiles.store' => [
+        'tag' => 'Operator',
+        'summary' => 'Record an OS install profile',
+        'description' => <<<'TEXT'
+        The unattended-install recipe a Dedicated build renders and serves to
+        the machine: an installer (`autoinstall`, `preseed` or `kickstart`), a
+        template with `{{ name }}` placeholders, and defaults for them.
+
+        A slug is written once; a corrected recipe is a new profile, and the
+        old one is withdrawn rather than edited, so a machine keeps pointing at
+        what it was built with. The audit entry records the template's
+        SHA-256.
+
+        A build passes `hostname`, `ipv4_address`, `ipv4_prefix_length` and
+        `ipv4_gateway` (the gateway is omitted for an address from a subnet
+        registered without one). A template naming any other placeholder
+        without a default is refused (422
+        `infrastructure.install_profile_incomplete`), because no order-driven
+        build could fill it. A default for `hostname`, `ipv4_address` or
+        `ipv4_prefix_length` is refused (422
+        `infrastructure.install_profile_default_not_allowed`): those are the
+        platform's alone. A default `ipv4_gateway` is allowed, and applies to
+        an address from a subnet registered without a gateway.
+        TEXT,
+        'permission' => 'dedicated.manage',
+        'body' => ['slug', 'name', 'os_family', 'os_version', 'installer', 'template', 'defaults'],
+        'response' => $one('AdminOsInstallProfile', 201),
+    ],
+    'api.admin.infrastructure.os_install_profiles.withdraw' => [
+        'tag' => 'Operator',
+        'summary' => 'Stop installing from a profile',
+        'description' => 'Deactivated, never deleted. The renderer refuses an inactive profile at render time, so a build queued before the withdrawal stops using it too. Withdrawing a withdrawn profile changes nothing and is not audited again.',
+        'permission' => 'dedicated.manage',
+        'response' => $one('AdminOsInstallProfile'),
     ],
     'api.admin.infrastructure.profiles.index' => [
         'tag' => 'Operator',

@@ -4271,7 +4271,7 @@ paths:
         - "Operator"
       summary: "Add a block to a pool"
       description: |-
-        The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool.
+        The block is parsed by the same value object the allocator reads it with, so the address family and the prefix length are derived rather than asked for and a block the allocator would reject cannot be written. A gateway must fall inside it, and a network — optional — must be in the same datacenter as the pool. An IPv4 block is expanded into the address rows the allocator hands out, in the same transaction: network, broadcast, gateway and every address in `reserved_addresses` are written unavailable, the rest available, and `allocatable_addresses` in the answer says how many. IPv6 is delegated per service and never expanded, and `"allocatable": false` registers a block as held space with no rows; both answer `allocatable_addresses: 0`. An IPv4 block wider than a /16 registered for allocation is refused (422 `infrastructure.subnet_too_wide_to_allocate_from`); an overlap in the block's realm is refused (422 `infrastructure.subnet_overlaps`) first.
 
         Requires the `ipam.manage` permission.
       parameters:
@@ -4294,6 +4294,10 @@ paths:
                 gateway:
                   description: "See the endpoint description; validated server-side."
                 network_id:
+                  description: "See the endpoint description; validated server-side."
+                allocatable:
+                  description: "See the endpoint description; validated server-side."
+                reserved_addresses:
                   description: "See the endpoint description; validated server-side."
       security:
         - sessionCookie: []
@@ -4591,6 +4595,302 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/AdminNodePage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/nodes/{node}/status":
+    put:
+      operationId: "api_admin_infrastructure_nodes_status"
+      tags:
+        - "Operator"
+      summary: "Put a hypervisor node into service, drain it, or take it out"
+      description: |-
+        A node the reconcile sweep discovers is recorded in `maintenance`: discovery is not authorisation. This is the operator saying it is cabled, patched and monitored and may take customers (`active`), should take no new ones (`draining`), or is out (`maintenance`). `offline` is refused: nothing in this build writes or reads it as distinct from `maintenance`, and a node set to it by hand would stay there with nothing to bring it back but this route. The reason is required and audited. Placement still asks for a node that is healthy as well as active; health is the sweep's.
+
+        Requires the `node.maintenance` permission.
+      parameters:
+        - name: "node"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                status:
+                  description: "See the endpoint description; validated server-side."
+                reason:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminComputeNodeStatusResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/os-install-profiles":
+    get:
+      operationId: "api_admin_infrastructure_os_install_profiles_index"
+      tags:
+        - "Operator"
+      summary: "The answer files a Dedicated build installs from"
+      description: |-
+        Withdrawn profiles are listed with `is_active: false`. The template is not returned, only its SHA-256, and of the defaults only their keys: a default may legitimately be a password hash.
+
+        Requires the `infrastructure.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "Every result, unpaged."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "data"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/AdminOsInstallProfile"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+    post:
+      operationId: "api_admin_infrastructure_os_install_profiles_store"
+      tags:
+        - "Operator"
+      summary: "Record an OS install profile"
+      description: |-
+        The unattended-install recipe a Dedicated build renders and serves to
+        the machine: an installer (`autoinstall`, `preseed` or `kickstart`), a
+        template with `{{ name }}` placeholders, and defaults for them.
+
+        A slug is written once; a corrected recipe is a new profile, and the
+        old one is withdrawn rather than edited, so a machine keeps pointing at
+        what it was built with. The audit entry records the template's
+        SHA-256.
+
+        A build passes `hostname`, `ipv4_address`, `ipv4_prefix_length` and
+        `ipv4_gateway` (the gateway is omitted for an address from a subnet
+        registered without one). A template naming any other placeholder
+        without a default is refused (422
+        `infrastructure.install_profile_incomplete`), because no order-driven
+        build could fill it. A default for `hostname`, `ipv4_address` or
+        `ipv4_prefix_length` is refused (422
+        `infrastructure.install_profile_default_not_allowed`): those are the
+        platform's alone. A default `ipv4_gateway` is allowed, and applies to
+        an address from a subnet registered without a gateway.
+
+        Requires the `dedicated.manage` permission.
+      parameters:
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                slug:
+                  description: "See the endpoint description; validated server-side."
+                name:
+                  description: "See the endpoint description; validated server-side."
+                os_family:
+                  description: "See the endpoint description; validated server-side."
+                os_version:
+                  description: "See the endpoint description; validated server-side."
+                installer:
+                  description: "See the endpoint description; validated server-side."
+                template:
+                  description: "See the endpoint description; validated server-side."
+                defaults:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        201:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminOsInstallProfileResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/os-install-profiles/{profile}":
+    delete:
+      operationId: "api_admin_infrastructure_os_install_profiles_withdraw"
+      tags:
+        - "Operator"
+      summary: "Stop installing from a profile"
+      description: |-
+        Deactivated, never deleted. The renderer refuses an inactive profile at render time, so a build queued before the withdrawal stops using it too. Withdrawing a withdrawn profile changes nothing and is not audited again.
+
+        Requires the `dedicated.manage` permission.
+      parameters:
+        - name: "profile"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminOsInstallProfileResponse"
           headers:
             X-Request-Id:
               "$ref": "#/components/headers/RequestId"
@@ -20015,6 +20315,32 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminComputeCluster"
+    AdminComputeNodeStatus:
+      type: "object"
+      additionalProperties: false
+      description: "A hypervisor node after an operator changed whether it takes customers."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        provider_name:
+          type: "string"
+        cluster_id:
+          type: "string"
+        status:
+          type: "string"
+          description: "active, draining or maintenance."
+        is_healthy:
+          type: "boolean"
+        schedulable:
+          type: "boolean"
+          description: "Active and healthy, which is what placement asks for."
+    AdminComputeNodeStatusResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminComputeNodeStatus"
     AdminCountryCurrencyChange:
       type: "object"
       additionalProperties: false
@@ -20786,6 +21112,41 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminOperator"
+    AdminOsInstallProfile:
+      type: "object"
+      additionalProperties: false
+      description: "An unattended-install recipe for a Dedicated build. Written once per slug; withdrawn, never edited or deleted."
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        slug:
+          type: "string"
+        name:
+          type: "object"
+          additionalProperties:
+            type: "string"
+        os_family:
+          type: "string"
+        os_version:
+          type: "string"
+        installer:
+          type: "string"
+          description: "autoinstall, preseed or kickstart."
+        template_sha256:
+          type: "string"
+        default_keys:
+          type: "array"
+          items:
+            type: "string"
+        is_active:
+          type: "boolean"
+    AdminOsInstallProfileResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminOsInstallProfile"
     AdminPermission:
       type: "object"
       additionalProperties: false
@@ -21373,6 +21734,9 @@ components:
           type:
             - "string"
             - "null"
+        allocatable_addresses:
+          type: "integer"
+          description: "On registration only: the addresses written available for the allocator. Zero for IPv6 and for held space."
     AdminSubnetResponse:
       type: "object"
       required:

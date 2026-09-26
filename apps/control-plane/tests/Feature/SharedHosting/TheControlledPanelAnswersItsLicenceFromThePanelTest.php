@@ -25,8 +25,10 @@ use Tests\TestCase;
  * has just registered carries `false` there, because nothing has asked the
  * panel yet (RegisterHostingNode) — so the simulator said "unlicensed", the
  * sync wrote "unlicensed" back, and a registered node standing in for a
- * licensed panel could never become licensed. The estate test needed a
- * wrapper (`tests/Support/LicensedPanel.php` on round3/03) to get past it.
+ * licensed panel could never become licensed. The estate test
+ * (AFreshDeploymentBecomesConfigurableTest) needed a wrapper to get past it
+ * while round three was being fixed; with this fix it uses the simulator as
+ * it is.
  *
  * A real panel answers from its vendor, whatever the platform's row says, and
  * the simulator now keeps that shape: its answer is a property of the panel —

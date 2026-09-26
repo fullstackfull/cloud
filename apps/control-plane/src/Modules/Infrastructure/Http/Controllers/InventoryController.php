@@ -214,12 +214,17 @@ final class InventoryController
             ? Network::query()->findOrFail($request->string('network_id')->value())
             : null;
 
+        /** @var list<string> $reserved */
+        $reserved = array_values(array_map(strval(...), $request->array('reserved_addresses')));
+
         $subnet = $register->execute(
             $found,
             $request->string('cidr')->value(),
             $request->input('gateway'),
             $network,
             $this->operator($request),
+            reservedAddresses: $reserved,
+            allocatable: $request->boolean('allocatable', true),
         );
 
         return response()->json([
@@ -230,6 +235,15 @@ final class InventoryController
                 'prefix_length' => $subnet->prefix_length,
                 'gateway' => $subnet->gateway,
                 'network_id' => $subnet->network_id,
+                /*
+                 * The rows written available, which is what registering the
+                 * block was for. Zero for IPv6 and for held space, said rather
+                 * than left for the first order to discover.
+                 */
+                'allocatable_addresses' => IpAddress::query()
+                    ->where('subnet_id', $subnet->getKey())
+                    ->available()
+                    ->count(),
             ],
         ], Response::HTTP_CREATED);
     }

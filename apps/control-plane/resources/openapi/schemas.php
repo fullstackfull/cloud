@@ -2256,6 +2256,35 @@ return [
             'rack_unit' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminComputeNodeStatus' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'A hypervisor node after an operator changed whether it takes customers.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'provider_name' => ['type' => 'string'],
+            'cluster_id' => ['type' => 'string'],
+            'status' => ['type' => 'string', 'description' => 'active, draining or maintenance.'],
+            'is_healthy' => ['type' => 'boolean'],
+            'schedulable' => ['type' => 'boolean', 'description' => 'Active and healthy, which is what placement asks for.'],
+        ],
+    ],
+    'AdminOsInstallProfile' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'description' => 'An unattended-install recipe for a Dedicated build. Written once per slug; withdrawn, never edited or deleted.',
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'slug' => ['type' => 'string'],
+            'name' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+            'os_family' => ['type' => 'string'],
+            'os_version' => ['type' => 'string'],
+            'installer' => ['type' => 'string', 'description' => 'autoinstall, preseed or kickstart.'],
+            'template_sha256' => ['type' => 'string'],
+            'default_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'is_active' => ['type' => 'boolean'],
+        ],
+    ],
     'AdminHostingNode' => [
         'type' => 'object',
         'additionalProperties' => false,
@@ -2380,6 +2409,7 @@ return [
             'prefix_length' => ['type' => 'integer'],
             'is_active' => ['type' => ['boolean', 'null']],
             'network_id' => ['type' => ['string', 'null']],
+            'allocatable_addresses' => ['type' => 'integer', 'description' => 'On registration only: the addresses written available for the allocator. Zero for IPv6 and for held space.'],
         ],
     ],
     'AdminHostingNode' => [

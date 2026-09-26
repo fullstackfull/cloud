@@ -17,10 +17,12 @@ use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
 use Lynomia\Modules\Catalog\Http\Controllers\OperatorCatalogueController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\ComputeNodeController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentJobController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DeploymentPlanController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\DesiredStateController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\InventoryController;
+use Lynomia\Modules\Infrastructure\Http\Controllers\OsInstallProfileController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\OverviewController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\PreflightController;
 use Lynomia\Modules\Infrastructure\Http\Controllers\ServerController;
@@ -215,6 +217,16 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::get('infrastructure/nodes', [InfrastructureController::class, 'nodes'])
         ->middleware('permission:'.Permission::InfrastructureView->value)
         ->name('infrastructure.nodes');
+
+    /*
+     * A discovered node is recorded in maintenance; this is the person saying
+     * it may take customers. `node.maintenance`, which NOC and
+     * infrastructure-admin hold.
+     */
+    Route::put('infrastructure/nodes/{node}/status', [ComputeNodeController::class, 'status'])
+        ->whereUlid('node')
+        ->middleware('permission:'.Permission::NodeMaintenance->value)
+        ->name('infrastructure.nodes.status');
 
     Route::get('infrastructure/ip-pools', [InfrastructureController::class, 'ipPools'])
         ->middleware('permission:'.Permission::IpamView->value)
@@ -487,6 +499,23 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::delete('infrastructure/templates/{template}', [VmTemplateController::class, 'destroy'])
         ->middleware('permission:'.Permission::InfrastructureManage->value)
         ->name('infrastructure.templates.withdraw');
+
+    /*
+     * The answer files a Dedicated build installs from. Writing one is
+     * `dedicated.manage`, the permission for statements about physical
+     * machines: an answer file decides how a machine's disks are partitioned.
+     */
+    Route::get('infrastructure/os-install-profiles', [OsInstallProfileController::class, 'index'])
+        ->middleware('permission:'.Permission::InfrastructureView->value)
+        ->name('infrastructure.os_install_profiles.index');
+
+    Route::post('infrastructure/os-install-profiles', [OsInstallProfileController::class, 'store'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('infrastructure.os_install_profiles.store');
+
+    Route::delete('infrastructure/os-install-profiles/{profile}', [OsInstallProfileController::class, 'destroy'])
+        ->middleware('permission:'.Permission::DedicatedManage->value)
+        ->name('infrastructure.os_install_profiles.withdraw');
 
     /*
     |--------------------------------------------------------------------------

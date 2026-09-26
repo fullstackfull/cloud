@@ -17,9 +17,11 @@ use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
+use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use PHPUnit\Framework\Attributes\Test;
@@ -234,6 +236,24 @@ final class AnOperatorCanBuildTheEstateFromNothingTest extends TestCase
         $this->assertSame($pool->id, $subnet->ip_pool_id);
         $this->assertSame(4, $subnet->ip_version->value);
         $this->assertSame(24, $subnet->prefix_length);
+
+        /*
+         * And the allocator can give a customer an address out of it. This
+         * row used to stop at the subnet row and isCustomerAllocatable(),
+         * which were both true while the allocator refused the pool as
+         * exhausted: the route wrote no address rows (F-02).
+         */
+        $reservations = app(IpAllocator::class)->reserve(
+            scope: $pool,
+            provisioningJobId: (string) ProvisioningJob::factory()->create()->getKey(),
+            customer: Customer::factory()->create(),
+        );
+
+        $this->assertCount(1, $reservations);
+        $this->assertNotContains(
+            $reservations[0]->ipAddress()->firstOrFail()->address,
+            ['203.0.113.0', '203.0.113.1', '203.0.113.255'],
+        );
     }
 
     #[Test]
