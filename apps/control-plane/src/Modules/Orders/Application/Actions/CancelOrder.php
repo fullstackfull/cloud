@@ -112,7 +112,9 @@ final readonly class CancelOrder
      * there is nothing left to offer. So does an order whose invoice has
      * taken money that fulfilment has not yet recorded on the order — the
      * button would lead only to `order.already_paid`. Read without a lock: an
-     * answer for a screen, which execute() re-asks under one.
+     * answer for a screen, which execute() re-asks under one. The order's
+     * `invoices` relation is used when the caller loaded it (the order list
+     * does), so a page of orders is not one invoice query per row.
      */
     public static function isCancellable(Order $order): bool
     {
@@ -120,7 +122,11 @@ final readonly class CancelOrder
             && ! $order->status->isPaid()
             && $order->paid_at === null
             && in_array($order->status, self::CANCELLABLE, true)
-            && ! self::hasTakenMoney(Invoice::query()->where('order_id', $order->getKey())->get()->all());
+            && ! self::hasTakenMoney(
+                $order->relationLoaded('invoices')
+                    ? $order->invoices->all()
+                    : Invoice::query()->where('order_id', $order->getKey())->get()->all()
+            );
     }
 
     /**
