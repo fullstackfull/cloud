@@ -103,7 +103,7 @@ independent re-audit follows. The specification is
 |---|---|---|---|
 | 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | rejected again (sibling subscriptions of one order mint credit after a partial refund), repairing; voided-upgrade billing added | `708bfb1` |
 | 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | rejected (capacity at fulfilment strands a paid order; cancelled-order credit pays back twice), repairing | `505cbba` |
-| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | repaired; re-verifying | `84b937f` |
+| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | rejected again (a defaulted gateway is sold and cannot be built), repairing | `84b937f` |
 | 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | rejected (stale-row writes: sweep overwrites a running restore; concurrent restores), repairing | `defcd5c` |
 | 05 | F-16 `--env` disarms production guards; operator RBAC (role removal, permission emptying, invite atomicity, bootstrap promotion); F-03 test; EndpointPolicy 5f00::/16 | upheld with reservations; merged `a607ea2`, full suite 5,199/5,199, 628 suites `skipped="0"`, exit 0 | `31c8357` |
 | 06 | F-26 empty reserved-zone default and preflight wording; I-3 customer blamed for operator misconfiguration | upheld with reservations; sentences narrowed in `862f416`; merged `306aa57`, full suite 5,233/5,233, 631 suites `skipped="0"`, exit 0 | `862f416` |
