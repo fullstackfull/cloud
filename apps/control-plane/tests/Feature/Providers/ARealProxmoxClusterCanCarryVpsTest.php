@@ -101,24 +101,33 @@ use Tests\TestCase;
  *     catalogue entry, the VPS requirement and the privilege map) and this
  *     file breaks if the four stop agreeing; the architecture gate cannot
  *     see all four removed together.
- *  5. The two premises the map rests on, each checked at source:
- *     - `create` and `reinstall` ask for `VM.Config.Cloudinit` because every
- *       call that builds or rebuilds a machine on a real hypervisor hands
- *       the adapter a cloud-init config. The cloud-init pin reads every call
- *       to either build method in each handler — not only the handler's own
- *       — token by token, so a comment or a string that merely quotes
- *       `cloudInit:` does not satisfy it. The caller set reads every file of
- *       the application and holds that no other file names a build method
- *       whole — called, taken as a callable, or named in a string the way PHP
- *       and Laravel read a callable: alone, after `::` or after `@` — apart
- *       from one browser-suite seeder whose every call is checked to be made
- *       on the fake hypervisor. And the map is held to its half: both build
- *       capabilities still ask for `VM.Config.Cloudinit`.
- *     - `inventory_sync` is load-bearing because the inventory sync is the
- *       only production code that brings a ComputeStorage row into
- *       existence. The writer scan establishes that for every shape it
- *       counts, and states exactly what those are and what it does not
- *       count (below).
+ *  5. The two premises the map rests on, each checked at source by a token
+ *     scan. What each scan reads is stated where it is defined, and what it
+ *     does not read is measured rather than bounded (see THE SOURCE-READING
+ *     GATES below):
+ *     - `create` and `reinstall` ask for `VM.Config.Cloudinit` because the
+ *       calls that build or rebuild a machine on a real hypervisor hand the
+ *       adapter a cloud-init config. The cloud-init pin reads, token by
+ *       token, each call to either build method written whole in each
+ *       handler — not only the handler's own method — and requires one
+ *       positional argument to be exactly `new <Request>(…)`, among whose
+ *       own arguments `cloudInit:` is bound to exactly `new
+ *       CloudInitConfig(…)`: nothing called on or applied to either
+ *       construction after it closes, and a comment or a string that merely
+ *       quotes `cloudInit:` does not satisfy it. The caller set tokenizes the
+ *       files READ BY THE SCANS and fails if any of them other than the two
+ *       handlers names a build method whole — called, taken as a callable,
+ *       or named in a string alone, after `::` or after `@`, the forms PHP
+ *       and Laravel call — apart from one browser-suite seeder whose every
+ *       such call is checked to be made on the fake hypervisor. And the map
+ *       is held to its half: both build capabilities still ask for
+ *       `VM.Config.Cloudinit`.
+ *     - `inventory_sync` is load-bearing because, of the code the writer
+ *       scan reads, only the inventory sync brings a ComputeStorage row into
+ *       existence in production; the simulation loader is the one other
+ *       creator, and it refuses production. The shapes the scan counts, and
+ *       the escapes found so far with the number of sites each occupies
+ *       today, are listed at the test.
  *
  * ===========================================================================
  * WHAT THIS FILE DOES NOT REACH
@@ -133,21 +142,71 @@ use Tests\TestCase;
  *  - A privilege held only at one path counts as held; the tester flattens
  *    scope. Recorded on the ledger, moot for this repository's clusters, whose
  *    automation grants the role at `/`.
- *  - `suspend` and `unsuspend` map to `VM.PowerMgmt` alone while the adapter
- *    also writes `onboot` and `lock` (`VM.Config.Options`). No verdict moves,
- *    because both compute products require `create`, which requires
- *    `VM.Config.Options`; the tester's answer for those two capabilities is
- *    still wrong for such a token, and that is recorded rather than fixed.
- *  - The cloud-init pin and the caller set see a build method only when its
- *    name is written whole: called or taken as a callable in any case, or
- *    named in a string alone, after `::` or after `@` (`'Class@method'`, the
- *    form Laravel's container calls). A name assembled at run time is
- *    invisible to both;
- *    what stops that from removing cloud-init from the *last*
- *    machine-building call is the per-file backstop that each pinned file
- *    still calls its own method by name. So a hidden call site can add a
- *    machine without cloud-init; it cannot take cloud-init off the one the
- *    backstop sees.
+ *  - Lists the tester's own reading makes short, recorded in its docblock
+ *    rather than fixed: `suspend` and `unsuspend` map to `VM.PowerMgmt`
+ *    alone while the adapter also writes `onboot` and `lock`
+ *    (`VM.Config.Options`); `create` and `reinstall` send `import-from=`,
+ *    which the tester reads as needing `Datastore.Audit`, and do not list
+ *    it. No verdict moves on either, because both compute products require
+ *    `create`, which requires `VM.Config.Options`, and `templates`, which
+ *    requires `Datastore.Audit`; the tester's answer for those capabilities
+ *    is still wrong for such a token.
+ *
+ * ===========================================================================
+ * THE SOURCE-READING GATES: WHAT THEY READ, AND WHAT IS MEASURED INSTEAD
+ * ===========================================================================
+ *
+ * The cloud-init pin, the caller set and the writer scan read source text to
+ * predict what will run. Each reads the grammar stated where it is defined;
+ * none of them bounds what PHP and Laravel can execute, and no list in this
+ * file of what they miss is closed. The escapes named here and at the writer
+ * scan are the ones attack has found so far, and an attacker who stops has
+ * found the limit of the attack, not of the scan. What can be measured is
+ * how many sites of each escape the tree holds, and that is given below with
+ * the command that measured it, at the commit that last changed this file.
+ * Re-run them when the tree moves: a green run relies on those counts, not on
+ * the lists.
+ *
+ * READ BY THE SCANS: each file under the control plane whose name ends
+ * `.php`, outside {@see self::NOT_APPLICATION_CODE} and hidden directories,
+ * through PHP's own tokenizer — 1,595 files, which is also what
+ *
+ *     G -l '' . | wc -l
+ *
+ * counts, where G, here and below, is run from apps/control-plane and stands
+ * for `grep -rE --include='*.php' --exclude-dir={tests,vendor,node_modules,storage,tools,cache}`.
+ *
+ * ESCAPES FOUND, AND THEIR OCCUPANCY:
+ *
+ *  - Code a Blade template writes in its own syntax (`@php … @endphp`,
+ *    `{{ … }}`, a directive's argument) reaches the tokenizer as text, so no
+ *    scan reads it. 2 templates, and 0 name a build method, the model, a
+ *    relation to it or its table:
+ *
+ *        grep -rilE --include='*.blade.php' --exclude-dir={vendor,node_modules} 'virtualmachine|reinstallvm|computestorage|compute_storages|storages?|assignable' .
+ *
+ *  - PHP in a file whose name does not end `.php` is not read. 1 such file,
+ *    `artisan`, which names none of those:
+ *
+ *        grep -rlE --exclude='*.php' --exclude-dir={tests,vendor,node_modules,storage,tools,cache} '^(<\?php|#!.*php)' .
+ *        grep -ciE 'virtualmachine|reinstallvm|computestorage|compute_storages|storages?|assignable' artisan
+ *
+ *  - A build method reached through a name assembled at run time is
+ *    invisible to the pin and the caller set. The dispatch forms that carry
+ *    one — a method called through a variable or a braced expression, and
+ *    call_user_func / forward_static_call — occur at 0 sites:
+ *
+ *        G -n '(->|::)\s*(\$\w+|\{[^}]*\})\s*\(' .
+ *        G -nw 'call_user_func(_array)?|forward_static_call(_array)?' .
+ *
+ *    A callable array or string whose name is concatenated and handed to
+ *    something that calls it is not in that count; no grep pins that down.
+ *    What bounds this escape besides its occupancy is the per-file backstop:
+ *    each pinned file must still call its own method by name, so a hidden
+ *    call site can add a machine without cloud-init; it cannot take
+ *    cloud-init off the call the backstop sees.
+ *  - The writer scan's own escapes are listed at WHAT IT DOES NOT COUNT, each
+ *    with its occupancy.
  */
 final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
 {
@@ -158,10 +217,12 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     private const string ROLE_FILE = __DIR__.'/../../../../../infrastructure/ansible/group_vars/proxmox.yml';
 
     /**
-     * The control plane's own directory. Both scans below read every PHP file
-     * under it except the tests, the dependencies and what the framework
-     * writes at run time — so a console command, a migration or a seeder is
-     * read as well as src/.
+     * The control plane's own directory. The scans below tokenize each file
+     * under it whose name ends `.php`, outside NOT_APPLICATION_CODE (the
+     * tests, the dependencies, what the framework writes at run time and the
+     * developer tools) and hidden directories — so a console command, a
+     * migration or a seeder is read as well as src/. What that leaves unread,
+     * and how much of it the tree holds, is in the file header.
      */
     private const string ROOT = __DIR__.'/../../..';
 
@@ -185,11 +246,13 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
      * file's own; the file's own method is what the backstop requires to be
      * called by name.
      *
-     * Two files. {@see self::the_pinned_call_sites_are_every_call_site_in_the_application()}
-     * asserts that no other file names a build method whole — apart from
-     * {@see self::FAKE_ONLY_CALLERS}, whose every call it checks is made on
-     * the fake — so this is a closed list rather than a hand-written one that
-     * can silently fall behind.
+     * Two files. {@see self::the_caller_set_finds_a_build_method_named_whole_only_in_the_pinned_handlers()}
+     * fails if any other file it reads names a build method whole — apart
+     * from {@see self::FAKE_ONLY_CALLERS}, whose every such call it checks is
+     * made on the fake — so a caller written in the forms it reads cannot be
+     * added without this list changing. It is not a closed list: the forms
+     * the caller set does not read, and the number of sites each occupies
+     * today, are in the file header.
      *
      * @var array<string, string>
      */
@@ -201,10 +264,10 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     /**
      * Files that name a build method and are not pinned, and why each may.
      *
-     * Every build call in them is made on the fake hypervisor, constructed by
-     * class in the call itself, so no cluster is asked for a privilege and the
-     * premise is not about them. The caller-set test checks each call's
-     * receiver rather than trusting the reason.
+     * Each build call they write is made on the fake hypervisor, constructed
+     * by class in the call itself, so no cluster is asked for a privilege and
+     * the premise is not about them. The caller-set test checks the receiver
+     * of each call it reads rather than trusting the reason.
      *
      * @var array<string, string>
      */
@@ -466,15 +529,16 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     // -----------------------------------------------------------------------
 
     #[Test]
-    public function only_the_inventory_sync_and_the_simulation_loader_create_storage_rows(): void
+    public function the_writer_scan_finds_only_the_inventory_sync_and_the_simulation_loader_creating_storage_rows(): void
     {
         /*
-         * WHAT THIS CHECK COUNTS. Every PHP file of the application is read
-         * (src/, app/, database/, routes/, config/ and the rest — not tests/
-         * or vendor/). Comments are removed by the tokenizer, so a comment can
-         * neither match nor hide a creation. A string literal is one token,
-         * read only where a shape below reads one — as SQL, a callable, a
-         * table name, or a name in a relation declaration: a sentence quoting
+         * WHAT THIS CHECK COUNTS. The files READ BY THE SCANS (file header)
+         * are tokenized: src/, app/, database/, routes/, config/ and the rest
+         * of the `.php` files, not tests/ or vendor/. Comments are removed by
+         * the tokenizer, so a comment can neither match nor hide a creation.
+         * A string literal is one token, read only where a shape below reads
+         * one — as SQL, a callable, a table name, a `$table` default, or a
+         * name in a relation declaration: a sentence quoting
          * `ComputeStorage::create(…)` matches nothing, and one quoting SQL
          * that inserts into the table is counted, which fails closed. What a
          * double-quoted string interpolates, `"{$node->storages()->create()}"`,
@@ -492,10 +556,10 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
          *   ->storages[0]->…-><creator>(           name written or in a literal
          *                                          `->{'…'}`; its names
          *                                          derived, not listed
-         *                                          (see relationsIn()): every
-         *                                          relation kind the model can
-         *                                          declare, belongsTo, the
-         *                                          *Through and morph kinds
+         *                                          (see relationsIn()): each
+         *                                          relation kind the framework's
+         *                                          Model documents, belongsTo,
+         *                                          the *Through and morph kinds
          *                                          included, one built by hand,
          *                                          one narrowed from another,
          *                                          and a has-through
@@ -513,15 +577,18 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
          *   'INSERT INTO compute_storages …'       SQL in a string: INSERT or
          *                                          MERGE INTO, or COPY … FROM
          *
-         * ComputeStorage stands for every name the model goes by, derived
-         * rather than listed: the class however qualified and in any case, a
-         * class the application declares extending it or naming it as a
-         * factory's `$model` (to a fixed point), an alias a file imports any
-         * of those under with `use … as`, and `self`, `static` and `parent`
-         * inside a file that declares one of them. `new class extends
-         * ComputeStorage` counts as an instance.
+         * ComputeStorage stands for these names, derived from the files rather
+         * than listed (see storageClasses()): the class however qualified and
+         * in any case; a named class the files declare extending one of these
+         * names, giving `$table` the model's table as a literal in its body
+         * (bare or schema-qualified — a second model on the same table), or
+         * naming one as a factory's `$model`, to a fixed point; an alias a
+         * file imports any of those under with `use … as`; and `self`,
+         * `static` and `parent` inside a file that declares one of them.
+         * `new class extends ComputeStorage`, and an anonymous class whose
+         * body gives `$table` the table, count as an instance.
          *
-         * <creator> is every method the framework's builders, relations
+         * <creator> is each method the framework's builders, relations
          * (every class the model's relation-declaring methods return), model
          * and factories offer whose name has one of the shapes of a method
          * that makes a row, or an instance that saving makes into one —
@@ -538,18 +605,60 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
          * and write it through a variable, so nothing in their chains creates
          * one; the two verbatim lines are among the shapes below.
          *
-         * WHAT IT DOES NOT COUNT: anything reached through a variable — one
-         * holding the class name, a query, a relation, an instance or a method
-         * name, `$this` included (`$query->create(…)`,
-         * `$storage->replicate()->save()`, `->$method(…)`), and a relation
-         * declared from one (`$this->newHasMany($instance->newQuery(), …)`);
-         * the class name used as a value other than in a callable or a
-         * relation declaration (`app(ComputeStorage::class)`,
-         * `class_alias(…)`); a mixin (`Builder::mixin(…)`), whose methods
-         * become macros only at run time; any name or SQL assembled at run
-         * time; and code in a Blade template, which the tokenizer reads as
-         * text. Each of those needs to know what a value will be, which a
-         * token scan cannot.
+         * WHAT IT DOES NOT COUNT. These are the escapes attack has found, not
+         * the boundary of what the scan misses. Each is given with the number
+         * of sites it occupies in the tree, measured with the command shown
+         * (G as in the file header), at the commit that last changed this
+         * file:
+         *
+         *  - Anything reached through a variable: one holding the class name,
+         *    a query, a relation, an instance or a method name, `$this`
+         *    included (`$query->create(…)`, `$storage->replicate()->save()`,
+         *    `->$method(…)`), and a relation declared from one
+         *    (`$this->newHasMany($instance->newQuery(), …)`). A value of the
+         *    model put in a variable: 5 sites. One is in SyncClusterInventory,
+         *    a listed creator; ReserveNodeCapacity and ReleaseNodeCapacity save
+         *    the row they found by id; NodeScheduler and MappingChain read.
+         *
+         *        G -n '\$\w+\s*=\s*\\?(\w+\\)*ComputeStorage\s*::' . | grep -v '::class'
+         *
+         *    A relation to it put in a variable: 0 sites (the one line the
+         *    command prints is the simulation loader calling its own
+         *    `storage()` method). ComputeStorage itself calls nothing on
+         *    `$this` but two relation declarations and its own `freeGib()`.
+         *
+         *        G -n '=\s*\$\w+\s*(->|\?->)\s*(storages?|assignable)\s*\(' .
+         *        grep -nE '\$this\s*->\s*\w+\s*\(' src/Modules/Compute/Infrastructure/Models/ComputeStorage.php
+         *
+         *  - The class name as a value anywhere other than a callable, a
+         *    relation declaration or a factory's `$model`
+         *    (`app(ComputeStorage::class)`, `class_alias(…)`), and a mixin
+         *    (`Builder::mixin(…)`), whose methods become macros only at run
+         *    time. `ComputeStorage::class` occurs at 4 sites, each a factory's
+         *    `$model` or a relation declaration, which the scan reads;
+         *    `class_alias` and `::mixin(` at 0.
+         *
+         *        G -n 'ComputeStorage(Factory)?::class' .
+         *        G -n 'class_alias|::mixin\(' .
+         *
+         *  - The table reached other than as a literal in `table()` or
+         *    `from()`, in SQL in a string, or as a literal `$table` in a class
+         *    body: a table name held in a constant or a variable,
+         *    `setTable(…)`, a `getTable()` override, a `$table` a trait or a
+         *    constructor supplies. The table's name occurs in 5 files: three
+         *    migrations (schema; the scan reads them and counts none), a
+         *    comment in the reference topology, and NamingConcept::table(),
+         *    whose one caller reads through `DB::table($concept->table())
+         *    ->get(…)`. `setTable(` and a `getTable()` override occur at 0.
+         *
+         *        G -il 'compute_storages' .
+         *        G -n 'setTable\(|function getTable\(' .
+         *
+         *  - Any name or SQL assembled at run time: the dispatch forms counted
+         *    in the file header (0 sites), and the table name above.
+         *  - Code a Blade template writes in its own syntax, and PHP in a file
+         *    not named `.php`: see the file header (0 sites that name the
+         *    model, a relation to it or its table).
          */
         $relations = $this->storageRelations();
 
@@ -569,7 +678,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         sort($expected);
 
         $this->assertSame($expected, $creators, sprintf(
-            "The set of code that can create a storage row has changed. inventory_sync is required of VPS because only the sync creates one in production; a new creator has to be justified here:\n  %s",
+            "The set of code the writer scan finds creating a storage row has changed. inventory_sync is required of VPS because, of the code this scan reads, only the sync creates one in production; a new creator has to be justified here:\n  %s",
             implode("\n  ", $creators),
         ));
     }
@@ -651,6 +760,18 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'static, inside another class' => ["class Ledger {\n    public static function open(): static { return static::create([]); }\n}", false];
         yield 'a subclass of another model' => ["class Pool extends ComputeNode {}\nPool::create([]);", false];
         yield 'the model, aliased and only read' => ["use Lynomia\\Modules\\Compute\\Infrastructure\\Models\\ComputeStorage as Pool;\nPool::query()->where('a', 1)->get();", false];
+
+        // A second model on the same table, named by `$table`.
+        yield 'a second model on the table' => ["final class StoragePoolRecord extends Model {\n    use HasUlids;\n    protected \$table = 'compute_storages';\n    protected \$guarded = ['id'];\n}\nStoragePoolRecord::query()->create([]);", true];
+        yield 'a second model on the table, schema-qualified' => ["class PoolRow extends Model { protected \$table = \"public.compute_storages\"; }\nPoolRow::forceCreate([]);", true];
+        yield 'a subclass of a second model on the table' => ["class PoolRow extends Model { protected \$table = 'compute_storages'; }\nclass FastPoolRow extends PoolRow {}\n(new FastPoolRow)->save();", true];
+        yield 'static, inside a second model on the table' => ["class PoolRow extends Model {\n    protected \$table = 'compute_storages';\n    public static function adopt(): static { return static::create([]); }\n}", true];
+        yield 'an anonymous model on the table' => ["(new class extends Model { protected \$table = 'compute_storages'; })->save();", true];
+        yield 'an anonymous model on the table, constructed with arguments' => ["\$pool = new class(['name' => 'x']) extends Model { protected \$table = 'compute_storages'; };", true];
+        yield 'a second model on the table, only read' => ["class PoolRow extends Model { protected \$table = 'compute_storages'; }\nPoolRow::query()->where('a', 1)->get();", false];
+        yield 'a model on another table' => ["class NodeRow extends Model { protected \$table = 'compute_nodes'; }\nNodeRow::query()->create([]);", false];
+        yield 'an anonymous model on another table' => ["(new class extends Model { protected \$table = 'compute_nodes'; })->save();", false];
+        yield 'a model on another table, next to one that names the table in a string' => ["class NodeRow extends Model { protected \$table = 'compute_nodes'; }\nNodeRow::create([]);\n\$label = 'compute_storages';", false];
     }
 
     #[Test]
@@ -676,7 +797,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'another case' => ['public function Pools(): HasMany { return $this->HasMany(computestorage::class); }', ['pools']];
         yield 'another model' => ['public function nodes(): HasMany { return $this->hasMany(ComputeNode::class); }', []];
 
-        // Every kind the model can declare: each can create the row it reads.
+        // Each kind the relation grammar derives from the model: each can create the row it reads.
         yield 'belongsTo, whose create is forwarded to the related model' => ['public function storage(): BelongsTo { return $this->belongsTo(ComputeStorage::class); }', ['storage']];
         yield 'morphOne' => ["public function pool(): MorphOne { return \$this->morphOne(ComputeStorage::class, 'owner'); }", ['pool']];
         yield 'morphToMany' => ["public function pools(): MorphToMany { return \$this->morphToMany(ComputeStorage::class, 'owner'); }", ['pools']];
@@ -688,6 +809,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'hasManyThrough with the model as the intermediate, named first' => ['public function snapshots(): HasManyThrough { return $this->hasManyThrough(through: ComputeStorage::class, related: Snapshot::class); }', []];
         yield 'morphTo, which reads the related class off the row' => ['public function owner(): MorphTo { return $this->morphTo(); }', ['owner']];
         yield 'self, inside the model' => ["class ComputeStorage extends Model {\n    public function children(): HasMany { return \$this->hasMany(self::class, 'parent_id'); }\n}", ['children']];
+        yield 'to a second model on the table' => ["class PoolRow extends Model { protected \$table = 'compute_storages'; }\npublic function pools(): HasMany { return \$this->hasMany(PoolRow::class); }", ['pools']];
 
         // Built by hand.
         yield 'a factory method, from the model\'s query' => ["public function pools(): HasMany { return \$this->newHasMany(ComputeStorage::query(), \$this, 'node_id', 'id'); }", ['pools']];
@@ -727,18 +849,18 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     // -----------------------------------------------------------------------
-    // 5. The premise behind VM.Config.Cloudinit: every build carries cloud-init
+    // 5. The premise behind VM.Config.Cloudinit: the build calls carry cloud-init
     // -----------------------------------------------------------------------
 
     #[Test]
-    public function every_call_that_builds_or_rebuilds_a_machine_hands_the_adapter_a_cloud_init_config(): void
+    public function each_build_call_the_pin_reads_in_the_handlers_hands_the_adapter_a_cloud_init_config(): void
     {
         foreach (self::CLOUD_INIT_CALL_SITES as $relative => $own) {
             $problems = $this->cloudInitFileProblems($this->tokens(self::ROOT.'/'.$relative), $own);
 
             $this->assertSame([], $problems['missing'], sprintf(
-                "%s builds or rebuilds a machine without handing the adapter a request carrying cloudInit: new CloudInitConfig(...):\n  %s\n"
-                .'The privilege map asks VM.Config.Cloudinit of that capability because every such call carries cloud-init.',
+                "%s builds or rebuilds a machine without handing the adapter exactly new <Request>(..., cloudInit: new CloudInitConfig(...)):\n  %s\n"
+                .'The privilege map asks VM.Config.Cloudinit of that capability because the build calls carry cloud-init.',
                 $relative,
                 implode("\n  ", $problems['missing']),
             ));
@@ -775,7 +897,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     #[Test]
-    public function the_pinned_methods_are_every_method_that_takes_a_build_request(): void
+    public function the_pinned_methods_are_every_contract_method_that_takes_a_build_request(): void
     {
         $methods = [];
 
@@ -804,7 +926,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     #[Test]
-    public function the_pinned_call_sites_are_every_call_site_in_the_application(): void
+    public function the_caller_set_finds_a_build_method_named_whole_only_in_the_pinned_handlers(): void
     {
         $callers = [];
         $fakeOnly = [];
@@ -889,7 +1011,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
 
     #[Test]
     #[DataProvider('callerShapes')]
-    public function the_caller_set_counts_every_way_a_build_method_is_named_whole(string $code, bool $reaches): void
+    public function the_caller_set_counts_each_form_of_naming_a_build_method_it_claims(string $code, bool $reaches): void
     {
         $this->assertSame($reaches, $this->reachesABuildMethod($this->tokensOf("<?php\n".$code."\n")));
     }
@@ -917,6 +1039,16 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         yield 'a build method in Laravel\'s callable string' => [$good."\napp()->call('Lynomia\\Modules\\Compute\\Infrastructure\\Providers\\ProxmoxComputeProvider@createVirtualMachine', ['request' => \$payload]);", false];
         yield 'the same method in another case, without cloud-init' => [$good."\n\$provider->CreateVirtualMachine(new CreateVmRequest(nodeName: 'b'));", false];
         yield 'the other build method in another case, without cloud-init' => [$good."\n\$provider->reinstallvm('a', 'b', new ReinstallVmRequest(templateReference: 'x'));", false];
+
+        // The argument must be the construction and end with it.
+        yield 'a method called on the new request, which hands over what it returns' => ["\$provider->createVirtualMachine(new CreateVmRequest(\n    nodeName: 'a',\n    cloudInit: new CloudInitConfig(sshKeys: []),\n)->withoutCloudInit());", false];
+        yield 'a nullsafe call on the new request' => ["\$provider->createVirtualMachine(new CreateVmRequest(nodeName: 'a', cloudInit: new CloudInitConfig(sshKeys: []))?->withoutCloudInit());", false];
+        yield 'an operator after the new request' => ["\$provider->createVirtualMachine(new CreateVmRequest(nodeName: 'a', cloudInit: new CloudInitConfig(sshKeys: [])) ?: \$fallback);", false];
+        yield 'a method called on the new cloud-init config' => ["\$provider->createVirtualMachine(new CreateVmRequest(\n    nodeName: 'a',\n    cloudInit: new CloudInitConfig(sshKeys: [])->orNothing(),\n));", false];
+        yield 'a ternary after the new cloud-init config' => ["\$provider->createVirtualMachine(new CreateVmRequest(nodeName: 'a', cloudInit: new CloudInitConfig(sshKeys: []) ? null : null));", false];
+        yield 'the other build method, a method called on its new request' => [$good."\n\$provider->reinstallVm('a', 'b', new ReinstallVmRequest(templateReference: 'x', cloudInit: new CloudInitConfig(sshKeys: []))->withoutCloudInit());", false];
+        yield 'cloud-init constructed with no argument list' => ["\$provider->createVirtualMachine(new CreateVmRequest(\n    nodeName: 'a',\n    cloudInit: new CloudInitConfig,\n));", true];
+        yield 'a trailing comma after the new request' => ["\$provider->createVirtualMachine(\n    new CreateVmRequest(nodeName: 'a', cloudInit: new CloudInitConfig(sshKeys: [])),\n);", true];
     }
 
     #[Test]
@@ -1093,9 +1225,12 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Every PHP file of the application: everything under the control plane's
-     * directory except what {@see self::NOT_APPLICATION_CODE} names and hidden
-     * directories.
+     * The files the scans read: each file under the control plane's directory
+     * whose name ends `.php`, except what {@see self::NOT_APPLICATION_CODE}
+     * names and hidden files and directories. A Blade template's name ends
+     * `.php` and it is returned, but what it writes in its own syntax reaches
+     * the tokenizer as text; that, and the PHP this walk does not return, are
+     * measured in the file header.
      *
      * @return array<string, string> path relative to the control plane => absolute path
      */
@@ -1182,9 +1317,9 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * The names under which the application declares a relation able to
-     * reach ComputeStorage rows ({@see self::relationsIn()}), read from every
-     * file to a fixed point, so a relation narrowed from, or built through,
+     * The names under which the files the scans read declare a relation able
+     * to reach ComputeStorage rows ({@see self::relationsIn()}), read from each
+     * of them to a fixed point, so a relation narrowed from, or built through,
      * one declared in another file counts too.
      *
      * @return list<string> {@see self::relationKey()}
@@ -1207,13 +1342,15 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
 
     /**
      * The names under which this code declares a relation able to reach
-     * ComputeStorage rows. Every relation can create the row it reads: a
-     * create on any relation, belongsTo and the *Through kinds included, is
-     * forwarded to the related model's query, and most kinds define creators
-     * of their own besides. A method's name counts when, in its body:
+     * ComputeStorage rows. A relation of any kind the grammar derives can
+     * create the row it reads: a create on one, belongsTo and the *Through
+     * kinds included, is forwarded to the related model's query, and most
+     * kinds define creators of their own besides. A method's name counts
+     * when, in its body:
      *
-     *  - one of the model's relation-declaring methods is called — every one
-     *    the framework's model has, read off it by reflection
+     *  - one of the model's relation-declaring methods is called — each
+     *    method of the framework's Model whose docblock says it returns a
+     *    relation, read off it by reflection
      *    ({@see self::relationGrammar()}): hasOne … morphedByMany and the
      *    newHasOne … newMorphToMany factories they call — or one of the
      *    relation classes they return is constructed with `new` (the
@@ -1245,7 +1382,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
      */
     private function relationsIn(array $tokens, array $known = []): array
     {
-        $names = $this->modelNamesIn($tokens, $this->storageClasses());
+        $names = $this->modelNamesIn($tokens, $this->storageClasses(), $this->storageTable());
         $isModel = $this->modelMatcher($tokens, $names);
         $kinds = $this->relationGrammar()['kinds'];
         $classes = $this->modelNamesIn($tokens, $this->relationClassNames());
@@ -1472,27 +1609,40 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Every class name the model is reached by in the application, derived
-     * rather than listed: ComputeStorage itself, every class declared as
-     * extending one of these (a subclass writes the same table), and every
-     * factory whose `$model` is one of these — to a fixed point, so a
-     * subclass of a subclass is found too.
+     * The class names this scan takes to be the model, derived from the files
+     * {@see self::sourceFiles()} returns rather than listed: ComputeStorage
+     * itself; a named class declared extending one of these (a subclass
+     * writes the same table); a named class whose body gives `$table` the
+     * model's table as a literal string (a second model on the same table,
+     * this repository's own idiom for naming a table); and a factory whose
+     * `$model` is one of these — to a fixed point, so a subclass of a subclass
+     * is found too. A class that reaches the table any other way is not one of
+     * these names; see WHAT IT DOES NOT COUNT.
      *
      * @return list<string> lower-cased short names
      */
     private function storageClasses(): array
     {
-        return self::$storageClasses ??= $this->classesDerivedFrom(['computestorage']);
+        return self::$storageClasses ??= $this->classesDerivedFrom(['computestorage'], $this->storageTable());
     }
 
     /**
-     * These classes, and every class the application declares extending one
-     * of them or naming one as a factory's `$model`, to a fixed point.
+     * The model's table, as the model itself answers it.
+     */
+    private function storageTable(): string
+    {
+        return (new ComputeStorage)->getTable();
+    }
+
+    /**
+     * These classes, and every class the files declare extending one of them,
+     * naming one as a factory's `$model` or — when a table is given — giving
+     * `$table` that table, to a fixed point.
      *
      * @param  list<string>  $seed  lower-cased short names
      * @return list<string> lower-cased short names
      */
-    private function classesDerivedFrom(array $seed): array
+    private function classesDerivedFrom(array $seed, ?string $table = null): array
     {
         $files = array_map(fn (string $path): array => $this->tokens($path), array_values($this->sourceFiles()));
         $classes = $seed;
@@ -1510,7 +1660,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
                     }
                 }
 
-                $classes = array_values(array_unique([...$classes, ...array_intersect($this->modelNamesIn($tokens, $classes), $declared)]));
+                $classes = array_values(array_unique([...$classes, ...array_intersect($this->modelNamesIn($tokens, $classes, $table), $declared)]));
             }
         } while ($classes !== $before);
 
@@ -1518,16 +1668,17 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * The names the model goes by in this code: the ones given, every class
-     * this code declares extending one of them or declaring one as a
-     * factory's `$model`, and every alias it imports one of them under with
+     * The names the model goes by in this code: the ones given, every named
+     * class this code declares extending one of them, declaring one as a
+     * factory's `$model` or — when a table is given — giving `$table` that
+     * table in its body, and every alias it imports one of them under with
      * `use … as`.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      * @param  list<string>  $names  lower-cased short names
      * @return list<string>
      */
-    private function modelNamesIn(array $tokens, array $names): array
+    private function modelNamesIn(array $tokens, array $names, ?string $table = null): array
     {
         do {
             $before = $names;
@@ -1538,6 +1689,11 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
                     $declared = strtolower($tokens[$i + 1][1]);
 
                     if (($tokens[$i + 2][0] ?? null) === T_EXTENDS && $this->namesAny($tokens[$i + 3] ?? null, $names)) {
+                        $names[] = $declared;
+                    }
+
+                    // protected $table = 'compute_storages';
+                    if ($table !== null && $this->bodyNamesTable($tokens, $i + 2, $table)) {
                         $names[] = $declared;
                     }
                 }
@@ -1592,16 +1748,17 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
      */
     private function createsStorage(array $tokens, array $relations): bool
     {
-        $names = $this->modelNamesIn($tokens, $this->storageClasses());
-        $table = (new ComputeStorage)->getTable();
+        $table = $this->storageTable();
+        $names = $this->modelNamesIn($tokens, $this->storageClasses(), $table);
         $count = count($tokens);
         $isModel = $this->modelMatcher($tokens, $names);
 
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
 
-            // new ComputeStorage, and an anonymous class extending it
-            if ($token[0] === T_NEW && ($isModel($tokens[$i + 1] ?? null) || $this->isAnonymousSubclass($tokens, $i + 1, $isModel))) {
+            // new ComputeStorage, and an anonymous class extending it or
+            // giving `$table` its table
+            if ($token[0] === T_NEW && ($isModel($tokens[$i + 1] ?? null) || $this->isAnonymousSubclass($tokens, $i + 1, $isModel, $table))) {
                 return true;
             }
 
@@ -1675,12 +1832,13 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Is the code after `new` at $i `class(…) extends <the model>`?
+     * Is the code after `new` at $i `class(…) extends <the model>`, or an
+     * anonymous class whose body gives `$table` the model's table?
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      * @param  callable(array{0: int|string, 1: string, 2: int}|null): bool  $isModel
      */
-    private function isAnonymousSubclass(array $tokens, int $i, callable $isModel): bool
+    private function isAnonymousSubclass(array $tokens, int $i, callable $isModel, string $table): bool
     {
         if (($tokens[$i][0] ?? null) !== T_CLASS) {
             return false;
@@ -1692,7 +1850,46 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
             $next = $this->closing($tokens, $next) + 1;
         }
 
-        return ($tokens[$next][0] ?? null) === T_EXTENDS && $isModel($tokens[$next + 1] ?? null);
+        return (($tokens[$next][0] ?? null) === T_EXTENDS && $isModel($tokens[$next + 1] ?? null))
+            || $this->bodyNamesTable($tokens, $next, $table);
+    }
+
+    /**
+     * Does the class body that opens at the first `{` from $from give
+     * `$table` this table as a literal string — bare or schema-qualified, in
+     * any case? Read anywhere in the body, so a local variable of that name
+     * counts too, which can only make the scan count more.
+     *
+     * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
+     */
+    private function bodyNamesTable(array $tokens, int $from, string $table): bool
+    {
+        $count = count($tokens);
+        $open = $from;
+
+        while ($open < $count && $tokens[$open][1] !== '{') {
+            $open++;
+        }
+
+        $depth = 0;
+
+        for ($j = $open; $j < $count; $j++) {
+            if ($tokens[$j][1] === '{' || in_array($tokens[$j][0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], strict: true)) {
+                $depth++;
+            } elseif ($tokens[$j][1] === '}' && --$depth === 0) {
+                return false;
+            }
+
+            if ($tokens[$j][0] === T_VARIABLE && $tokens[$j][1] === '$table'
+                && ($tokens[$j + 1][1] ?? null) === '='
+                && ($tokens[$j + 2][0] ?? null) === T_CONSTANT_ENCAPSED_STRING
+                && preg_match('/^(\w+\.)?'.preg_quote($table, '/').'$/i', trim($tokens[$j + 2][1], '\'"')) === 1
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1733,12 +1930,13 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Every method that makes a row, or an instance that saving makes into
-     * one, read off the framework's builders, relations (every class the
-     * model's relation-declaring methods return), model and factories by
-     * reflection rather than listed — so a framework upgrade that adds one
-     * under a name of these shapes is counted without anybody remembering
-     * to. A creator named otherwise is not; the shapes are the list.
+     * The methods of the framework's builders, relations (every class the
+     * model's relation-declaring methods return), model and factories whose
+     * names have the shape of one that makes a row, or an instance that
+     * saving makes into one — read off those classes by reflection rather
+     * than listed, so a framework upgrade that adds one under a name of these
+     * shapes is counted without anybody remembering to. A creator named
+     * otherwise is not; the shapes are the list.
      *
      * @return list<string> lower-cased, as PHP resolves a method name
      */
@@ -1948,11 +2146,14 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Every build method, checked in one file: each call to any of them must
-     * hand the adapter its own request carrying cloud-init; none may be
-     * dispatched through a variable or named in a string the way a callable
-     * names one ({@see self::stringNames()}); and the file's own method must
-     * be called by name at least once — the backstop.
+     * Every build method, checked in one file: each call to any of them that
+     * is written whole must hand the adapter exactly its own request carrying
+     * exactly a cloud-init config ({@see self::carriesCloudInit()}); no member
+     * may be reached through a variable or a braced name (`->$name`,
+     * `::$name`, `->{…}`), no call_user_func may appear, and no build method
+     * may be named in a string the way a callable names one
+     * ({@see self::stringNames()}); and the file's own method must be called
+     * by name at least once — the backstop.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      * @return array{found: int, missing: list<string>, dynamic: list<int>}
@@ -1988,7 +2189,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
      * first-class callable, in any case; or named in a string, as a callable
      * array, `call_user_func`, `->{'…'}(`, `'Class::method'` or Laravel's
      * `'Class@method'` name one? The same two readings the pin makes inside
-     * the pinned files, made of every file.
+     * the pinned files, made of each file the scans read.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      */
@@ -2148,16 +2349,24 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
     }
 
     /**
-     * Does the call whose argument list opens at $open hand over
-     * `new $request(... cloudInit: new CloudInitConfig ...)` — both at the
-     * top level of their own argument lists?
+     * Does the call whose argument list opens at $open have a positional
+     * argument that is exactly `new $request(…)`, among whose own top-level
+     * arguments is `cloudInit:` bound to exactly `new CloudInitConfig(…)` (or
+     * `new CloudInitConfig` with no list)?
+     *
+     * "Exactly" is read off the tokens: the argument ends at the parenthesis
+     * that closes the construction. PHP 8.4 lets a method be called on a
+     * `new` expression without wrapping it, so `new $request(…)->without()`
+     * hands the adapter whatever `without()` returns, and an operator after
+     * the construction (`?:`, `??`, a ternary) hands over what it evaluates
+     * to; neither is the construction, and neither passes.
      *
      * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
      */
     private function carriesCloudInit(array $tokens, int $open, string $request): bool
     {
         foreach ($this->arguments($tokens, $open) as $argument) {
-            if (($argument[0][0] ?? null) !== T_NEW || ! $this->names($argument[1] ?? null, $request) || ($argument[2][1] ?? null) !== '(') {
+            if (($argument[2][1] ?? null) !== '(' || ! $this->isExactlyConstruction($tokens, $argument, $request)) {
                 continue;
             }
 
@@ -2166,8 +2375,7 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
             foreach ($this->arguments($tokens, $offset) as $inner) {
                 if (($inner[0][1] ?? null) === 'cloudInit'
                     && ($inner[1][1] ?? null) === ':'
-                    && ($inner[2][0] ?? null) === T_NEW
-                    && $this->names($inner[3] ?? null, 'CloudInitConfig')
+                    && $this->isExactlyConstruction($tokens, array_slice($inner, 2), 'CloudInitConfig')
                 ) {
                     return true;
                 }
@@ -2175,6 +2383,32 @@ final class ARealProxmoxClusterCanCarryVpsTest extends TestCase
         }
 
         return false;
+    }
+
+    /**
+     * Is this argument `new $class`, or `new $class(…)` and nothing after the
+     * parenthesis that closes it?
+     *
+     * @param  list<array{0: int|string, 1: string, 2: int}>  $tokens
+     * @param  list<array{0: int|string, 1: string, 2: int, 3?: int}>  $argument
+     */
+    private function isExactlyConstruction(array $tokens, array $argument, string $class): bool
+    {
+        if (($argument[0][0] ?? null) !== T_NEW || ! $this->names($argument[1] ?? null, $class)) {
+            return false;
+        }
+
+        if (count($argument) === 2) {
+            return true;
+        }
+
+        if (($argument[2][1] ?? null) !== '(') {
+            return false;
+        }
+
+        $last = $argument[array_key_last($argument)];
+
+        return $this->offsetOf($tokens, $last) === $this->closing($tokens, $this->offsetOf($tokens, $argument[2]));
     }
 
     /**
