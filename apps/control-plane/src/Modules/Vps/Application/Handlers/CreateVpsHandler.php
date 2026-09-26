@@ -21,6 +21,7 @@ use Lynomia\Modules\Compute\Domain\Services\NodeScheduler;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Ipam\Domain\Exceptions\IpPoolExhaustedException;
@@ -81,7 +82,10 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * and the same one until an operator repoints the job
  * (`RepointReservedIdentity`), and every attempt first asks the hypervisor
  * what is already there under it, on every node an attempt under it was
- * placed on. Each name a create under the identity is sent with is written
+ * placed on — and, when the cluster refuses a create under it, on every node
+ * the platform has on record for the cluster, since a hypervisor id is taken
+ * cluster-wide and a machine at it on a node no attempt was placed on is
+ * otherwise found by nothing (whatTheClusterHasAt()). Each name a create under the identity is sent with is written
  * down immediately before it is sent (`ProvisioningJob::recordCreateSentWith()`),
  * and only then: a machine found is judged against those names, read as the
  * row holds them once it has been found. What the look finds decides the
@@ -587,6 +591,24 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             ));
         } catch (ComputeProviderException $e) {
             /*
+             * A refusal the cluster spoke out loud may be the cluster saying
+             * the id is taken — and a Proxmox VMID is taken cluster-wide,
+             * whichever node holds it. The look before the build asked only
+             * the nodes this build's attempts were placed on, so a machine at
+             * the id on any other node is found here or not at all: without
+             * this, every attempt is refused at the id, each refusal reads as
+             * transient, and the job runs out its attempts on a finding
+             * nothing licenses an operator to act on.
+             */
+            if (! $e->isIndeterminate()) {
+                $elsewhere = $this->whatTheClusterHasAt($provider, $identity);
+
+                if ($elsewhere !== null) {
+                    return $this->becauseSomethingIsAlreadyThere($job, $payload, $elsewhere, $identity, $resources, $earlierSendsAreRecorded);
+                }
+            }
+
+            /*
              * The adapter's own verdict on whether the request may still be in
              * flight is what decides the failure class, and it is the only
              * thing that can know: it saw the transport. A refusal the cluster
@@ -691,7 +713,12 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      * about 5% at N = 100 and about 39% at N = 300, so at scale it is an
      * operational certainty rather than an edge case. That is why the create
      * looks before it builds, and why a stranger at the id is a finding an
-     * operator can act on rather than a dead end.
+     * operator can act on rather than a dead end — on a node an attempt was
+     * placed on, found by the look before the build; on any other node the
+     * platform has on record for the cluster, found once the cluster refuses
+     * the create at the id (whatTheClusterHasAt()). A stranger on a node the
+     * platform has no row for, or one that does not answer, is still found by
+     * neither: the refusal is then the only finding.
      *
      * @param  array<string, mixed>  $payload
      */
@@ -751,6 +778,53 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
     {
         foreach ($nodes as $nodeName) {
             $machine = $provider->getVm($nodeName, $identity->providerId);
+
+            if ($machine !== null) {
+                return $machine;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * What the hypervisor has at this job's identity on any node the
+     * platform has on record for the identity's cluster, asked after a create
+     * under it was refused.
+     *
+     * Every node in the inventory, whatever its status — a node in
+     * maintenance or draining is never placed on, and is exactly where a
+     * machine at the id stays invisible to the look before the build. The
+     * nodes an attempt was placed on are asked again, first: a machine may
+     * have arrived there since the look. A node that cannot be asked is
+     * passed over rather than failing the attempt, because the refusal this
+     * follows is already an answer: when nothing is found, the attempt
+     * settles on the refusal as it always did, and the next attempt asks
+     * again. What this does not reach is a node the platform has no row for,
+     * or one that does not answer: a machine at the id there leaves the
+     * refusal as the only finding.
+     *
+     * What is found is judged by becauseSomethingIsAlreadyThere(), exactly as
+     * a machine on the build's own node is — so one carrying a name a create
+     * under the identity was sent with is not taken for a stranger (it may be
+     * this build's, moved), and one that is somebody else's by name licenses
+     * the repoint.
+     */
+    private function whatTheClusterHasAt(ComputeProvider $provider, ReservedProviderIdentity $identity): ?RemoteVmState
+    {
+        $inventory = ComputeNode::query()
+            ->where('cluster_id', $identity->clusterId)
+            ->orderBy('provider_name')
+            ->pluck('provider_name')
+            ->map(static fn (mixed $name): string => (string) $name)
+            ->all();
+
+        foreach (array_values(array_unique([...$identity->nodes, ...$inventory])) as $nodeName) {
+            try {
+                $machine = $provider->getVm($nodeName, $identity->providerId);
+            } catch (ComputeProviderException) {
+                continue;
+            }
 
             if ($machine !== null) {
                 return $machine;

@@ -112,7 +112,16 @@ GET /admin/provisioning/needs-review
 ```
 
 Look at the reserved id on the listed nodes in the Proxmox console, then find
-the row:
+the row. A machine at the id on a node no attempt was placed on — a node in
+maintenance, say, where placement never goes — is found only once the cluster
+refuses the create at the id, when the create looks on every node the
+platform has on record for the cluster; the finding is then one of the
+`vps.create_identity_taken` or `vps.create_found_its_own_build` rows below,
+and the node it names in `last_error` is not among `reserved_provider_nodes`.
+Look there. A machine on a node the platform has no row for, or one that does
+not answer, is not found: the refusal stays `compute.provider_request_failed`.
+
+
 
 | `error_code` | `error_reason` | What it means | What to do |
 |---|---|---|---|
