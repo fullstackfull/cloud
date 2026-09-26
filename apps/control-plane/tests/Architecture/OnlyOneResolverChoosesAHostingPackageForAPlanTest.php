@@ -161,7 +161,12 @@ final class OnlyOneResolverChoosesAHostingPackageForAPlanTest extends TestCase
     {
         $walk = self::walk(self::ROOT);
 
-        foreach (self::ROOTS as $root) {
+        /*
+         * Spelled out rather than read back from ROOTS: this is the claim the
+         * class docblock makes, and a loop over the constant would agree with
+         * whatever the constant had been narrowed to.
+         */
+        foreach (['src', 'app', 'database'] as $root) {
             $this->assertGreaterThan(
                 0,
                 $walk['read'][$root] ?? 0,
