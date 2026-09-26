@@ -74,7 +74,7 @@ final class LayeringTest extends TestCase
      *
      * @return list<string>
      */
-    private function importsIn(string $source): array
+    private static function importsIn(string $source): array
     {
         preg_match_all(self::IMPORT, $source, $matches);
 
@@ -438,6 +438,14 @@ final class LayeringTest extends TestCase
          * here, and is held at zero by
          * no_module_names_another_modules_infrastructure_or_http_out_of_sight().
          */
+        $unseen = array_keys(array_filter(self::importsTheHttpRuleMustRefuse(), static fn (string $source): bool => self::importsReachingAnotherModulesHttp($source, 'Orders') === []));
+
+        $this->assertSame([], $unseen, "The Http rule cannot see these, so a clean result from it would mean nothing:\n  ".implode("\n  ", $unseen));
+
+        $refused = array_keys(array_filter(self::importsTheHttpRuleMustAllow(), static fn (string $source): bool => self::importsReachingAnotherModulesHttp($source, 'Orders') !== []));
+
+        $this->assertSame([], $refused, "The Http rule refuses these, which reach no other module's Http:\n  ".implode("\n  ", $refused));
+
         $violations = [];
 
         foreach ($this->phpFiles(self::SRC.'/Modules') as $file) {
@@ -448,18 +456,75 @@ final class LayeringTest extends TestCase
                 continue;
             }
 
-            foreach ($this->importsIn($file['source']) as $import) {
-                if (preg_match('/^Lynomia\\\\Modules\\\\(\w+)\\\\Http\\\\/', $import, $m) !== 1) {
-                    continue;
-                }
-
-                if ($m[1] !== $own) {
-                    $violations[] = $own.' -> '.$import.' ('.$file['relative'].')';
-                }
+            foreach (self::importsReachingAnotherModulesHttp($file['source'], $own) as $import) {
+                $violations[] = $own.' -> '.$import.' ('.$file['relative'].')';
             }
         }
 
         $this->assertSame([], $violations, "Cross-module reach into an HTTP layer:\n  ".implode("\n  ", $violations));
+    }
+
+    /**
+     * The imports of $source, a file of module $own, that reach another
+     * module's Http.
+     *
+     * @return list<string>
+     */
+    private static function importsReachingAnotherModulesHttp(string $source, string $own): array
+    {
+        $found = [];
+
+        foreach (self::importsIn($source) as $import) {
+            if (preg_match('/^Lynomia\\\\Modules\\\\(\w+)\\\\Http\\\\/', $import, $m) === 1 && $m[1] !== $own) {
+                $found[] = $import;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * One file of the Orders module per way a `use` statement can reach
+     * Billing's Http. PHP's import grammar is a closed set, and this is it:
+     * a class, a namespace above one, an alias of either, a group, a list, a
+     * leading backslash, and any letter case.
+     *
+     * @return array<string, string>
+     */
+    private static function importsTheHttpRuleMustRefuse(): array
+    {
+        $file = static fn (string $imports, string $name): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$imports."\n\nfinal class Planted\n{\n    public const string C = ".$name."::class;\n}\n";
+
+        return [
+            'an import of a controller' => $file('use Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController'),
+            'an import of the layer itself' => $file('use Lynomia\\Modules\\Billing\\Http;', 'Http\\Controllers\\InvoiceController'),
+            'an aliased import of the layer' => $file('use Lynomia\\Modules\\Billing\\Http as BillingHttp;', 'BillingHttp\\Controllers\\InvoiceController'),
+            'an aliased import of the module' => $file('use Lynomia\\Modules\\Billing as BillingModule;', 'BillingModule\\Http\\Controllers\\InvoiceController'),
+            'an import of every module' => $file('use Lynomia\\Modules;', 'Modules\\Billing\\Http\\Controllers\\InvoiceController'),
+            'a group import' => $file('use Lynomia\\Modules\\Billing\\{Http\\Controllers\\InvoiceController};', 'InvoiceController'),
+            'a group import across lines' => $file("use Lynomia\\Modules\\{\n    Billing\\Http,\n};", 'Http\\Controllers\\InvoiceController'),
+            'the second import of a list' => $file('use Lynomia\\Modules\\Catalog\\Domain\\Enums\\ProductKind,Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController'),
+            'an import with a leading backslash' => $file('use \\Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController'),
+            'an import in another letter case' => $file('use lynomia\\modules\\billing\\http;', 'http\\Controllers\\InvoiceController'),
+        ];
+    }
+
+    /**
+     * Imports in a file of the Orders module that reach no other module's
+     * Http, however close they come.
+     *
+     * @return array<string, string>
+     */
+    private static function importsTheHttpRuleMustAllow(): array
+    {
+        $file = static fn (string $imports): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$imports."\n\nfinal class Planted {}\n";
+
+        return [
+            "the file's own module's Http" => $file('use Lynomia\\Modules\\Orders\\Http\\Controllers\\OrderController;'),
+            "the file's own module" => $file('use Lynomia\\Modules\\Orders;'),
+            "another module's Domain" => $file('use Lynomia\\Modules\\Catalog\\Domain;'),
+            'a namespace outside the modules' => $file('use Lynomia\\Http\\Concerns\\BoundsPageSize;'),
+        ];
     }
 
     /**
@@ -664,13 +729,13 @@ final class LayeringTest extends TestCase
          * report. A scan that fails to parse a file does not go red; it reports
          * the clean tree one was hoping for.
          */
-        foreach (self::outOfSightCrossingsTheScanMustFind() as $shape => $source) {
-            $this->assertNotSame([], self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS), 'The scan cannot see '.$shape.', so a clean result from it would mean nothing.');
-        }
+        $unseen = array_keys(array_filter(self::outOfSightCrossingsTheScanMustFind(), static fn (string $source): bool => self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) === []));
 
-        foreach (self::referencesTheScanMustNotReport() as $shape => $source) {
-            $this->assertSame([], self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS), 'The scan reports '.$shape.', which is not a crossing it exists to find.');
-        }
+        $this->assertSame([], $unseen, "The scan cannot see these, so a clean result from it would mean nothing:\n  ".implode("\n  ", $unseen));
+
+        $reported = array_keys(array_filter(self::referencesTheScanMustNotReport(), static fn (string $source): bool => self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) !== []));
+
+        $this->assertSame([], $reported, "The scan reports these, which are not crossings it exists to find:\n  ".implode("\n  ", $reported));
 
         $violations = [];
 
@@ -880,6 +945,57 @@ final class LayeringTest extends TestCase
                     }
                 }
                 PHP),
+            'a layer chosen at runtime' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return 'Lynomia\\Modules\\Billing\\'.$layer.'\\Controllers\\InvoiceController';
+                    }
+                }
+                PHP),
+            'a name in another letter case' => $file(<<<'PHP'
+                /**
+                 * Hands the result to {@see \lynomia\modules\billing\http\controllers\InvoiceController}.
+                 */
+                final class Planted {}
+                PHP),
+            'a class named through an import of its layer' => $file(<<<'PHP'
+                use Lynomia\Modules\Billing\Http;
+
+                final class Planted
+                {
+                    public const string C = Http\Controllers\InvoiceController::class;
+                }
+                PHP),
+            'a class named through an aliased import of its module' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog as CatalogModule;
+
+                final class Planted
+                {
+                    public const string C = CatalogModule\Infrastructure\Models\Plan::class;
+                }
+                PHP),
+            'a class named through a group import of its layer' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\{Infrastructure};
+
+                final class Planted
+                {
+                    public const string C = Infrastructure\Models\Plan::class;
+                }
+                PHP),
+            'a class named through a namespace declared above it' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules;
+
+                final class Planted
+                {
+                    public const string C = Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
         ];
     }
 
@@ -914,6 +1030,23 @@ final class LayeringTest extends TestCase
                 final class Planted
                 {
                     private const string VALUES = 'Lynomia\\Modules\\Infrastructure\\Domain\\Reference\\ReferenceValues';
+                }
+                PHP),
+            "a class named through an import of another module's Domain" => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Domain;
+
+                final class Planted
+                {
+                    public const string C = Domain\Enums\ProductKind::class;
+                }
+                PHP),
+            "a layer of the file's own module chosen at runtime" => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return 'Lynomia\\Modules\\Orders\\'.$layer.'\\Models\\Order';
+                    }
                 }
                 PHP),
         ];
