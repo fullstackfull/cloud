@@ -132,7 +132,7 @@ final class LayeringTest extends TestCase
                         $rest[] = $part;
                     } elseif ($part->is(T_AS)) {
                         $alias = true;
-                    } elseif ($part->is([',', '}', ';'])) {
+                    } elseif ($part->is([',', '}', ';', T_CLOSE_TAG])) {
                         if ($name !== '') {
                             $imports[] = ['name' => ltrim($prefix.$name, '\\'), 'line' => $line];
                         }
@@ -140,7 +140,7 @@ final class LayeringTest extends TestCase
                         $name = '';
                         $prefix = $part->is('}') ? '' : $prefix;
 
-                        if ($part->is(';')) {
+                        if ($part->is([';', T_CLOSE_TAG])) {
                             break;
                         }
                     } elseif ($part->is('{')) {
@@ -174,7 +174,7 @@ final class LayeringTest extends TestCase
                 $opensANamespace = false;
             } elseif ($token->is('}')) {
                 array_pop($braces);
-            } elseif ($token->is(';')) {
+            } elseif ($token->is([';', T_CLOSE_TAG])) {
                 $opensANamespace = false;
             }
 
@@ -1179,7 +1179,7 @@ final class LayeringTest extends TestCase
         foreach ($read['rest'] as $token) {
             $isString = $token->is([T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE]);
 
-            if (! $isString && ! $token->is([T_COMMENT, T_DOC_COMMENT, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED])) {
+            if (! $isString && ! $token->is([T_COMMENT, T_DOC_COMMENT, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED, T_NAME_RELATIVE])) {
                 continue;
             }
 
