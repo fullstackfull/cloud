@@ -19,9 +19,9 @@ Those numbers are derived from the tree by
 `infrastructure/scripts/validate-runbook-alerts.py` and compared on every run;
 `--write` rewrites them. They used to be typed by hand, and the hand-typed count
 said 55 alerts when the rules defined 64 — internally consistent, which is why
-nobody noticed. The first batch of these pages was written in Phase 30B, because
-`infrastructure/scripts/validate-monitoring.py` found seventeen alerts pointing
-at runbooks nobody had written.
+nobody noticed. Three pages predated Phase 30B; nineteen more were written in
+it, because `infrastructure/scripts/validate-monitoring.py` found seventeen
+alerts pointing at runbooks nobody had written.
 
 Two conventions coexist in the alert rules, and both are checked. An alert may
 carry a `runbook` — a path in this repository, which must exist — or a
@@ -51,14 +51,19 @@ mentioned in prose, is declared on the page that writes it, next to where it is
 written: `<!-- not-an-alert: Word - what it actually is -->`, with a reason of at
 least twelve characters. The declaration is refused if the page does not cite
 the word, if the word is a defined alert, or if nothing outside `docs/` names it
-— an invented alert name exists only in prose, and calling it something else
-does not make it real.
+as a word of its own — an invented alert name exists only in prose, and calling
+it something else does not make it real. A rule defining `QueueBacklogGrowing`
+does not name a truncation of it: a prefix that matches two alerts is neither.
 
 ## Alerts with no page here
 
 These are the alerts counted above as naming no page here. They rely on
 `runbook_url` alone — an internal documentation site nothing here can check.
-They are listed so the gap is a known one rather than a surprise at 4am:
+They are listed so the gap is a known one rather than a surprise at 4am.
+`validate-runbook-alerts.py` derives this set from the rule files and compares
+it with every alert named in this section, so an alert that gains a page fails
+the build until it leaves the table, and a new alert with no page fails until
+it is in it:
 
 | Alerts | Subject | Why there is no page yet |
 | --- | --- | --- |

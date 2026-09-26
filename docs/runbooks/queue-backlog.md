@@ -14,9 +14,10 @@ One of three alerts, or a queue you can see is not moving:
 
 No alert watches for a stalled queue as such — case 2 below, no workers and
 nothing completing. `lynomia_queue_depth` shows it only as a depth that stops
-falling; it pages once enough new work piles up behind it to trip
-`QueueBacklogGrowing`, and not before. Nothing the control plane exports says
-whether a worker is alive.
+falling. It reaches the platform channel once enough new work piles up behind
+it to trip `QueueBacklogGrowing`, and it pages only once the depth has stayed
+above 2,000 long enough to trip `QueueBacklogSevere` — not before. Nothing the
+control plane exports says whether a worker is alive.
 
 ## What it means
 

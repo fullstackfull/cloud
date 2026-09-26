@@ -21,10 +21,16 @@ name passes, and a tree with two fails naming both.
 
 The threshold is pinned from both sides. `NodeDown` is the shortest alert the
 rules define, at exactly eight characters, so the eight-character screen has no
-margin: raising it silently ignores real citations (the gate stays green at a
-threshold of twenty while reading nothing under twenty), and a seven-letter
-alert written tomorrow would be invisible. The first is pinned here; the second
-the gate refuses on the real tree.
+margin. Raise the threshold and every defined alert shorter than the new one
+becomes a name the gate cannot read; the gate refuses each of those by name,
+on the real tree and on the synthetic trees here, and `check_threshold` below
+pins the value at eight regardless. Write a seven-letter alert tomorrow and the
+same refusal names it.
+
+The escape hatch is only as strict as its corroboration, so that is pinned too:
+a truncation of a real alert (`QueueBacklog`, inside `QueueBacklogGrowing`) is
+not named by the rule that contains it, and this gate and this file, which
+quote invented names as fixtures, cannot vouch for them.
 
 Run: python3 infrastructure/scripts/test_validate_runbook_alerts.py
 Exit 0 when every case behaves, 1 otherwise.
@@ -103,13 +109,16 @@ REGISTER = """## Pages with no alert here
 - `deploy.md` — **Procedure.** A deploy is something a person starts.
 """
 
+PAGELESS_HEADING = "## Alerts with no page here"
+PAGELESS_LINE = "`CertificateExpired` relies on its `runbook_url`."
+
 README = f"""# Runbooks
 
 {COUNTS}
 
-## Alerts with no page here
+{PAGELESS_HEADING}
 
-`CertificateExpired` relies on its `runbook_url`.
+{PAGELESS_LINE}
 
 {REGISTER}"""
 
@@ -203,7 +212,7 @@ CASES: list[tuple[str, dict, str | None]] = [
         {"pages": queue_page("```", "grep `NotReadHereAtAll` /var/log", "```")},
         None,
     ),
-    # -- the escape hatch, and its four refused abuses -------------------
+    # -- the escape hatch, and the abuses of it that are refused ---------
     (
         "a word declared not-an-alert on the page, and named outside docs/, passes",
         {
@@ -238,6 +247,46 @@ CASES: list[tuple[str, dict, str | None]] = [
             "other": {"docs/some-report.md": "The `ProviderTasksIndeterminate` alert fires.\n"},
         },
         "nothing outside docs/ names it",
+    ),
+    (
+        # The audit's own case: the rules name `QueueBacklogGrowing`, which
+        # contains `QueueBacklog` as text and does not name it as a word.
+        "a declaration for a truncation of a defined alert is refused (the head of the name)",
+        {"pages": queue_page(
+            "`QueueBacklog` fires first.",
+            "<!-- not-an-alert: QueueBacklog - shorthand for both backlog alerts -->",
+        )},
+        "declares `QueueBacklog` not an alert, and nothing outside docs/ names it",
+    ),
+    (
+        "a declaration for a truncation of a defined alert is refused (the tail of the name)",
+        {"pages": queue_page(
+            "`BacklogGrowing` fires first.",
+            "<!-- not-an-alert: BacklogGrowing - shorthand for the warning tier -->",
+        )},
+        "declares `BacklogGrowing` not an alert, and nothing outside docs/ names it",
+    ),
+    (
+        "this gate's self-test names invented words as fixtures, and cannot vouch for them",
+        {
+            "pages": queue_page(
+                "`QueueStalled` fires when nothing completes.",
+                "<!-- not-an-alert: QueueStalled - only a fixture name elsewhere -->",
+            ),
+            "other": {"infrastructure/scripts/test_validate_runbook_alerts.py": "CASE = 'QueueStalled'\n"},
+        },
+        "declares `QueueStalled` not an alert, and nothing outside docs/ names it",
+    ),
+    (
+        "this gate names invented words in its own text, and cannot vouch for them",
+        {
+            "pages": queue_page(
+                "`QueueStalled` fires when nothing completes.",
+                "<!-- not-an-alert: QueueStalled - only a fixture name elsewhere -->",
+            ),
+            "other": {"infrastructure/scripts/validate-runbook-alerts.py": "# e.g. QueueStalled\n"},
+        },
+        "declares `QueueStalled` not an alert, and nothing outside docs/ names it",
     ),
     (
         "a declaration over a defined alert cannot silence a true citation",
@@ -361,6 +410,38 @@ CASES: list[tuple[str, dict, str | None]] = [
             "- `deploy.md`",
         )},
         "`deploy.md` gives no reason",
+    ),
+    # -- the list of alerts with no page here ------------------------------
+    (
+        "a README with no list of alerts with no page is refused",
+        {"readme": README.replace(f"{PAGELESS_HEADING}\n\n{PAGELESS_LINE}\n\n", "")},
+        'has no "Alerts with no page here" section',
+    ),
+    (
+        "an alert with no page here, missing from that list, is refused",
+        {"readme": README.replace(PAGELESS_LINE, "Certificates rely on their `runbook_url`.")},
+        '`CertificateExpired` names no page here and is not listed under "Alerts with no page here"',
+    ),
+    (
+        "a new alert with only a runbook_url is refused until it is listed",
+        {
+            "rules": {"platform.yml": RULES.replace(
+                "      - record:",
+                "      - alert: CertificateExpiringSoon\n        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 14\n"
+                "        labels:\n          severity: warning\n        annotations:\n"
+                "          runbook_url: https://docs.example/runbooks/certificates\n      - record:")},
+            "readme": README.replace("**3** alerts", "**4** alerts").replace(
+                "**1** names no page here", "**2** name no page here"),
+        },
+        '`CertificateExpiringSoon` names no page here and is not listed under "Alerts with no page here"',
+    ),
+    (
+        "a listed alert that names a page here is refused, and says to remove it",
+        {"readme": README.replace(
+            PAGELESS_LINE, PAGELESS_LINE[:-1] + ", and so does `QueueBacklogGrowing`.",
+        )},
+        '"Alerts with no page here" lists `QueueBacklogGrowing`, which names '
+        "docs/runbooks/queue-backlog.md with runbook:. Remove it from the list.",
     ),
 ]
 

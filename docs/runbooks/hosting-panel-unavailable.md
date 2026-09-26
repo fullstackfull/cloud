@@ -31,8 +31,9 @@ Two alerts watch this, and they do not read the same number:
 
 - `HostingNodeDiskRatioHigh` fires when the control plane's own record of the
   node, `lynomia_hosting_node_disk_ratio` as last synced, has been above 80% for
-  30 minutes. That is the ratio at which placement stops sending the node new
-  accounts.
+  30 minutes. Placement stops sending the node new accounts earlier, at
+  `HOSTING_MAX_DISK_PERCENT` — 75% unless it has been configured otherwise — so
+  with that default a node this alert names is already taking no new accounts.
 - `HostingNodeDiskAlmostFull` fires when node_exporter on the node has seen less
   than 20% free on one of its filesystems for 10 minutes.
 

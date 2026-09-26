@@ -39,7 +39,10 @@ whoever writes the page. A declaration is refused when:
     exists in the code or the configuration. An invented alert name exists only
     in prose, and calling it something else does not make it real. `docs/` is
     excluded as a whole because the remediation ledger and its briefs quote
-    every invented name this gate was written to catch;
+    every invented name this gate was written to catch, and so are this gate
+    and its self-test, which quote them as fixtures. Naming means as a word of
+    its own: a rule defining `QueueBacklogGrowing` does not name `QueueBacklog`,
+    because a truncation that matches two real alerts is still not an alert;
   - the reason is shorter than twelve characters, or the declaration cannot be
     parsed at all. A declaration quoted inside a code span is an example, not a
     declaration.
@@ -60,6 +63,12 @@ fails until somebody says why, and a listed page that an alert has started to
 name fails until the row goes. `--write` does not remove that row. A count is a
 fact a machine may recompute; a row is a person's claim about why there is no
 alert, and deciding that it has stopped mattering is that person's job.
+
+The same holds the other way round for "Alerts with no page here": the alerts
+no rule points at a page here with `runbook:`, derived from the rule files and
+compared as a set with every alert-shaped word in that section. An alert that
+gains a page fails until it leaves the section, and a new alert with none fails
+until it is listed. `--write` touches neither list.
 
 What it does not cover
 ----------------------
@@ -97,6 +106,7 @@ COUNTS_BEGIN = "<!-- counts:begin -->"
 COUNTS_END = "<!-- counts:end -->"
 REGISTER_HEADING = "## Pages with no alert here"
 REGISTER_ROW = re.compile(r"^-\s+`([^`]+)`\s*(?:—|-|:)?\s*(.*?)\s*$")
+PAGELESS_HEADING = "## Alerts with no page here"
 
 # Where a declared word is looked for. Top-level `docs/` is excluded on purpose
 # (see the module docstring); the rest are dependencies, build output and
@@ -151,8 +161,18 @@ def load_alerts(rules_dir: Path) -> tuple[list[tuple[str, str, str | None]], int
     return alerts, len(files)
 
 
+def names_word(text: str, word: str) -> bool:
+    """Whether `text` names `word` as a word of its own.
+
+    A letter, digit or underscore on either side makes it part of a longer
+    identifier, which is a different name: `QueueBacklogGrowing` contains
+    `QueueBacklog` and does not name it.
+    """
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(word)}(?![A-Za-z0-9_])", text) is not None
+
+
 def named_outside_docs(repo_root: Path, words: set[str]) -> set[str]:
-    """The subset of `words` that some file outside `docs/` contains."""
+    """The subset of `words` that some file outside `docs/` names as a word."""
     found: set[str] = set()
     if not words:
         return found
@@ -171,7 +191,7 @@ def named_outside_docs(repo_root: Path, words: set[str]) -> set[str]:
                 text = (here / name).read_text(errors="replace")
             except OSError:
                 continue
-            found.update(word for word in words - found if word in text)
+            found.update(word for word in words - found if names_word(text, word))
             if found == words:
                 return found
     return found
@@ -202,22 +222,44 @@ def counts_span(text: str) -> tuple[int, int] | None:
     return begin, end + len(COUNTS_END)
 
 
-def register_rows(text: str) -> list[tuple[str, str]] | None:
-    """(page, reason) for each row under the register heading, or None if the
-    README has no register."""
+def section(text: str, heading: str) -> list[str] | None:
+    """The lines under `heading`, up to the next `## `, or None if the README
+    has no such heading."""
     lines = text.splitlines()
     try:
-        start = lines.index(REGISTER_HEADING)
+        start = lines.index(heading)
     except ValueError:
         return None
-    rows: list[tuple[str, str]] = []
+    body: list[str] = []
     for line in lines[start + 1:]:
         if line.startswith("## "):
             break
+        body.append(line)
+    return body
+
+
+def register_rows(text: str) -> list[tuple[str, str]] | None:
+    """(page, reason) for each row under the register heading, or None if the
+    README has no register."""
+    lines = section(text, REGISTER_HEADING)
+    if lines is None:
+        return None
+    rows: list[tuple[str, str]] = []
+    for line in lines:
         match = REGISTER_ROW.match(line)
         if match:
             rows.append((match.group(1), match.group(2)))
     return rows
+
+
+def pageless_listed(text: str) -> set[str] | None:
+    """Every alert-shaped word under the "Alerts with no page here" heading, or
+    None if the README has no such section."""
+    lines = section(text, PAGELESS_HEADING)
+    if lines is None:
+        return None
+    found, _ = read_page("\n".join(lines))
+    return {word for _, word in found}
 
 
 def main(argv: list[str]) -> int:
@@ -402,6 +444,32 @@ def main(argv: list[str]) -> int:
                 f"docs/runbooks/README.md: `{page}` is named by no alert and is not "
                 f'listed under "Pages with no alert here". Add a row saying why, or '
                 f"point an alert at it."
+            )
+
+    # The other list, alerts with no page here, compared as a set the same way.
+    # A listed word no rule defines is already refused above as a citation.
+    pageless = {
+        name for name, _, runbook in alerts
+        if not (isinstance(runbook, str) and runbook.startswith("docs/runbooks/"))
+    }
+    listed_alerts = pageless_listed(readme)
+    if listed_alerts is None:
+        problems.append(
+            f'docs/runbooks/README.md has no "Alerts with no page here" section. '
+            f"These alerts name no page here, and each needs listing there: "
+            f"{', '.join(sorted(pageless)) or '(none)'}"
+        )
+    else:
+        for name in sorted((listed_alerts & set(defined)) - pageless):
+            naming = sorted({str(runbook) for other, _, runbook in alerts if other == name})
+            problems.append(
+                f'docs/runbooks/README.md: "Alerts with no page here" lists `{name}`, '
+                f"which names {', '.join(naming)} with runbook:. Remove it from the list."
+            )
+        for name in sorted(pageless - listed_alerts):
+            problems.append(
+                f"docs/runbooks/README.md: `{name}` names no page here and is not listed "
+                f'under "Alerts with no page here". List it, or give it a page with runbook:.'
             )
 
     print(
