@@ -221,6 +221,14 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
         ["infrastructure/tofu"], "",
     ),
     (
+        # An HCL identifier may hold `-`: `<<END-X` opens a heredoc, and the
+        # source line inside it is text.
+        "a heredoc whose marker holds a hyphen is text, not a call",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  d = <<END-X\nsource = "./modules/dns"\nEND-X\n}\n'}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    (
         "an unterminated /* block is refused",
         with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ROOT_MAIN + "/* never closed\n"}),
         None, "unterminated /* comment",
@@ -298,9 +306,14 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
 # The stub records each call. On `init` it writes the module manifest real
 # tofu writes, listing every directory below the root that holds a .tf file
 # -- a tofu that loaded everything -- or, with TOFU_LOADS_NOTHING set, only
-# the root itself.
+# the root itself. Like tofu 1.10.7, which merges into a manifest already
+# there, it leaves an existing manifest's entries in place: with
+# TOFU_LOADS_NOTHING it adds nothing to one.
 STUB = """#!/usr/bin/env bash
 printf '%s\\t%s\\n' "$PWD" "$*" >> "$TOFU_LOG"
+if [ "$1" = init ] && [ -n "${TOFU_LOADS_NOTHING:-}" ] && [ -f .terraform/modules/modules.json ]; then
+  exit 0
+fi
 if [ "$1" = init ]; then
   mkdir -p .terraform/modules
   {
@@ -374,6 +387,9 @@ def run_step(tree: Path, env_extra: dict[str, str] | None = None) -> tuple[int, 
         log.touch()
         script = Path(tmp) / "step.sh"
         script.write_text(ci_step())
+        if not (tree / ".git").exists():
+            subprocess.run(["git", "init", "-q", str(tree)], check=True)
+            subprocess.run(["git", "-C", str(tree), "add", "-A"], check=True)
         env = dict(
             os.environ, PATH=f"{stub_dir}{os.pathsep}{os.environ['PATH']}", TOFU_LOG=str(log),
             **(env_extra or {}),
@@ -486,7 +502,7 @@ def main() -> int:
                 if must_fail:
                     code, calls, output = run_step(tree)
                     validated = [d for d, a in calls if a.startswith("validate")]
-                    report(name, [] if code != 0 and not validated else [
+                    report(name, [] if code != 0 and not validated and "no configuration file" in output else [
                         f"exit {code}, validated {[str(d) for d in validated]}:\n{output}"
                     ])
                 else:
@@ -494,7 +510,39 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001
                 report(name, [repr(error)])
 
-    total = len(CASES) + len(LOADED_CASES) + 4
+    # A manifest left from an earlier init names a module; tofu 1.10.7 would
+    # merge into it and keep the entry. The step removes .terraform/ before
+    # init, so with an init that loads nothing the module is still refused.
+    # And a tracked .terraform/ is refused before anything runs.
+    for name, files, env_extra, expected in (
+        (
+            "a stale manifest in a root does not vouch for a module tofu did not load",
+            with_files(LAYOUT, **{
+                MANIFEST: manifest("modules/vm", "modules/dns"),
+                ".gitignore": ".terraform/\n",
+            }),
+            {"TOFU_LOADS_NOTHING": "1"},
+            "infrastructure/tofu/modules/dns holds configuration that is not a root",
+        ),
+        (
+            "a tracked path under .terraform/ is refused",
+            with_files(LAYOUT, **{MANIFEST: manifest("modules/vm", "modules/dns")}),
+            {},
+            "infrastructure/tofu/.terraform/modules/modules.json is tracked",
+        ),
+    ):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            build(tree, files)
+            (tree / "infrastructure" / "scripts").mkdir(parents=True, exist_ok=True)
+            shutil.copy(SCRIPT, tree / "infrastructure" / "scripts" / SCRIPT.name)
+            try:
+                code, _, output = run_step(tree, env_extra)
+                report(name, [] if code != 0 and expected in output else [f"exit {code}:\n{output}"])
+            except Exception as error:  # noqa: BLE001
+                report(name, [repr(error)])
+
+    total = len(CASES) + len(LOADED_CASES) + 6
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 

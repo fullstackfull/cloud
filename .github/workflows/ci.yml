@@ -630,7 +630,12 @@ jobs:
       # and is not claimed complete; so after every root is initialised, it is
       # run again with --loaded-by-tofu, and refuses any module directory that
       # is neither a root nor in the module manifest `tofu init` wrote in some
-      # root -- a module OpenTofu never loaded, whatever the lexer read.
+      # root -- a module OpenTofu never loaded, whatever the lexer read. The
+      # manifest says that only when init wrote it afresh: OpenTofu 1.10.7
+      # merges into an existing .terraform/modules/modules.json, keeping stale
+      # entries. So a tracked path under any .terraform/ is refused first, and
+      # each root's .terraform/ is removed before its init (the lock file,
+      # .terraform.lock.hcl, is kept).
       # test_list_tofu_root_modules.py runs this step as written with a stub
       # tofu and fails if it validates a directory with no configuration,
       # misses a root, skips the manifest check, or passes a tree with none.
@@ -638,6 +643,15 @@ jobs:
         run: |
           set -euo pipefail
           tofu fmt -check -recursive infrastructure/tofu
+          tracked="$(git ls-files -z -- infrastructure/tofu | tr '\0' '\n')"
+          while IFS= read -r path; do
+            case "$path" in
+              .terraform/* | */.terraform/*)
+                echo "::error::$path is tracked; a committed .terraform/ can make tofu init's module manifest vouch for a module it never loaded."
+                exit 1
+                ;;
+            esac
+          done <<< "$tracked"
           roots="$(python3 infrastructure/scripts/list-tofu-root-modules.py .)"
           if [ -z "$roots" ]; then
             echo "::error::No OpenTofu root module found; validate would have nothing to parse."
@@ -647,7 +661,7 @@ jobs:
             echo "-- $dir"
             # -backend=false: CI has no business holding state credentials, and
             # does not need them to decide whether the configuration parses.
-            ( cd "$dir" && tofu init -backend=false -input=false && tofu validate )
+            ( cd "$dir" && rm -rf .terraform && tofu init -backend=false -input=false && tofu validate )
           done <<< "$roots"
           python3 infrastructure/scripts/list-tofu-root-modules.py . --loaded-by-tofu
 

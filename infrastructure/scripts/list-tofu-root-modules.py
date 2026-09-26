@@ -39,7 +39,8 @@ and `//` to the end of the line and `/* */` blocks, outside double-quoted
 strings; double-quoted strings, with backslash escapes, `${ }` and `%{ }`
 interpolations (which may hold strings of their own) and the `$${` and `%%{`
 escapes, which are text; and heredocs opened by `<<EOT` or `<<-EOT` at the end
-of a line, dropped through the line holding only the marker. A call commented
+of a line, the marker an identifier of letters, digits, `_` and `-`, dropped
+through the line holding only the marker. A call commented
 out in one of those forms is not read as a call; one hidden by a construct
 outside that list may be. A `source = "./..."` written as an attribute
 outside a `module` block is read as a call. The self-test pins these
@@ -49,8 +50,14 @@ Because that reading is not HCL's and is not claimed complete, the step has a
 backstop that does not depend on it: run with --loaded-by-tofu after `tofu
 init` in each root, this reads the module manifest init writes
 (`.terraform/modules/modules.json`) in every root and refuses any module
-directory that is neither a root nor loaded by some root's init. A module
-this script took for called and OpenTofu never loaded fails there.
+directory that is neither a root nor loaded by some root's init. The manifest
+means that only if init wrote it afresh: OpenTofu 1.10.7 merges into a
+manifest already there, so an entry left from an earlier init, or a committed
+one, survives and reads as loaded. The CI step therefore removes each root's
+`.terraform/` before its init, and refuses a tracked path under any
+`.terraform/` before anything runs. Given that, a module this script took for
+called and OpenTofu never loaded fails there. Run by hand in a tree where
+init ran earlier, the check can pass on such a stale entry.
 
 What it refuses
 ---------------
@@ -79,8 +86,9 @@ CONFIGURATION_SUFFIXES = (".tf", ".tofu", ".tf.json", ".tofu.json")
 
 # `source = "./modules/x"` or `source = "../x"`, anywhere in the text.
 LOCAL_SOURCE = re.compile(r"""\bsource\s*=\s*"(\.\.?/[^"]*)\"""")
-# A heredoc opening at the end of a line: `<<EOT` or `<<-EOT`.
-HEREDOC = re.compile(r"<<-?\s*([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:\n|$)")
+# A heredoc opening at the end of a line: `<<EOT` or `<<-EOT`. The marker is
+# an HCL identifier, which may hold `-` after its first character (`<<END-X`).
+HEREDOC = re.compile(r"<<-?\s*([A-Za-z_][A-Za-z0-9_-]*)[ \t]*(?:\n|$)")
 
 
 class CommentError(ValueError):
