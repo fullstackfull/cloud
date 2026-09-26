@@ -16,6 +16,28 @@ use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
  */
 final class InstallProfileRefused extends DomainException
 {
+    private string $refusal = 'infrastructure.install_profile_incomplete';
+
+    /**
+     * @param  list<string>  $keys
+     */
+    public static function becauseItDefaultsWhatThePlatformOwns(string $slug, array $keys): self
+    {
+        sort($keys);
+
+        $exception = new self(sprintf(
+            'The profile "%s" gives a default for %s, which only the platform supplies: a default would be '
+            .'installed onto a machine whenever the platform had no value, an address or a name nobody '
+            .'allocated. Remove the default.',
+            $slug,
+            implode(', ', $keys),
+        ));
+
+        $exception->refusal = 'infrastructure.install_profile_default_not_allowed';
+
+        return $exception->withContext(['slug' => $slug, 'keys' => implode(', ', $keys)]);
+    }
+
     /**
      * @param  list<string>  $uncovered
      * @param  list<string>  $supplied
@@ -40,6 +62,6 @@ final class InstallProfileRefused extends DomainException
 
     public function errorCode(): string
     {
-        return 'infrastructure.install_profile_incomplete';
+        return $this->refusal;
     }
 }

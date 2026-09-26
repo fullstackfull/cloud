@@ -40,6 +40,17 @@ use Lynomia\Modules\Infrastructure\Domain\Exceptions\InstallProfileRefused;
  * it.
  *
  * ---------------------------------------------------------------------------
+ * No default for what the platform owns
+ * ---------------------------------------------------------------------------
+ *
+ * A default for the hostname, the IPv4 address or its prefix length
+ * ({@see InstallProfileRenderer::PLATFORM_OWNED}) is refused. Those are the
+ * platform's to state; a default would be installed onto a machine whenever
+ * the platform had none to pass — a rebuild of a machine with no address
+ * would come up on one IPAM never gave it. A default gateway is allowed: a
+ * subnet may be registered without one.
+ *
+ * ---------------------------------------------------------------------------
  * A placeholder no build could ever fill is refused here
  * ---------------------------------------------------------------------------
  *
@@ -78,6 +89,12 @@ final readonly class RecordOsInstallProfile
         array $defaults,
         User $operator,
     ): OsInstallProfile {
+        $owned = array_values(array_intersect(array_keys($defaults), InstallProfileRenderer::PLATFORM_OWNED));
+
+        if ($owned !== []) {
+            throw InstallProfileRefused::becauseItDefaultsWhatThePlatformOwns($slug, $owned);
+        }
+
         $supplied = [
             ...InstallProfileRenderer::PLATFORM_VARIABLES,
             ...array_keys(array_filter($defaults, static fn (mixed $value): bool => $value !== null)),

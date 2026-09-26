@@ -2016,11 +2016,15 @@ return [
         SHA-256.
 
         A build passes `hostname`, `ipv4_address`, `ipv4_prefix_length` and
-        `ipv4_gateway` (the gateway is empty for an address from a subnet
+        `ipv4_gateway` (the gateway is omitted for an address from a subnet
         registered without one). A template naming any other placeholder
         without a default is refused (422
         `infrastructure.install_profile_incomplete`), because no order-driven
-        build could fill it.
+        build could fill it. A default for `hostname`, `ipv4_address` or
+        `ipv4_prefix_length` is refused (422
+        `infrastructure.install_profile_default_not_allowed`): those are the
+        platform's alone. A default `ipv4_gateway` is allowed, and applies to
+        an address from a subnet registered without a gateway.
         TEXT,
         'permission' => 'dedicated.manage',
         'body' => ['slug', 'name', 'os_family', 'os_version', 'installer', 'template', 'defaults'],

@@ -227,6 +227,40 @@ final class ReinstallDedicatedHandlerTest extends TestCase
     }
 
     #[Test]
+    public function a_machine_with_no_address_is_not_installed_onto_one_a_profile_default_names(): void
+    {
+        /*
+         * B3 (round three). A rebuild restates the machine's own address; a
+         * machine with no primary assignment has none, and the handler passes
+         * nulls for it. A renderer that let the profile's defaults fill those
+         * nulls armed a boot onto an address IPAM never gave the machine. The
+         * profile row is written directly here: the operator route now refuses
+         * a default for a platform-owned address key, and this pins the
+         * render path on its own.
+         */
+        $this->osProfile->forceFill([
+            'template' => "addr {{ ipv4_address }}/{{ ipv4_prefix_length }} gw {{ ipv4_gateway }}\nh {{ hostname }}",
+            'defaults' => [
+                'ipv4_address' => '203.0.113.50',
+                'ipv4_prefix_length' => '24',
+                'ipv4_gateway' => '203.0.113.1',
+            ],
+        ])->save();
+
+        IpAssignment::query()->delete();
+
+        $this->completeTheInstallOnFirstPoll();
+
+        $result = $this->reinstall();
+
+        $this->assertFalse($result->successful, 'A machine with no address was rebuilt onto one IPAM never gave it.');
+        $this->assertSame('dedicated.install_profile_not_renderable', $result->errorCode);
+        $this->assertSame(0, PxeBootAuthorisation::query()->count(), 'A boot was armed.');
+        $this->assertSame(DedicatedServerStatus::Active, $this->server->fresh()?->status);
+        $this->assertFalse(DedicatedReinstall::query()->sole()->destroyedData());
+    }
+
+    #[Test]
     public function a_withdrawn_install_profile_is_refused_rather_than_substituted(): void
     {
         $this->osProfile->update(['is_active' => false]);

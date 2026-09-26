@@ -61,7 +61,9 @@ OS install profiles are operator data (`POST /api/admin/infrastructure/os-instal
 `dedicated.manage`, audited with a SHA-256 of the template). A slug is written once; a
 corrected recipe is a new profile and the old one is withdrawn. A template naming a
 placeholder that neither a build (`hostname`, `ipv4_address`, `ipv4_prefix_length`,
-`ipv4_gateway`) nor the profile's defaults supply is refused.
+`ipv4_gateway`) nor the profile's defaults supply is refused, and so is a default for
+`hostname`, `ipv4_address` or `ipv4_prefix_length`: those are the platform's alone. A default
+`ipv4_gateway` applies when the machine's subnet was registered without a gateway.
 
 The build refuses a job whose profile has been withdrawn, or whose pool or profile does not
 exist, before it holds anything. A build refused an address (`ipam.pool_exhausted`), or

@@ -250,7 +250,15 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
             'hostname' => (string) ($payload['hostname'] ?? 'srv-'.strtolower((string) $job->getKey())),
             'ipv4_address' => $address->address,
             'ipv4_prefix_length' => $address->subnet->prefix_length,
-            'ipv4_gateway' => $address->subnet->gateway,
+            /*
+             * Omitted, not passed as null, for a subnet registered without a
+             * gateway: the renderer treats a null the caller passes as "no
+             * value" and refuses the placeholder, and checkout accepts a
+             * profile that defaults the gateway (LocalPlacementFeasibility).
+             * Omitting it lets that default apply, so checkout and the build
+             * agree.
+             */
+            ...($address->subnet->gateway !== null ? ['ipv4_gateway' => $address->subnet->gateway] : []),
         ];
 
         /*

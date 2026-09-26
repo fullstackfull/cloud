@@ -145,6 +145,25 @@ final class AnOperatorRecordsAnOsInstallProfileTest extends TestCase
     }
 
     #[Test]
+    public function a_default_for_an_address_or_a_name_the_platform_owns_is_refused(): void
+    {
+        foreach (['ipv4_address' => '203.0.113.50', 'ipv4_prefix_length' => '24', 'hostname' => 'srv'] as $key => $value) {
+            $this->record($this->operator, $this->profile([
+                'defaults' => ['timezone' => 'Asia/Kuwait', $key => $value],
+            ]))
+                ->assertStatus(422)
+                ->assertJsonPath('error.code', 'infrastructure.install_profile_default_not_allowed');
+        }
+
+        $this->assertSame(0, OsInstallProfile::query()->count());
+
+        // The gateway is the subnet's, which may have none: a default is allowed.
+        $this->record($this->operator, $this->profile([
+            'defaults' => ['timezone' => 'Asia/Kuwait', 'ipv4_gateway' => '203.0.113.1'],
+        ]))->assertCreated();
+    }
+
+    #[Test]
     public function a_slug_already_recorded_is_refused_rather_than_rewritten(): void
     {
         // An answer file decides how a customer's disks are partitioned; a
