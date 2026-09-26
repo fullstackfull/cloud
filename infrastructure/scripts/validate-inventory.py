@@ -4,7 +4,18 @@
 An inventory is a list of machines somebody may be about to change. This script
 is what stops a machine getting there without a stated purpose, a named owner
 and a deliberate safety class — and what stops a credential being committed
-alongside it.
+alongside it, under a name or in a value shape it recognises.
+
+What it calls a credential. A host variable whose name is one of Ansible's own
+credential variables (`ANSIBLE_CREDENTIAL_VARIABLES`: every password variable
+the ssh, paramiko_ssh, winrm and psrp connection plugins and the sudo, su and
+runas become plugins of ansible-core 2.18.1 declare, and ansible.netcommon's
+httpapi ones); a name containing one of `SECRET_HINTS`; a name with `pass` as
+a whole word once split on `_`, `-` and `.` (`SECRET_WORDS`: `bmc_pass`, not
+`bypass_cache` or `ansible_sshpass_prompt`); and a string value beginning with
+one of `SECRET_VALUE_PREFIXES`. A credential under any other name, or in any
+other value shape, is not recognised. Only inventory variables are read: an
+nginx `fastcgi_pass` in a role's template is not this validator's subject.
 
 It reads the YAML itself rather than asking Ansible, so it needs no Ansible
 installed and contacts no host. That makes it a reimplementation of part of
@@ -83,6 +94,37 @@ REQUIRED = ("ansible_host", "safety_class")
 # boolean that exists precisely so nobody writes the credential itself.
 SECRET_HINTS = ("password", "passwd", "secret", "token", "api_key", "apikey",
                 "private_key", "ssh_key", "auth_code", "credential")
+
+# Words that are a credential when they stand alone in a variable's name,
+# split on `_`, `-` and `.`. As a substring `pass` would catch bypass and
+# passthrough; as a word it catches Ansible's own `ansible_ssh_pass`.
+SECRET_WORDS = ("pass",)
+
+# Ansible's own credential variables, by exact name. Taken from the `vars:`
+# each plugin declares for its password option in ansible-core 2.18.1
+# (plugins/connection/{ssh,paramiko_ssh,winrm,psrp}.py,
+# plugins/become/{sudo,su,runas}.py) and from ansible.netcommon's httpapi
+# connection, which is not in core. Most are also caught by SECRET_HINTS or
+# SECRET_WORDS; this list does not depend on either, and names them outright.
+ANSIBLE_CREDENTIAL_VARIABLES = frozenset({
+    # connection: ssh, paramiko_ssh, winrm, psrp
+    "ansible_password",
+    "ansible_ssh_pass",
+    "ansible_ssh_password",
+    "ansible_paramiko_pass",
+    "ansible_paramiko_password",
+    "ansible_winrm_pass",
+    "ansible_winrm_password",
+    # become: sudo, su, runas
+    "ansible_become_pass",
+    "ansible_become_password",
+    "ansible_sudo_pass",
+    "ansible_su_pass",
+    "ansible_runas_pass",
+    # connection: ansible.netcommon.httpapi
+    "ansible_httpapi_pass",
+    "ansible_httpapi_password",
+})
 
 SECRET_VALUE_PREFIXES = ("-----BEGIN", "ssh-rsa ", "ssh-ed25519 ")
 
@@ -498,7 +540,15 @@ def check_host(
 
     for key, value in hostvars.items():
         lowered = str(key).lower()
-        if key != "credentials_available" and any(h in lowered for h in SECRET_HINTS):
+        words = re.split(r"[_.-]", lowered)
+        if lowered in ANSIBLE_CREDENTIAL_VARIABLES:
+            problems.append(
+                f"{prefix} has a variable named {key!r}{at(key)}, which is one of "
+                "Ansible's own credential variables and reads as a secret"
+            )
+        elif key != "credentials_available" and (
+            any(h in lowered for h in SECRET_HINTS) or any(w in words for w in SECRET_WORDS)
+        ):
             problems.append(
                 f"{prefix} has a variable named {key!r}{at(key)}, which reads as a secret"
             )
