@@ -50,7 +50,8 @@ A node the reconcile sweep (`infrastructure:reconcile`) discovers is recorded in
 `MAINTENANCE`: discovery is not authorisation. An operator holding `node.maintenance` puts
 it into service, drains it or takes it out with
 `PUT /api/admin/infrastructure/nodes/{node}/status` (`active`, `draining` or `maintenance`,
-with a reason, audited). `OFFLINE` is not set by hand. Placement still requires the node to
+with a reason, audited). `OFFLINE` is refused there: nothing in this build writes it (a node
+that stops answering is recorded unhealthy by the sweep, not offline). Placement still requires the node to
 be healthy as well as active.
 
 ## Placement

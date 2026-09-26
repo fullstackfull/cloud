@@ -1990,7 +1990,7 @@ return [
     'api.admin.infrastructure.nodes.status' => [
         'tag' => 'Operator',
         'summary' => 'Put a hypervisor node into service, drain it, or take it out',
-        'description' => 'A node the reconcile sweep discovers is recorded in `maintenance`: discovery is not authorisation. This is the operator saying it is cabled, patched and monitored and may take customers (`active`), should take no new ones (`draining`), or is out (`maintenance`). `offline` is the hypervisor\'s to say and is refused. The reason is required and audited. Placement still asks for a node that is healthy as well as active; health is the sweep\'s.',
+        'description' => 'A node the reconcile sweep discovers is recorded in `maintenance`: discovery is not authorisation. This is the operator saying it is cabled, patched and monitored and may take customers (`active`), should take no new ones (`draining`), or is out (`maintenance`). `offline` is refused: nothing in this build writes or reads it as distinct from `maintenance`, and a node set to it by hand would stay there with nothing to bring it back but this route. The reason is required and audited. Placement still asks for a node that is healthy as well as active; health is the sweep\'s.',
         'permission' => 'node.maintenance',
         'body' => ['status', 'reason'],
         'response' => $one('AdminComputeNodeStatus'),
@@ -2015,10 +2015,12 @@ return [
         what it was built with. The audit entry records the template's
         SHA-256.
 
-        A build supplies `hostname`, `ipv4_address`, `ipv4_prefix_length` and
-        `ipv4_gateway`. A template naming any other placeholder without a
-        default is refused (422 `infrastructure.install_profile_incomplete`),
-        because no order-driven build could render it.
+        A build passes `hostname`, `ipv4_address`, `ipv4_prefix_length` and
+        `ipv4_gateway` (the gateway is empty for an address from a subnet
+        registered without one). A template naming any other placeholder
+        without a default is refused (422
+        `infrastructure.install_profile_incomplete`), because no order-driven
+        build could fill it.
         TEXT,
         'permission' => 'dedicated.manage',
         'body' => ['slug', 'name', 'os_family', 'os_version', 'installer', 'template', 'defaults'],
@@ -2027,7 +2029,7 @@ return [
     'api.admin.infrastructure.os_install_profiles.withdraw' => [
         'tag' => 'Operator',
         'summary' => 'Stop installing from a profile',
-        'description' => 'Deactivated, never deleted. The renderer refuses an inactive profile at render time, so a build queued before the withdrawal stops using it too.',
+        'description' => 'Deactivated, never deleted. The renderer refuses an inactive profile at render time, so a build queued before the withdrawal stops using it too. Withdrawing a withdrawn profile changes nothing and is not audited again.',
         'permission' => 'dedicated.manage',
         'response' => $one('AdminOsInstallProfile'),
     ],

@@ -17,6 +17,9 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
  * with, and "what is this server running?" is the first question asked when a
  * rebuild goes wrong. The renderer refuses an inactive profile at render
  * time, so a build queued before the withdrawal stops using it too.
+ *
+ * Withdrawing a profile that is already withdrawn changes nothing and records
+ * nothing.
  */
 final readonly class WithdrawOsInstallProfile
 {
@@ -26,6 +29,14 @@ final readonly class WithdrawOsInstallProfile
 
     public function execute(OsInstallProfile $profile, User $operator): OsInstallProfile
     {
+        /*
+         * Already withdrawn: nothing changes, so nothing is recorded. A second
+         * audit row would claim a second act that did not happen.
+         */
+        if (! $profile->is_active) {
+            return $profile;
+        }
+
         return $this->record->execute(
             act: function () use ($profile): OsInstallProfile {
                 $profile->forceFill(['is_active' => false])->save();

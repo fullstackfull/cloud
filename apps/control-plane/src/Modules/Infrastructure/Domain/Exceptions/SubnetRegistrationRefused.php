@@ -47,16 +47,17 @@ final class SubnetRegistrationRefused extends DomainException
     /**
      * A block registered for allocation becomes one row per address, written
      * inside the registration's own transaction. Past the limit that is a
-     * write the request should not be making, and an estate does not
-     * allocate customer addresses out of a block that size: it registers the
-     * pieces it hands out, and may register the aggregate as held space.
+     * write the request should not be making. The estate registers either
+     * the pieces it hands out, or the aggregate as held space; the pieces
+     * cannot be registered inside held space, which is overlap-checked like
+     * any block.
      */
     public static function becauseItIsTooWideToAllocateFrom(string $block, int $addresses, int $limit): self
     {
         $exception = new self(sprintf(
             '%s holds %d addresses, and a block registered for allocation is expanded into one row per address; '
-            .'the most one registration expands is %d. Register the pieces you will allocate from, or register '
-            .'this block with "allocatable": false to hold the space without allocating from it.',
+            .'the most one registration expands is %d. Register the pieces you will allocate from instead, or '
+            .'register this block with "allocatable": false to hold the space without allocating from any of it.',
             $block,
             $addresses,
             $limit,

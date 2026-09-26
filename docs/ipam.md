@@ -99,7 +99,8 @@ Three cases are handled differently, and each says so:
   that nothing inside it can be registered elsewhere, and writes no rows.
 - **An IPv4 block wider than a /16** registered for allocation is refused with
   `422 infrastructure.subnet_too_wide_to_allocate_from`. Register the pieces to allocate
-  from, and the aggregate as held space if it should be guarded.
+  from instead. Held space is overlap-checked like any block, so an aggregate registered as
+  held space cannot then have pieces registered inside it.
 
 `infra:preflight`'s `mapping.network` passes only when the active pools hold at least one
 address the allocator could give a customer machine (`IpAllocator::customerAllocatableCount`).

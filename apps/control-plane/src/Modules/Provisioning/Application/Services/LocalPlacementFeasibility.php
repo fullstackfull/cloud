@@ -11,10 +11,12 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
+use Lynomia\Modules\Dedicated\Domain\Services\InstallProfileRenderer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Provisioning\Application\DTOs\PlacementResolution;
 use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
@@ -62,8 +64,10 @@ use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
  * an undefined array key (F-02, the re-audit's probe). So a Dedicated plan
  * resolves, from rows this platform holds, the datacenter holding its
  * hardware profile, the customer pool in that datacenter and the active
- * install profile — each what the plan's constraints name, or the estate's
- * only answer. Whether a machine of that profile is free is still the
+ * install profile — each what the plan's constraints name (and a named one
+ * must be one the estate would itself pick), or the estate's only answer —
+ * and refuses a profile needing a gateway the pool's subnets may not have
+ * (dedicated() says exactly what is checked). Whether a machine of that profile is free is still the
  * handler's question, answered under a row lock: stock moves between checkout
  * and build, and a capacity wait is the right outcome for a machine that is
  * busy, not a refusal at checkout.
@@ -72,6 +76,7 @@ final readonly class LocalPlacementFeasibility
 {
     public function __construct(
         private HostingPackageForPlan $packages,
+        private InstallProfileRenderer $renderer,
     ) {}
 
     public function resolve(Plan $plan): PlacementResolution
@@ -129,6 +134,19 @@ final readonly class LocalPlacementFeasibility
      * elsewhere is not a candidate. The install profile is the active one the
      * plan names by slug, or the only active one.
      *
+     * A datacenter or pool the plan names is looked up among the same
+     * candidates the estate's own answer is drawn from, as the VPS branch
+     * does: naming a management pool, an inactive pool, a pool in another
+     * building or an id that does not exist is refused, not trusted.
+     *
+     * And the answer file has to be fillable from the pool: a profile whose
+     * template asks for `{{ ipv4_gateway }}`, with no default for it, is
+     * refused against a pool holding an active IPv4 subnet registered without
+     * a gateway — the build would reserve a machine and an address and then
+     * be unable to render (the handler gives both back, but the money should
+     * not have moved). That is the one build variable a pool can fail to
+     * supply; the others come from the address and the job.
+     *
      * @param  array<string, mixed>  $constraints
      */
     private function dedicated(Plan $plan, array $constraints): PlacementResolution
@@ -137,18 +155,22 @@ final readonly class LocalPlacementFeasibility
         $resources = $plan->resources ?? [];
         $hardware = is_string($resources['hardware_profile'] ?? null) ? $resources['hardware_profile'] : '';
 
-        $datacenter = $this->soleTarget(
+        $datacenter = self::declaredOrSole(
             $constraints['datacenter_id'] ?? null,
-            static fn (): ?string => self::soleId(
-                Datacenter::query()->whereIn(
-                    'id',
-                    DedicatedServer::query()
-                        ->where('hardware_profile', $hardware)
-                        ->where('status', '!=', DedicatedServerStatus::Retired->value)
-                        ->select('datacenter_id'),
-                ),
+            static fn (): Builder => Datacenter::query()->whereIn(
+                'id',
+                DedicatedServer::query()
+                    ->where('hardware_profile', $hardware)
+                    ->where('status', '!=', DedicatedServerStatus::Retired->value)
+                    ->select('datacenter_id'),
             ),
         );
+
+        if ($datacenter === false) {
+            return PlacementResolution::blocked(
+                'the plan names a datacenter that does not exist or holds no machine of its hardware profile',
+            );
+        }
 
         if ($datacenter === null) {
             return PlacementResolution::blocked(
@@ -156,16 +178,21 @@ final readonly class LocalPlacementFeasibility
             );
         }
 
-        $pool = $this->soleTarget(
+        $pool = self::declaredOrSole(
             $constraints['ip_pool_id'] ?? null,
-            static fn (): ?string => self::soleId(
-                IpPool::query()
-                    ->where('is_active', true)
-                    ->where('ip_version', 4)
-                    ->where('datacenter_id', $datacenter)
-                    ->whereIn('scope', self::customerAllocatableScopes()),
-            ),
+            static fn (): Builder => IpPool::query()
+                ->where('is_active', true)
+                ->where('ip_version', 4)
+                ->where('datacenter_id', $datacenter)
+                ->whereIn('scope', self::customerAllocatableScopes()),
         );
+
+        if ($pool === false) {
+            return PlacementResolution::blocked(
+                'the plan names an IP pool that does not exist, is not active, is not a customer IPv4 pool, '
+                .'or is not in the datacenter holding the hardware',
+            );
+        }
 
         if ($pool === null) {
             return PlacementResolution::blocked(
@@ -176,9 +203,10 @@ final readonly class LocalPlacementFeasibility
         $declared = $constraints['os_install_profile_slug'] ?? null;
         $profiles = OsInstallProfile::query()->where('is_active', true);
 
+        /** @var OsInstallProfile|null $profile */
         $profile = is_string($declared) && $declared !== ''
-            ? $profiles->where('slug', $declared)->value('id')
-            : self::soleId($profiles);
+            ? $profiles->where('slug', $declared)->first()
+            : (($id = self::soleId($profiles)) === null ? null : OsInstallProfile::query()->find($id));
 
         if ($profile === null) {
             return PlacementResolution::blocked(
@@ -186,11 +214,51 @@ final readonly class LocalPlacementFeasibility
             );
         }
 
+        if ($this->needsAGatewayThePoolMayNotHave($profile, $pool)) {
+            return PlacementResolution::blocked(
+                'the install profile needs a gateway and the pool holds a subnet registered without one',
+            );
+        }
+
         return PlacementResolution::ready([
             'datacenter_id' => $datacenter,
             'ip_pool_id' => $pool,
-            'os_install_profile_id' => (string) $profile,
+            'os_install_profile_id' => (string) $profile->getKey(),
         ]);
+    }
+
+    private function needsAGatewayThePoolMayNotHave(OsInstallProfile $profile, string $pool): bool
+    {
+        $defaults = $profile->defaults ?? [];
+
+        if (($defaults['ipv4_gateway'] ?? null) !== null
+            || ! in_array('ipv4_gateway', $this->renderer->placeholdersIn($profile->template), true)) {
+            return false;
+        }
+
+        return Subnet::query()
+            ->where('ip_pool_id', $pool)
+            ->where('is_active', true)
+            ->where('ip_version', 4)
+            ->whereNull('gateway')
+            ->exists();
+    }
+
+    /**
+     * The target the plan declares, when it is one of the candidates; the
+     * sole candidate, when it declares nothing.
+     *
+     * @param  callable(): Builder<*>  $candidates
+     * @return string|false|null the id; false when the plan names something that is not a
+     *                           candidate; null when it names nothing and there is no sole one
+     */
+    private static function declaredOrSole(mixed $declared, callable $candidates): string|false|null
+    {
+        if (is_string($declared) && $declared !== '') {
+            return $candidates()->whereKey($declared)->exists() ? $declared : false;
+        }
+
+        return self::soleId($candidates());
     }
 
     /**

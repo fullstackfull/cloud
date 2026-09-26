@@ -32,10 +32,13 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
  * ---------------------------------------------------------------------------
  *
  * `active`, `draining` and `maintenance` — the operator's own states. Not
- * `offline`: that is what the hypervisor's answer says, and a node declared
- * offline by hand would be one the platform stops reading as it is. Nothing
- * here makes an unhealthy node schedulable either: placement asks for an
- * active node that is also healthy, and health is the reconcile sweep's.
+ * `offline`. No code in this build writes NodeStatus::Offline — the reconcile
+ * sweep records a node that stopped answering in `is_healthy`, not in the
+ * status — and nothing treats it differently from `maintenance` except that
+ * it holds no workloads; allowing it here would add a state that only this
+ * route could ever enter or leave, for no behaviour. Nothing here makes an
+ * unhealthy node schedulable either: placement asks for an active node that
+ * is also healthy, and health is the reconcile sweep's.
  *
  * The reason is required and audited with the move, because "who put this
  * node into service, and on what grounds" is the question asked the day a

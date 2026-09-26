@@ -15,12 +15,14 @@ use Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedProviderException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\InstallProfileNotRenderableException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\NoMatchingHardwareException;
 use Lynomia\Modules\Dedicated\Domain\Exceptions\PxeAuthorisationRefusedException;
+use Lynomia\Modules\Dedicated\Domain\Services\InstallProfileRenderer;
 use Lynomia\Modules\Dedicated\Domain\StateMachines\DedicatedServerStateMachine;
 use Lynomia\Modules\Dedicated\Infrastructure\DedicatedProviderFactory;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\OsInstallProfile;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\PxeBootAuthorisation;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Ipam\Domain\Enums\ReleaseReason;
 use Lynomia\Modules\Ipam\Domain\Exceptions\AddressNotAllocatableException;
 use Lynomia\Modules\Ipam\Domain\Exceptions\IpPoolExhaustedException;
 use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
@@ -40,15 +42,24 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * created, so the irreversible step is not "a machine now exists" but "a
  * machine's disks have been erased".
  *
- *  0. **Resolve what the build needs** — the address pool and the install
- *     profile — before anything is held. A job that names neither is refused
- *     outright; nothing is reserved for a build that cannot run.
+ *  0. **Resolve what the build needs** — the address pool, and an install
+ *     profile that is still active — before anything is held. A job naming a
+ *     pool or profile that does not exist, or a withdrawn profile, is refused
+ *     here and reserves nothing.
  *  1. **Reserve a machine** — a row lock. Cheap, and undoable.
  *  2. **Reserve addresses** — rows. Released or quarantined by compensation.
- *     Refused, the machine goes straight back to stock: it has been held,
- *     never touched, and only now does it move to `provisioning`.
+ *     Refused, the machine goes straight back to stock.
+ *  2a. **Render the answer file** with the address just reserved, while the
+ *     machine is still only `reserved`. A profile the address cannot fill —
+ *     `{{ ipv4_gateway }}` from a subnet registered without a gateway —
+ *     is refused here, and the machine and the addresses this attempt took go
+ *     back. Nothing has been armed: rendering is the first thing a boot
+ *     authorisation does. Only after this does the machine move to
+ *     `provisioning`.
  *  3. **Authorise one-time PXE** — a recorded decision, then a boot override
- *     armed for exactly one boot.
+ *     armed for exactly one boot. It renders again, from the same inputs; a
+ *     profile withdrawn in the moment between the two renders is the one
+ *     render refusal that still holds the machine for review.
  *  4. **Power cycle** — the first step whose effect is physical.
  *  5. **Wait for the install** — tens of minutes, over which the machine
  *     erases and rebuilds itself.
@@ -100,6 +111,7 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
         private DedicatedProviderFactory $providers,
         private DedicatedServerStateMachine $states,
         private SecretRedactor $redactor,
+        private InstallProfileRenderer $renderer,
     ) {}
 
     public function kind(): ProvisioningJobKind
@@ -149,14 +161,15 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
         $pool = IpPool::query()->find((string) ($payload['ip_pool_id'] ?? ''));
         $profile = OsInstallProfile::query()->find((string) ($payload['os_install_profile_id'] ?? ''));
 
-        if ($pool === null || $profile === null) {
+        if ($pool === null || $profile === null || ! $profile->is_active) {
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 'dedicated.placement_incomplete',
-                sprintf(
-                    'The job names no %s that exists, so there is nothing to build with.',
-                    $pool === null ? 'IP pool' : 'OS install profile',
-                ),
+                match (true) {
+                    $pool === null => 'The job names no IP pool that exists, so there is nothing to build with.',
+                    $profile === null => 'The job names no OS install profile that exists, so there is nothing to build with.',
+                    default => sprintf('The OS install profile "%s" has been withdrawn and is not installed from.', $profile->slug),
+                },
                 metadata: [
                     'ip_pool_id' => isset($payload['ip_pool_id']) ? (string) $payload['ip_pool_id'] : null,
                     'os_install_profile_id' => isset($payload['os_install_profile_id']) ? (string) $payload['os_install_profile_id'] : null,
@@ -223,12 +236,50 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
             );
         }
 
-        // The machine is ours and has an address to come up on; from here it
-        // is being built rather than held.
-        $this->transition($server, DedicatedServerStatus::Provisioning);
-
         $primary = $reservations[0];
         $address = $primary->ipAddress()->firstOrFail();
+
+        $variables = [
+            // The payload's extras go FIRST so the platform's own
+            // values win. An `install_variables` entry naming
+            // ipv4_address would otherwise install the machine with an
+            // address IPAM never allocated, while the platform commits
+            // and bills the one it did — an address conflict at best,
+            // a silent hijack of another tenant's address at worst.
+            ...$this->profileVariables($payload),
+            'hostname' => (string) ($payload['hostname'] ?? 'srv-'.strtolower((string) $job->getKey())),
+            'ipv4_address' => $address->address,
+            'ipv4_prefix_length' => $address->subnet->prefix_length,
+            'ipv4_gateway' => $address->subnet->gateway,
+        ];
+
+        /*
+         * Step 2a: the answer file, rendered while the machine is still only
+         * held. A refusal here has armed nothing, so the machine and the
+         * addresses go back rather than being held for review.
+         */
+        try {
+            $this->renderer->render($profile, $variables);
+        } catch (InstallProfileNotRenderableException $e) {
+            $released = $this->giveBackUntouched($server, $heldBefore);
+
+            if (($released['released_to_stock'] ?? false) === true) {
+                foreach ($reservations as $reservation) {
+                    $this->ipAllocator->release($reservation, ReleaseReason::JobFailed);
+                }
+            }
+
+            return ProvisioningResult::failed(
+                FailureClass::Permanent,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: [...$this->redactor->redact($e->context()), ...$released],
+            );
+        }
+
+        // The machine is ours, has an address to come up on and an answer
+        // file that renders; from here it is being built rather than held.
+        $this->transition($server, DedicatedServerStatus::Provisioning);
 
         try {
             $authorisation = $this->authorisePxe->execute(
@@ -237,23 +288,12 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
                 reason: (string) ($payload['install_reason'] ?? 'Initial provisioning for order '.($job->order_id ?? $job->getKey())),
                 authorisedByUserId: isset($payload['authorised_by_user_id']) ? (string) $payload['authorised_by_user_id'] : null,
                 provisioningJobId: (string) $job->getKey(),
-                variables: [
-                    // The payload's extras go FIRST so the platform's own
-                    // values win. An `install_variables` entry naming
-                    // ipv4_address would otherwise install the machine with an
-                    // address IPAM never allocated, while the platform commits
-                    // and bills the one it did — an address conflict at best,
-                    // a silent hijack of another tenant's address at worst.
-                    ...$this->profileVariables($payload),
-                    'hostname' => (string) ($payload['hostname'] ?? 'srv-'.strtolower((string) $job->getKey())),
-                    'ipv4_address' => $address->address,
-                    'ipv4_prefix_length' => $address->subnet->prefix_length,
-                    'ipv4_gateway' => $address->subnet->gateway,
-                ],
+                variables: $variables,
             );
         } catch (PxeAuthorisationRefusedException|InstallProfileNotRenderableException $e) {
-            // The request itself is wrong — a machine in the wrong state, a
-            // profile with a hole in it — and will be just as wrong next time.
+            // The request itself is wrong — a machine in the wrong state, no
+            // provisioning NIC, or a profile withdrawn since step 2a — and
+            // will be just as wrong next time.
             return $this->failWithoutReleasing($server, FailureClass::Permanent, $e->errorCode(), $e->getMessage(), $e->context());
         } catch (BmcNotConfiguredException $e) {
             // A machine with no reachable controller cannot be installed by any

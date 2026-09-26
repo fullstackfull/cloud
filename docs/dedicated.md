@@ -49,7 +49,11 @@ moves, from rows the platform holds, and the paid order's provisioning job carri
 - **the OS install profile** — the active one named by
   `placement_constraints.os_install_profile_slug`, or the only active one.
 
-If any of them has no single answer, checkout refuses the plan (`checkout.not_deliverable`).
+If any of them has no single answer, or the plan names one the estate would not pick itself
+(a management or inactive pool, a pool in another building, an id that does not exist),
+checkout refuses the plan (`checkout.not_deliverable`). It is also refused when the profile's
+template needs `{{ ipv4_gateway }}` with no default and the pool holds an active subnet
+registered without a gateway.
 Whether a machine of the profile is free is not asked here: stock moves between checkout
 and build, and the build reserves under a row lock.
 
@@ -59,9 +63,12 @@ corrected recipe is a new profile and the old one is withdrawn. A template namin
 placeholder that neither a build (`hostname`, `ipv4_address`, `ipv4_prefix_length`,
 `ipv4_gateway`) nor the profile's defaults supply is refused.
 
-A build refused an address (`ipam.pool_exhausted`) gives its machine back: the chassis was
-reserved and nothing else, so it returns to `available` and the retry reserves again. It
-moves to `provisioning` only once its addresses are held.
+The build refuses a job whose profile has been withdrawn, or whose pool or profile does not
+exist, before it holds anything. A build refused an address (`ipam.pool_exhausted`), or
+whose answer file cannot be rendered with the address it was given, gives back the machine
+it reserved and the addresses it took: nothing has been armed. It moves to `provisioning`
+only once its addresses are held and its answer file renders. A hold the order already had
+before the attempt (an operator's) is kept.
 
 ## Out-of-band management
 

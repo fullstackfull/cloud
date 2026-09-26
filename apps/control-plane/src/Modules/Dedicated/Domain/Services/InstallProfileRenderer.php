@@ -40,7 +40,8 @@ final readonly class InstallProfileRenderer
      * outside them has to be covered by the profile's own defaults, or the
      * profile cannot be rendered by an order-driven build, which names no
      * extras. RecordOsInstallProfile refuses such a profile when it is
-     * written, rather than a build refusing it after a machine was reserved.
+     * written. A key being passed is not the same as it having a value: the
+     * gateway is null for an address from a subnet registered without one.
      *
      * @var list<string>
      */

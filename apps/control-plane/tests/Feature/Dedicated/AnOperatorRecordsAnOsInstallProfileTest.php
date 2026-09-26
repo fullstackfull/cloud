@@ -90,6 +90,45 @@ final class AnOperatorRecordsAnOsInstallProfileTest extends TestCase
     }
 
     #[Test]
+    public function the_listing_names_default_keys_and_never_their_values_or_the_template(): void
+    {
+        // A default may legitimately be a password hash; the listing is read
+        // by everyone holding infrastructure.view.
+        $this->record($this->operator, $this->profile([
+            'defaults' => ['timezone' => 'Asia/Kuwait', 'root_hash' => '$6$rounds=5000$secret-hash'],
+        ]))->assertCreated();
+
+        $response = $this->actingAs($this->operator)
+            ->getJson('/api/admin/infrastructure/os-install-profiles')
+            ->assertOk()
+            ->assertJsonPath('data.0.default_keys', ['timezone', 'root_hash']);
+
+        $body = (string) $response->getContent();
+
+        $this->assertStringNotContainsString('secret-hash', $body);
+        $this->assertStringNotContainsString('Asia\/Kuwait', $body);
+        $this->assertStringNotContainsString('Asia/Kuwait', $body);
+        $this->assertStringNotContainsString('autoinstall:', $body);
+        $this->assertArrayNotHasKey('defaults', (array) $response->json('data.0'));
+        $this->assertArrayNotHasKey('template', (array) $response->json('data.0'));
+    }
+
+    #[Test]
+    public function withdrawing_a_withdrawn_profile_changes_nothing_and_is_not_audited_again(): void
+    {
+        $id = (string) $this->record($this->operator, $this->profile())->assertCreated()->json('data.id');
+
+        foreach ([1, 2] as $_) {
+            $this->actingAs($this->operator)
+                ->deleteJson('/api/admin/infrastructure/os-install-profiles/'.$id)
+                ->assertOk()
+                ->assertJsonPath('data.is_active', false);
+        }
+
+        $this->assertSame(1, AuditEntry::query()->where('action', AuditAction::OsInstallProfileWithdrawn)->count());
+    }
+
+    #[Test]
     public function a_template_asking_for_a_value_nothing_supplies_is_refused(): void
     {
         /*

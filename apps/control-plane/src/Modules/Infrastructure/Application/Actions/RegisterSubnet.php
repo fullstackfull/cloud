@@ -130,9 +130,11 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * And one kind is refused: an IPv4 block registered for allocation that holds
  * more than {@see self::MAX_ADDRESSES_EXPANDED} addresses (a /16). One row per
  * address is written inside this request's transaction, and a /8 is 16.7
- * million of them; an estate allocates out of the pieces, and may register the
- * aggregate as held space. The overlap check runs first, so a wide block that
- * collides is told about the collision.
+ * million of them. An estate either registers the pieces it allocates from,
+ * or registers the aggregate as held space — not both: held space is compared
+ * for overlaps like any block, so the pieces cannot then be registered inside
+ * it. The overlap check runs first, so a wide block that collides is told
+ * about the collision.
  *
  * ---------------------------------------------------------------------------
  * What it does not cover

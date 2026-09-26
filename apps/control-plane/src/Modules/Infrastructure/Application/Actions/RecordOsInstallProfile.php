@@ -40,14 +40,20 @@ use Lynomia\Modules\Infrastructure\Domain\Exceptions\InstallProfileRefused;
  * it.
  *
  * ---------------------------------------------------------------------------
- * A profile a build cannot render is refused here
+ * A placeholder no build could ever fill is refused here
  * ---------------------------------------------------------------------------
  *
- * The renderer refuses a template with an unfilled placeholder, which is
- * right at render time and too late: the build has reserved a machine by then.
- * A build supplies {@see InstallProfileRenderer::PLATFORM_VARIABLES}, and an
- * order names nothing else, so every other placeholder must have a default
- * here. The same renderer's pattern is what finds them.
+ * The keys a build passes are {@see InstallProfileRenderer::PLATFORM_VARIABLES},
+ * and an order names no others, so a placeholder outside them with no default
+ * is one no order-driven build could fill; it is refused when the profile is
+ * written, with the renderer's own pattern. That is all this can know. Whether
+ * a build's values are present depends on the address it is given — a subnet
+ * registered without a gateway leaves `ipv4_gateway` empty — and this action
+ * cannot know which subnet a build will draw from. Checkout refuses a
+ * Dedicated plan whose pool holds such a subnet when its profile needs a
+ * gateway (LocalPlacementFeasibility), and the build renders before it moves
+ * the machine to `provisioning` and gives the machine and address back if it
+ * cannot (ProvisionDedicatedHandler).
  */
 final readonly class RecordOsInstallProfile
 {
