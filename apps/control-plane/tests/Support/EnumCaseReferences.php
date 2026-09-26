@@ -54,7 +54,22 @@ use UnitEnum;
  * reading positions:
  *
  *  - an operand of `===`, `!==`, `==` or `!=`;
- *  - a condition of a `match` arm (left of its `=>`);
+ *  - a condition of a `match` arm (left of its `=>`), including an element
+ *    of an array literal that is the condition — `match ([$a, $b]) {
+ *    [Enum::X, Enum::Y] => ... }` — descended through nested array literals
+ *    only (a call or an index inside is a boundary). `FactSource::Declared`
+ *    stood as produced by `mayReplace()`'s condition lists before this;
+ *  - anywhere inside an **enum's own transition table**, which is read the
+ *    way a machine's file is skipped: in an enum declared in the file, the
+ *    body of a method named `canBecome` whose declared return type is
+ *    exactly `bool`, and the body of every `private` method of the same enum
+ *    called at least once and only from inside such a body (as
+ *    `$this->name(`, `self::name(` or `static::name(`; one level, not
+ *    transitively). A `bool` answer cannot hand a case on, and a private
+ *    helper only it calls cannot either. A public helper (`BackupState::
+ *    allowedNext()`) can be called from anywhere and stays a producer.
+ *    `DomainState::TransferredAway` stood as produced by its own `canBecome()`
+ *    before this;
  *  - a `case` label of a `switch`;
  *  - a member of a set that is being DECLARED, TESTED or WALKED, at five named
  *    positions: an element of a list literal initialising a `const`; an
@@ -170,6 +185,9 @@ use UnitEnum;
  *  - **Nested literal shapes beyond arrays.** A haystack or a walked list is
  *    descended through array literals only; anything else inside it is a
  *    boundary.
+ *  - **A write inside an enum's transition table.** Everything in a table
+ *    body is read as a read, so a `canBecome()` that also stored a case
+ *    somewhere would hide that store. No such body in the tree does.
  *  - **Reachability of the writer itself.** A producer is a site that names
  *    the case in a writing position. Whether that site's method is ever
  *    called is {@see NoDeadMethodsTest}'s question.
@@ -612,6 +630,7 @@ final class EnumCaseReferences
 
         $tokens = self::significant(PhpToken::tokenize($source));
         $count = count($tokens);
+        $tables = self::enumTransitionTables($tokens);
 
         $namespace = '';
         $aliases = [];
@@ -759,7 +778,9 @@ final class EnumCaseReferences
             $found[] = [
                 $enum.'::'.$case,
                 $token->line,
-                self::position($prev, $tokens[$end] ?? null, $projected, $stack, $init),
+                self::inRanges($i, $tables)
+                    ? 'enum transition table'
+                    : self::position($prev, $tokens[$end] ?? null, $projected, $stack, $init),
             ];
 
             $i = $end - 1;
@@ -791,6 +812,15 @@ final class EnumCaseReferences
         $top = $stack[$depth - 1] ?? null;
 
         if ($top !== null && $top['kind'] === 'match' && ! $top['arrow']) {
+            return 'match arm condition';
+        }
+
+        // An element of an array literal that is itself a match arm's
+        // condition — `match ([$a, $b]) { [Enum::X, Enum::Y] => ... }` — is
+        // compared, not stored: descended through array literals only.
+        for ($m = $depth - 1; $m >= 0 && $stack[$m]['kind'] === 'array'; $m--);
+
+        if ($m >= 0 && $m < $depth - 1 && $stack[$m]['kind'] === 'match' && ! $stack[$m]['arrow']) {
             return 'match arm condition';
         }
 
@@ -838,6 +868,136 @@ final class EnumCaseReferences
         }
 
         return 'producer';
+    }
+
+    /**
+     * The token ranges (bodies, braces included) of an enum's own transition
+     * table: in each enum declared in the source, the body of a method named
+     * `canBecome` whose declared return type is exactly `bool`, and the body
+     * of every `private` method of the same enum that is called at least once
+     * and only from inside such a body (called as `$this->name(`,
+     * `self::name(` or `static::name(`; one level, not transitively).
+     *
+     * @param  list<PhpToken>  $tokens
+     * @return list<array{int, int}>
+     */
+    private static function enumTransitionTables(array $tokens): array
+    {
+        $count = count($tokens);
+        $ranges = [];
+
+        for ($i = 0; $i < $count; $i++) {
+            if (! $tokens[$i]->is(T_ENUM)
+                || ($tokens[$i - 1] ?? null)?->is(T_DOUBLE_COLON)
+                || ! ($tokens[$i + 1] ?? null)?->is(T_STRING)) {
+                continue;
+            }
+
+            for ($open = $i; $open < $count && $tokens[$open]->text !== '{'; $open++);
+            $close = self::closingBrace($tokens, $open);
+
+            $methods = [];
+
+            for ($j = $open + 1; $j < $close; $j++) {
+                if (! $tokens[$j]->is(T_FUNCTION) || ! ($tokens[$j + 1] ?? null)?->is(T_STRING)) {
+                    continue;
+                }
+
+                $private = false;
+                for ($k = $j - 1; $k > $open && $tokens[$k]->is([T_PUBLIC, T_PROTECTED, T_PRIVATE, T_STATIC, T_FINAL, T_ABSTRACT]); $k--) {
+                    $private = $private || $tokens[$k]->is(T_PRIVATE);
+                }
+
+                for ($body = $j; $body < $close && $tokens[$body]->text !== '{' && $tokens[$body]->text !== ';'; $body++);
+
+                if ($tokens[$body]->text !== '{') {
+                    continue;
+                }
+
+                // The return type: the tokens between the parameter list's `)` and the body.
+                $type = '';
+                for ($k = $body - 1; $k > $j && $tokens[$k]->text !== ')'; $k--) {
+                    $type = $tokens[$k]->text.$type;
+                }
+
+                $end = self::closingBrace($tokens, $body);
+                $methods[strtolower($tokens[$j + 1]->text)] = ['private' => $private, 'type' => ltrim($type, ':'), 'range' => [$body, $end]];
+                $j = $end;
+            }
+
+            $tables = [];
+
+            foreach ($methods as $name => $method) {
+                if ($name === 'canbecome' && strtolower($method['type']) === 'bool') {
+                    $tables[] = $method['range'];
+                }
+            }
+
+            if ($tables === []) {
+                $i = $close;
+
+                continue;
+            }
+
+            foreach ($methods as $name => $method) {
+                if (! $method['private'] || $name === 'canbecome') {
+                    continue;
+                }
+
+                $calls = [];
+
+                for ($k = $open + 1; $k < $close; $k++) {
+                    if (strtolower($tokens[$k]->text) === $name
+                        && ($tokens[$k + 1] ?? null)?->text === '('
+                        && (($tokens[$k - 1]->is(T_OBJECT_OPERATOR) && ($tokens[$k - 2] ?? null)?->text === '$this')
+                            || ($tokens[$k - 1]->is(T_DOUBLE_COLON) && in_array(strtolower(($tokens[$k - 2] ?? null)?->text ?? ''), ['self', 'static'], true)))) {
+                        $calls[] = $k;
+                    }
+                }
+
+                if ($calls !== [] && array_filter($calls, static fn (int $k): bool => ! self::inRanges($k, $tables)) === []) {
+                    $ranges[] = $method['range'];
+                }
+            }
+
+            array_push($ranges, ...$tables);
+            $i = $close;
+        }
+
+        return $ranges;
+    }
+
+    /**
+     * @param  list<PhpToken>  $tokens
+     */
+    private static function closingBrace(array $tokens, int $open): int
+    {
+        $count = count($tokens);
+        $level = 0;
+
+        for ($k = $open; $k < $count; $k++) {
+            if ($tokens[$k]->text === '{' || $tokens[$k]->is([T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES])) {
+                $level++;
+            } elseif ($tokens[$k]->text === '}' && --$level === 0) {
+                return $k;
+            }
+        }
+
+        return $count - 1;
+    }
+
+    /**
+     * @param  list<array{int, int}>  $ranges
+     */
+    private static function inRanges(int $i, array $ranges): bool
+    {
+        foreach ($ranges as [$from, $to]) {
+            if ($i > $from && $i < $to) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -92,6 +92,51 @@ CASES = [
         GOOD + "          bmc_password: hunter2\n",
         "reads as a secret",
     ),
+    # Ansible's own credential variables. ansible_ssh_pass, ansible_become_pass
+    # and ansible_sudo_pass carry no SECRET_HINTS substring, and passed until
+    # they were named.
+    *[
+        (
+            f"Ansible's credential variable {name} is refused",
+            GOOD + f"          {name}: hunter2\n",
+            "one of Ansible's own credential variables",
+        )
+        for name in (
+            "ansible_ssh_pass",
+            "ansible_become_pass",
+            "ansible_sudo_pass",
+            "ansible_su_pass",
+            "ansible_runas_pass",
+            "ansible_paramiko_pass",
+            "ansible_winrm_pass",
+            "ansible_httpapi_pass",
+            "ansible_password",
+            "ansible_ssh_password",
+            "ansible_become_password",
+            "ansible_winrm_password",
+            "ansible_httpapi_password",
+        )
+    ],
+    (
+        "an Ansible credential variable is matched whatever its case",
+        GOOD + "          Ansible_SSH_Pass: hunter2\n",
+        "one of Ansible's own credential variables",
+    ),
+    (
+        "pass as a word in any other name is refused",
+        GOOD + "          bmc_pass: hunter2\n",
+        "reads as a secret",
+    ),
+    (
+        "pass as a word between dashes is refused",
+        GOOD + "          ipmi-pass-word: hunter2\n",
+        "reads as a secret",
+    ),
+    (
+        "pass inside a longer word is not a credential",
+        GOOD + "          bypass_cache: true\n          gpu_passthrough: vfio\n          ansible_sshpass_prompt: 'Password:'\n",
+        None,
+    ),
     (
         "an inlined private key is refused",
         # Assembled rather than written out. A fixture for this test has to look
@@ -740,7 +785,7 @@ all:
 # reject". The count is literal source in this file, maintained by whoever
 # edits the table, so adding or removing a case is a deliberate edit of this
 # number too.
-EXPECTED_CASES = 52
+EXPECTED_CASES = 69
 
 
 def run_tree(files: dict[str, str] | None) -> tuple[int, str]:
