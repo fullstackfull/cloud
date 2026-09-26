@@ -85,6 +85,8 @@
     "aupDocument": "Acceptable use policy",
     "documentVersion": "version {{version}}",
     "registrationUnavailable": "Registration is not open yet. The documents you would be agreeing to have not been published.",
+    "registrationOptionsFailed": "We could not load what this form needs — the countries, the currencies and the documents you would be agreeing to — so it cannot be submitted yet.",
+    "registrationUnconfirmed": "We could not confirm that registration is open, so this form cannot be submitted yet. Try again in a moment.",
     "haveAccount": "Already have an account?",
     "checkYourEmailTitle": "Check your email",
     "checkYourEmailBody": "We sent a verification link to {{email}}. Your account is created; verify the address to start ordering.",

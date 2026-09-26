@@ -136,7 +136,13 @@ function MachineChain({ server }: { server: Server }) {
       <Card>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold">{t('admin.plans.planHeading')}</h2>
-          <Button size="sm" variant="secondary" loading={compute.isPending} disabled={desired.data?.data === null} onClick={() => { compute.mutate({ serverId: server.id }); }}>
+          {/*
+            Only against a desired state this page has actually read.
+            `desired.data?.data === null` alone let a pending or failed read
+            through, because `undefined === null` is false: the button was
+            live, and sent the request, against a state nobody could see.
+          */}
+          <Button size="sm" variant="secondary" loading={compute.isPending} disabled={desired.data === undefined || desired.data.data === null} onClick={() => { compute.mutate({ serverId: server.id }); }}>
             {t('admin.plans.compute')}
           </Button>
         </div>
