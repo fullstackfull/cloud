@@ -827,7 +827,7 @@ return [
     'api.v1.dns.zones.store' => [
         'tag' => 'DNS',
         'summary' => 'Claim a domain',
-        'description' => "Creates the zone and answers with the nameservers to delegate to. **This is not verification.** Nothing here checks that the account owns the domain, and no field on the response should be read as saying so — the zone serves nothing until the registrar points the domain at those nameservers, which only whoever controls the registration can do. Refused for a domain another account already holds here, for the platform's own names and their parents, and for reverse zones, which follow the address block rather than the domain.",
+        'description' => "Creates the zone and answers with the nameservers to delegate to. **This is not verification.** Nothing here checks that the account owns the domain, and no field on the response should be read as saying so — the zone serves nothing until the registrar points the domain at those nameservers, which only whoever controls the registration can do. Refused for a domain another account already holds here; with 403 `dns.zone.reserved` for the platform's own names, every parent of one and everything beneath one; and for reverse zones, which follow the address block rather than the domain.",
         'body' => ['name', 'service_id'],
         'response' => $one('DnsZone', 201),
     ],

@@ -48,7 +48,7 @@ Three names are refused outright:
 
 | Refused | Why |
 | --- | --- |
-| The platform's own zones, and any parent of one | An account holding `lynomia.com` can serve `panel.lynomia.com` whatever this platform thinks it owns. Configured in `dns.reserved_zones`. |
+| The platform's own zones, any parent of one, and anything beneath one | An account holding `lynomia.com` can serve `panel.lynomia.com` whatever this platform thinks it owns; an account holding `db.panel.lynomia.com` holds a piece of the platform's name space, in the provider account the platform publishes from. The names are those listed in `dns.reserved_zones` plus the hosts of `APP_URL` and `FRONTEND_URL` — see [Reserved zones](#reserved-zones). |
 | Anything under `in-addr.arpa` or `ip6.arpa` | Reverse zones follow the address block. Set per address in the IPAM surface. |
 | Anything that is not a domain name | ASCII only (internationalised names must arrive as punycode — converting them here would mean this platform deciding what `münchen.de` means, and homograph attacks are exactly a disagreement about that), at least two labels, no empty labels, no leading or trailing hyphen, and no all-numeric final label. |
 
@@ -246,7 +246,7 @@ how a monitoring system is taken down from inside.
 | --- | --- | --- |
 | `dns.zones_per_customer` | 50 | Zones one account may hold |
 | `dns.records_per_zone` | 250 | Records in one zone |
-| `dns.reserved_zones` | empty | Names no account may claim, and their children |
+| `dns.reserved_zones` | empty | Names no account may claim, with their parents and their children, added to the hosts of `APP_URL` and `FRONTEND_URL` — see below |
 | `dns.reconcile_after_hours` | 6 | How stale a zone's picture may be |
 | `dns.reconcile_batch` | 50 | Zones looked at per run |
 
@@ -255,3 +255,73 @@ factory reads: an operator who has configured Cloudflare has configured
 Cloudflare, and two keys would let one deployment hold a forward provider and a
 reverse provider talking to different accounts. They remain two contracts,
 because the capabilities are genuinely different.
+
+### Reserved zones
+
+`DNS_RESERVED_ZONES` ships empty, and it is not the whole reservation: the
+host of `APP_URL` and the host of `FRONTEND_URL` are reserved as well, whenever
+they are domain names. An estate that has put the control plane and the portal
+on their real names is covered without saying so twice. The shipped
+configuration has not: both addresses are on `localhost`, which is not a
+domain name, so **nothing is reserved until an estate is given its names** —
+and the estate preflight says so, as a warning.
+
+A host contributes itself, not its registrable domain — the registrable domain
+of `panel.example.co.uk` cannot be worked out without a public-suffix list, and
+guessing would reserve `co.uk`. Holding the host still refuses every parent of
+it, so the registrable domain cannot be claimed either; what it does not cover
+is a sibling. **List the registrable domain in `DNS_RESERVED_ZONES`** and every
+name beneath it is covered, siblings included.
+
+A host written in Unicode is held in the form DNS carries: `https://münchen.example.net`
+reserves `xn--mnchen-3ya.example.net`, the name a resolver is asked for and the
+one an account would type to claim it. The host is percent-decoded and, where
+it is not ASCII, converted by UTS #46 with nontransitional processing, as the
+URL standard specifies. That is not the conversion the name rules refuse to make for a
+claim (see *Anything that is not a domain name*, above): converting a claim
+decides what is admitted, while converting a reservation only adds to what is
+refused. The older transitional processing maps four characters — `ß`, `ς` and
+the two zero-width joiners — elsewhere (`straße` to `strasse`); the name that
+produces is a different name, and is held only if it is listed. Entries in
+`DNS_RESERVED_ZONES` are not converted: list an internationalised name in its
+`xn--` form.
+
+An address that gives no name says why, because what it leaves unheld depends
+on the reason:
+
+| The address | What it leaves unheld |
+| --- | --- |
+| Unset | Whatever name it was meant to carry |
+| No host can be read — `panel.example.net` with no `https://` in front | The name it was meant to carry, perhaps: here `panel.example.net`, which an account can claim |
+| An IP address, IPv4 or bracketed IPv6 | Nothing: no zone at, above or beneath an address is a name |
+| A single label, such as `localhost` | The names beneath it, such as `x.localhost`: names whenever the label is well formed, and then an account can claim them. The label itself is not a name and has nothing above it |
+| A host the name rules refuse, such as `my_panel.example.net` | Everything at, above and beneath it; above this one, that includes `example.net`, which an account can claim |
+
+Unheld means not held because of that address: the other address or a listed
+entry may still hold the same name. A single label is not reserved, and nor is
+anything beneath it: holding the label would mean relaxing the name rules for
+the one caller that needs them strictest.
+
+An entry in `DNS_RESERVED_ZONES` that is not a domain name refuses **every**
+claim, by every account, until it is corrected. The whole list is read before
+any claim is compared with it; skipping a bad entry would protect less than was
+asked for and say nothing.
+
+The estate preflight (`php artisan infra:preflight --mode=…`, or the Control
+Center) carries one finding about all of this, `dns.reserved_zones`:
+
+| Status | When |
+| --- | --- |
+| `fail` | An entry in `DNS_RESERVED_ZONES` is not a domain name. The only blocking state. |
+| `warning` | Nothing is reserved at all, or `APP_URL` or `FRONTEND_URL` contributed no name — each named with its reason, from the table above. |
+| `pass` | Otherwise: a count of the entries held and the variables they came from. |
+
+It names variables and counts entries. It never quotes a reserved name or a
+configured value. The count is of entries, so a name and a host beneath it are
+two although the first covers the second.
+
+A change to the reservation applies to the next claim. It does not reach back
+to zones already held: nothing re-checks existing zones when the reservation
+changes, so a name that became reserved after an account claimed it stays with
+that account until the account deletes it. There is no operator route for DNS
+zones; taking one back means changing the database.
