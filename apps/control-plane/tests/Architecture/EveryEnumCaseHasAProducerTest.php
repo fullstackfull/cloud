@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Architecture;
 
+use BackedEnum;
 use Lynomia\Modules\Activity\Domain\Enums\ActivityCategory;
 use Lynomia\Modules\Activity\Domain\Enums\ActorType;
 use Lynomia\Modules\Activity\Domain\Enums\AttentionSeverity;
@@ -24,6 +25,7 @@ use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedPowerAction;
 use Lynomia\Modules\Dedicated\Domain\Enums\InstallerKind;
 use Lynomia\Modules\Dns\Domain\Enums\ZoneImportMode;
 use Lynomia\Modules\Domains\Domain\Enums\DomainContactRole;
+use Lynomia\Modules\Domains\Domain\Enums\DomainState;
 use Lynomia\Modules\Domains\Domain\Enums\RegistrarCapability;
 use Lynomia\Modules\Identity\Domain\Enums\CountryCurrencyChangeState;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerCapability;
@@ -34,6 +36,7 @@ use Lynomia\Modules\Identity\Domain\Enums\LegalDocumentType;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentKind;
 use Lynomia\Modules\Infrastructure\Domain\Enums\DeploymentState;
+use Lynomia\Modules\Infrastructure\Domain\Enums\FactSource;
 use Lynomia\Modules\Infrastructure\Domain\Enums\GpuAllocationState;
 use Lynomia\Modules\Infrastructure\Domain\Enums\GpuPassthroughMode;
 use Lynomia\Modules\Infrastructure\Domain\Enums\PlanRisk;
@@ -73,6 +76,8 @@ use Lynomia\Modules\Support\Domain\Enums\MessageAuthorKind;
 use Lynomia\Modules\Support\Domain\Enums\TicketCategory;
 use Lynomia\Modules\Support\Domain\Enums\TicketPriority;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use PhpToken;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionClassConstant;
@@ -121,7 +126,12 @@ use Tests\Support\EnumCaseReferences;
  *    `Enum::tryFrom()`. The entry names the file where that happens, and the
  *    file must construct the enum (read by the classifier, not by a string
  *    search). This is a weaker claim than a producer: the gate cannot say
- *    which values arrive, so a case added to such an enum is not noticed. A
+ *    which values arrive, so a case added to such an enum is not noticed —
+ *    except where the site restricts the values with a literal `in:` rule
+ *    over the enum's values ({@see casesTheSiteCannotAccept()} says exactly
+ *    what it reads): then a case with no producer that the rule refuses must
+ *    answer for itself in CASES, as `CustomerStatus::Closed` does beside
+ *    `CustomerController`'s `in:active,suspended`. A
  *    `from()` in a list filter or over a stored column is a read, and does
  *    not qualify: the file named is the one where the value is chosen.
  *  - **`vocabulary`**, for a whole enum: its cases are names code asks about
@@ -232,13 +242,16 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         RegistrarCapability::class.'::Renewal' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it and nothing asks for it.'],
         RegistrarCapability::class.'::PremiumPricing' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it; DomainPricing refuses premium names by the string premium_pricing.'],
         RegistrarCapability::class.'::MultiYearTerms' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'No registrar adapter declares it and nothing asks for it.'],
+        DomainState::class.'::TransferredAway' => ['kind' => 'unwritten', 'owner' => 'Domains', 'why' => 'Nothing detects a transfer away: no registrar adapter, reconciliation or action reports that a name left for another registrar, so no row is written transferred_away. DomainState::canBecome() only permits it, and holdsTheName() and the domains_one_live_holder index only read it.'],
         CountryCurrencyChangeState::class.'::Requested' => ['kind' => 'unwritten', 'owner' => 'Identity', 'why' => 'RequestCountryCurrencyChange writes blocked or awaiting_approval; nothing writes requested.'],
         LoginOutcome::class.'::UnverifiedEmail' => ['kind' => 'unwritten', 'owner' => 'Identity', 'why' => 'No sign-in path records an unverified-email outcome.'],
         LoginOutcome::class.'::TokenIssued' => ['kind' => 'unwritten', 'owner' => 'Identity', 'why' => 'No sign-in path records a token issue.'],
+        CustomerStatus::class.'::Closed' => ['kind' => 'unwritten', 'owner' => 'Identity', 'why' => 'Nothing closes an account: the operator\'s status change (CustomerController::setStatus) validates in:active,suspended, and no other path writes closed.'],
         DeploymentState::class.'::Requested' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'RequestDeployment writes queued; CancelDeployment and the one-open-deployment index read this state, nothing writes it.'],
         DeploymentState::class.'::Preflight' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'The runner never records a preflight step as a state.'],
         DeploymentState::class.'::Planning' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'The runner never records a planning step as a state.'],
         DeploymentState::class.'::AwaitingApproval' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'Plans are approved on their own row; no deployment is put to wait for it.'],
+        FactSource::class.'::Declared' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'Nothing declares a fact: DiscoverServer writes discovered and RunDeploymentJob derived; no form or action records a person\'s note as a server fact, so FactSource::mayReplace() only compares against it.'],
         GpuAllocationState::class.'::Allocated' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'Nothing allocates a GPU card yet.'],
         GpuAllocationState::class.'::Reserved' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'Nothing reserves a GPU card yet.'],
         GpuAllocationState::class.'::Faulted' => ['kind' => 'unwritten', 'owner' => 'Infrastructure', 'why' => 'Nothing marks a GPU card faulted yet.'],
@@ -343,6 +356,10 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
                 if (! in_array($excuse['site'], $sites, true)) {
                     $stale[] = "{$enum} — {$excuse['site']} does not build it with from() or tryFrom() (it is built in: ".implode(', ', array_unique($sites)).')';
                 }
+
+                foreach (self::casesTheSiteCannotAccept($enum, $excuse['site'], $cases) as $case => $rules) {
+                    $stale[] = "{$case} — the by-value excuse names {$excuse['site']}, whose ".implode(' and ', $rules).' does not accept '.constant($case)->value.'; nothing produces it there, so answer for it in CASES';
+                }
             } elseif (! self::fileSays($excuse['site'], $excuse['spelling'] ?? '')) {
                 $stale[] = "{$enum} — {$excuse['site']} no longer contains ".($excuse['spelling'] ?? '(no spelling given)');
             }
@@ -388,6 +405,80 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function tablesAndConditions(): iterable
+    {
+        $enum = static fn (string $methods): string => "<?php\nnamespace Tests\\Architecture;\nenum Fixture: string\n{\n    case A = 'a';\n    case B = 'b';\n{$methods}\n}\n";
+        $probe = static fn (string $body): string => "<?php\nnamespace App\\Probe;\nuse Tests\\Architecture\\Fixture;\nfinal class Probe\n{\n    public function run(mixed \$a, mixed \$b): mixed\n    {\n        return {$body};\n    }\n}\n";
+
+        yield 'a member of a match arm\'s condition list' => [$probe('match ([$a, $b]) { [Fixture::A, Fixture::B] => true, default => false }'), 'match arm condition'];
+        yield 'a member of a nested condition list' => [$probe('match ([$a, [$b]]) { [Fixture::A, [Fixture::B]] => true, default => false }'), 'match arm condition'];
+        yield 'a member of a match arm\'s result list' => [$probe('match ($a) { Fixture::A => [Fixture::B], default => [] }'), 'producer'];
+        yield 'a call inside a condition list' => [$probe('match ([$a]) { [wrap(Fixture::B)] => true, default => false }'), 'producer'];
+
+        $table = 'return in_array($next, match ($this) { self::A => [self::B], default => [] }, true);';
+
+        yield 'an enum\'s own canBecome table' => [$enum("    public function canBecome(self \$next): bool\n    {\n        {$table}\n    }"), 'enum transition table'];
+        yield 'a private table only canBecome reads' => [$enum("    public function canBecome(self \$next): bool\n    {\n        return in_array(\$next, \$this->allowed(), true);\n    }\n    private function allowed(): array\n    {\n        return match (\$this) { self::A => [self::B], default => [] };\n    }"), 'enum transition table'];
+        yield 'a public table canBecome reads' => [$enum("    public function canBecome(self \$next): bool\n    {\n        return in_array(\$next, \$this->allowed(), true);\n    }\n    public function allowed(): array\n    {\n        return match (\$this) { self::A => [self::B], default => [] };\n    }"), 'producer'];
+        yield 'a private table something else also reads' => [$enum("    public function canBecome(self \$next): bool\n    {\n        return in_array(\$next, \$this->allowed(), true);\n    }\n    public function first(): self\n    {\n        return \$this->allowed()[0];\n    }\n    private function allowed(): array\n    {\n        return match (\$this) { self::A => [self::B], default => [] };\n    }"), 'producer'];
+        yield 'a canBecome that is not declared bool' => [$enum("    public function canBecome(self \$next): ?bool\n    {\n        {$table}\n    }"), 'producer'];
+        yield 'a canBecome declared in a class' => ["<?php\nnamespace App\\Probe;\nuse Tests\\Architecture\\Fixture;\nfinal class Probe\n{\n    public function canBecome(Fixture \$next): bool\n    {\n        return in_array(\$next, match (\$next) { Fixture::A => [Fixture::B], default => [] }, true);\n    }\n}\n", 'producer'];
+        yield 'an enum method that is not the table' => [$enum("    public function canBecome(self \$next): bool\n    {\n        return true;\n    }\n    public function next(): self\n    {\n        return self::B;\n    }"), 'producer'];
+    }
+
+    /**
+     * The two rules that stopped a case's own enum from standing as its
+     * producer — `FactSource::Declared` in `mayReplace()`'s condition lists,
+     * `DomainState::TransferredAway` in `canBecome()`'s table — and the lines
+     * each must not cross, on sources written here.
+     */
+    #[Test]
+    #[DataProvider('tablesAndConditions')]
+    public function the_classifier_reads_a_match_condition_list_and_an_enums_own_transition_table_as_reads_and_nothing_else(string $source, string $expected): void
+    {
+        [$found] = EnumCaseReferences::classifySource($source, ['Tests\\Architecture\\Fixture' => ['B' => true]]);
+
+        $this->assertNotSame([], $found, 'The probe names Fixture::B; the classifier must find it.');
+        $this->assertSame([$expected], array_values(array_unique(array_column($found, 2))));
+    }
+
+    /**
+     * The literal `in:` rule reading behind the by-value check, on the one
+     * site it holds today and on the line it must not cross.
+     */
+    #[Test]
+    public function a_by_value_site_is_held_to_the_values_its_literal_in_rule_accepts(): void
+    {
+        $customerStatus = [CustomerStatus::class.'::Active' => [], CustomerStatus::class.'::Suspended' => [], CustomerStatus::class.'::Closed' => []];
+
+        $this->assertSame(
+            [],
+            self::casesTheSiteCannotAccept(CustomerStatus::class, 'src/Modules/Admin/Http/Controllers/CustomerController.php', $customerStatus),
+            'active and suspended are in the controller\'s in:active,suspended, and closed answers for itself in CASES.',
+        );
+        $this->assertSame('unwritten', self::CASES[CustomerStatus::class.'::Closed']['kind']);
+
+        $this->assertSame(
+            [DriftStatus::class.'::Open' => ["'in:acknowledged,resolved'"]],
+            self::casesTheSiteCannotAccept(DriftStatus::class, 'src/Modules/Admin/Http/Controllers/DriftController.php', [DriftStatus::class.'::Open' => []]),
+        );
+
+        $this->assertSame(
+            [],
+            self::casesTheSiteCannotAccept(DriftStatus::class, 'src/Modules/Admin/Http/Controllers/DriftController.php', [DriftStatus::class.'::Open' => [['src/x.php', 1, 'producer']]]),
+            'A case with a producer is not held to the site.',
+        );
+
+        $this->assertSame(
+            [],
+            self::casesTheSiteCannotAccept(BillingPeriod::class, 'src/Modules/Catalog/Http/Controllers/OperatorCatalogueController.php', [BillingPeriod::class.'::Hourly' => []]),
+            'A site with no literal in: rule over the enum is not held to anything.',
+        );
+    }
+
+    /**
      * Every subject case with its producer sites. The states a machine can
      * enter are left out: the sibling gate answers for them.
      *
@@ -418,6 +509,70 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         }
 
         return $subjects;
+    }
+
+    /**
+     * The cases a by-value excuse covers that its site's literal `in:` rules
+     * refuse, each with the rules that refuse it.
+     *
+     * What is read: every single- or double-quoted string literal in the site
+     * file (tokenised, so comments are not read), split on `|`; each segment
+     * beginning `in:` is a rule, its values read as Laravel reads them
+     * (`str_getcsv`). A rule restricts this enum when every value it lists is
+     * one of the enum's values. When at least one does, a case with no
+     * producer and no entry of its own in CASES must be listed by one of
+     * them: the site cannot build a value its validation refuses. A site with
+     * no such rule is not held to anything here. Not read: `Rule::in(...)`,
+     * `Rule::enum(...)`, `new In(...)`, an `in:` rule built by concatenation
+     * or held in a heredoc, and which request field a rule belongs to.
+     *
+     * @param  array<string, list<array{string, int, string}>>  $cases  "Enum::Case" → producers
+     * @return array<string, list<string>> "Enum::Case" → the refusing rules, quoted
+     */
+    public static function casesTheSiteCannotAccept(string $enum, string $site, array $cases): array
+    {
+        $values = array_map(static fn (BackedEnum $case): string => (string) $case->value, is_subclass_of($enum, BackedEnum::class) ? $enum::cases() : []);
+        $path = EnumCaseReferences::ROOT.'/'.$site;
+        $restricting = [];
+
+        foreach (is_file($path) ? PhpToken::tokenize((string) file_get_contents($path)) : [] as $token) {
+            if (! $token->is(T_CONSTANT_ENCAPSED_STRING)) {
+                continue;
+            }
+
+            foreach (explode('|', substr($token->text, 1, -1)) as $segment) {
+                if (! str_starts_with($segment, 'in:')) {
+                    continue;
+                }
+
+                $listed = array_map('strval', str_getcsv(substr($segment, 3), ',', '"', ''));
+
+                if ($listed !== [] && array_diff($listed, $values) === []) {
+                    $restricting["'{$segment}'"] = $listed;
+                }
+            }
+        }
+
+        if ($restricting === []) {
+            return [];
+        }
+
+        $accepted = array_merge(...array_values($restricting));
+        $refused = [];
+
+        foreach ($cases as $case => $producers) {
+            $value = constant($case);
+
+            if ($producers !== [] || isset(self::CASES[$case]) || ! $value instanceof BackedEnum) {
+                continue;
+            }
+
+            if (! in_array((string) $value->value, $accepted, true)) {
+                $refused[$case] = array_keys($restricting);
+            }
+        }
+
+        return $refused;
     }
 
     private static function enumOf(string $case): string
