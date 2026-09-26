@@ -23,10 +23,19 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * Less than a whole-machine restore and not less dangerous for the files
  * it names: what the machine holds at those paths is replaced. So it clears
  * the same bar — the hostname typed back, the backup complete and from this
- * machine, the service active, nothing else restoring into the machine —
- * and adds one of its own: every path is looked up in the archive first,
- * and a symlink is refused by name. A restore that followed a link would
- * write wherever the guest had pointed it.
+ * machine, the archive not found unreadable by the datastore (`verified =
+ * false`; `null` is not a verdict), the service active, nothing else
+ * restoring into the machine — and adds one of its own: every path is looked
+ * up in the archive first, and a symlink is refused by name. A restore that
+ * followed a link would write wherever the guest had pointed it.
+ *
+ * The archive is held while the restore reads it: a row in
+ * {@see FileRestoreState::holdingTheMachine()} refuses the archive's deletion
+ * ({@see RequestBackupDeletion}) and keeps the deletion sweep from acting on
+ * it ({@see DeleteBackupAtProvider}). The state and the verdict are read
+ * again, under a lock on the archive's row, in the step that writes this
+ * restore, so a deletion or a verdict written in between is one or the other
+ * of two serialised steps rather than both.
  *
  * The Timeout Rule as everywhere: a provider that does not answer may be
  * restoring right now, so the row goes to needs_review and is never retried.
@@ -77,7 +86,13 @@ final readonly class RestoreBackupFiles
         $restore = DB::transaction(function () use ($backup, $machine, $paths, $userId): BackupFileRestore {
             VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->firstOrFail();
 
-            $this->assertRestorable($backup, $machine);
+            /** @var Backup $locked */
+            $locked = Backup::query()->whereKey($backup->getKey())->lockForUpdate()->firstOrFail();
+
+            // The same order as the whole restore: the machine, then the
+            // archive. A deletion locks only the archive.
+            $this->support->assertOpenable($locked);
+            $this->assertRestorable($locked, $machine);
 
             return BackupFileRestore::query()->create([
                 'backup_id' => $backup->getKey(),

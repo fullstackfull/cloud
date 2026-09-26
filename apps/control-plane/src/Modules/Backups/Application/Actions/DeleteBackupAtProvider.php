@@ -10,6 +10,7 @@ use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 
 /**
@@ -101,6 +102,18 @@ final readonly class DeleteBackupAtProvider
         }
 
         $provider = $this->providers->for($cluster);
+
+        if ($backup->state === BackupState::DeleteRequested
+            && BackupFileRestore::query()->readingFrom((string) $backup->getKey())->exists()) {
+            /*
+             * A file restore is reading this archive. RequestBackupDeletion
+             * refuses to mark one, so this is a row marked before it did;
+             * asking the provider now would pull the source out from under
+             * the restore. Left as it is and looked at again on the next pass,
+             * while it can still be called off.
+             */
+            return $backup;
+        }
 
         if ($backup->state === BackupState::DeleteRequested) {
             $backup->transitionTo(BackupState::Deleting, []);
