@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -132,9 +133,11 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
             '  source = "./modules/dns"', '  # source = "./modules/dns"')}),
         ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
     ),
-    # A call that is commented out is not a call, wherever the comment is: the
-    # module it names is then a root of its own and validated, not counted as
-    # reached through a root that never loads it (B2).
+    # A call commented out in one of the forms code_text recognises -- these
+    # cases are those forms, not every form -- is not a call: the module it
+    # names is then a root of its own and validated, not counted as reached
+    # through a root that never loads it (B2). What the lexer misses, the
+    # manifest check below is there to catch.
     (
         "a call inside a /* */ block leaves its module a root of its own",
         with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ROOT_MAIN.replace(
@@ -177,6 +180,44 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
         "a /* inside a quoted string is not a comment",
         with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
                               + 'locals {\n  m = { note = "a /* b", source = "./modules/dns" }\n}\n'}),
+        ["infrastructure/tofu"], "",
+    ),
+    # `$${` and `%%{` are HCL's escapes for a literal `${` and `%{`: text, not
+    # an interpolation. Read as one, an unbalanced `"$${"` would leave the
+    # rest of the file inside a string, and a commented-out call after it
+    # would count (B3).
+    (
+        "$${ in a string is text, so a later commented-out call is not a call",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  a = "$${"\n}\n# module "dns" { source = "./modules/dns" }\n'}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    (
+        "%%{ in a string is text, so a later commented-out call is not a call",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  a = "%%{"\n}\n# module "dns" { source = "./modules/dns" }\n'}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    # An escaped quote does not end a string: the # after it is text, and
+    # the call on the same line is read.
+    (
+        "an escaped quote inside a string does not end it",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  m = { note = "a\\" # ", source = "./modules/dns" }\n}\n'}),
+        ["infrastructure/tofu"], "",
+    ),
+    # A quote inside ${ } opens a string of its own; the one that closes it
+    # does not close the outer string, and the # inside it is text.
+    (
+        "a string inside an interpolation does not end the string around it",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  m = { note = "${join("#", [])}", source = "./modules/dns" }\n}\n'}),
+        ["infrastructure/tofu"], "",
+    ),
+    (
+        "a string inside a %{ } directive does not end the string around it",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  m = { note = "%{ if true }#%{ endif }${"#"}", source = "./modules/dns" }\n}\n'}),
         ["infrastructure/tofu"], "",
     ),
     (
@@ -254,9 +295,57 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
     ),
 ]
 
+# The stub records each call. On `init` it writes the module manifest real
+# tofu writes, listing every directory below the root that holds a .tf file
+# -- a tofu that loaded everything -- or, with TOFU_LOADS_NOTHING set, only
+# the root itself.
 STUB = """#!/usr/bin/env bash
 printf '%s\\t%s\\n' "$PWD" "$*" >> "$TOFU_LOG"
+if [ "$1" = init ]; then
+  mkdir -p .terraform/modules
+  {
+    printf '{"Modules":[{"Key":"","Source":"","Dir":"."}'
+    if [ -z "${TOFU_LOADS_NOTHING:-}" ]; then
+      find . -mindepth 2 -name '*.tf' -not -path './.terraform/*' -printf '%h\\n' | sort -u \\
+        | while IFS= read -r dir; do printf ',{"Key":"k","Source":"%s","Dir":"%s"}' "$dir" "${dir#./}"; done
+    fi
+    printf ']}'
+  } > .terraform/modules/modules.json
+fi
 """
+
+
+def manifest(*dirs: str) -> str:
+    entries = [{"Key": "", "Source": "", "Dir": "."}] + [
+        {"Key": d, "Source": f"./{d}", "Dir": d} for d in dirs
+    ]
+    return json.dumps({"Modules": entries})
+
+
+MANIFEST = "infrastructure/tofu/.terraform/modules/modules.json"
+
+# The backstop: run after `tofu init`, every module directory must be a root
+# or in some root's manifest. (name, files, None for a pass or the text the
+# refusal names.)
+LOADED_CASES: list[tuple[str, dict[str, str], str | None]] = [
+    (
+        "every module loaded by the root's init passes the manifest check",
+        with_files(LAYOUT, **{MANIFEST: manifest("modules/vm", "modules/dns")}),
+        None,
+    ),
+    (
+        # What B3 was: the lister took a commented-out call for a call, and
+        # OpenTofu, reading the comment as a comment, never loaded the module.
+        "a module the lister counts as called and tofu never loaded is refused",
+        with_files(LAYOUT, **{MANIFEST: manifest("modules/vm")}),
+        "infrastructure/tofu/modules/dns holds configuration that is not a root",
+    ),
+    (
+        "a root with no manifest loaded nothing beyond itself",
+        LAYOUT,
+        "infrastructure/tofu/modules/vm holds configuration that is not a root",
+    ),
+]
 
 
 def ci_step() -> str:
@@ -272,7 +361,7 @@ def ci_step() -> str:
     return found[0]
 
 
-def run_step(tree: Path) -> tuple[int, list[tuple[Path, str]], str]:
+def run_step(tree: Path, env_extra: dict[str, str] | None = None) -> tuple[int, list[tuple[Path, str]], str]:
     """Run the CI step in `tree` as GitHub runs a bash step, with the stub
     tofu. (exit status, [(directory, arguments)], output)."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -285,7 +374,10 @@ def run_step(tree: Path) -> tuple[int, list[tuple[Path, str]], str]:
         log.touch()
         script = Path(tmp) / "step.sh"
         script.write_text(ci_step())
-        env = dict(os.environ, PATH=f"{stub_dir}{os.pathsep}{os.environ['PATH']}", TOFU_LOG=str(log))
+        env = dict(
+            os.environ, PATH=f"{stub_dir}{os.pathsep}{os.environ['PATH']}", TOFU_LOG=str(log),
+            **(env_extra or {}),
+        )
         result = subprocess.run(
             ["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)],
             cwd=tree, env=env, capture_output=True, text=True,
@@ -337,15 +429,38 @@ def main() -> int:
             ok = code == 0 and out.split() == expected and not err.strip()
         report(name, [] if ok else [f"exit {code}, stdout {out.strip()!r}, stderr {err.strip()!r}"])
 
-    # The step over this repository.
+    for name, files, refusal in LOADED_CASES:
+        with tempfile.TemporaryDirectory() as tmp:
+            build(Path(tmp), files)
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = lister.main(["list-tofu-root-modules.py", tmp, "--loaded-by-tofu"])
+        ok = code == 0 and not err.getvalue() if refusal is None else code == 1 and refusal in err.getvalue()
+        report(name, [] if ok else [f"exit {code}, stderr {err.getvalue().strip()!r}"])
+
+    # The step over this repository's own tofu tree, copied, so that the
+    # stub's .terraform/ lands in a scratch directory and not in the checkout.
     try:
-        roots, problems = lister.root_modules(REPO)
-        report(
-            "the CI step validates every root module here, and only directories with configuration",
-            problems or step_problems(REPO, roots),
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp)
+            shutil.copytree(REPO / "infrastructure" / "tofu", copy / "infrastructure" / "tofu",
+                            ignore=shutil.ignore_patterns(".terraform", ".terraform.lock.hcl"))
+            (copy / "infrastructure" / "scripts").mkdir(parents=True)
+            shutil.copy(SCRIPT, copy / "infrastructure" / "scripts" / SCRIPT.name)
+            roots, problems = lister.root_modules(copy)
+            report(
+                "the CI step validates every root module here, and only directories with configuration",
+                problems or step_problems(copy, roots),
+            )
+            # And the backstop is wired: a tofu whose init loads no module
+            # beyond the root fails the step.
+            code, _, output = run_step(copy, {"TOFU_LOADS_NOTHING": "1"})
+            report(
+                "the CI step fails when a module is neither a root nor loaded by tofu init",
+                [] if code != 0 and "no root's `tofu init` loaded" in output else [f"exit {code}:\n{output}"],
+            )
     except Exception as error:  # noqa: BLE001
-        report("the CI step validates every root module here, and only directories with configuration", [repr(error)])
+        report("the CI step over this repository's tofu tree", [repr(error)])
 
     # The step over trees shaped like this one, and like the one it used to
     # pass over: with the configuration gone, it must fail, not validate
@@ -379,7 +494,7 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001
                 report(name, [repr(error)])
 
-    total = len(CASES) + 3
+    total = len(CASES) + len(LOADED_CASES) + 4
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 

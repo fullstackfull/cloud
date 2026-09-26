@@ -625,10 +625,15 @@ jobs:
       # -- and refuses a tree with none; validating a root validates each
       # module it calls. The assignment is checked by `set -e`, which a
       # command substitution in a `for` list would not be, and an empty answer
-      # is refused again here rather than trusted. test_list_tofu_root_modules.py
-      # runs this step as written with a stub tofu and fails if it validates a
-      # directory with no configuration, misses a root, or passes a tree with
-      # none.
+      # is refused again here rather than trusted. The script decides what is
+      # called by reading the files with a lexer of its own, which is not HCL's
+      # and is not claimed complete; so after every root is initialised, it is
+      # run again with --loaded-by-tofu, and refuses any module directory that
+      # is neither a root nor in the module manifest `tofu init` wrote in some
+      # root -- a module OpenTofu never loaded, whatever the lexer read.
+      # test_list_tofu_root_modules.py runs this step as written with a stub
+      # tofu and fails if it validates a directory with no configuration,
+      # misses a root, skips the manifest check, or passes a tree with none.
       - name: OpenTofu is formatted and valid
         run: |
           set -euo pipefail
@@ -644,6 +649,7 @@ jobs:
             # does not need them to decide whether the configuration parses.
             ( cd "$dir" && tofu init -backend=false -input=false && tofu validate )
           done <<< "$roots"
+          python3 infrastructure/scripts/list-tofu-root-modules.py . --loaded-by-tofu
 
       - name: The validate step still runs where the configuration is
         run: python3 infrastructure/scripts/test_list_tofu_root_modules.py
