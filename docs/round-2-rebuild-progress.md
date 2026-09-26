@@ -35,7 +35,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-21 | High | rebuilt; rounds 1–3 REJECTED on its frontend gate's parsing and query-state model (a new shape each round); final round under the occupancy precedent running | `7573746` |
 | F-22 | High | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected only the route-walk gate's model of Alertmanager/Prometheus/Loki — empty-label, Loki-flag and duplicate-key gaps fixed, sentences narrowed); merged | `42b1d71` |
 | F-23 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged; nine F-19 excuses retired at F-19's merge | `5ae2e58` |
-| F-24 | High | rebuild + verification running on the integrated tree (its prerequisites F-04, F-11, F-15, F-45 are in) |  |
+| F-24 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking; built on F-04, F-11, F-15 and F-45 — no longer red by design); the verifier was cut short before its green runs, which the coordinator ran after merging: 1,165/1,165 across Compute, SharedHosting, Simulation, Vps, Dns and Architecture | `0586031` |
 | F-41 | High | queued (last: changes the test harness) | |
 | F-46 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); census rebuilt first; merged | `3fa4d48` |
 | F-25 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `272d8a3` |
