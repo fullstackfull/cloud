@@ -12,6 +12,7 @@ use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Domain\Exceptions\IpPoolExhaustedException;
 use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
@@ -68,6 +69,7 @@ final class OneRealAddressReachesOneCustomerTest extends IpamApiTestCase
             ->postJson('/api/admin/infrastructure/ip-pools/'.$north->id.'/subnets', [
                 'cidr' => '203.0.113.0/24',
                 'gateway' => '203.0.113.1',
+                'network_id' => Network::factory()->create(['datacenter_id' => $north->datacenter_id])->id,
             ])
             ->assertCreated();
 
@@ -75,6 +77,7 @@ final class OneRealAddressReachesOneCustomerTest extends IpamApiTestCase
             ->postJson('/api/admin/infrastructure/ip-pools/'.$south->id.'/subnets', [
                 'cidr' => '203.0.113.0/25',
                 'gateway' => '203.0.113.1',
+                'network_id' => Network::factory()->create(['datacenter_id' => $south->datacenter_id])->id,
             ]);
 
         // Whatever the route let in, turn it into addresses and hand them out.

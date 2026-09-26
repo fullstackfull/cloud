@@ -183,6 +183,41 @@ final readonly class IpAllocator
     }
 
     /**
+     * How many of customerAllocatableCount()'s addresses are in a subnet whose
+     * network a customer machine can be plugged into
+     * (Network::canCarryACustomerMachine()).
+     *
+     * reserve() does not read the network — the address is chosen first, and
+     * the build that asked for it refuses one it cannot attach
+     * (`vps.network_not_attachable`, permanent). So an address counted by
+     * customerAllocatableCount() and not by this one is an address reserve()
+     * may hand a VPS build that then fails. Same rows, same subnet list, same
+     * absence of a lock.
+     */
+    public function customerAttachableCount(IpPool $pool): int
+    {
+        if (! $pool->scope->isCustomerAllocatable()) {
+            return 0;
+        }
+
+        $subnetIds = Subnet::query()
+            ->whereIn('id', $this->subnetIdsFor($pool))
+            ->with('network')
+            ->get()
+            ->filter(static fn (Subnet $subnet): bool => $subnet->network?->canCarryACustomerMachine() === true)
+            ->modelKeys();
+
+        if ($subnetIds === []) {
+            return 0;
+        }
+
+        return DB::table('ip_addresses')
+            ->whereIn('subnet_id', $subnetIds)
+            ->where('status', IpAddressStatus::Available->value)
+            ->count();
+    }
+
+    /**
      * Turn a held reservation into a live assignment.
      *
      * @param  ?string  $serviceId  The service the address now belongs to. A string id rather than a

@@ -36,7 +36,10 @@ const CLUSTER = {
 const CUSTOMER_POOL = { id: '01JPOOLPUB', slug: 'kw-public-v4', name: 'Kuwait Public', scope: 'public', ip_version: 4, customer_allocatable: true, is_active: true }
 const MANAGEMENT_POOL = { id: '01JPOOLMGMT', slug: 'kw-mgmt-v4', name: 'Kuwait Management', scope: 'management', ip_version: 4, customer_allocatable: false, is_active: true }
 
-function stubFetch(capture?: (path: string, body: unknown) => void) {
+const CUSTOMER_NETWORK = { id: '01JNETPUB', slug: 'kw-public-1', name: 'Kuwait Public 1', purpose: 'public', vlan_id: 100, bridge: 'vmbr1', is_customer_facing: true, is_active: true, datacenter: 'kw-dc-1' }
+const MANAGEMENT_NETWORK = { id: '01JNETMGMT', slug: 'kw-mgmt-1', name: 'Kuwait Management', purpose: 'management', vlan_id: 10, bridge: 'vmbr0', is_customer_facing: false, is_active: true, datacenter: 'kw-dc-1' }
+
+function stubFetch(capture?: (path: string, body: unknown) => void, networks: unknown[] = []) {
   return vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = input instanceof Request ? input.url : String(input)
     const path = (url.split('?')[0] ?? url).replace(/^https?:\/\/[^/]+/, '')
@@ -54,7 +57,7 @@ function stubFetch(capture?: (path: string, body: unknown) => void) {
     } else if (path.endsWith('/infrastructure/clusters')) {
       body = { data: [CLUSTER] }
     } else if (path.endsWith('/infrastructure/networks')) {
-      body = { data: [] }
+      body = { data: networks }
     } else if (path.endsWith('/infrastructure/ip-pools')) {
       body = { data: [CUSTOMER_POOL, MANAGEMENT_POOL] }
     } else if (path.includes('/subnets')) {
@@ -168,6 +171,53 @@ describe('NetworkingPage', () => {
     expect(body.credentials_reference).toBe('pve-token')
     expect(Object.keys(body)).not.toContain('password')
     expect(Object.keys(body)).not.toContain('token')
+  })
+
+  it('puts a customer block on a customer-facing segment, and offers no other', async () => {
+    const sent: { path: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', stubFetch((path, body) => { sent.push({ path, body }) }, [CUSTOMER_NETWORK, MANAGEMENT_NETWORK]))
+    renderPage()
+
+    const pool = await screen.findByRole('listitem', { name: /kw-public-v4/i })
+    await userEvent.click(within(pool).getByRole('button', { name: /add a block/i }))
+
+    const form = await within(pool).findByRole('form', { name: /add a block/i })
+    const segment = within(form).getByLabelText(/network segment/i)
+
+    await waitFor(() => { expect(within(segment).getAllByRole('option')).toHaveLength(2) })
+    expect(within(segment).queryByRole('option', { name: /kw-mgmt-1/i })).not.toBeInTheDocument()
+    expect(segment).toBeRequired()
+
+    await userEvent.type(within(form).getByLabelText(/^block/i), '203.0.113.0/24')
+    await userEvent.selectOptions(segment, '01JNETPUB')
+    await userEvent.click(within(form).getByRole('button', { name: /add a block/i }))
+
+    await waitFor(() => { expect(sent).toHaveLength(1) })
+    expect(sent[0]?.path).toMatch(/ip-pools\/01JPOOLPUB\/subnets$/)
+    expect((sent[0]?.body as Record<string, unknown>).network_id).toBe('01JNETPUB')
+  })
+
+  it('says a customer block needs a customer-facing segment when there is none', async () => {
+    vi.stubGlobal('fetch', stubFetch(undefined, [MANAGEMENT_NETWORK]))
+    renderPage()
+
+    const pool = await screen.findByRole('listitem', { name: /kw-public-v4/i })
+    await userEvent.click(within(pool).getByRole('button', { name: /add a block/i }))
+
+    expect(await within(pool).findByText(/has to name a customer-facing segment/i)).toBeInTheDocument()
+  })
+
+  it('leaves the segment optional for a management block', async () => {
+    vi.stubGlobal('fetch', stubFetch(undefined, [MANAGEMENT_NETWORK]))
+    renderPage()
+
+    const pool = await screen.findByRole('listitem', { name: /kw-mgmt-v4/i })
+    await userEvent.click(within(pool).getByRole('button', { name: /add a block/i }))
+
+    const form = await within(pool).findByRole('form', { name: /add a block/i })
+
+    expect(within(form).getByLabelText(/network segment/i)).not.toBeRequired()
+    expect(within(form).queryByText(/has to name a customer-facing segment/i)).not.toBeInTheDocument()
   })
 
   it('tells an operator what is missing before a VPS can be placed', async () => {

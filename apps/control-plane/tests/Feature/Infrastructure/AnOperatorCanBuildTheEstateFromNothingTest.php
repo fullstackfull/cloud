@@ -223,10 +223,40 @@ final class AnOperatorCanBuildTheEstateFromNothingTest extends TestCase
         $this->assertSame(IpPoolScope::Public, $pool->scope);
         $this->assertTrue($pool->scope->isCustomerAllocatable());
 
+        /*
+         * The block names the segment it is on. Registered without one, it
+         * used to be accepted: its addresses were handed out, and every VPS
+         * build given one was refused `vps.network_not_attachable` — with no
+         * route to attach a network to the block afterwards.
+         */
         $this->actingAs($this->operator)
             ->postJson('/api/admin/infrastructure/ip-pools/'.$pool->id.'/subnets', [
                 'cidr' => '203.0.113.0/24',
                 'gateway' => '203.0.113.1',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'infrastructure.subnet_has_no_customer_network');
+
+        $this->actingAs($this->operator)
+            ->postJson('/api/admin/infrastructure/networks', [
+                'datacenter_id' => $datacenter,
+                'slug' => 'kw-public-1',
+                'name' => 'Kuwait Public 1',
+                'purpose' => 'public',
+                'vlan_id' => 100,
+                'bridge' => 'vmbr1',
+                'is_customer_facing' => true,
+            ])
+            ->assertCreated();
+
+        /** @var Network $network */
+        $network = Network::query()->sole();
+
+        $this->actingAs($this->operator)
+            ->postJson('/api/admin/infrastructure/ip-pools/'.$pool->id.'/subnets', [
+                'cidr' => '203.0.113.0/24',
+                'gateway' => '203.0.113.1',
+                'network_id' => $network->id,
             ])
             ->assertCreated();
 
@@ -234,6 +264,8 @@ final class AnOperatorCanBuildTheEstateFromNothingTest extends TestCase
         $subnet = Subnet::query()->sole();
 
         $this->assertSame($pool->id, $subnet->ip_pool_id);
+        $this->assertSame($network->id, $subnet->network_id);
+        $this->assertTrue($network->canCarryACustomerMachine());
         $this->assertSame(4, $subnet->ip_version->value);
         $this->assertSame(24, $subnet->prefix_length);
 

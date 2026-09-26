@@ -13,6 +13,7 @@ use Lynomia\Modules\Infrastructure\Application\Actions\RegisterSubnet;
 use Lynomia\Modules\Infrastructure\Domain\Exceptions\SubnetRegistrationRefused;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Support\TestDatabaseGuard;
@@ -74,6 +75,9 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
     private const string LOCK_NOT_AVAILABLE = '55P03';
 
     private string $defaultConnection;
+
+    /** @var array<string, Network> */
+    private array $networks = [];
 
     private User $operator;
 
@@ -169,7 +173,7 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
             // A has read the estate and not yet written. B tries now.
             try {
                 $this->asOperatorB(
-                    fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, '203.0.113.0/25', null, null, $this->operator),
+                    fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, '203.0.113.0/25', null, $this->networkFor($secondPool), $this->operator),
                 );
                 $b = 'committed';
             } catch (QueryException $e) {
@@ -179,7 +183,7 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
             }
         });
 
-        app(RegisterSubnet::class)->execute($firstPool, '203.0.113.0/24', null, null, $this->operator);
+        app(RegisterSubnet::class)->execute($firstPool, '203.0.113.0/24', null, $this->networkFor($firstPool), $this->operator);
 
         $this->assertSame(
             self::LOCK_NOT_AVAILABLE,
@@ -195,10 +199,10 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
         $site = $this->datacenter('kw-north');
         $held = $this->pool($site, 'north-public');
 
-        app(RegisterSubnet::class)->execute($held, '203.0.113.0/24', null, null, $this->operator);
+        app(RegisterSubnet::class)->execute($held, '203.0.113.0/24', null, $this->networkFor($held), $this->operator);
 
         try {
-            app(RegisterSubnet::class)->execute($held, '203.0.113.0/25', null, null, $this->operator);
+            app(RegisterSubnet::class)->execute($held, '203.0.113.0/25', null, $this->networkFor($held), $this->operator);
             $this->fail('The overlapping block was accepted.');
         } catch (SubnetRegistrationRefused) {
             // Refused, as it should be. What matters is what it left behind.
@@ -208,10 +212,10 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
         // registration on the platform behind a connection that has moved on.
         $subnet = $this->asOperatorB(
             fn (): Subnet => app(RegisterSubnet::class)->execute(
-                $this->pool($this->datacenter('kw-south'), 'south-public'),
+                $south = $this->pool($this->datacenter('kw-south'), 'south-public'),
                 '198.51.100.0/24',
                 null,
-                null,
+                $this->networkFor($south),
                 $this->operator,
             ),
         );
@@ -235,7 +239,7 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
             $statements[] = strtolower($query->sql);
         });
 
-        app(RegisterSubnet::class)->execute($pool, '203.0.113.0/24', null, null, $this->operator);
+        app(RegisterSubnet::class)->execute($pool, '203.0.113.0/24', null, $this->networkFor($pool), $this->operator);
 
         $locks = array_keys(array_filter($statements, static fn (string $sql): bool => str_contains($sql, 'pg_advisory_xact_lock')));
         $reads = array_keys(array_filter(
@@ -263,11 +267,11 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
 
         // A registers and is frozen before it commits.
         DB::connection($this->defaultConnection)->beginTransaction();
-        app(RegisterSubnet::class)->execute($firstPool, $firstBlock, null, null, $this->operator);
+        app(RegisterSubnet::class)->execute($firstPool, $firstBlock, null, $this->networkFor($firstPool), $this->operator);
 
         try {
             $this->asOperatorB(
-                fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, $secondBlock, null, null, $this->operator),
+                fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, $secondBlock, null, $this->networkFor($secondPool), $this->operator),
             );
 
             $this->fail(sprintf(
@@ -288,7 +292,7 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
         // Now that A has finished, B's retry sees A's block and is refused.
         try {
             $this->asOperatorB(
-                fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, $secondBlock, null, null, $this->operator),
+                fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, $secondBlock, null, $this->networkFor($secondPool), $this->operator),
             );
 
             $this->fail('Once A had committed, B was still allowed to register an overlapping block.');
@@ -306,11 +310,22 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
 
     private function pool(string $datacenterId, string $slug): IpPool
     {
-        return IpPool::factory()->create([
+        $pool = IpPool::factory()->create([
             'datacenter_id' => $datacenterId,
             'slug' => $slug,
             'scope' => IpPoolScope::Public,
         ]);
+
+        // Committed with the pool, before either operator begins: a block a
+        // customer is given addresses from names the segment it is on.
+        $this->networks[(string) $pool->getKey()] = Network::factory()->create(['datacenter_id' => $datacenterId]);
+
+        return $pool;
+    }
+
+    private function networkFor(IpPool $pool): Network
+    {
+        return $this->networks[(string) $pool->getKey()];
     }
 
     /**

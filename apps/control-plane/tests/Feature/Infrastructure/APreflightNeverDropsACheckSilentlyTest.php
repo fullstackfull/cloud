@@ -19,6 +19,7 @@ use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
 use Lynomia\Modules\Ipam\Application\Actions\SeedSubnetAddresses;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\Providers\Infrastructure\Models\ProviderInstance;
@@ -521,8 +522,11 @@ final class APreflightNeverDropsACheckSilentlyTest extends TestCase
         }
 
         if ($pool === 'allocatable') {
+            // On a segment a customer machine can be plugged into: an address
+            // on none is not one a build can use (mapping.network says so).
             $subnet = Subnet::factory()->forBlock('198.51.100.0/29')->create([
                 'ip_pool_id' => IpPool::factory()->create()->getKey(),
+                'network_id' => Network::factory()->create(['bridge' => 'vmbr1'])->getKey(),
             ]);
 
             app(SeedSubnetAddresses::class)->execute($subnet);

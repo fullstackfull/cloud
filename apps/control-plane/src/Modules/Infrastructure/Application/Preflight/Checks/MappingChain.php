@@ -271,6 +271,25 @@ final readonly class MappingChain
      * counts the rows there that are `available`.
      *
      * ===========================================================================
+     * AND ON A SEGMENT A MACHINE CAN BE PLUGGED INTO
+     * ===========================================================================
+     *
+     * A pass also used to count an address in a subnet naming no network, or
+     * one no customer machine may be attached to, or one with no bridge: "5
+     * address(es) a customer machine can be given" on an estate whose every
+     * VPS build failed `vps.network_not_attachable`, permanently, because
+     * CreateVpsHandler will not guess where to plug a machine in. So the pass
+     * counts {@see IpAllocator::customerAttachableCount()} — the same rows,
+     * restricted to subnets whose network passes
+     * Network::canCarryACustomerMachine(), the rule the build itself refuses
+     * by — and names how many it left out. The operator's subnet route now
+     * refuses a customer block with no customer network (RegisterSubnet), but
+     * it does not require the bridge (a dedicated server is not attached by
+     * one), a network's bridge and `is_active` can be edited afterwards, and
+     * rows written before the route refused are still there; this count is
+     * what reads all three.
+     *
+     * ===========================================================================
      * WHAT A PASS HERE STILL DOES NOT SAY
      * ===========================================================================
      *
@@ -287,6 +306,13 @@ final readonly class MappingChain
      *
      *   (c) Handed a subnet rather than a pool, the allocator reads that
      *       subnet alone. Nothing in the build path does that today.
+     *
+     *   (d) That the address reserve() picks is one of the addresses counted.
+     *       reserve() does not read the network; in a pool holding blocks on
+     *       an attachable segment and blocks on none, this passes on the
+     *       first and the build may be handed an address from the second,
+     *       and is refused `vps.network_not_attachable`. The summary says how
+     *       many addresses it left out, which is when this can happen.
      *
      * And one term that is not about the estate: the allocator's read is
      * `FOR UPDATE SKIP LOCKED`, so a row another transaction holds and has
@@ -333,14 +359,35 @@ final readonly class MappingChain
             );
         }
 
+        $attachable = (int) $active->sum(fn (IpPool $pool): int => $this->addresses->customerAttachableCount($pool));
+
+        if ($attachable < 1) {
+            return PreflightFinding::fail(
+                'mapping.network',
+                CheckCategory::Mapping,
+                $target,
+                sprintf(
+                    '%d address(es) a customer machine can be given, across %d active address pool(s), and none of them is on a network a customer machine can be attached to (active, customer-facing, with a bridge), so every build would be refused.',
+                    $allocatable,
+                    $active->count(),
+                ),
+                'Record a bridge on the customer-facing network the block is on, or register a block for allocation on a customer-facing network that has one; a registered block\'s network cannot be changed.',
+            );
+        }
+
+        $unattachable = $allocatable - $attachable;
+
         return PreflightFinding::pass(
             'mapping.network',
             CheckCategory::Mapping,
             $target,
             sprintf(
-                '%d address(es) a customer machine can be given, across %d active address pool(s).',
-                $allocatable,
+                '%d address(es) a customer machine can be given and attached, across %d active address pool(s).%s',
+                $attachable,
                 $active->count(),
+                $unattachable > 0
+                    ? sprintf(' %d more are in subnets on no network a customer machine can be attached to, and are not counted.', $unattachable)
+                    : '',
             ),
             EvidenceClass::Configuration,
         );

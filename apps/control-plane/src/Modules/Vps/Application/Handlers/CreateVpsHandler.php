@@ -544,7 +544,7 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
          */
         $network = $address->subnet->network()->first();
 
-        if ($network === null || ! $network->acceptsCustomerAttachments() || ($network->bridge ?? '') === '') {
+        if ($network === null || ! $network->canCarryACustomerMachine()) {
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 'vps.network_not_attachable',

@@ -12,6 +12,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
@@ -414,6 +415,8 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
             ->postJson('/api/admin/infrastructure/ip-pools/'.$pool->id.'/subnets', [
                 'cidr' => $cidr,
                 'allocatable' => $allocatable,
+                // The segment the block is on: a customer block names one.
+                'network_id' => Network::factory()->create(['datacenter_id' => $pool->datacenter_id])->id,
             ]);
     }
 

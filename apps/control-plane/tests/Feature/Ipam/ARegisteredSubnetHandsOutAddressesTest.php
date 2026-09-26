@@ -20,6 +20,7 @@ use Lynomia\Modules\Ipam\Domain\Exceptions\IpPoolExhaustedException;
 use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
+use Lynomia\Modules\Ipam\Infrastructure\Models\Network;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
@@ -232,6 +233,9 @@ final class ARegisteredSubnetHandsOutAddressesTest extends TestCase
      */
     private function register(IpPool $pool, array $body): TestResponse
     {
+        // The segment the block is on: a customer block names one.
+        $body['network_id'] ??= Network::factory()->create(['datacenter_id' => $this->datacenter->getKey()])->getKey();
+
         return $this->actingAs($this->operator)
             ->postJson('/api/admin/infrastructure/ip-pools/'.$pool->getKey().'/subnets', $body);
     }
