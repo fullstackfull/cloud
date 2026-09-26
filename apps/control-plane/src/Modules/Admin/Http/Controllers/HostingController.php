@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\SharedHosting\Application\Actions\EndHostingService;
 use Lynomia\Modules\SharedHosting\Application\Actions\ResetHostingAccountPassword;
 use Lynomia\Modules\SharedHosting\Application\Actions\TerminateHostingAccount;
 use Lynomia\Modules\SharedHosting\Application\Actions\UnsuspendHostingAccount;
@@ -141,6 +142,11 @@ final class HostingController
      * account terminated in the platform without the panel having actually
      * removed it: a row that says gone while the site still serves is the one
      * outcome nobody would ever look at again.
+     *
+     * Once the panel has removed it, the service the account was bought as
+     * ends too (EndHostingService::afterTheAccountEnded), which moves the
+     * order and ends the subscription. The reverse of the rule above: a
+     * service row that says live while its site is gone is billed for ever.
      */
     public function terminate(Request $request, string $account): JsonResponse
     {
@@ -174,6 +180,14 @@ final class HostingController
 
         $terminated = app(TerminateHostingAccount::class)->execute($found, force: $force);
 
+        /*
+         * The site is gone, so the service it was bought as has ended too —
+         * and with it the order that follows the service and the subscription
+         * that bills for it (I-1). Before this the route left all three
+         * reading `active` for an account it had just deleted.
+         */
+        $endedService = app(EndHostingService::class)->afterTheAccountEnded($terminated);
+
         app(RecordAuditEntry::class)->execute(
             action: AuditAction::HostingAccountTerminated,
             subject: $terminated,
@@ -186,6 +200,7 @@ final class HostingController
                 // "a person chose to skip it" are different acts and a reviewer
                 // must be able to tell them apart.
                 'retention_skipped' => $force,
+                'service_ended' => $endedService !== null ? (string) $endedService->getKey() : null,
             ],
         );
 
