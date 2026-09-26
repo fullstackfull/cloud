@@ -54,13 +54,16 @@ use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
  *     in every mode: it is an outage.
  *   - **Blocked** — a production preflight (read-only-real, on a production
  *     installation: the same test the naming findings use) where nothing is
- *     reserved at all, or where a name beside a platform host is claimable.
- *     A production estate needs `DNS_RESERVED_ZONES` to hold the domain above
- *     its hosts, and is not called ready until it does.
+ *     reserved at all, or where a platform host is {@see NamesBeside::Claimable}:
+ *     three or more labels, nothing reserved above it, and not itself listed.
+ *     Not every state in which a name beside a platform host is claimable
+ *     blocks: a host listed exactly is only a warning (next bullet), because
+ *     it cannot be told apart from a listed registrable domain.
  *   - **Warning** — the same two states in any other run, where a rehearsal
  *     is told and not stopped; and, in any run, an address that contributed
  *     no name, named with its {@see NoDerivedName} reason, or a host that is
- *     listed exactly with nothing above it, which may or may not be complete.
+ *     listed exactly with nothing above it — complete if it is a registrable
+ *     domain, and leaving the names beside it claimable if it is not.
  *   - **Pass** — every platform host held with the names beside it: a count of
  *     the entries and the variables they came from, and exactly what that
  *     covers.
@@ -187,7 +190,7 @@ final readonly class ReservedZonesCheck
         if ($claimable !== []) {
             return [$this->short(
                 $production,
-                $summary.($production ? ' A production estate is not ready while a name beside its own can be claimed.' : ''),
+                $summary.($production ? ' A production estate is not ready while a host of its own has nothing reserved above it.' : ''),
                 sprintf(
                     'List in %s the registrable domain above the host of %s, so that every name beside it is covered.',
                     self::LIST,

@@ -332,7 +332,7 @@ not held, and a pass says so.
 | Status | When |
 | --- | --- |
 | `fail` | An entry in `DNS_RESERVED_ZONES` is not a domain name. Blocks in every run. |
-| `blocked` | A production preflight (read-only-real, on a production installation) where nothing is reserved at all, or where a name beside a platform host can be claimed. |
+| `blocked` | A production preflight (read-only-real, on a production installation) where nothing is reserved at all, or where a platform host of three or more labels has nothing reserved above it and is not itself listed. A host listed exactly is not blocked (see `warning`), although the names beside it are claimable unless it is a registrable domain. |
 | `warning` | The same two states in any other run; or `APP_URL` or `FRONTEND_URL` contributed no name — each named with its reason, from the table above; or a platform host is listed exactly with nothing above it, which is complete only if it is a registrable domain. |
 | `pass` | Otherwise: a count of the entries held, the variables they came from, and what that covers. |
 

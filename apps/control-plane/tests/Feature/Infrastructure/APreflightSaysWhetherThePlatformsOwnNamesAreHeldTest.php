@@ -10,6 +10,7 @@ use Lynomia\Modules\Dns\Application\Services\ConfiguredReservedZones;
 use Lynomia\Modules\Dns\Domain\Enums\NoDerivedName;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DomainName;
 use Lynomia\Modules\Infrastructure\Application\Preflight\InfrastructurePreflightService;
+use Lynomia\Modules\Infrastructure\Domain\Naming\DnsSuffix;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckStatus;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightMode;
@@ -39,7 +40,8 @@ use Tests\TestCase;
  *     `api.lynomia.example`, `www.lynomia.example` is anybody's. Round two
  *     passed that state and said "everything beneath it"; two rows of the
  *     provider below pinned the pass and now pin the warning. A production
- *     preflight blocks on it, and on a reservation that holds nothing; any
+ *     preflight blocks on it where the host has nothing reserved above it
+ *     and is not itself listed, and on a reservation that holds nothing; any
  *     other run is told, as a warning, and not stopped.
  *   - **Warning** too when one of the platform's own addresses contributed
  *     nothing — and then why, because what is left unheld depends on it:
@@ -302,11 +304,15 @@ final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCas
     }
 
     /**
-     * A production preflight requires `DNS_RESERVED_ZONES`, and requires it
-     * to hold a name at or above every platform host: anything less leaves
-     * names beside the platform claimable by any account, which is not a
-     * state to put a production estate into. A rehearsal is still told, as a
-     * warning, and not stopped.
+     * A production preflight blocks while nothing is reserved, and while a
+     * platform host of three or more labels has nothing reserved above it and
+     * is not itself listed: the names beside it are claimable by any account.
+     * It does not require `DNS_RESERVED_ZONES` as such — a portal on the
+     * domain above the control plane holds every sibling of it, and that row
+     * passes with nothing listed. Nor does it block every state in which a
+     * sibling is claimable: a host listed exactly is a warning, because it
+     * cannot be told apart from a listed registrable domain. A rehearsal is
+     * still told, as a warning, and not stopped.
      *
      * @param  list<string>  $configured
      */
@@ -331,6 +337,50 @@ final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCas
         $rehearsal = $this->finding(PreflightMode::Simulation);
 
         $this->assertSame($expected === CheckStatus::Blocked ? CheckStatus::Warning : $expected, $rehearsal->status, $rehearsal->summary);
+    }
+
+    /**
+     * "Production" is both halves: a read-only-real run AND a production
+     * installation. A real read on staging is a rehearsal like any other, so
+     * a claimable sibling there is a warning — and so is the naming findings'
+     * production rule, which the same test decides. Without this, a
+     * `production()` that looked at the mode alone would block every real read
+     * on every installation and nothing would notice.
+     */
+    #[Test]
+    public function a_real_read_on_an_installation_that_is_not_production_is_told_and_not_stopped(): void
+    {
+        $this->configure([], 'https://api.lynomia.test', 'https://portal.lynomia.test');
+        config()->set(DnsSuffix::INTERNAL_CONFIG_KEY, 'dc1.reference.example');
+
+        $this->assertFalse($this->app->environment('production'));
+
+        $real = $this->estate(PreflightMode::ReadOnlyReal);
+
+        $this->assertSame(CheckStatus::Warning, $this->named($real, self::ID)->status, $this->named($real, self::ID)->summary);
+        $this->assertSame(CheckStatus::Pass, $this->named($real, 'naming.dns_suffix')->status, $this->named($real, 'naming.dns_suffix')->summary);
+
+        // The control: the same configuration on a production installation blocks both.
+        $this->app->detectEnvironment(static fn (): string => 'production');
+
+        $production = $this->estate(PreflightMode::ReadOnlyReal);
+
+        $this->assertSame(CheckStatus::Blocked, $this->named($production, self::ID)->status);
+        $this->assertSame(CheckStatus::Blocked, $this->named($production, 'naming.dns_suffix')->status);
+    }
+
+    /**
+     * @param  list<PreflightFinding>  $findings
+     */
+    private function named(array $findings, string $id): PreflightFinding
+    {
+        foreach ($findings as $finding) {
+            if ($finding->id === $id) {
+                return $finding;
+            }
+        }
+
+        $this->fail(sprintf('The estate preflight carries no %s finding.', $id));
     }
 
     #[Test]
