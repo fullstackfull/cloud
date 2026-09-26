@@ -120,6 +120,14 @@ use Tests\TestCase;
  * column; the query builder's touch('payload') is a JSON syntax error;
  * increment('payload') and `.=` throw.
  *
+ * A setter called through a callable that spells its name as a string
+ * literal — `call_user_func([$job, 'setAttribute'], 'payload', …)` and the
+ * other forms the setter shape's comment lists — is here because the
+ * round-three verification planted exactly that in
+ * `OperationsController::settleTheJob()`: it executed, kept the hostname, and
+ * left this census, the F-15 band and the operations queue's tests green.
+ * The clause that reads it matched nothing over the clean tree.
+ *
  * The raw-SQL window is sized by a criterion, not a feeling: at least twice
  * the widest `UPDATE … SET` clause in `src/` today. An UPDATE is any `update`
  * followed by a `set` before the next `;`, whatever the target between them —
@@ -130,9 +138,12 @@ use Tests\TestCase;
  * the bindings are in it), which is the safe direction for a floor. The
  * widest today is the reservation statement in
  * `ProvisioningJob::reserveProviderIdentity()` — the very statement a second
- * writer is likeliest to be appended to — at 1,310 characters,
- * comment-stripped. Twice that is 2,620; the window is the next round
- * thousand, 3,000.
+ * writer is likeliest to be appended to — at 947 characters,
+ * comment-stripped. It was 1,310 when the window was set, twice that 2,620
+ * and the window the next round thousand, 3,000; it narrowed when the name a
+ * create is sent with moved into a statement of its own
+ * (`recordCreateSentWith()`, 498), and the window was left where it was,
+ * since the floor is all it has to meet.
  *
  * What holds that: `the_raw_sql_window_is_twice_the_widest_set_clause_in_the_tree`
  * re-measures the tree on every run and fails when any UPDATE's clause
@@ -146,8 +157,10 @@ use Tests\TestCase;
  * pattern to it. Widening cost nothing: over the clean tree the raw-SQL
  * shape, row constructor included, matches no file at widths 30, 200, 1,000,
  * 2,000, 3,000, 4,000, 6,000 and 20,000, all four expected entries being
- * `array key`; and the measure finds one UPDATE in `src/`, the same one the
- * narrower measure it replaced found.
+ * `array key`; and the measure then found one UPDATE in `src/`, the same one
+ * the narrower measure it replaced found. (It now finds two, both in
+ * `ProvisioningJob`: the second is `recordCreateSentWith()`, which writes no
+ * column called `payload`.)
  *
  * ===========================================================================
  * WHAT THIS SCAN STILL DOES NOT SEE
@@ -161,6 +174,23 @@ use Tests\TestCase;
  *   PHP's `"pay\x6coad"`, SQL's `U&"…"`. The scan reads the characters the
  *   source holds; what PHP or Postgres would make of them is evaluating the
  *   program, not reading it.
+ * - **A setter whose name the statement does not spell** — held in a
+ *   variable (`$job->$method('payload', …)`,
+ *   `call_user_func([$job, $method], 'payload', …)`), assembled, or spelled
+ *   in an earlier statement; and `Arr::set()` or `Arr::add()` handed over as
+ *   a callable, `[Arr::class, 'set']`, whose bare `'set'` is too common a
+ *   literal to be read as a setter's name.
+ * - **Whatever a PHP expression stands for in the raw-SQL seam** — a
+ *   constant, a call or an interpolation between the column (or its
+ *   subscripts) and its `=`: `'… set payload'.PHP_EOL.'= ?'`,
+ *   `sprintf('… set payload%s= ?', ' ')`. The gap reads whitespace, PHP's
+ *   whitespace escapes, quotes, the seam's `.` and SQL comments; what a
+ *   constant or a call evaluates to is, again, evaluating the program.
+ * - **A bracket inside a subscript's string literal** — `set payload[']'] =
+ *   ?`, `set payload['['] = ?`. A subscript is balanced by its brackets, not
+ *   read as SQL, so a bracket in a literal unbalances it and the target is
+ *   not read. Telling a literal's bracket from the subscript's would take a
+ *   SQL tokenizer, as with the `;` below.
  * - **A statement assembled across statements** — `$sql = 'update … set ';
  *   $sql .= 'payload = ?';`. Letting the raw-SQL shape cross a `;` is what
  *   would turn it into a false-positive machine across whole files.
@@ -289,8 +319,17 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             // data_fill(), Arr::set(), Arr::add(), touch() and touchQuietly()
             // — which write a timestamp over the whole payload — and
             // upsert()'s list of columns to update; the name positional or
-            // named.
-            'setAttribute' => '~\b(?:setAttribute|offsetSet|__set|fillJsonAttribute|data_set|data_fill|Arr::set|Arr::add|touch|touchQuietly|upsert)\s*\((?:[^;]*?[,(\[])?\s*(?:\w+\s*:\s*)?["\']payload(?:["\'.]|->)~',
+            // named. Called directly, or through a callable that spells the
+            // setter's name as a string literal in the same statement:
+            // call_user_func([$job, 'setAttribute'], 'payload', …),
+            // call_user_func_array(), [$job, 'setAttribute'](…),
+            // $job->{'setAttribute'}(…), app()->call([…], …), a callable
+            // handed to array_map(), call_user_func('data_set', …). (Not
+            // Arr::set() or Arr::add() as a callable, [Arr::class, 'set']:
+            // a bare 'set' or 'add' is too common a literal to read as a
+            // setter's name; see WHAT THIS SCAN STILL DOES NOT SEE.)
+            'setAttribute' => '~\b(?:setAttribute|offsetSet|__set|fillJsonAttribute|data_set|data_fill|Arr::set|Arr::add|touch|touchQuietly|upsert)\s*\((?:[^;]*?[,(\[])?\s*(?:\w+\s*:\s*)?["\']payload(?:["\'.]|->)'
+                .'|["\'](?:setAttribute|offsetSet|__set|fillJsonAttribute|data_set|data_fill|touch|touchQuietly|upsert)["\'][^;]*?["\']payload(?:["\'.]|->)~',
             // update … set …, payload = … — in a string, a concatenation or a
             // heredoc — with the column subscripted or not, set payload['k']
             // = …; and the row-constructor form, set (…, payload) = (…).
@@ -407,6 +446,17 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
                 "\$job->touch('payload');",
                 "DB::table('provisioning_jobs')->upsert(\$rows, ['id'], ['payload']);",
                 "\$q->upsert(\$rows, uniqueBy: 'id', update: ['payload']);",
+                // Through a callable that spells the setter as a literal: the
+                // round-three verification's plant first, which executed in
+                // OperationsController::settleTheJob with the census green.
+                "call_user_func([\$job, 'setAttribute'], 'payload', [...\$job->payload, 'k' => 1]);",
+                "call_user_func_array([\$job, 'setAttribute'], ['payload', \$p]);",
+                "[\$job, 'setAttribute']('payload', \$p);",
+                "\$job->{'setAttribute'}('payload', \$p);",
+                "app()->call([\$job, 'setAttribute'], ['key' => 'payload', 'value' => \$p]);",
+                "array_map(fn (\$j) => call_user_func([\$j, 'offsetSet'], 'payload', \$p), \$jobs);",
+                "call_user_func('data_set', \$job, 'payload', \$p);",
+                "call_user_func([\$job, 'touch'], 'payload');",
             ],
             'raw SQL' => [
                 "DB::update('update provisioning_jobs set payload = ? where id = ?', \$b);",
@@ -471,6 +521,8 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             'foreach ($job->payload as $k => $v) {}',
             'foreach ($rows as $row) { $x = $row->payload; }',
             '$job->touch();',
+            "call_user_func([\$job, 'setAttribute'], 'status', \$p);",
+            "call_user_func([\$job, 'getAttribute'], 'payload');",
             "DB::table('provisioning_jobs')->upsert(\$rows, ['id'], ['status']);",
             "\$x = ['kind' => 'payload'];",
             "\$q->update(['payload_version' => 2]);",

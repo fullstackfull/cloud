@@ -11,18 +11,21 @@ use Illuminate\Support\Facades\Schema;
  *
  * What establishes that a machine found at the reserved id is this build's
  * and not a stranger's is the name the hypervisor reports for it, compared
- * exactly against the names this job actually asked for. Written by the same
- * statement that writes the id, so there is no instant at which the platform
- * has called with a name it has not recorded.
+ * exactly against the names a create under the id was actually sent with.
+ * Written by its own statement immediately before each create is sent — not
+ * with the id, which is reserved before an attempt knows whether it will
+ * send anything — so the list holds no name that was only reserved, holds
+ * nothing until a create has been sent, and there is no instant at which the
+ * platform has called with a name it has not recorded.
  *
  * A list rather than a single value, and append-only: the comparison is
  * against every name a create under this identity sent, not only the latest.
  * `provisioning_jobs.payload` has exactly one writer in `src/` — the statement
  * that creates the row — so in practice the list holds one entry, and that
- * bound is pinned by tests rather than assumed: a census of every form a
- * write to the column takes in the source's text, which names the forms no
- * reading of the text can see, and a behavioural pin that drives a create's
- * job through the engine, every operator act on it and both sweepers.
+ * bound is pinned by tests rather than assumed: a census of the writes to the
+ * column in the source's text, in every form its shapes list, which names the
+ * forms it does not read, and a behavioural pin that drives a create's job
+ * through the engine, every operator act on it and both sweepers.
  * Nothing on the platform edits a payload; the list
  * is what keeps the comparison correct if something outside the platform
  * ever does, instead of letting a second name quietly turn this build's own

@@ -71,7 +71,10 @@ final class RepointingAReservedIdentityTest extends TestCase
         $this->assertNull($job->reserved_provider_nodes);
         $this->assertNull($job->reserved_provider_hostnames);
         $this->assertSame($taken, $job->result['repoints'][0]['from'] ?? null);
-        $this->assertSame(['web-01'], $job->result['repoints'][0]['hostnames'] ?? null);
+        // The history says what was sent under the old identity: nothing, as
+        // the stranger was found before a create was. (It used to say
+        // ['web-01'], a name recorded at the reservation and never sent.)
+        $this->assertSame([], $job->result['repoints'][0]['hostnames'] ?? null);
 
         $entry = AuditEntry::query()->where('action', AuditAction::ProvisioningIdentityRepointed)->sole();
         $this->assertSame($taken, $entry->context['from'] ?? null);

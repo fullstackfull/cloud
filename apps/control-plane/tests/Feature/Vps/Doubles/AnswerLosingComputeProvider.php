@@ -37,11 +37,29 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 {
     public bool $loseTheAnswerToCreates = true;
 
+    /**
+     * When set, a create is lost before the cluster acts on it: it is
+     * recorded as sent, nothing is built, and it is answered as a lost
+     * answer is. The state in which a create under an identity HAS been sent
+     * and nothing of it is there — which is what a later look has to judge
+     * a machine found at the identity against.
+     */
+    public bool $loseTheRequestToCreates = false;
+
     /** @var list<CreateVmRequest> */
     public array $creates = [];
 
     /** @var ?Closure(CreateVmRequest): void */
     public ?Closure $atTheMomentOfCreate = null;
+
+    /**
+     * When set, run once at the first read of a machine, before the fleet is
+     * asked: how a test puts something at the identity between an attempt
+     * reserving it and that attempt looking under it.
+     *
+     * @var ?Closure(string, string): void
+     */
+    public ?Closure $atTheMomentOfLook = null;
 
     /**
      * When set, thrown once the machine is built: the worker process dying
@@ -72,6 +90,14 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
         if ($this->atTheMomentOfCreate !== null) {
             ($this->atTheMomentOfCreate)($request);
+        }
+
+        if ($this->loseTheRequestToCreates) {
+            throw ComputeProviderException::requestFailed($this->name(), 'create_vm', [
+                'node' => $request->nodeName,
+                'vmid' => $request->vmId,
+                'provider_message' => 'this create was lost before the cluster acted on it',
+            ], indeterminate: true);
         }
 
         $operation = $this->fleet->createVirtualMachine($request);
@@ -150,6 +176,12 @@ final class AnswerLosingComputeProvider implements ComputeProvider
     {
         if ($this->failReadsWith !== null) {
             throw $this->failReadsWith;
+        }
+
+        if ($this->atTheMomentOfLook !== null) {
+            $look = $this->atTheMomentOfLook;
+            $this->atTheMomentOfLook = null;
+            $look($nodeName, $providerId);
         }
 
         $machine = $this->fleet->getVm($nodeName, $providerId);

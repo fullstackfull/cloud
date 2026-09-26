@@ -20,14 +20,16 @@ use Tests\TestCase;
  * The behavioural half of the bound F-15's ownership rule rests on.
  *
  * A create claims a machine it finds under its reserved identity as its own
- * when the machine's name is one the job sent — and the names it sent come
- * from its payload, recorded append-only in `reserved_provider_hostnames`.
- * That is safe while the payload is written once. So every act the platform
+ * when the machine's name is one a create under it was sent with — and the
+ * names it sent come from its payload, recorded append-only in
+ * `reserved_provider_hostnames` immediately before each create is sent. That
+ * is safe while the payload is written once. So every act the platform
  * offers an operator over a VPS create's job — retry, adopt and repoint, the
  * refused ones included — and both sweepers that act on one without an
  * operator, the stale sweep and the task poller, are driven here, and after
  * each the payload must come out byte-for-byte as it was written and the list
- * of names must still hold exactly one.
+ * of names must hold exactly the one name the payload gives, or none where
+ * no create has been sent.
  *
  * It is the effect that is asserted, not a count of writers: a second writer
  * planted on any of these paths — a hostname "normalised while we are
@@ -81,7 +83,9 @@ final class EveryOperatorActLeavesAJobsPayloadAsItWasWrittenTest extends TestCas
         $this->aStrangerAt($this->derivedIdOf($job));
 
         $this->runWorker($job);
-        $this->assertUntouched($job, $written, 'the attempt that found a stranger');
+        // It found the stranger before sending anything, so no name has been
+        // recorded as sent — and none may have been.
+        $this->assertUntouched($job, $written, 'the attempt that found a stranger', sent: false);
 
         $this->repointAsOperator($job)->assertOk();
         $this->assertSame(null, $job->refresh()->reserved_provider_hostnames, 'a repoint starts the new identity\'s names empty');
@@ -159,14 +163,21 @@ final class EveryOperatorActLeavesAJobsPayloadAsItWasWrittenTest extends TestCas
         return (string) DB::table('provisioning_jobs')->where('id', $job->id)->value('payload');
     }
 
-    private function assertUntouched(ProvisioningJob $job, string $written, string $after, string $hostname = 'web-01'): void
+    /**
+     * The payload byte for byte as written, and the names a create under the
+     * identity was sent with exactly the one it gives — or, where no create
+     * has been sent, none at all.
+     */
+    private function assertUntouched(ProvisioningJob $job, string $written, string $after, string $hostname = 'web-01', bool $sent = true): void
     {
         $this->assertSame($written, $this->payloadOf($job), sprintf('The payload changed during %s: it has a second writer.', $after));
 
         $this->assertSame(
-            [$hostname],
+            $sent ? [$hostname] : null,
             $job->refresh()->reserved_provider_hostnames,
-            sprintf('After %s the job has called its machine by more than one name, so the ownership rule claims more than it built.', $after),
+            $sent
+                ? sprintf('After %s the job has called its machine by more than one name, so the ownership rule claims more than it built.', $after)
+                : sprintf('After %s the job records a name as sent when it sent nothing, so the ownership rule can claim what it never built.', $after),
         );
     }
 }

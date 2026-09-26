@@ -39,12 +39,15 @@ use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
  *  - **That finding is current** (`provisioning.repoint_finding_is_stale`) in BOTH
  *    dimensions it can go stale in: it must be about the identity the job
  *    holds now, and it must have been written by the job's last attempt. The
- *    second is not belt and braces. An attempt that built under a new identity
- *    and then died leaves the previous attempt's finding behind — the stale
- *    sweeper moves the job to review on its deadline alone — and a repoint
- *    licensed by that old finding would build a second machine beside the one
- *    the dead attempt left. `DetectStaleJobs` now overwrites the finding too;
- *    each half closes that door on its own.
+ *    second is not belt and braces. When the operator clears the stranger at
+ *    the hypervisor instead of repointing, the retry builds under the SAME
+ *    identity; if its worker dies, it leaves the previous attempt's finding
+ *    behind — the stale sweeper moves the job to review on its deadline alone
+ *    — still about the identity the job holds, and a repoint licensed by that
+ *    old finding would build a second machine beside the one the dead attempt
+ *    left. (After a repoint, the finding is about the identity the job was
+ *    moved off, and the first check already refuses it.) `DetectStaleJobs`
+ *    now overwrites the finding too; each half closes that door on its own.
  *  - **The machine is established to be somebody else's**
  *    (`provisioning.repoint_ownership_not_established`): reason `named_otherwise` and
  *    nothing weaker. A machine reported with no name, or named as this job

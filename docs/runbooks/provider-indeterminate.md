@@ -58,10 +58,15 @@ person stating what they found at a provider, one operation at a time.
 ## A VPS build in review
 
 A VPS create reserves the hypervisor id it will ask for **before** it calls,
-and writes it on the job with the cluster, every node a create under it was
-sent to and every name it was sent with. Every later attempt asks for the
-same id and looks under it before building. So a build whose answer was lost
-is never retried into a second machine: the retry finds the first one.
+and writes it on the job with the cluster and every node an attempt under it
+was placed on. Immediately before each create is sent — and not before — it
+writes down the name the create is sent with, so `reserved_provider_hostnames`
+is exactly the names a create under the id was sent with, and **empty when
+none has been sent**. Every later attempt asks for the same id and looks under
+it before building. So a build whose answer was lost is never retried into a
+second machine: the retry finds the first one. And a machine found at the id
+before any create under it was sent is never taken for this build's, whatever
+it is called.
 
 The review list shows, per job, `error_code`, `error_reason`,
 `reserved_provider_id`, `reserved_provider_nodes` and
@@ -82,10 +87,10 @@ the row:
 |---|---|---|---|
 | `compute.provider_request_failed` | — | The create was sent and the platform never learned its outcome. With `failure_class` `timeout` the answer was lost: the cluster may have built the machine at the reserved id, or may not, and nothing retries it on its own. (With `transient` the cluster refused it and nothing was built; the job is listed only once the engine's own attempts are spent.) | Look under the reserved id on the listed nodes, then **retry**: the retry looks under that id before it builds, settles as `found_its_own_build` if the machine is there, and builds if nothing is. Repoint is refused. |
 | `provisioning.worker_never_settled` | — | A worker took an attempt and never settled it within the job's timeout; the stale sweep moved it here. The create may have been sent. | Look under the reserved id on the listed nodes, then **retry**, as above: the retry finds a build the dead worker left and settles as `found_its_own_build`. If the retry is refused because a provider task was recorded, the create was answered: adopt the machine at the reserved id. Repoint is refused. |
-| `vps.create_found_its_own_build` | `named_as_called` | An earlier attempt built this machine and its answer was lost. Nothing new was built. | Confirm the machine at the node, then **adopt** it with the reserved id (see below). Retry is refused from here on, deliberately. |
-| `vps.create_identity_taken` | `named_otherwise` | Somebody else's machine, by name, holds the id. Nothing of this build's exists. | Confirm the name at the node. Then **repoint** the job, which gives it an id it has never held, and **retry** it. |
-| `vps.create_identity_taken` | `unnamed` | A machine is there and reports no name — what Proxmox does while a create is still writing its config. It may be this build's. | Wait for the task on that node to finish and look again. If it becomes named as ordered, retry: the retry finds it and settles as `found_its_own_build`. Repoint is refused. |
-| `vps.create_identity_taken` | `shape_differs` | A machine named as ordered but with a different vCPU or memory. Whose it is cannot be established. | Look at it. If it is this build's, adopt it; if it is not, it has to be renamed or removed at the hypervisor before a retry. Repoint is refused. |
+| `vps.create_found_its_own_build` | `named_as_called` | An earlier attempt sent a create under this id with the name the machine carries (it is in `reserved_provider_hostnames`), and nothing about the machine's vCPU or memory contradicts this build. It is **taken to be** that attempt's machine, whose answer was lost — on its name and shape, which is all the platform matched. Nothing new was built. (If `reserved_provider_hostnames` is empty, the id was pinned on the job's payload and no create under it is recorded; the name matched is the payload's, and `last_error` says so.) | Confirm at the node that this is the build and not a machine that took the id afterwards — the node's task history for the id is where to tell the two apart. Then **adopt** it with the reserved id (see below). Retry is refused from here on, deliberately. |
+| `vps.create_identity_taken` | `named_otherwise` | A machine holds the id under a name no create under it was sent with. When `reserved_provider_hostnames` is empty no create under the id has been sent at all, and the machine is not this build's **whatever it is called** — the name this build was about to use included. Nothing of this build's exists. | Confirm at the node. Then **repoint** the job, which gives it an id it has never held, and **retry** it. Do not adopt it. |
+| `vps.create_identity_taken` | `unnamed` | A machine is there and reports no name — what Proxmox does while a create is still writing its config. It may be this build's if a create under the id was sent (`reserved_provider_hostnames` is not empty). If none was, it is not, and it is reported this way only because a machine with no name is never read as a stranger's. | Wait for the task on that node to finish and look again, then retry. If a create under the id was sent and the machine is now named as it was sent, the retry settles as `found_its_own_build`; if none was sent, the retry reports it `named_otherwise`, and you can repoint. Repoint is refused until then. |
+| `vps.create_identity_taken` | `shape_differs` | A machine carrying a name a create under this id was sent with, but a different vCPU or memory. Whose it is cannot be established. | Look at it. If it is this build's, adopt it; if it is not, it has to be renamed or removed at the hypervisor before a retry. Repoint is refused. |
 | `vps.create_identity_reserved_elsewhere` | — | The job's payload names a different cluster from the one its identity was reserved on. Nothing on the platform edits a payload, so the change came from outside it. | There is no route to put it back from this screen, and nothing on this page is one. Escalate; the reserved cluster is where an earlier build would be. |
 | `vps.create_identity_unverifiable` | — | The hypervisor could not be asked what is at the id; nothing was built. The engine retries this on its own. | Nothing, unless it exhausts its attempts — then fix the cluster's reachability and retry. |
 | `compute.task_failed`, `compute.task_unconfirmed` | — | The build settled with a machine, and afterwards the hypervisor said its task failed, or the platform stopped waiting for the task to finish (`last_error` says which). `provider_reference` is the id the build was answered with. | Look at that machine at the node. Retry and repoint are refused, because something was built. |
@@ -96,6 +101,12 @@ identity, has built nothing, and its **last** attempt found the identity taken
 `named_otherwise` — about the identity it holds now. A finding from an earlier
 attempt licenses nothing: if a worker died since, retry instead, and the retry
 tells you what is there now. There is no override.
+
+**Adopt** only a machine you have confirmed at the node is this build's. The
+platform claims a machine on a name a create under the id was sent with and a
+shape that does not contradict the plan; a machine that took the id after this
+build's create built nothing can carry both. Adopting a stranger's machine,
+and then the DBA step below, hands this customer another customer's machine.
 
 **Adopt** records the machine and delivers the service. It does **not** create
 the platform's machine record and does **not** commit the address: the

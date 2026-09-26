@@ -19,8 +19,8 @@ namespace Lynomia\Modules\Provisioning\Domain\ValueObjects;
 final readonly class ReservedProviderIdentity
 {
     /**
-     * @param  list<string>  $nodes  Every node a create under this id was sent to.
-     * @param  list<string>  $hostnames  Every name a create under this id was sent with.
+     * @param  list<string>  $nodes  Every node an attempt under this id was placed on, and so every node a create under it can have been sent to.
+     * @param  list<string>  $hostnames  Every name a create under this id was sent with, written immediately before each was sent — never a name only reserved.
      */
     public function __construct(
         public string $providerId,
@@ -30,7 +30,8 @@ final readonly class ReservedProviderIdentity
     ) {}
 
     /**
-     * Whether the hypervisor's name for a machine is one this job asked for.
+     * Whether the hypervisor's name for a machine is one a create under this
+     * id was sent with. With none sent, no name is.
      *
      * Exact, deliberately: no case folding and no trimming. A comparison
      * loosened in either direction widens what this job may claim as its own
