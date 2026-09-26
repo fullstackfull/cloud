@@ -7,7 +7,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Which payment failure the dunning counter last counted.
+ * Which payment failures the dunning counter has counted.
  *
  * `failed_payment_count` was incremented once per delivery of PaymentFailed,
  * not once per failure. A delivery is not a failure: a provider redelivers a
@@ -16,28 +16,40 @@ use Illuminate\Support\Facades\Schema;
  * second worker. Each of those counted the same declined card again, walking a
  * customer towards suspension for a payment they had failed once.
  *
- * The failed transaction's id is the key, read and written under the
- * subscription's row lock, so a second delivery of the same failure — even one
- * running at the same moment — finds it already counted. It is deliberately
- * not cleared when the customer pays: a failure redelivered after the payment
- * that settled it must not reopen dunning either.
+ * One row per failure counted, so the answer to "was this one counted?" is
+ * the same however many failures have been counted since. A single "last
+ * counted" column cannot give it: a failure delivered again after a newer one
+ * finds the newer one's id there and is counted a second time. And a delivery
+ * after the customer has paid is not rare — `payments:reconcile` records a
+ * failed intent under its own event id, and the provider's webhook for the
+ * same intent arrives later under another, announcing the same failed
+ * transaction again.
  *
- * No foreign key. It records which event was counted, and a counter's history
- * should not stop a transaction row being archived.
+ * Written with an insert that does nothing on conflict, under the
+ * subscription's row lock, so a second delivery of the same failure — even
+ * one running at the same moment — finds it already counted. The rows are
+ * deliberately not cleared when the customer pays: a failure delivered again
+ * after the payment that settled the subscription must not reopen dunning
+ * either.
+ *
+ * No foreign key to `transactions`. This records which event was counted, and
+ * a counter's history should not stop a transaction row being archived.
  */
 return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('subscriptions', function (Blueprint $table): void {
-            $table->ulid('last_counted_payment_failure_id')->nullable()->after('failed_payment_count');
+        Schema::create('subscription_counted_payment_failures', function (Blueprint $table): void {
+            $table->foreignUlid('subscription_id')->constrained('subscriptions')->cascadeOnDelete();
+            $table->ulid('payment_failure_id');
+            $table->timestampTz('counted_at');
+
+            $table->primary(['subscription_id', 'payment_failure_id']);
         });
     }
 
     public function down(): void
     {
-        Schema::table('subscriptions', function (Blueprint $table): void {
-            $table->dropColumn('last_counted_payment_failure_id');
-        });
+        Schema::dropIfExists('subscription_counted_payment_failures');
     }
 };

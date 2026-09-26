@@ -50,11 +50,11 @@ namespace App\Queue;
  *
  * What a single class declares for itself — a job's or queued listener's own
  * `$timeout`, which beats the worker's `--timeout` at `Worker.php:353`
- * (`$job->timeout() ?? $options->timeout`) — is not visible from
- * configuration. It is read from the payload the framework actually builds, by
- * the test suite (`tests/Support/Queue/ThePayloadTheWorkerWillRead.php`),
- * because only a test can enumerate the application's queued classes and
- * dispatch each one.
+ * (`return $job && ! is_null($job->timeout()) ? $job->timeout() : $options->timeout;`)
+ * — is not visible from configuration. It is read from the payload the
+ * framework actually builds, by the test suite
+ * (`tests/Support/Queue/ThePayloadTheWorkerWillRead.php`), because only a test
+ * can enumerate the application's queued classes and dispatch each one.
  *
  * The clocks themselves are `env()`-overridable
  * (`REDIS_QUEUE_RETRY_AFTER`, `REDIS_PROVISIONING_RETRY_AFTER`,

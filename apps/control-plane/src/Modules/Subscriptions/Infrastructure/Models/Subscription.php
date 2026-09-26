@@ -42,7 +42,6 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  * @property string $currency
  * @property int $recurring_amount_minor
  * @property int $failed_payment_count
- * @property ?string $last_counted_payment_failure_id
  * @property ?int $coupon_cycles_remaining
  */
 class Subscription extends Model
