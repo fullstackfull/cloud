@@ -87,6 +87,11 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
         // than a suite that never returns.
         DB::connection(self::SECOND_CONNECTION)->statement("SET lock_timeout = '2s'");
 
+        // A never waits when the lock is what it should be. It is bounded too,
+        // so that a lock which outlives its transaction — a session lock left
+        // on a connection from an earlier test — fails here instead of hanging.
+        DB::connection($this->defaultConnection)->statement("SET lock_timeout = '10s'");
+
         $this->operator = User::factory()->create();
     }
 
@@ -98,6 +103,7 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
 
         DB::purge(self::SECOND_CONNECTION);
         $this->emptyTheCommittedDatabase();
+        DB::connection($this->defaultConnection)->statement('RESET lock_timeout');
 
         parent::tearDown();
     }

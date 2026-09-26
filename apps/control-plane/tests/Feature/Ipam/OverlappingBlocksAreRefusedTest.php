@@ -125,9 +125,11 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
         $this->register($pool, '203.0.113.0/24')->assertCreated();
 
         // Both normalise to the block already held. A rule comparing the raw
-        // string passed them both on to the table's unique index, which
-        // answered with a 500.
-        foreach (['203.0.113.7/24', ' 203.0.113.0/24 '] as $spelling) {
+        // string passed them on to the table's unique index, which answered
+        // with a 500. (Surrounding whitespace is not a spelling worth a row
+        // here: the framework trims request strings before any rule reads
+        // them, so it arrives as an exact repeat.)
+        foreach (['203.0.113.7/24', '203.0.113.200/24'] as $spelling) {
             $this->assertRefusedOver($this->register($pool, $spelling), '203.0.113.0/24', 'north-public', 'kw-north');
         }
 
@@ -261,6 +263,15 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
         $this->register($north, '10.20.30.0/24')->assertCreated();
 
         $this->assertRefusedOver($this->register($south, '10.0.0.0/7'), '10.20.30.0/24', 'north-private', 'kw-north');
+
+        // And the other way round: the straddle already held, a private block
+        // arriving inside it. Both sides are classified, not only the new one.
+        $east = $this->pool('kw-east', IpPoolScope::Private, 'east-private');
+        $west = $this->pool('kw-west', IpPoolScope::Private);
+
+        $this->register($east, '172.0.0.0/11')->assertCreated();
+
+        $this->assertRefusedOver($this->register($west, '172.16.5.0/24'), '172.0.0.0/11', 'east-private', 'kw-east');
     }
 
     // ---- the scan ----------------------------------------------------------

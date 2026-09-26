@@ -188,7 +188,10 @@ final readonly class Cidr implements Stringable
      * Two CIDR blocks either nest or are disjoint — they cannot partly
      * overlap — so they share an address exactly when they agree on the bits
      * the shorter prefix fixes. Blocks of different families never overlap:
-     * ::/0 and 0.0.0.0/0 are two address spaces, not a containment.
+     * ::/0 and 0.0.0.0/0 are two address spaces, not a containment. (The
+     * masked comparison would reach the same answer on its own, because a v4
+     * and a v6 network address never print alike; the check states it rather
+     * than leaving it to how addresses are printed.)
      */
     public function overlaps(self $other): bool
     {
