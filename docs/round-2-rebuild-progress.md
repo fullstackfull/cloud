@@ -22,7 +22,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | Finding | Sev | Status | Commit |
 |---|---|---|---|
 | F-04 | Critical | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected a contact-address fallback that skipped a blank billing address — fixed); merged with F-04 × F-15 | `50edbe1` |
-| F-13 | Critical | rebuilt + merged; rounds 1–3 REJECTED only on completeness claims of its source-reading gates (a new escape each round, none present in the tree); final round under the ledger's occupancy precedent running | `79b6b13` |
+| F-13 | Critical | **UPHELD WITH RESERVATIONS** (round 4, under the ledger's occupancy precedent; rounds 1–3 rejected only its source-reading gates' completeness claims — cheap escapes fixed, the rest narrowed with measured occupancy); merged | `776c5d8` |
 | F-14 | Critical | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 10 reservations); merged | `b2f33d1` |
 | F-08 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); merged | `6f605da` |
 | F-11 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 6 reservations); merged; closes F-24 DNS limb | `d69856a` |
@@ -33,7 +33,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-19 | High | **UPHELD WITH RESERVATIONS** by independent verification (round 1, 0 blocking, 7 reservations); merged | `45d53af` |
 | F-20 | High | in progress (rebuild → independent verification) | |
 | F-21 | High | in progress (rebuild → independent verification) | |
-| F-22 | High | rebuilt + merged; rounds 1–3 REJECTED only on the route-walk gate's model of Alertmanager/Prometheus/Loki (a new divergence each round, none present in the tree); final round under the occupancy precedent running | `bb1c77e` |
+| F-22 | High | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected only the route-walk gate's model of Alertmanager/Prometheus/Loki — empty-label, Loki-flag and duplicate-key gaps fixed, sentences narrowed); merged | `42b1d71` |
 | F-23 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged; nine F-19 excuses retired at F-19's merge | `5ae2e58` |
 | F-24 | High | queued | |
 | F-41 | High | queued (last: changes the test harness) | |
