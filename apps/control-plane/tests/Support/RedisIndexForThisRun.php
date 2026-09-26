@@ -24,14 +24,18 @@ use RuntimeException;
  * read `4.5` as 4, because `is_numeric('4.5')` is true.
  *
  * So the rule lives here, once, and distinguishes the two cases the old line
- * merged:
+ * merged, and refuses both:
  *
- *  - **Absent** returns the caller's fallback. A runner that never set the
- *    variable made no claim about isolation; it gets the suite's default.
- *    Under this repository's `phpunit.xml` the variable is never absent — the
- *    file pins `REDIS_DB` as a default an exported value overrides — so the
- *    fallback is reached only by a runner that does not use that file, such as
- *    `vendor/bin/phpunit -c <a copy without the entry>`.
+ *  - **Absent** — neither exported nor in `.env.testing` — throws. A run that
+ *    names no index has not chosen one, and a suite that empties a whole
+ *    index must not pick one for it: the old fallback, 15, was where every
+ *    forgetful run landed on top of every other, and the default of 0 that
+ *    phpunit.xml later supplied was the application's own index. The
+ *    precedence that decides whether the variable is present is written in
+ *    phpunit.xml's comment and measured by
+ *    `ThePhpunitPinsHoldAgainstAnExportedVariableTest`: exported, then
+ *    `.env.testing`, then nothing. `.env.testing.example` names one, so a
+ *    checkout made from it has one.
  *  - **Set and not a non-negative integer written in digits** throws. A runner
  *    that set it unreadably made a claim about isolation that is false, and
  *    the place to say so is here, before anything is flushed. That includes
@@ -43,22 +47,26 @@ final class RedisIndexForThisRun
 {
     public const string VARIABLE = 'REDIS_DB';
 
-    /** The index this run owns, or `$fallback` when nothing names one. */
-    public static function resolve(int $fallback): int
+    /** The index this run owns; refuses when nothing names one. */
+    public static function resolve(): int
     {
-        return self::from(Env::getRepository()->get(self::VARIABLE), $fallback);
+        return self::from(Env::getRepository()->get(self::VARIABLE));
     }
 
     /** The same rule over a value already read, for the tests that pin it. */
-    public static function from(?string $configured, int $fallback): int
+    public static function from(?string $configured): int
     {
         if ($configured === null) {
-            return $fallback;
+            throw new RuntimeException(sprintf(
+                '%s is set nowhere: not exported and not in .env.testing. A suite that empties its Redis database refuses to choose one for this run: export %s=<n>, or add it to .env.testing.',
+                self::VARIABLE,
+                self::VARIABLE,
+            ));
         }
 
         if (preg_match('/\A[0-9]+\z/', $configured) !== 1) {
             throw new RuntimeException(sprintf(
-                '%s is set to "%s", which is not a Redis database index. A suite that empties its Redis database refuses to guess which one this run owns: set it to a whole number, or unset it.',
+                '%s is set to "%s", which is not a Redis database index. A suite that empties its Redis database refuses to guess which one this run owns: set it to a whole number.',
                 self::VARIABLE,
                 $configured,
             ));

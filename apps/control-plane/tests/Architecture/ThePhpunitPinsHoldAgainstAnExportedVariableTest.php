@@ -113,7 +113,24 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
         'DB_DATABASE',
         'DB_USERNAME',
         'DB_URL',
+    ];
+
+    /**
+     * Where the suite's Redis lives: chosen by the run, and named nowhere in
+     * phpunit.xml.
+     *
+     * An entry there, even an unforced default, is applied before dotenv, and
+     * dotenv never overwrites; so a `REDIS_DB` in `.env.testing` never reached
+     * a run while `REDIS_PORT` (never in phpunit.xml) did, and one connection
+     * took its port and its index from two different places. Every checkout
+     * that isolated itself through `.env.testing` then shared index 0 of its
+     * port — the index the two flushing suites empty before every test.
+     *
+     * @var list<string>
+     */
+    private const array LEFT_TO_THE_RUN = [
         'REDIS_DB',
+        'REDIS_PORT',
     ];
 
     #[Test]
@@ -248,6 +265,35 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
     }
 
     /**
+     * The precedence for the Redis address, measured through PHPUnit's own
+     * handler and dotenv in a clean child: an exported value wins; otherwise
+     * `.env.testing`'s; otherwise nothing, and the suites that flush Redis
+     * refuse ({@see RedisIndexForThisRun}).
+     */
+    #[Test]
+    public function the_redis_address_is_the_exported_one_then_env_testings_and_never_phpunit_xmls(): void
+    {
+        foreach (self::LEFT_TO_THE_RUN as $name) {
+            $this->assertArrayNotHasKey($name, self::pins('env'), "{$name} must not be in phpunit.xml at all: an <env> there is applied before dotenv, so .env.testing's {$name} would never reach a run.");
+            $this->assertArrayNotHasKey($name, self::pins('server'), "{$name} must not be in phpunit.xml at all.");
+        }
+
+        $dotenv = ['REDIS_DB' => '12', 'REDIS_PORT' => '6390'];
+
+        $fromTheFile = self::throughPhpunit([], $dotenv);
+        $exported = self::throughPhpunit(['REDIS_DB' => '7', 'REDIS_PORT' => '6391'], $dotenv);
+        $neither = self::throughPhpunit([], []);
+
+        foreach (self::LEFT_TO_THE_RUN as $name) {
+            $this->assertSame($dotenv[$name], $fromTheFile[$name]['laravel'], "A {$name} in .env.testing must reach env() when nothing is exported.");
+            $this->assertSame($dotenv[$name], $fromTheFile[$name]['getenv'], "A {$name} in .env.testing must reach getenv(), which a worker subprocess inherits.");
+            $this->assertNotSame($dotenv[$name], $exported[$name]['laravel'], "An exported {$name} must win over .env.testing's.");
+            $this->assertSame($exported[$name]['getenv'], $exported[$name]['laravel'], "An exported {$name} must be what env() and getenv() both read.");
+            $this->assertNull($neither[$name]['laravel'], "With {$name} neither exported nor in .env.testing, nothing may supply one.");
+        }
+    }
+
+    /**
      * The `<env>` or `<server>` entries of phpunit.xml's `<php>` block.
      *
      * @return array<string, array{value: string, force: bool}>
@@ -298,7 +344,7 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
         }
         file_put_contents($directory.'/.env.testing', $lines);
 
-        $names = [...self::MUST_NOT_YIELD, ...self::MUST_YIELD];
+        $names = [...self::MUST_NOT_YIELD, ...self::MUST_YIELD, ...self::LEFT_TO_THE_RUN];
 
         $code = <<<'PHP'
             [, $autoload, $configuration, $directory, $names] = $argv;
