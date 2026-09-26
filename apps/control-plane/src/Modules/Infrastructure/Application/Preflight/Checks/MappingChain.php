@@ -15,6 +15,7 @@ use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckCategory;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\EvidenceClass;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
 use Lynomia\Modules\Infrastructure\Infrastructure\Models\ManagedServer;
+use Lynomia\Modules\Ipam\Domain\Services\IpAllocator;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use Lynomia\Modules\Shared\Domain\Enums\BlockerReason;
@@ -81,8 +82,13 @@ final readonly class MappingChain
 
     /**
      * Compute: a cluster that takes placement, a node that can hold something,
-     * storage that can hold a disk, a template that can be installed, and
-     * addresses to give out.
+     * storage that can hold a disk, a template that can be installed, and an
+     * active address pool — which is less than an address to give out, and
+     * {@see self::addressFinding()} says by how much.
+     *
+     * The chain stops after the cluster check when no cluster takes
+     * placement, and that finding fails. On every other path it emits all six
+     * checks.
      *
      * @return list<PreflightFinding>
      */
@@ -165,23 +171,42 @@ final readonly class MappingChain
         $findings[] = $this->capacityFinding($nodes, $storages, $target);
 
         // ---- template -------------------------------------------------------
+        $findings[] = $this->templateFinding($target);
+
+        // ---- addresses ------------------------------------------------------
         /*
-         * Installable, and separately: active but with no name the cluster
-         * knows it by.
-         *
-         * `scopeInstallable` already requires a provider reference, which is
-         * the platform refusing to consider such a template buildable — so
-         * counting both tells the operator which of two different things to
-         * do. "No template is mapped" means map one. "Three are mapped and
-         * none carries a provider reference" means go and read the identifier
-         * off the cluster, because nothing in this platform invents one, and a
-         * template the hypervisor has no name for fails at build time, per
-         * order, which is the worst possible moment.
+         * Asked whatever the template check found. It used to sit below that
+         * check's early return, so it was asked only when no template was
+         * installable — and an estate with an installable template and no
+         * address pool at all reported five passes and no sixth line. An
+         * absent check in a band that does not block reads exactly like a
+         * passing one, which is the one thing a preflight must never let it
+         * do. `APreflightNeverDropsACheckSilentlyTest` holds the rule.
          */
+        $findings[] = $this->addressFinding($target);
+
+        return $findings;
+    }
+
+    /**
+     * Installable, and separately: active but with no name the cluster knows
+     * it by.
+     *
+     * `scopeInstallable` already requires a provider reference, which is the
+     * platform refusing to consider such a template buildable — so counting
+     * both tells the operator which of two different things to do. "No
+     * template is mapped" means map one. "Three are mapped and none carries a
+     * provider reference" means go and read the identifier off the cluster,
+     * because nothing in this platform invents one, and a template the
+     * hypervisor has no name for fails at build time, per order, which is the
+     * worst possible moment.
+     */
+    private function templateFinding(string $target): PreflightFinding
+    {
         $templates = VmTemplate::query()->installable()->get();
 
         if ($templates->isNotEmpty()) {
-            $findings[] = PreflightFinding::pass(
+            return PreflightFinding::pass(
                 'mapping.template',
                 CheckCategory::Mapping,
                 $target,
@@ -190,8 +215,6 @@ final readonly class MappingChain
                     implode(', ', $templates->take(5)->map(fn (VmTemplate $t): string => $t->os_family->value.' '.$t->os_version)->values()->all())),
                 EvidenceClass::Configuration,
             );
-
-            return $findings;
         }
 
         $unreferenced = VmTemplate::query()
@@ -199,7 +222,7 @@ final readonly class MappingChain
             ->whereNull('provider_reference')
             ->count();
 
-        $findings[] = $unreferenced > 0
+        return $unreferenced > 0
             ? PreflightFinding::fail(
                 'mapping.template',
                 CheckCategory::Mapping,
@@ -217,11 +240,94 @@ final readonly class MappingChain
                 'No installable template is mapped, so nothing can be built.',
                 'Map a template and record the provider reference it is known by on the cluster.',
             );
+    }
 
-        // ---- addresses ------------------------------------------------------
-        $pools = IpPool::query()->count();
+    /**
+     * Whether any address pool is active.
+     *
+     * ===========================================================================
+     * ACTIVE POOLS, NOT POOL ROWS
+     * ===========================================================================
+     *
+     * `is_active` on a pool is the allocator's kill switch: switched off, the
+     * pool gives out no address whether the allocator is handed the pool or
+     * one of its subnets. Counting rows would pass an estate whose only pool
+     * is off — a green nothing earned, which is the shape of the skipped
+     * check this method replaced, one level down.
+     *
+     * ===========================================================================
+     * WHAT A PASS HERE DOES NOT SAY
+     * ===========================================================================
+     *
+     * That an address can be allocated. {@see IpAllocator::reserve()} asks
+     * more than this check does. The terms below were derived by walking that
+     * method from its first line and taking every path that throws or returns
+     * short, and each was run rather than read: an estate built to fail that
+     * one term, `mapping.network` read out of `infra:preflight`, then
+     * `reserve()` called on the same rows, beside a healthy estate that does
+     * allocate. It is an open list, of terms and not of estates, because one
+     * of them is not about the estate at all.
+     *
+     *   (a) The pool is active. The one term this check asks.
+     *
+     *   (b) A subnet in it is active. A pool with no subnet, or with only
+     *       inactive ones, passes here and is refused as exhausted. Handed a
+     *       subnet rather than a pool, the allocator wants that subnet and
+     *       its pool both active.
+     *
+     *   (c) Handed the pool, that subnet is IPv4. `subnetIdsFor()` filters on
+     *       `ip_version` in its pool branch and not in its subnet branch, so
+     *       an IPv6 subnet holding an available row is allocatable when named
+     *       and refused through its pool. Latent in this build: the only
+     *       insert into address rows in `src/` is `SeedSubnetAddresses`,
+     *       which refuses an IPv6 block, so reaching it takes a row written
+     *       by hand.
+     *
+     *   (d) The pool's scope may serve a customer — conditionally. When a
+     *       customer is named, a management pool is refused before any
+     *       address row is read. When none is named, `assertScopeMayServe()`
+     *       returns before its test, and a management pool serves the call.
+     *
+     *   (e) Enough rows in those subnets are `available` for the count asked
+     *       for. Nothing on the operator's route writes one: `RegisterSubnet`
+     *       creates the subnet and no address rows, and `SeedSubnetAddresses`
+     *       has one caller in `src/`, the reference topology loader for
+     *       simulation. A subnet that was never seeded, one whose rows are
+     *       all reserved, assigned, quarantined or unavailable, a /32 whose
+     *       one row is its own gateway, and one available row against an
+     *       order for two all pass here and are refused.
+     *
+     * And one term that is not about the estate: the allocator's read is
+     * `FOR UPDATE SKIP LOCKED`, so a row another transaction holds and has
+     * not committed is not a candidate. An order can be refused while enough
+     * committed rows sit `available`, because they are locked elsewhere. No
+     * reading of the estate, and no count of estates, can answer that one,
+     * which is why the list is of terms.
+     *
+     * Not asked here, on purpose. The terms live in the allocator's private
+     * methods, and this class asks the models' own questions rather than
+     * writing a second copy of anybody's rules — a copy would answer
+     * differently the first time either side changed, and the difference
+     * would surface on the order that failed. (e) also turns on the count an
+     * order asks for, which a preflight does not have. So a pass here means
+     * an active pool exists, and the summary says exactly that much.
+     */
+    private function addressFinding(string $target): PreflightFinding
+    {
+        $registered = IpPool::query()->count();
+        $active = IpPool::query()->active()->count();
 
-        $findings[] = $pools === 0
+        if ($active > 0) {
+            return PreflightFinding::pass(
+                'mapping.network',
+                CheckCategory::Mapping,
+                $target,
+                sprintf('%d of %d registered address pool(s) are active.', $active, $registered),
+                EvidenceClass::Configuration,
+            );
+        }
+
+        return $registered === 0
             ? PreflightFinding::fail(
                 'mapping.network',
                 CheckCategory::Mapping,
@@ -229,15 +335,13 @@ final readonly class MappingChain
                 'No address pool is registered, so a machine cannot be given an address.',
                 'Register an address pool and its subnets.',
             )
-            : PreflightFinding::pass(
+            : PreflightFinding::fail(
                 'mapping.network',
                 CheckCategory::Mapping,
                 $target,
-                sprintf('%d address pool(s) are registered.', $pools),
-                EvidenceClass::Configuration,
+                sprintf('%d address pool(s) are registered and none of them is active, so a machine cannot be given an address.', $registered),
+                'Return an address pool to active, or register one that is.',
             );
-
-        return $findings;
     }
 
     /**

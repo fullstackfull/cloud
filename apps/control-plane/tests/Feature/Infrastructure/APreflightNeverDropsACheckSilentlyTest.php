@@ -66,18 +66,18 @@ use Tests\TestCase;
  * The constant is not self-checking, and the qualification matters: a check
  * somebody adds to a chain without adding it here is named by the first
  * assertion only for a product that some shape below names, and only on a
- * shape that reaches the new check. The six products the prepared arm serves
- * are named once, by DNS, whose arm reads nothing and so needs no fixture —
- * which is exactly why it was easy to leave out, and why dropping
- * `mapping.none` used to leave every test here green. The other five share
- * that arm and are named by no shape.
+ * shape that reaches the new check. The prepared arm serves six products and
+ * one shape names one of them, DNS. That arm reads nothing, so the shape
+ * needs no fixture — which is exactly why it was easy to leave out, and
+ * without it, dropping `mapping.none` would leave every test here green. The
+ * other five products on that arm are named by no shape.
  *
  * The rule is also checked for being live: every product a shape names must
  * reach a band that does not block in at least one shape, or the third
  * assertion would never have run for it and would prove nothing.
  *
  * ===========================================================================
- * THE INVENTORY: WHERE A CHECK IS ABSENT, AND WHY NONE OF IT IS SILENT
+ * THE INVENTORY: EVERY PLACE A CHECK CAN BE ABSENT, AND WHAT SAYS SO
  * ===========================================================================
  *
  * The good idiom is {@see ProviderChain}'s: a chain that stops records every
@@ -118,6 +118,11 @@ use Tests\TestCase;
  *   - `DependencyChain::backups()` returns without
  *     `dependency.backup_verification` when collecting the metrics registry
  *     throws, having recorded `dependency.backup_metrics` as `not_tested`.
+ *     It is the one exit in this list that can leave a check out of a band
+ *     that does not block without saying which: `monitoring()` collects the
+ *     registry again and reports `dependency.monitoring` as a failure only
+ *     if that throws too. The registry catches each collector's own throw,
+ *     so neither is easy to reach. Recorded, not changed here.
  *   - The service's own wrappers: a target whose checks throw becomes one
  *     `preflight.check_failed` (fail), and a provider reached after the
  *     deadline becomes one `preflight.deadline` (`not_tested`) naming the
