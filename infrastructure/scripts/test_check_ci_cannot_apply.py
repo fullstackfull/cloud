@@ -176,8 +176,12 @@ CASES: list[tuple[str, dict[str, str] | None, str | tuple[str, ...] | None]] = [
     ),
     # F-38. The gate used to skip, before inspecting anything, every step whose
     # body merely CONTAINED its own file name -- and it did so before stripping
-    # comments, so a comment was enough. The four cases below each went green
-    # over an apply while the exemption stood.
+    # comments, so a comment was enough. Measured against that version: the
+    # first two cases below went green over an apply. The third went red, but
+    # only by accident -- both of its steps were skipped, nothing was
+    # inspected, and the empty-subject refusal fired without either apply
+    # being named. The fourth holds no apply; it pins that an empty `run:` is
+    # not counted as a step inspected.
     (
         "a comment naming this gate does not exempt the apply below it",
         {
@@ -264,6 +268,73 @@ jobs:
         "inspected no run steps",
     ),
     ("no workflow directory at all is refused", None, "no workflow files found"),
+    # F-38, round five. OpenTofu and Terraform take global options before the
+    # subcommand, so `tofu -chdir=deploy apply` applies exactly as `tofu apply`
+    # does -- and matched no pattern here.
+    (
+        "`tofu -chdir=... apply` is caught",
+        {"ci.yml": step("tofu -chdir=deploy apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "`terraform -chdir=... destroy` is caught",
+        {"ci.yml": step("terraform -chdir=deploy destroy -auto-approve")},
+        "destroys OpenTofu resources",
+    ),
+    (
+        "a quoted -chdir holding a space does not hide the apply after it",
+        {"ci.yml": step("tofu -chdir='deploy dir' apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "`tofu -chdir=... validate` is not an apply",
+        {"ci.yml": step("tofu -chdir=infrastructure/tofu validate")},
+        None,
+    ),
+    # F-38, round five. The check-mode test used to look for `--check`
+    # anywhere later on the same line, so a check flag belonging to the NEXT
+    # command -- or to no command at all -- excused a real playbook run.
+    (
+        "a --check in a later command does not excuse the playbook before it",
+        {"ci.yml": step("ansible-playbook -i inventories/staging playbooks/control-plane.yml && echo \"no --check needed\"")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a bare --check belonging to the next command does not excuse the playbook",
+        {"ci.yml": step("ansible-playbook -i inventories/staging playbooks/control-plane.yml && echo --check")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a --check inside a quoted argument is not check mode",
+        {"ci.yml": step("ansible-playbook -i hosts.yml site.yml -e \"msg=run --check later\"")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a separator inside a quoted argument does not end the command",
+        {"ci.yml": step("ansible-playbook -i hosts.yml site.yml -e \"a=1;b=2\" --check")},
+        None,
+    ),
+    (
+        "a --check in a trailing comment is not check mode",
+        {
+            "ci.yml": GOOD
+            + """      - name: the step under test
+        run: |
+          ansible-playbook -i hosts.yml site.yml  # --check is for cowards
+"""
+        },
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a second playbook run without --check is caught beside one with it",
+        {"ci.yml": step("ansible-playbook site.yml --check; ansible-playbook site.yml")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "ansible-playbook --check followed by another command is still check mode",
+        {"ci.yml": step("ansible-playbook -i hosts.yml site.yml --check && echo done")},
+        None,
+    ),
 ]
 
 
@@ -272,7 +343,7 @@ jobs:
 # exists to refuse. The count is literal source in this file, maintained by
 # whoever edits the table, so adding or removing a case is a deliberate edit
 # of this number too.
-EXPECTED_CASES = 21
+EXPECTED_CASES = 32
 
 
 def main() -> int:
