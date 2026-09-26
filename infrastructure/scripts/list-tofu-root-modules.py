@@ -33,18 +33,21 @@ calls is printed as a root of its own, so a module left behind by a refactor
 is still validated, standalone.
 
 LOCAL_SOURCE is a pattern, not an HCL parser: it takes any `source = "./..."`
-or `source = "../..."` on a line that does not begin with `#` or `//` and is
-not inside a heredoc (`<<EOT` or `<<-EOT` ending a line, through the line
-holding only `EOT`). A call commented out inside a `/* */` block, or after
-code on the same line, is still read as a call; it would make its module look
-called, and if nothing else called it, the module would be refused below as
-reached from no root rather than dropped. The self-test pins these readings.
+or `source = "../..."` left once code_text has removed what HCL does not read
+as code -- comments (`#` and `//` to the end of the line, `/* */` blocks,
+wherever they stand outside a quoted string) and heredoc bodies. So a call
+commented out is not a call: the module it names is a root of its own, and
+validated, rather than counted as reached through a root that never loads it.
+A `#`, `//` or `/*` inside a quoted string is text. A `source = "./..."`
+written as an attribute outside a `module` block is still read as a call.
+The self-test pins these readings.
 
 What it refuses
 ---------------
 Exit status 1, printing nothing to stdout, when infrastructure/tofu holds no
 configuration at all, when it holds a symbolic link to a directory, when a
-local `source` names a directory that holds none, or when a module is reached
+configuration file holds a `/*` never closed or one inside another block
+comment, when a local `source` names a directory that holds none, or when a module is reached
 from no root -- modules that call only each other, which no validate would
 ever load, whether or not a real root stands beside them. An empty answer would give the validate step nothing to run, which is
 the silent pass this exists to end. Otherwise exit 0 and one root per line,
@@ -66,26 +69,86 @@ CONFIGURATION_SUFFIXES = (".tf", ".tofu", ".tf.json", ".tofu.json")
 # `source = "./modules/x"` or `source = "../x"`, anywhere in the text.
 LOCAL_SOURCE = re.compile(r"""\bsource\s*=\s*"(\.\.?/[^"]*)\"""")
 # A heredoc opening at the end of a line: `<<EOT` or `<<-EOT`.
-HEREDOC = re.compile(r"<<-?\s*([A-Za-z_][A-Za-z0-9_]*)\s*$")
+HEREDOC = re.compile(r"<<-?\s*([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:\n|$)")
+
+
+class CommentError(ValueError):
+    """A block comment this cannot read as HCL does."""
 
 
 def code_text(text: str) -> str:
-    """`text` without whole-line `#` and `//` comments and heredoc bodies."""
-    kept: list[str] = []
-    closing: str | None = None
-    for line in text.splitlines():
+    """`text` with HCL's comments and heredoc bodies removed.
+
+    Read as HCL's native syntax reads it: `#` and `//` start a comment to the
+    end of the line, and `/*` one to the next `*/`, wherever they stand
+    outside a quoted string -- a comment after code on the same line
+    included. Inside a quoted string, and in the `${...}` or `%{...}` of one,
+    they are text; a string's backslash escapes are followed. A heredoc
+    (`<<EOT` or `<<-EOT` ending a line) is dropped through the line holding
+    only its marker. Raises CommentError on a `/*` never closed, and on a
+    `/*` inside a block comment: HCL ends the comment at the first `*/` and
+    leaves the rest as code, and reading that shape any way at all here
+    would be a guess.
+    """
+    out: list[str] = []
+    stack: list[str] = []  # "string", or "brace" for a { opened in code or a template
+    closing: str | None = None  # the marker of the heredoc being skipped
+    at = 0
+    while at < len(text):
         if closing is not None:
+            end = text.find("\n", at)
+            line = text[at:] if end < 0 else text[at:end]
+            at = len(text) if end < 0 else end + 1
             if line.strip() == closing:
                 closing = None
+                out.append("\n")
             continue
-        if line.lstrip().startswith(("#", "//")):
+        char, pair = text[at], text[at:at + 2]
+        if stack and stack[-1] == "string":
+            if char == "\\":
+                out.append(text[at:at + 2])
+                at += 2
+            elif pair in ("${", "%{"):
+                stack.append("brace")
+                out.append(pair)
+                at += 2
+            elif char == '"':
+                stack.pop()
+                out.append(char)
+                at += 1
+            else:
+                out.append(char)
+                at += 1
             continue
-        opened = HEREDOC.search(line)
-        if opened:
-            closing = opened.group(1)
-            line = line[: opened.start()]
-        kept.append(line)
-    return "\n".join(kept)
+        if char == "#" or pair == "//":
+            end = text.find("\n", at)
+            at = len(text) if end < 0 else end
+            continue
+        if pair == "/*":
+            end = text.find("*/", at + 2)
+            if end < 0:
+                raise CommentError("an unterminated /* comment")
+            if "/*" in text[at + 2:end]:
+                raise CommentError("a nested /* comment")
+            out.append("\n" * text.count("\n", at, end))
+            at = end + 2
+            continue
+        if pair == "<<":
+            opened = HEREDOC.match(text, at)
+            if opened:
+                closing = opened.group(1)
+                out.append("\n")
+                at = opened.end()
+                continue
+        if char == '"':
+            stack.append("string")
+        elif char == "{":
+            stack.append("brace")
+        elif char == "}" and stack:
+            stack.pop()
+        out.append(char)
+        at += 1
+    return "".join(out)
 
 
 def configuration_files(directory: Path) -> list[Path]:
@@ -144,7 +207,12 @@ def root_modules(repo_root: Path) -> tuple[list[Path], list[str]]:
     calls: dict[Path, set[Path]] = {directory: set() for directory in modules}
     for directory, files in modules.items():
         for path in files:
-            for source in local_sources(path):
+            try:
+                sources = local_sources(path)
+            except CommentError as error:
+                problems.append(f"{path.relative_to(repo_root)} holds {error}; its calls cannot be read")
+                continue
+            for source in sources:
                 target = (directory / source).resolve()
                 if target not in modules:
                     problems.append(

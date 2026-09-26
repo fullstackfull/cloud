@@ -57,6 +57,9 @@ module "dns" {
 
 MODULE = 'variable "name" {\n  type = string\n}\n'
 
+# The root calling the vm module only.
+ONLY_VM = 'module "vm" {\n  source = "./modules/vm"\n}\n\n'
+
 # This repository's shape: a root with two modules, and environment
 # directories holding only templates.
 LAYOUT = {
@@ -129,13 +132,64 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
             '  source = "./modules/dns"', '  # source = "./modules/dns"')}),
         ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
     ),
+    # A call that is commented out is not a call, wherever the comment is: the
+    # module it names is then a root of its own and validated, not counted as
+    # reached through a root that never loads it (B2).
     (
-        # The limit the script's docstring states: a /* */ block is not read
-        # as a comment, so the call inside it still counts.
-        "a call inside a /* */ block is still read as a call",
+        "a call inside a /* */ block leaves its module a root of its own",
         with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ROOT_MAIN.replace(
             'module "dns" {', '/*\nmodule "dns" {').rstrip() + "\n*/\n"}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    (
+        "a call after a trailing # leaves its module a root of its own",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  z = 1 # source = "./modules/dns"\n}\n'}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    (
+        "a call after a trailing // leaves its module a root of its own",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  z = 1 // source = "./modules/dns"\n}\n'}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    (
+        "a one-line /* */ block holding a call leaves its module a root of its own",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + '/* module "dns" { source = "./modules/dns" } */\n'}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    # Inside a quoted string none of the three starts a comment: each line
+    # below still names ./modules/dns after the marker, so dns stays called.
+    (
+        "a # inside a quoted string is not a comment",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  m = { note = "a # b", source = "./modules/dns" }\n}\n'}),
         ["infrastructure/tofu"], "",
+    ),
+    (
+        "a // inside a quoted string is not a comment",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  m = { note = "https://x", source = "./modules/dns" }\n}\n'}),
+        ["infrastructure/tofu"], "",
+    ),
+    (
+        "a /* inside a quoted string is not a comment",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ONLY_VM
+                              + 'locals {\n  m = { note = "a /* b", source = "./modules/dns" }\n}\n'}),
+        ["infrastructure/tofu"], "",
+    ),
+    (
+        "an unterminated /* block is refused",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ROOT_MAIN + "/* never closed\n"}),
+        None, "unterminated /* comment",
+    ),
+    (
+        # HCL ends a block comment at the first */, so an inner /* is text and
+        # the outer */ is left over; reading it any way would be a guess.
+        "a nested /* block is refused",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ROOT_MAIN + "/* a /* b */ c */\n"}),
+        None, "nested /* comment",
     ),
     (
         "a call to a directory with no configuration is refused",
