@@ -91,3 +91,23 @@ remain `No`.
 
 **`SOFTWARE_CODE_COMPLETE = NO`.** `30B.0-E = NOT READY`; every `REAL_*` and
 `READY_TO_SELL` = `NONE`.
+
+## Round three — fixing what the re-audit found
+
+Ten groups, each fixed on `round3/NN` with a failing test first, then an
+independent verifier (repair and re-verify until upheld), then merged; a fresh
+independent re-audit follows. The specification is
+`docs/final-independent-re-audit-after-round-2.md`.
+
+| Group | Scope | Status | Commit |
+|---|---|---|---|
+| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | fixing | |
+| 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | fixing | |
+| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | fixing | |
+| 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | fixing | |
+| 05 | F-16 `--env` disarms production guards; operator RBAC (role removal, permission emptying, invite atomicity, bootstrap promotion); F-03 test; EndpointPolicy 5f00::/16 | fixing | |
+| 06 | F-26 empty reserved-zone default and preflight wording; I-3 customer blamed for operator misconfiguration | queued | |
+| 07 | F-20 false rebuild label; F-42 vitest under load; F-21 gate budget | queued | |
+| 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | queued | |
+| 09 | F-38 `tofu validate` on no configuration; validator empty subjects and stale docstrings; CI grep exit codes | queued | |
+| 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | queued | |
