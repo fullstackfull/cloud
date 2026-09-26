@@ -530,6 +530,51 @@ final class AnAccountHolderHearsAboutTheirOwnAccountTest extends TestCase
         $this->assertCount(1, $this->told($user, NotificationType::PasswordChanged));
     }
 
+    #[Test]
+    public function a_failure_after_the_callers_commit_is_not_thrown_into_the_caller(): void
+    {
+        /*
+         * Announced after a transaction commits, the failure surfaces from
+         * that commit — inside the caller's DB::transaction() call, after
+         * its work is durable. It must be reported there, not thrown, or the
+         * caller answers 500 for a change that has already been made.
+         */
+        Exceptions::fake();
+        [, $user] = $this->account();
+        $this->tellingThemFails();
+
+        DB::transaction(static function () use ($user): void {
+            $user->forceFill(['name' => 'Changed in the same transaction'])->save();
+
+            app(NotifyAboutAccountSecurity::class)->passwordChanged($user);
+        });
+
+        $this->assertSame('Changed in the same transaction', $user->fresh()?->name);
+        $this->assertSame(0, Notification::query()->count());
+        $this->assertTheFailureWasReported();
+    }
+
+    #[Test]
+    public function an_announcement_that_cannot_even_be_registered_is_reported_not_thrown(): void
+    {
+        // A connection with nothing to register an after-commit callback
+        // with refuses to take one; that refusal is the announcement failing
+        // too, and is reported like any other.
+        Exceptions::fake();
+        [, $user] = $this->account();
+        $connection = DB::connection();
+        $connection->unsetTransactionManager();
+
+        try {
+            app(NotifyAboutAccountSecurity::class)->passwordChanged($user);
+        } finally {
+            $connection->setTransactionManager(app('db.transactions'));
+        }
+
+        $this->assertSame(0, Notification::query()->count());
+        Exceptions::assertReported(RuntimeException::class);
+    }
+
     // ---- plumbing ----------------------------------------------------------
 
     /**
