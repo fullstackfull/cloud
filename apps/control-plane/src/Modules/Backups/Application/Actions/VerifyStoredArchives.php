@@ -219,6 +219,16 @@ final readonly class VerifyStoredArchives
              */
             'provider_task_id' => $operation->taskId,
             'verification_task_id' => $operation->taskId,
+            /*
+             * The clock this verification is measured on. The poller gives up
+             * `backups.max_poll_hours` after this, and it used to measure from
+             * the archive's own `started_at` instead — so every archive older
+             * than the window that this sweep sent for verification was handed
+             * to a person on its first poll, and stopped being restorable
+             * (F-09). Not `verification_requested_at`: that is this sweep's
+             * ordering key and is written for a refused attempt as well.
+             */
+            'verification_started_at' => now(),
             'last_polled_at' => null,
             'poll_count' => 0,
             // Cleared: the row is in flight again, and a reason left over from

@@ -131,6 +131,10 @@ enum BackupState: string
      * Nothing transitions out of `Failed`. A failed backup is not repaired; a
      * new one is taken, as a new row, so the failure stays visible in history.
      *
+     * Nothing the platform does on its own transitions out of `NeedsReview`
+     * either, which is why it is empty here. A person can: {@see self::afterReview()}
+     * is the one way out, and it is narrower than this table on purpose.
+     *
      * @return list<self>
      */
     public function allowedNext(): array
@@ -161,6 +165,37 @@ enum BackupState: string
             self::Deleted => [],
 
             self::Failed, self::NeedsReview => [],
+        };
+    }
+
+    /**
+     * Where a person's verdict takes a row that went to review from $interrupted.
+     *
+     * Only the two operations that act on an archive already known to exist
+     * have an answer. A restore or a verification that the platform lost
+     * track of was working on a good archive, and leaving that archive in
+     * `NeedsReview` for ever — which is what an old archive's restore used to
+     * cause on its first poll (F-09) — makes a backup the customer is paying
+     * for permanently unrestorable. Each has exactly the two endings the
+     * reconciler would have written had it seen the task finish:
+     *
+     *  - a restore that completed is `Restored`; one that did not leaves the
+     *    archive intact, back at `Succeeded`;
+     *  - a verification that read the archive back is `Verified`; one that
+     *    could not is `Failed`, the same verdict a failed verification task
+     *    writes.
+     *
+     * A backup that never reported its archive, and a deletion whose outcome
+     * is unknown, answer null. Settling either needs facts a verdict does not
+     * carry — which archive, whether it is still on the datastore — so they
+     * stay in front of a person rather than being waved through by one.
+     */
+    public static function afterReview(self $interrupted, bool $completed): ?self
+    {
+        return match ($interrupted) {
+            self::Restoring => $completed ? self::Restored : self::Succeeded,
+            self::Verifying => $completed ? self::Verified : self::Failed,
+            default => null,
         };
     }
 

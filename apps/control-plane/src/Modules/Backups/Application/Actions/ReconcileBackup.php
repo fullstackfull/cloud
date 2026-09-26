@@ -32,6 +32,17 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * front of a person, and is the only outcome that resolves the question of
  * whether the archive is there.
  *
+ * The window is measured from when the operation the row is waiting on
+ * started, and from nothing else: `started_at` for the backup itself,
+ * `restore_started_at` for a restore, `verification_started_at` for a
+ * verification. It used to be measured from the archive's `started_at` for
+ * all three. Restoring a backup taken three days ago is the normal case, so a
+ * restore that had been running for seconds was read as seventy-two hours
+ * overdue on its first poll and handed to a person with a reason that said it
+ * had run for twelve; the scheduled verification sweep did the same to every
+ * archive older than the window (F-09). The reason written now names the
+ * operation and the hours it actually ran.
+ *
  * A poll that itself times out changes nothing at all. The row is left where
  * it is and asked again later: not knowing what a task is doing is the normal
  * condition of a poller, and turning one unanswered read into a state change
@@ -88,9 +99,12 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * saying nothing at all, which is what both did until recently, leaves a
  * customer relying on an archive that may not exist.
  *
- * A failed verification is the one ending that still borrows nothing and adds
- * nothing: its verdict is `BackupVerificationFailed`, which is about the data
- * rather than about the operation.
+ * A failed verification borrows nothing either: its verdict is
+ * `BackupVerificationFailed`, which is about the data rather than about the
+ * operation. A verification the platform lost track of is not a verdict, and
+ * is not announced as one — but it has just made the archive unrestorable in
+ * the portal until a person looks, so the customer is told that much, in the
+ * backup's own needs-review words.
  */
 final readonly class ReconcileBackup
 {
@@ -288,7 +302,11 @@ final readonly class ReconcileBackup
          * Readable gets none at all — a customer does not need telling that a
          * check they never asked for passed. And a verification that could not
          * be run reaches NeedsReview with `verified` still null, which is not
-         * a verdict and must not be announced as one.
+         * a verdict and must not be announced as one. It is announced as what
+         * it is — the platform could not confirm the state of this backup —
+         * because until a person settles it the archive is no longer offered
+         * for restore, and a customer who is not told finds that out on the
+         * day they need it.
          *
          * A backup has three endings of its own, and the third one used to be
          * silence for want of a word. `NeedsReview` is not a failure: nothing
@@ -308,11 +326,15 @@ final readonly class ReconcileBackup
                     BackupState::Restored => 'restored',
                     BackupState::NeedsReview => 'needs_review',
                     default => 'failed',
-                }),
+                }, $backup->restore_started_at?->toIso8601String()),
             ],
             $operation === BackupState::Verifying && $backup->verified === false => [
                 NotificationType::BackupVerificationFailed,
                 BackupNotificationKey::verificationFailed($id),
+            ],
+            $operation === BackupState::Verifying && $landed === BackupState::NeedsReview => [
+                NotificationType::BackupNeedsReview,
+                BackupNotificationKey::verificationNeedsReview($id, $backup->verification_task_id),
             ],
             in_array($operation, [BackupState::Requested, BackupState::Running], true) => [
                 match ($landed) {
@@ -403,22 +425,51 @@ final readonly class ReconcileBackup
     }
 
     /**
-     * The row has been in flight longer than the platform is willing to track.
+     * The operation this row is waiting on has run longer than the platform is
+     * willing to track.
+     *
+     * Measured from when THAT operation started. See the class docblock for
+     * what measuring every operation from the archive's own clock did.
      */
     private function giveUpIfOverdue(Backup $backup, BackupState $operation): Backup
     {
         $limit = max(1, (int) config('backups.max_poll_hours', 12));
 
-        $startedAt = $backup->started_at ?? $backup->created_at;
+        [$what, $stamp] = match ($operation) {
+            BackupState::Restoring => ['restore', $backup->restore_started_at],
+            BackupState::Verifying => ['verification', $backup->verification_started_at],
+            // A backup still `Requested` has no provider start yet; the row
+            // was written when it was asked for, which is its start.
+            default => ['backup', $backup->started_at ?? $backup->created_at],
+        };
+
+        /*
+         * A row with no start stamp for its operation is one nothing in this
+         * module writes any more (the migration that added the verification
+         * stamp backfilled the rows already in flight). The row's own creation
+         * is the only clock left, and the reason says that is what was read.
+         */
+        $startedAt = $stamp ?? $backup->created_at;
 
         if ($startedAt->addHours($limit)->isFuture()) {
             return $backup;
         }
 
-        return $this->quarantine($backup, $operation, sprintf(
-            'the provider task was still unfinished after %d hours; the platform has stopped tracking it',
-            $limit,
-        ));
+        $ran = (int) floor(abs($startedAt->diffInHours(now())));
+
+        return $this->quarantine($backup, $operation, $stamp !== null
+            ? sprintf(
+                'the provider task for this %s was still unfinished %d hours after the %s started; the platform has stopped tracking it',
+                $what,
+                $ran,
+                $what,
+            )
+            : sprintf(
+                'the provider task for this %s was still unfinished %d hours after this backup row was created, and when the %s started was never recorded; the platform has stopped tracking it',
+                $what,
+                $ran,
+                $what,
+            ));
     }
 
     /**

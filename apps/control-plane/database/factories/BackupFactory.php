@@ -66,6 +66,27 @@ class BackupFactory extends Factory
         ]);
     }
 
+    /**
+     * An archive taken long before whatever is about to happen to it.
+     *
+     * Restoring or verifying a backup from days ago is the normal case, and
+     * every fixture used to take its archive minutes before the operation — so
+     * nothing could tell an operation's own clock from the archive's, and the
+     * poller measured restores and verifications on the wrong one (F-09).
+     */
+    public function takenHoursAgo(int $hours): self
+    {
+        return $this->succeeded()->state(function () use ($hours): array {
+            $takenAt = now()->subHours($hours);
+
+            return [
+                'started_at' => $takenAt,
+                'finished_at' => $takenAt->copy()->addMinutes(20),
+                'created_at' => $takenAt,
+            ];
+        });
+    }
+
     public function needingReview(): self
     {
         return $this->state(fn (): array => [

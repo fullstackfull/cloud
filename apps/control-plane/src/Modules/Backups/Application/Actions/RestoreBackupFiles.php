@@ -6,7 +6,6 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 
 use Lynomia\Modules\Backups\Domain\Contracts\FileLevelBackupProvider;
 use Lynomia\Modules\Backups\Domain\Enums\BackupFileKind;
-use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupFileRefusedException;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
@@ -122,17 +121,17 @@ final readonly class RestoreBackupFiles
             throw BackupFileRefusedException::notAvailable((string) $backup->getKey(), 'the service is not active');
         }
 
-        $wholeMachine = Backup::query()
-            ->where('virtual_machine_id', $machine->getKey())
-            ->where('state', BackupState::Restoring->value)
-            ->exists();
-
         // In flight, or in review: a restore nobody has confirmed the end of
         // may still be writing, and a second over it cannot be reasoned
         // about afterwards. A person settles the first (see the runbook).
+        // That holds for a whole-machine restore as much as for a file one;
+        // reading only `restoring` for it let a whole-machine restore that
+        // went to review release the machine (F-09).
+        $wholeMachine = Backup::query()->restoreUnsettledOn((string) $machine->getKey())->exists();
+
         $files = BackupFileRestore::query()
             ->where('virtual_machine_id', $machine->getKey())
-            ->whereIn('state', [FileRestoreState::Requested->value, FileRestoreState::Running->value, FileRestoreState::NeedsReview->value])
+            ->whereIn('state', FileRestoreState::holdingTheMachine())
             ->exists();
 
         if ($wholeMachine || $files) {

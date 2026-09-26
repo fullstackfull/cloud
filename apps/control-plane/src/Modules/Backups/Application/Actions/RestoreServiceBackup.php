@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Backups\Application\Actions;
 
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
 use Lynomia\Modules\Backups\Domain\Exceptions\RestoreRefusedException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
+use Lynomia\Modules\Backups\Infrastructure\Models\BackupFileRestore;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
@@ -47,7 +49,11 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *    customers' servers and this is the last place to catch it.
  *
  *  - **Nothing else may be restoring.** Two concurrent restores over the same
- *    disks is the one outcome that cannot be reasoned about afterwards.
+ *    disks is the one outcome that cannot be reasoned about afterwards. A
+ *    restore that went to review still counts until a person settles it: the
+ *    platform stopped watching it, the provider did not necessarily stop
+ *    writing. So does a file restore still in flight or in review, which
+ *    writes the same disks (F-09).
  *
  * ---------------------------------------------------------------------------
  * A timeout is not a failure
@@ -115,11 +121,18 @@ final readonly class RestoreServiceBackup
         // first: if this process dies mid-request, the platform still knows a
         // restore was started and an operator can find it.
         $backup->transitionTo(BackupState::Restoring, [
+            // The clock this restore is measured on. ReconcileBackup gives up
+            // on it `backups.max_poll_hours` after THIS, not after the archive
+            // was taken — which for a backup days old is on the first poll.
             'restore_started_at' => now(),
             'restored_by_user_id' => $restoredByUserId,
             // Cleared: a previous attempt's reason has nothing to say about
             // this one, and leaving it makes a running restore look broken.
             'failure_reason' => null,
+            // A new operation to watch, asked about ahead of rows already
+            // polled; the backup's own poll history says nothing about it.
+            'last_polled_at' => null,
+            'poll_count' => 0,
         ]);
 
         try {
@@ -146,7 +159,9 @@ final readonly class RestoreServiceBackup
          * An update, not a transition: the row is already Restoring, and
          * Restoring is not a legal destination from itself — deliberately, so
          * that a re-entrant call cannot restart the clock on a restore that is
-         * already running.
+         * already running. That clock is `restore_started_at`, written by the
+         * transition above, and it is the one ReconcileBackup measures this
+         * restore's poll window from.
          *
          * The identifier goes in its own column. Overwriting provider_task_id
          * would erase the identifier of the backup itself — the one thing that
@@ -164,9 +179,10 @@ final readonly class RestoreServiceBackup
      *
      * The poller cannot do this one. A row that stops here is either back at
      * `Succeeded` — the provider refused outright, nothing was started, and
-     * the customer can simply try again — or at `NeedsReview`, which nothing
-     * transitions out of and which no sweep will ever pick up, because
-     * `isAwaitingProvider()` is false without a task.
+     * the customer can simply try again — or at `NeedsReview`, which only a
+     * person settles and which no sweep will ever pick up, because
+     * `isAwaitingProvider()` is false without a task. Until that person does,
+     * the row holds the machine against another restore.
      *
      * That second case is the most dangerous outcome this module produces and
      * was its quietest: the call did not answer, so the restore may be writing
@@ -193,6 +209,7 @@ final readonly class RestoreServiceBackup
                 (string) $backup->getKey(),
                 $backup->restore_task_id,
                 'needs_review',
+                $backup->restore_started_at?->toIso8601String(),
             ),
             subject: $backup,
             data: [
@@ -250,10 +267,18 @@ final readonly class RestoreServiceBackup
             );
         }
 
-        $inFlight = Backup::query()
-            ->where('virtual_machine_id', $machine->getKey())
-            ->where('state', BackupState::Restoring->value)
-            ->exists();
+        /*
+         * Any restore of this machine nobody has seen end, whatever its row
+         * now says. Reading `restoring` alone let a restore that went to
+         * review — which an archive older than the poll window did on its
+         * first poll — release the machine to a second restore over disks the
+         * first was still writing (F-09).
+         */
+        $inFlight = Backup::query()->restoreUnsettledOn((string) $machine->getKey())->exists()
+            || BackupFileRestore::query()
+                ->where('virtual_machine_id', $machine->getKey())
+                ->whereIn('state', FileRestoreState::holdingTheMachine())
+                ->exists();
 
         if ($inFlight) {
             throw RestoreRefusedException::alreadyRestoring((string) $backup->getKey());
