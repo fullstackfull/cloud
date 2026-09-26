@@ -758,7 +758,8 @@
     "noAddresses": "No addresses assigned to this machine yet.",
     "rebuildBody": "The last rebuild of this machine.",
     "rebuildRequested": "Requested",
-    "rebuildDataDestroyed": "This rebuild has already erased the disk. Whatever was on it is gone, whether or not the installation finished."
+    "rebuildDataDestroyed": "This rebuild has already erased the disk. Whatever was on it is gone, whether or not the installation finished.",
+    "rebuildStoppedAfterErasing": "The rebuild stopped after erasing the disk"
   },
   "dedicated": {
     "subtitle": "Your physical machines.",
@@ -815,6 +816,7 @@
     "rebuildBody": "The last rebuild of this machine.",
     "rebuildRequested": "Requested",
     "rebuildDataDestroyed": "This rebuild has already erased the disks. Whatever was on them is gone, whether or not the installation finished.",
+    "rebuildStoppedAfterErasing": "The rebuild stopped after erasing the disks",
     "rebuildNeedsAttention": "The platform did not hear how this rebuild ended. Do not request another — support can tell you where it stands."
   },
   "hosting": {

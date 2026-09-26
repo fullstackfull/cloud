@@ -22,6 +22,7 @@ import { useVirtualMachine } from '@/lib/queries'
 import type { VirtualMachine } from '@/lib/types'
 import { safeLabel } from '@/lib/safeLabel'
 
+import { rebuildStateLabel, stoppedAfterErasing } from './rebuildStateLabel'
 import { VpsPowerActions } from './vps/VpsPowerActions'
 import { VpsReinstallAction } from './vps/VpsReinstallAction'
 
@@ -165,16 +166,22 @@ export function VpsOverviewSection() {
                  * The rebuild's own vocabulary, not the generic status one: a
                  * finished rebuild is a machine that was "Rebuilt", which is
                  * the word the list has used since Wave 1, and it is emphasised
-                 * when the platform never heard how it ended.
+                 * when the platform never heard how it ended. Named from the
+                 * state and `data_destroyed` together, so a rebuild settled
+                 * `failed` after it erased the disk is not called "The rebuild
+                 * did not run" beside the sentence below (F-20); that one is
+                 * emphasised too.
                  */
                 label: t('services.state'),
                 value: (
                   <span
                     className={
-                      vm.reinstall.needs_attention ? 'text-[var(--danger-text)]' : undefined
+                      vm.reinstall.needs_attention || stoppedAfterErasing(vm.reinstall)
+                        ? 'text-[var(--danger-text)]'
+                        : undefined
                     }
                   >
-                    {safeLabel('vps.reinstallState', vm.reinstall.state)}
+                    {rebuildStateLabel('vps', vm.reinstall)}
                   </span>
                 ),
               },
@@ -191,7 +198,9 @@ export function VpsOverviewSection() {
             * independent: `failed` is published both for a rebuild that never
             * touched the disk and for one an operator settled after the disk
             * was replaced, and until this line the second read "The rebuild
-            * did not run" and nothing else. `data_destroyed` is true from the
+            * did not run" and nothing else. (The state above is now named from
+            * both, so the second no longer reads that at all.)
+            * `data_destroyed` is true from the
             * moment the machine was told to replace its disk, whatever
             * happened after — including a rebuild that completed — so it is
             * read before anything reassuring is said, as the Dedicated page
