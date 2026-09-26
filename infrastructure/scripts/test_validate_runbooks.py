@@ -43,6 +43,16 @@ final class SweepStaleJobs extends Command
 """
 
 
+# The validator reads three corpora and refuses any one of them being empty
+# (F-38), so every case gets a file in each by default -- one that names no
+# command, so it changes nothing a case is about. A case that is about a corpus
+# being empty passes ABSENT for it.
+ABSENT: dict[str, str] = {}
+DEFAULT_RUNBOOKS = {"README.md": "Operator runbooks live here.\n"}
+DEFAULT_INFRA_DOCS = {"README.md": "The infrastructure tree.\n"}
+DEFAULT_PLAYBOOKS = {"site.yml": "---\n- hosts: all\n  tasks: []\n"}
+
+
 def run(
     *,
     php: dict[str, str] | None = None,
@@ -61,14 +71,15 @@ def run(
 
         infra = root / "infrastructure"
         (infra / "ansible").mkdir(parents=True)
-        for name, body in (infra_docs or {}).items():
+        for name, body in (DEFAULT_INFRA_DOCS if infra_docs is None else infra_docs).items():
             (infra / name).write_text(body)
-        for name, body in (playbooks or {}).items():
+        for name, body in (DEFAULT_PLAYBOOKS if playbooks is None else playbooks).items():
             (infra / "ansible" / name).write_text(body)
 
         books = root / "docs" / "runbooks"
-        books.mkdir(parents=True)
-        for name, body in (runbooks or {}).items():
+        if runbooks is not ABSENT:
+            books.mkdir(parents=True)
+        for name, body in (DEFAULT_RUNBOOKS if runbooks is None else runbooks).items():
             (books / name).write_text(body)
 
         err = io.StringIO()
@@ -123,10 +134,51 @@ CASES: list[tuple[str, dict, str | None]] = [
         {"runbooks": {"prose.md": "Restart the worker from the deployment controller.\n"}},
         "no `php artisan` invocation anywhere",
     ),
+    # F-38. The three corpora are read as one union, and a union stays
+    # non-empty while any one of them does: with docs/runbooks moved aside the
+    # gate went on printing a green line over the infrastructure tree's single
+    # invocation, having read not one runbook. Each subject is asserted on its
+    # own.
+    (
+        "with docs/runbooks moved away the gate refuses rather than reading the rest",
+        {
+            "runbooks": ABSENT,
+            "infra_docs": {"README.md": "`php artisan lynomia:sweep-stale-jobs`\n"},
+        },
+        "docs/runbooks",
+    ),
+    (
+        "an infrastructure tree with no markdown in it is refused",
+        {
+            "runbooks": {"stale.md": "`php artisan lynomia:sweep-stale-jobs`\n"},
+            "infra_docs": ABSENT,
+        },
+        "infrastructure/**/*.md",
+    ),
+    (
+        "an ansible tree with no YAML in it is refused",
+        {
+            "runbooks": {"stale.md": "`php artisan lynomia:sweep-stale-jobs`\n"},
+            "playbooks": ABSENT,
+        },
+        "infrastructure/ansible/**/*.yml",
+    ),
 ]
+
+# The table above is this self-test's subject; emptied, it would print
+# `0/0 passed` and exit 0. The count is literal source in this file, maintained
+# by whoever edits the table, so adding or removing a case is a deliberate edit
+# of this number too.
+EXPECTED_CASES = 12
 
 
 def main() -> int:
+    if len(CASES) != EXPECTED_CASES:
+        print(
+            f"the case table holds {len(CASES)} case(s) and this file says "
+            f"{EXPECTED_CASES}; change both together or neither"
+        )
+        return 1
     failures = 0
     for name, kwargs, expected in CASES:
         code, err = run(**kwargs)

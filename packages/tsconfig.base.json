@@ -1,0 +1,31 @@
+{
+  // Compiler settings shared by every package under packages/: those of
+  // apps/web/tsconfig.app.json, less the three that belong to the application
+  // alone (its test-runner types, its build-info file and its `@/` alias), so
+  // a package type-checks to the same bar as the application that imports it.
+  // Each package's tsconfig.json extends this and names its own sources;
+  // `npm run typecheck --workspaces` runs it.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "erasableSyntaxOnly": true,
+
+    "types": []
+  }
+}

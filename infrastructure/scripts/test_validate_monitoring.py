@@ -1085,7 +1085,20 @@ def golden_failures() -> list[tuple[str, list[str]]]:
     return checks
 
 
+# CASES is this self-test's subject; emptied, it would still print a pass count
+# for the other checks and exit 0. The count is literal source in this file,
+# maintained by whoever edits the table, so adding or removing a case is a
+# deliberate edit of this number too.
+EXPECTED_CASES = 77
+
+
 def main() -> int:
+    if len(CASES) != EXPECTED_CASES:
+        print(
+            f"the case table holds {len(CASES)} case(s) and this file says "
+            f"{EXPECTED_CASES}; change both together or neither"
+        )
+        return 1
     failures = 0
     for name, kwargs, expected in CASES:
         code, out, err = run(**kwargs)

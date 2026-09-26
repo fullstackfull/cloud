@@ -6,6 +6,8 @@ Run: python3 infra/scripts/test_validate_inventory.py
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import tempfile
 from pathlib import Path
@@ -167,22 +169,841 @@ all:
 """,
         "only REIMAGE_ALLOWED may be wiped",
     ),
+    # F-38. Ansible puts a host listed directly under `all: hosts:` in the
+    # inventory exactly as it puts one under a child group, and applies
+    # `all: vars:` to every host. The walk used to start at `all.children`, so
+    # such a host -- whatever it carried -- was not in the count and not
+    # checked, and the file printed `N host(s), ok` over it.
+    (
+        "a host declared directly under all: with no safety_class is refused",
+        """
+all:
+  hosts:
+    stray-1:
+      ansible_host: 198.51.100.20
+""",
+        "does not declare safety_class",
+    ),
+    (
+        "a host declared directly under all: is checked for secrets too",
+        """
+all:
+  hosts:
+    stray-1:
+      ansible_host: 198.51.100.20
+      safety_class: DISCOVERY_ONLY
+      bmc_password: hunter2
+""",
+        "reads as a secret",
+    ),
+    (
+        "a well-formed host declared directly under all: passes",
+        """
+all:
+  hosts:
+    stray-1:
+      ansible_host: 198.51.100.20
+      safety_class: DISCOVERY_ONLY
+""",
+        None,
+    ),
+    (
+        "a class set once on all: vars covers every host in the inventory",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  children:
+    group:
+      hosts:
+        host-1:
+          ansible_host: 198.51.100.1
+""",
+        None,
+    ),
+    (
+        "a secret-named variable in all: vars is caught on the hosts it reaches",
+        """
+all:
+  vars:
+    vault_token: s.abcdef
+  children:
+    group:
+      hosts:
+        host-1:
+          ansible_host: 198.51.100.1
+          safety_class: DISCOVERY_ONLY
+""",
+        "reads as a secret",
+    ),
+    # F-38, round five. Ansible's YAML inventory makes a group of EVERY
+    # top-level key, `all` being only one of them, and a group or host is one
+    # object however many places declare it. The walk started at `all` and
+    # followed the document's nesting, so a host under a group written beside
+    # `all:` was neither counted nor checked, and vars declared on one
+    # occurrence of a group never reached hosts declared on another. What a
+    # case below takes Ansible to do was read off `ansible-inventory --list`
+    # (ansible-core 2.18.1) over the same document, not reasoned out; the
+    # cases that expect a refusal are shapes Ansible rewrites, skips or fails
+    # on, which this refuses rather than guesses at.
+    (
+        "a host under a top-level group beside all: is checked for secrets",
+        """
+all:
+  vars:
+    lynomia_environment: staging
+sidecar:
+  hosts:
+    hidden-1:
+      ansible_host: 198.51.100.201
+      safety_class: DISCOVERY_ONLY
+      bmc_password: hunter2
+""",
+        "reads as a secret",
+    ),
+    (
+        "a host under a top-level group beside all: with no safety_class is refused",
+        """
+all:
+  vars:
+    lynomia_environment: staging
+sidecar:
+  hosts:
+    hidden-1:
+      ansible_host: 198.51.100.201
+""",
+        "does not declare safety_class",
+    ),
+    (
+        "all: vars reaches a host under a top-level group, as in Ansible",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+sidecar:
+  hosts:
+    hidden-1:
+      ansible_host: 198.51.100.201
+""",
+        None,
+    ),
+    (
+        "an inventory whose groups all sit beside all: is read, not emptied",
+        """
+all:
+  vars:
+    lynomia_environment: staging
+control_plane:
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+      bmc_password: hunter2
+""",
+        ("does not declare safety_class", "reads as a secret"),
+    ),
+    (
+        "a group declared in two places is one group: vars on one reach hosts on the other",
+        """
+all:
+  children:
+    control_plane:
+      vars:
+        safety_class: CONFIGURATION_ALLOWED
+        bmc_password: hunter2
+control_plane:
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+""",
+        "reads as a secret",
+    ),
+    (
+        "a class set on one declaration of a group covers hosts declared on another",
+        """
+all:
+  children:
+    control_plane:
+      vars:
+        safety_class: CONFIGURATION_ALLOWED
+control_plane:
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+""",
+        None,
+    ),
+    # F-38, round seven. The two cases above put every variable on one
+    # declaration, so a reading that kept only one declaration's vars, or only
+    # the first value a variable was given, passed both. Measured against
+    # ansible-inventory 2.18.1: cp-1 below has bmc_password and the class from
+    # the second declaration; the class the later declaration gives wins.
+    (
+        "vars on two declarations of a group accumulate, one variable at a time",
+        """
+all:
+  children:
+    control_plane:
+      vars:
+        bmc_password: hunter2
+control_plane:
+  vars:
+    safety_class: CONFIGURATION_ALLOWED
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+""",
+        "reads as a secret",
+    ),
+    (
+        "where two declarations of a group set one variable, the later wins, as in Ansible",
+        """
+all:
+  children:
+    control_plane:
+      vars:
+        safety_class: REIMAGE_ALLOWED
+control_plane:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  hosts:
+    cp-1:
+      ansible_host: 198.51.100.11
+      allow_reimage: true
+""",
+        "safety_class is 'DISCOVERY_ONLY'; only REIMAGE_ALLOWED may be wiped",
+    ),
+    # Ansible fails the whole file on each of these two; read as empty, the
+    # host or group under them would go unjudged.
+    (
+        "a host whose vars are a list, not a mapping, is refused",
+        GOOD + "        host-2: [bmc_password, hunter2]\n",
+        "has vars that are a list, not a mapping",
+    ),
+    (
+        "a group whose hosts entry is a list, not a mapping, is refused",
+        GOOD + "    other:\n      hosts:\n        - rogue-1\n",
+        "has a hosts entry that is a list, not a mapping",
+    ),
+    (
+        "a group's vars reach its hosts under whichever parent each is declared",
+        """
+all:
+  children:
+    a:
+      children:
+        x:
+          vars:
+            bmc_password: hunter2
+    b:
+      children:
+        x:
+          hosts:
+            h1:
+              ansible_host: 198.51.100.1
+              safety_class: DISCOVERY_ONLY
+""",
+        "reads as a secret",
+    ),
+    (
+        "a host in two groups is judged on the class Ansible resolves for it",
+        # Same depth, same priority: the later name wins, so h1 is
+        # DISCOVERY_ONLY -- carrying the allow_reimage it was given under `a`.
+        """
+all:
+  children:
+    a:
+      vars:
+        safety_class: REIMAGE_ALLOWED
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+          allow_reimage: true
+    z:
+      vars:
+        safety_class: DISCOVERY_ONLY
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+""",
+        "only REIMAGE_ALLOWED may be wiped",
+    ),
+    (
+        "ansible_group_priority reorders groups, as in Ansible",
+        """
+all:
+  children:
+    a:
+      vars:
+        safety_class: REIMAGE_ALLOWED
+        ansible_group_priority: 5
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+          allow_reimage: true
+    z:
+      vars:
+        safety_class: DISCOVERY_ONLY
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+""",
+        None,
+    ),
+    (
+        "a deeper group's class wins over a shallower one's, as in Ansible",
+        """
+all:
+  children:
+    outer:
+      children:
+        inner:
+          vars:
+            safety_class: CONFIGURATION_ALLOWED
+          hosts:
+            h1:
+              ansible_host: 198.51.100.1
+    zed:
+      vars:
+        safety_class: REIMAGE_ALLOWED
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+          allow_reimage: true
+""",
+        "only REIMAGE_ALLOWED may be wiped",
+    ),
+    (
+        "a bare string under hosts: is a host, and is checked",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  children:
+    g:
+      hosts: stray-1
+""",
+        "does not declare ansible_host",
+    ),
+    (
+        "a host range Ansible expands into other names is refused, not read as one name",
+        """
+all:
+  children:
+    g:
+      vars:
+        safety_class: DISCOVERY_ONLY
+      hosts:
+        web[01:03].example:
+          ansible_host: 198.51.100.1
+""",
+        "rewrites into other host names",
+    ),
+    (
+        "a host key carrying a port is refused, not read as one name",
+        """
+all:
+  children:
+    g:
+      vars:
+        safety_class: DISCOVERY_ONLY
+      hosts:
+        "db-1.example:2222":
+          ansible_host: 198.51.100.2
+""",
+        "rewrites into other host names",
+    ),
+    (
+        "an inventory that declares no host at all is refused",
+        """
+all:
+  vars:
+    lynomia_environment: staging
+""",
+        "declares no host",
+    ),
+    (
+        "an `all` that is not a group mapping is refused",
+        """
+all: [cp-1, cp-2]
+""",
+        "'all' is not a group mapping",
+    ),
+    (
+        "groups that contain each other are refused, not walked forever",
+        """
+all:
+  children:
+    a:
+      children:
+        b:
+          children:
+            a:
+          hosts:
+            h1:
+              ansible_host: 198.51.100.1
+              safety_class: DISCOVERY_ONLY
+""",
+        "groups form a loop",
+    ),
+    (
+        "ungrouped's vars reach a host declared in no other group, as in Ansible",
+        """
+all:
+  hosts:
+    lone-1:
+      ansible_host: 198.51.100.1
+  children:
+    ungrouped:
+      vars:
+        safety_class: DISCOVERY_ONLY
+""",
+        None,
+    ),
+    (
+        "ungrouped's vars do not reach a host that has a group of its own",
+        """
+all:
+  children:
+    ungrouped:
+      vars:
+        safety_class: DISCOVERY_ONLY
+    g:
+      hosts:
+        grouped-1:
+          ansible_host: 198.51.100.2
+""",
+        "does not declare safety_class",
+    ),
+    (
+        "'all' declared as another group's child is refused",
+        """
+g:
+  children:
+    all:
+  hosts:
+    h1:
+      ansible_host: 198.51.100.1
+      safety_class: DISCOVERY_ONLY
+""",
+        "'all' is declared as a child of g",
+    ),
+    (
+        "a dynamic inventory plugin's config is refused: its hosts are not in the file",
+        """
+plugin: community.general.proxmox
+url: https://pve.example
+""",
+        "configures the inventory plugin",
+    ),
+    # F-38, round six. Ansible takes a host out of `ungrouped` once it is in
+    # any other group, and `ungrouped`'s vars go with it; the validator kept
+    # them. Each case below was measured against `ansible-inventory --host`
+    # (ansible-core 2.18.1), and passed the validator before this round.
+    (
+        "ungrouped's vars do not reach a host Ansible takes out of ungrouped",
+        # ansible-inventory: h1 is {"ansible_host": "198.51.100.1"}, no class.
+        """
+all:
+  children:
+    ungrouped:
+      vars:
+        safety_class: DISCOVERY_ONLY
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+    g:
+      hosts:
+        h1:
+""",
+        "does not declare safety_class",
+    ),
+    (
+        "a host listed in ungrouped and a group is judged on the group's class",
+        # ansible-inventory: h1 is CONFIGURATION_ALLOWED with allow_reimage.
+        """
+all:
+  hosts:
+    h1: {ansible_host: 198.51.100.1}
+ungrouped:
+  vars: {safety_class: REIMAGE_ALLOWED}
+  hosts: {h1: {allow_reimage: true}}
+g:
+  vars: {safety_class: CONFIGURATION_ALLOWED}
+  hosts: {h1: }
+""",
+        "only REIMAGE_ALLOWED may be wiped",
+    ),
+    (
+        "an ungrouped declared under another group is refused, not guessed at",
+        # ansible-inventory: h1 keeps neither p's vars nor ungrouped's.
+        """
+p:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  children:
+    ungrouped:
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+""",
+        "'ungrouped' is declared a child of p",
+    ),
+    (
+        "an ungrouped with a child group is refused, not guessed at",
+        # ansible-inventory: h1 loses ungrouped's vars here, and keeps them if
+        # it is listed under g alone.
+        """
+ungrouped:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  hosts:
+    h1:
+      ansible_host: 198.51.100.1
+  children:
+    g:
+      hosts:
+        h1:
+""",
+        "'ungrouped' has the child group(s) g",
+    ),
+    # Ansible skips a group key it does not know, and everything under it: the
+    # validator dropped it too, so a mistyped `host:` held hosts and
+    # credentials nothing checked.
+    (
+        "a misspelled group key is refused, not skipped with the hosts under it",
+        """
+all:
+  children:
+    g:
+      vars:
+        safety_class: DISCOVERY_ONLY
+      hosts:
+        h1:
+          ansible_host: 198.51.100.1
+      host:
+        h2:
+          ansible_host: 198.51.100.2
+          bmc_password: hunter2
+""",
+        "has the key(s) ['host'], which Ansible skips",
+    ),
+    (
+        "a group name that is not a string is refused: Ansible fails the whole file on it",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  hosts:
+    h1:
+      ansible_host: 198.51.100.1
+1:
+  hosts:
+    h2:
+      ansible_host: 198.51.100.2
+""",
+        "the group name 1 is not a string",
+    ),
+    (
+        "an empty group name is refused: Ansible fails the whole file on it",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  hosts:
+    h1:
+      ansible_host: 198.51.100.1
+"":
+  hosts:
+    h2:
+      ansible_host: 198.51.100.2
+""",
+        "the group name '' is empty",
+    ),
+    (
+        "an empty host name is refused: Ansible fails the whole file on it",
+        """
+all:
+  vars:
+    safety_class: DISCOVERY_ONLY
+  hosts:
+    h1:
+      ansible_host: 198.51.100.1
+    "":
+      ansible_host: 198.51.100.2
+""",
+        "the host key '', which is empty",
+    ),
 ]
+
+# The table above is this self-test's subject; emptied, it would print
+# `0/0 passed` and exit 0 under a step named "still rejects what it claims to
+# reject". The count is literal source in this file, maintained by whoever
+# edits the table, so adding or removing a case is a deliberate edit of this
+# number too.
+EXPECTED_CASES = 52
+
+
+def run_tree(files: dict[str, str] | None) -> tuple[int, str]:
+    """Lay `files` out under ansible/inventories/ and run the whole validator.
+
+    Paths are relative to the inventories directory, so `dev/hosts.yml` is the
+    development environment's hosts file. A file whose text begins with `#!` is
+    made executable, as an inventory script would be. None builds no
+    inventories directory at all. Returns (exit status, everything printed).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "infrastructure"
+        if files is not None:
+            base = root / "ansible" / "inventories"
+            base.mkdir(parents=True)
+            for relative, body in files.items():
+                path = base / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(body)
+                if body.startswith("#!"):
+                    path.chmod(0o755)
+        else:
+            root.mkdir()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            code = validate.main(["validate-inventory.py", str(root)])
+        return code, out.getvalue()
+
+
+# Ansible given an inventory DIRECTORY -- which is what `-i inventories/staging`
+# is -- reads every file in it that its ignore rules do not skip, and merges
+# them into one inventory. The validator used to glob `*/hosts.yml`, so an
+# environment whose file was renamed `hosts.yaml`, or which gained a second
+# file, lost hosts from the check while Ansible kept them.
+TREE_CASES: list[tuple[str, dict[str, str] | None, int, str | tuple[str, ...]]] = [
+    ("a tree of well-formed environments passes", {"dev/hosts.yml": GOOD}, 0, "1 host(s)"),
+    (
+        "an environment whose hosts file is named .yaml is read, not skipped",
+        {
+            "dev/hosts.yml": GOOD,
+            "prod/hosts.yaml": GOOD + "          bmc_password: hunter2\n",
+        },
+        1,
+        "reads as a secret",
+    ),
+    (
+        "a second inventory file in an environment is read too",
+        {
+            "dev/hosts.yml": GOOD,
+            "dev/extra.yml": "sidecar:\n  hosts:\n    hidden-1:\n      ansible_host: 198.51.100.201\n",
+        },
+        1,
+        "does not declare safety_class",
+    ),
+    (
+        "an inventory source in a format this does not read is refused",
+        {"dev/hosts.yml": GOOD, "dev/legacy.hosts": "[web]\nweb-1 ansible_host=198.51.100.5\n"},
+        1,
+        "reads only YAML",
+    ),
+    (
+        "a YAML-named source that is not a YAML mapping of groups is refused",
+        {"dev/hosts.yml": GOOD, "dev/legacy": "web-1 ansible_host=198.51.100.5\n"},
+        1,
+        "not a YAML mapping of groups",
+    ),
+    (
+        "a source Ansible would run as an inventory script is refused",
+        {"dev/hosts.yml": GOOD, "dev/dynamic.yml": "#!/bin/sh\necho '{\"sidecar\": {\"hosts\": [\"h\"]}}'\n"},
+        1,
+        "runs it as an inventory script",
+    ),
+    (
+        "a source that does not parse as YAML is refused, not crashed on",
+        {"dev/hosts.yml": GOOD, "dev/vaulted.yml": "all:\n  vars:\n    x: !vault |\n      $ANSIBLE_VAULT;1.1;AES256\n"},
+        1,
+        "does not parse as YAML",
+    ),
+    (
+        "an environment directory with no inventory source in it is refused",
+        {"dev/hosts.yml": GOOD, "prod/group_vars/all.yml": "lynomia_environment: production\n"},
+        1,
+        "no inventory source",
+    ),
+    (
+        "group_vars, hidden files and ignored extensions are not read as inventory",
+        {
+            "dev/hosts.yml": GOOD,
+            "dev/group_vars/all.yml": "safety_class: DISCOVERY_ONLY\n",
+            "dev/host_vars/host-1.yml": "allow_reimage: false\n",
+            "dev/.editor.yml": "not: [an, inventory\n",
+            "dev/README.md": "# notes\n",
+            "dev/hosts.yml.orig": "garbage: [\n",
+        },
+        0,
+        "1 host(s)",
+    ),
+    ("no inventories directory at all is refused", None, 1, "no inventories found"),
+    # F-38, round six. Ansible given an inventory directory also loads the
+    # `group_vars/` and `host_vars/` in it, and infrastructure/ansible/
+    # group_vars/all.yml names inventory host_vars/ as where a machine opts
+    # into reimaging. The validator read neither, so each case below printed
+    # `ok` while `ansible-inventory --host` showed the variable.
+    (
+        "a credential in the environment's group_vars/all.yml is caught on every host",
+        {"dev/hosts.yml": GOOD, "dev/group_vars/all.yml": "bmc_password: hunter2\n"},
+        1,
+        "(set in",
+    ),
+    (
+        "a host_vars opt-in to reimaging is judged against the host's class",
+        {"dev/hosts.yml": GOOD, "dev/host_vars/host-1.yml": "allow_reimage: true\n"},
+        1,
+        "only REIMAGE_ALLOWED may be wiped",
+    ),
+    (
+        "group_vars for a group override its inline vars, and are read from a directory too",
+        # Inline, host-1's group is REIMAGE_ALLOWED; group_vars/group/ -- the
+        # directory form -- makes it DISCOVERY_ONLY, which in Ansible wins,
+        # and host-1's own inline allow_reimage wins over both.
+        {
+            "dev/hosts.yml": GOOD.replace("    group:\n", "    group:\n      vars:\n        safety_class: REIMAGE_ALLOWED\n")
+            .replace("          safety_class: DISCOVERY_ONLY\n", "")
+            .replace("allow_reimage: false", "allow_reimage: true"),
+            "dev/group_vars/group/class.yml": "safety_class: DISCOVERY_ONLY\n",
+        },
+        1,
+        "safety_class is 'DISCOVERY_ONLY'; only REIMAGE_ALLOWED may be wiped",
+    ),
+    (
+        "a vars file Ansible loads for a host, which cannot be read, is refused",
+        {"dev/hosts.yml": GOOD, "dev/group_vars/all.yml": "$ANSIBLE_VAULT;1.1;AES256\n6162636465\n"},
+        1,
+        "encrypted with Ansible Vault",
+    ),
+    (
+        "a vars file Ansible loads for nothing in the inventory is not read",
+        # infrastructure/README.md's documented place for the encrypted file.
+        {"dev/hosts.yml": GOOD, "dev/group_vars/vault.yml": "$ANSIBLE_VAULT;1.1;AES256\n6162636465\n"},
+        0,
+        "1 host(s)",
+    ),
+    (
+        "a group_vars that is a file, which Ansible skips, is refused",
+        {"dev/hosts.yml": GOOD, "dev/group_vars": "safety_class: REIMAGE_ALLOWED\n"},
+        1,
+        "is not a directory",
+    ),
+    # Every top-level key is a group, so a second file need not say `all:`.
+    # One that did not was refused for it -- a false red, but one the round
+    # that taught the validator to read top-level groups had no reason keep.
+    (
+        "a second file whose groups all sit beside all: is a valid part of the inventory",
+        {
+            "dev/hosts.yml": GOOD,
+            "dev/extra.yml": "sidecar:\n  hosts:\n    side-1:\n      ansible_host: 198.51.100.201\n      safety_class: DISCOVERY_ONLY\n",
+        },
+        0,
+        "2 host(s)",
+    ),
+    (
+        "a file beside the environment directories is refused, not left unread",
+        {"dev/hosts.yml": GOOD, "rogue.yml": "all:\n  hosts:\n    r-1:\n      bmc_password: hunter2\n"},
+        1,
+        "in no environment directory",
+    ),
+    # F-38, round seven. Ansible's YAML plugin refuses an empty document
+    # ("Parsed empty YAML file") and hands the file to the next plugin; INI
+    # takes the line as a host. Measured on ansible-core 2.18.1, each of these
+    # environments has a second host, named `{}`, `null` and `~`, in
+    # `ungrouped` -- and the validator read the file as an empty inventory and
+    # printed `ok` over the host it never judged.
+    (
+        "a source holding the empty document `{}` is refused, not read as no groups",
+        {"dev/hosts.yml": GOOD, "dev/placeholder.json": "{}\n"},
+        1,
+        "empty YAML document",
+    ),
+    (
+        "a source holding `null` is refused, not read as no groups",
+        {"dev/hosts.yml": GOOD, "dev/placeholder.yml": "null\n"},
+        1,
+        "empty YAML document",
+    ),
+    (
+        "a source holding `~` is refused, not read as no groups",
+        {"dev/hosts.yml": GOOD, "dev/placeholder": "~\n"},
+        1,
+        "empty YAML document",
+    ),
+    # Measured against ansible-inventory 2.18.1: host-1 has the password from
+    # the nested file, and Ansible fails on the list.
+    (
+        "a group_vars/<group>/ directory is read into its subdirectories",
+        {"dev/hosts.yml": GOOD, "dev/group_vars/group/nested/creds.yml": "bmc_password: hunter2\n"},
+        1,
+        "reads as a secret",
+    ),
+    # Ansible given a directory reads the inventory sources in its
+    # subdirectories too (ansible-inventory lists sub-1 here), so the validator
+    # recurses; no environment has a subdirectory of sources today.
+    (
+        "an inventory source in a subdirectory of an environment is read too",
+        {
+            "dev/hosts.yml": GOOD,
+            "dev/sub/b.yml": "sidecar:\n  hosts:\n    sub-1:\n      ansible_host: 198.51.100.202\n      bmc_password: hunter2\n",
+        },
+        1,
+        ("does not declare safety_class", "reads as a secret"),
+    ),
+    (
+        "a vars file Ansible loads that is a list, not a mapping, is refused",
+        {"dev/hosts.yml": GOOD, "dev/group_vars/all.yml": "- bmc_password\n"},
+        1,
+        "holds a list, not a mapping of variables",
+    ),
+]
+
+# Pinned for the same reason, and maintained the same way, as EXPECTED_CASES.
+EXPECTED_TREE_CASES = 24
 
 
 def main() -> int:
+    for table, expected_count, label in (
+        (CASES, EXPECTED_CASES, "case table"),
+        (TREE_CASES, EXPECTED_TREE_CASES, "tree case table"),
+    ):
+        if len(table) != expected_count:
+            print(
+                f"the {label} holds {len(table)} case(s) and this file says "
+                f"{expected_count}; change both together or neither"
+            )
+            return 1
     failures = 0
     for name, document, expected in CASES:
-        problems = run(document)
-        if expected is None:
-            ok = not problems
+        try:
+            problems = run(document)
+        except Exception as crash:  # a crash fails its case; it does not end the run
+            problems = [f"CRASHED: {crash!r}"]
+            ok = False
         else:
-            ok = any(expected in p for p in problems)
+            if expected is None:
+                ok = not problems
+            else:
+                wanted = (expected,) if isinstance(expected, str) else expected
+                ok = all(any(each in p for p in problems) for each in wanted)
         print(f"{'PASS' if ok else 'FAIL'}  {name}")
         if not ok:
             failures += 1
             print(f"      expected {expected!r}, got {problems}")
-    print(f"\n{len(CASES) - failures}/{len(CASES)} passed")
+    for name, files, expected_code, expected in TREE_CASES:
+        try:
+            code, output = run_tree(files)
+        except Exception as crash:  # a crash fails its case; it does not end the run
+            code, output = None, f"CRASHED: {crash!r}"
+        wanted = (expected,) if isinstance(expected, str) else expected
+        ok = code == expected_code and all(each in output for each in wanted)
+        print(f"{'PASS' if ok else 'FAIL'}  {name}")
+        if not ok:
+            failures += 1
+            print(f"      expected exit {expected_code} and {expected!r}, got exit {code}:\n{output}")
+    total = len(CASES) + len(TREE_CASES)
+    print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 
 

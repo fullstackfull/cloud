@@ -87,8 +87,35 @@ fmt: ## Auto-format all code
 	cd $(WEB) && npm run format
 
 .PHONY: lint-frontend
-lint-frontend: ## ESLint + TypeScript typecheck
-	cd $(WEB) && npm run lint && npm run typecheck
+lint-frontend: ## ESLint + TypeScript typecheck over every workspace, as CI runs them
+	@# The root scripts, not apps/web's: CI's Lint and Typecheck steps run
+	@# `--workspaces`, and running one workspace here would make a developer's
+	@# green something other than CI's.
+	@#
+	@# The two corpus assertions are CI's "Typecheck and Lint cover every
+	@# workspace" step (.github/workflows/ci.yml), which says why there are two
+	@# and why the four is exact; change one, change both. They cannot be
+	@# byte-identical -- a recipe needs doubled dollars and line continuations
+	@# -- so this pointer and its twin in ci.yml are what hold them together.
+	@#
+	@# `set -euo pipefail`, and not the shorter `set -o pipefail`: pipefail only
+	@# sets the pipeline's exit status, and without -e the assignment swallows
+	@# it, so an npm that printed a correct list and then exited non-zero would
+	@# pass here while failing in CI.
+	@set -euo pipefail; \
+	for subject in apps/web packages; do \
+		if [ -z "$$(git ls-files -- "$$subject")" ]; then \
+			echo "lint-frontend: $$subject has no tracked files; the lint and typecheck corpus has narrowed" >&2; \
+			exit 1; \
+		fi; \
+	done; \
+	count=$$(npm query .workspace | node -e 'let s = ""; process.stdin.on("data", (c) => { s += c; }).on("end", () => { const w = JSON.parse(s); if (!Array.isArray(w)) { process.exit(3); } console.log(w.length); })'); \
+	if [ "$$count" != "4" ]; then \
+		echo "lint-frontend: npm resolves $$count workspaces, not 4; the lint and typecheck corpus has changed" >&2; \
+		exit 1; \
+	fi
+	npm run lint
+	npm run typecheck
 
 .PHONY: build
 build: ## Production build of the frontend
@@ -111,7 +138,18 @@ infra-validate: ## Static checks over the infrastructure tree (no network, no ho
 	python3 infrastructure/scripts/test_validate_runbooks.py
 	python3 infrastructure/scripts/check-ci-cannot-apply.py .
 	python3 infrastructure/scripts/test_check_ci_cannot_apply.py
-	cd infrastructure/ansible && ansible-lint --offline
+	@# ansible-lint discovers its own corpus and says nothing about its size,
+	@# so each subject is asserted present first. This is CI's "Ansible lint"
+	@# step (.github/workflows/ci.yml), which says why; change one, change both.
+	@# They cannot be byte-identical -- a recipe needs doubled dollars and line
+	@# continuations -- so this pointer and its twin in ci.yml are what hold
+	@# them together.
+	cd infrastructure/ansible && for subject in playbooks roles; do \
+		if [ -z "$$(git ls-files -- "$$subject")" ]; then \
+			echo "infra-validate: infrastructure/ansible/$$subject has no tracked files; ansible-lint would pass over what is left" >&2; \
+			exit 1; \
+		fi; \
+	done && ansible-lint --offline
 
 # Not in the CI job above, and the reason is not oversight. This one asks git
 # whether a sha resolves, and `actions/checkout` clones to depth 1, so every

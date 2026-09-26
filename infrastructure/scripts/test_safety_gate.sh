@@ -112,4 +112,15 @@ expect REIMAGE_ALLOWED       reimage   yes allowed
 
 echo
 echo "$((checked - failures))/$checked passed"
+
+# The expect lines above are this test's whole subject. Delete some and the
+# rest still report a perfect score and exit 0, so the number of pairs run is
+# pinned. It is literal source in this file, maintained by whoever edits the
+# list: adding or removing a pair is a deliberate edit of this number too.
+EXPECTED_PAIRS=10
+if [ "$checked" -ne "$EXPECTED_PAIRS" ]; then
+    echo "ran $checked class-and-action pair(s) and this file says $EXPECTED_PAIRS; change both together or neither"
+    exit 1
+fi
+
 exit $((failures > 0))
