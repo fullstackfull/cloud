@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Dns;
 
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Dns\Domain\Enums\DnsState;
@@ -388,54 +390,112 @@ final class ClaimingAZoneTest extends DnsTestCase
             ->assertCreated();
     }
 
-    #[Test]
-    public function one_entry_in_the_reserved_list_that_is_not_a_name_refuses_every_claim(): void
+    /**
+     * @return iterable<string, array{0: list<mixed>, 1: string, 2: int}>
+     */
+    public static function reservedListsThatDoNotRead(): iterable
     {
-        /*
-         * Fail closed, and loudly elsewhere. The whole list is read before
-         * any comparison, so a list with a typo in it protects nothing it
-         * could not read — and rather than guess, the guard refuses. That is
-         * why the preflight reports this state as a failure: the guard is
-         * correct and every customer is locked out until it is fixed.
-         *
-         * What the refusal *says* is deliberately not asserted here. It is
-         * a validation error about a name the customer did not type, and a
-         * row asserting its wording would bless it.
-         */
-        config()->set('dns.reserved_zones', ['lynomia.test', 'not a name']);
+        // The list, the name a customer claims, and how many entries do not read.
+        yield 'the re-audit probe: one entry that is not a name, and a claim unrelated to it' => [
+            ['lynomia.test', 'internal_panel.corp-secret.example'], 'unrelated.test', 1,
+        ];
+        yield 'one entry with a space in it, and a claim unrelated to it' => [
+            ['lynomia.test', 'not a name'], 'unrelated.test', 1,
+        ];
+        // `DNS_RESERVED_ZONES` always reads as strings; an edited config/dns.php need not.
+        yield 'an entry that is not even text, and a claim of the name inside it' => [
+            [['lynomia.test']], 'lynomia.test', 1,
+        ];
+    }
+
+    /**
+     * Fail closed, and say whose fault it is (I-3).
+     *
+     * The whole list is read before any comparison, so a list with a typo in
+     * it protects nothing it could not read, and rather than guess the guard
+     * refuses every claim. That is correct; what it used to *say* was not. It
+     * answered `dns.invalid_name`, 422, "That is not a valid DNS name." — the
+     * same code and sentence as a name the customer really did mistype, about
+     * a name the customer did not type. Neither the portal nor the customer
+     * could tell the platform's misconfiguration from their own mistake.
+     *
+     * Now it is the platform's condition, answered as one: 503, its own code,
+     * a sentence that blames nobody and discloses nothing — no entry, no
+     * variable, no count — and a log line at error level for the operator,
+     * which carries counts and never the entries. The estate preflight's
+     * `dns.reserved_zones` failure is the other half of the operator signal.
+     *
+     * @param  list<mixed>  $reserved
+     */
+    #[Test]
+    #[DataProvider('reservedListsThatDoNotRead')]
+    public function a_reserved_list_that_does_not_read_refuses_every_claim_as_the_platforms_condition_not_the_customers_mistake(array $reserved, string $claim, int $malformed): void
+    {
+        config()->set('dns.reserved_zones', $reserved);
+
+        $logged = [];
+        Log::listen(static function (MessageLogged $event) use (&$logged): void {
+            $logged[] = $event;
+        });
 
         [$customer, $owner] = $this->accountWithOwner();
         $provider = $this->provider();
 
         $response = $this->actingAs($owner)
             ->withHeaders($this->actingFor($customer))
-            ->postJson('/api/v1/dns/zones', ['name' => 'unrelated.test']);
+            ->postJson('/api/v1/dns/zones', ['name' => $claim]);
 
-        $this->assertNotSame(201, $response->status());
-        $this->assertNull($provider->findZone('unrelated.test'));
-        $this->assertFalse(DnsZone::query()->where('name', 'unrelated.test')->exists());
+        $response->assertStatus(503)
+            ->assertExactJson([
+                'error' => [
+                    'code' => 'dns.zone.unavailable',
+                    'message' => 'New zones cannot be added right now. Try again later.',
+                    'request_id' => $response->json('error.request_id'),
+                ],
+            ]);
+
+        $this->assertSame(__('errors.dns.zone.unavailable'), $response->json('error.message'));
+        $this->assertNull($provider->findZone($claim));
+        $this->assertFalse(DnsZone::query()->where('name', $claim)->exists());
+
+        $said = (string) $response->getContent();
+
+        foreach (['lynomia.test', 'internal_panel', 'corp-secret', 'not a name', 'DNS_RESERVED_ZONES', 'reserved'] as $value) {
+            $this->assertStringNotContainsStringIgnoringCase($value, $said, 'The refusal discloses the configuration.');
+        }
+
+        $signals = array_values(array_filter(
+            $logged,
+            static fn (MessageLogged $event): bool => $event->level === 'error'
+                && str_contains($event->message, 'DNS_RESERVED_ZONES'),
+        ));
+
+        $this->assertCount(1, $signals, 'A reserved list that refuses every claim has to be said to an operator, once per refusal.');
+        $this->assertSame($malformed, $signals[0]->context['malformed_entries'] ?? null);
+        $this->assertSame(count($reserved), $signals[0]->context['entries'] ?? null);
+        $this->assertSame('dns.reserved_zones', $signals[0]->context['preflight_finding'] ?? null);
+
+        $written = json_encode([$signals[0]->message, $signals[0]->context], JSON_THROW_ON_ERROR);
+
+        foreach (['internal_panel', 'corp-secret', 'not a name', 'lynomia.test'] as $value) {
+            $this->assertStringNotContainsString($value, $written, 'The operator signal quotes a configured entry; it counts them.');
+        }
     }
 
     #[Test]
-    public function an_entry_in_the_reserved_list_that_is_not_even_text_refuses_every_claim(): void
+    public function a_name_the_customer_did_mistype_is_still_their_mistake_when_the_list_does_not_read(): void
     {
-        /*
-         * `DNS_RESERVED_ZONES` always reads as a list of strings; an edited
-         * `config/dns.php` need not. A nested value is an entry that does not
-         * read like any other, and it fails the same way — closed — rather
-         * than vanishing and protecting less than was written.
-         */
-        config()->set('dns.reserved_zones', [['lynomia.test']]);
+        // The customer's own error comes first: it is true, and it is theirs to fix.
+        config()->set('dns.reserved_zones', ['lynomia.test', 'not a name']);
 
         [$customer, $owner] = $this->accountWithOwner();
-        $provider = $this->provider();
+        $this->provider();
 
-        $response = $this->actingAs($owner)
+        $this->actingAs($owner)
             ->withHeaders($this->actingFor($customer))
-            ->postJson('/api/v1/dns/zones', ['name' => 'lynomia.test']);
-
-        $this->assertNotSame(201, $response->status());
-        $this->assertNull($provider->findZone('lynomia.test'));
+            ->postJson('/api/v1/dns/zones', ['name' => 'under_score.test'])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'dns.invalid_name');
     }
 
     #[Test]

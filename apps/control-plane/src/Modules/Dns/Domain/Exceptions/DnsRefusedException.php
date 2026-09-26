@@ -164,6 +164,28 @@ final class DnsRefusedException extends DomainException
             ->as('dns.zone.not_confirmed');
     }
 
+    /**
+     * The platform cannot tell which names it holds, so it holds them all.
+     *
+     * An entry in `DNS_RESERVED_ZONES` that is not a name refuses every claim
+     * by every account until it is corrected (see ReservedZones). That is the
+     * platform's condition and not the claimant's mistake, so it is answered
+     * as one: a 503 under its own code, with a sentence that blames nobody.
+     * It used to surface as `dns.invalid_name`, 422, "That is not a valid DNS
+     * name." — about a name the customer did not type (I-3).
+     *
+     * Nothing is published: not the entry, not the variable, not a count.
+     * Which names the platform holds, and how its configuration is broken,
+     * are not the caller's to know. The operator is told by the log line the
+     * action writes and by the estate preflight's `dns.reserved_zones`.
+     */
+    public static function reservationUnreadable(): self
+    {
+        return (new self('New zones cannot be added right now. Try again later.'))
+            ->as('dns.zone.unavailable')
+            ->withStatus(503);
+    }
+
     public static function providerCannotCreateZones(): self
     {
         return (new self('This deployment is not configured to create zones.'))

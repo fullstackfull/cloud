@@ -230,9 +230,11 @@ final readonly class InfrastructurePreflightService
          * Deployment-wide like the two above, and estate-only unlike the
          * first: which names no account may claim is a fact about this
          * deployment's configuration and about no one product, so a product
-         * run would repeat it without adding anything.
+         * run would repeat it without adding anything. Production is decided
+         * as it is for the naming findings: a read-only-real run on a
+         * production installation, where holding too little is a blocker.
          */
-        $findings = [...$findings, ...$this->guarded('dns', CheckCategory::Configuration, fn (): array => $this->reservedZones->inspect())];
+        $findings = [...$findings, ...$this->guarded('dns', CheckCategory::Configuration, fn (): array => $this->reservedZones->inspect($this->production($request)))];
 
         foreach ($this->familiesInService() as $product) {
             $findings = [...$findings, ...$this->guarded(
@@ -615,8 +617,7 @@ final readonly class InfrastructurePreflightService
      */
     private function namingFindings(PreflightRequest $request): array
     {
-        $production = $request->mode === PreflightMode::ReadOnlyReal
-            && app()->environment('production');
+        $production = $this->production($request);
 
         return array_map(
             static fn (NamingFinding $finding): PreflightFinding => match ($finding->status) {
@@ -645,6 +646,17 @@ final readonly class InfrastructurePreflightService
             },
             $this->naming->execute($production),
         );
+    }
+
+    /**
+     * Is this run the one a production estate is judged by: read-only-real,
+     * on a production installation? A simulation run on production, or a
+     * real read anywhere else, is a rehearsal and is told rather than stopped.
+     */
+    private function production(PreflightRequest $request): bool
+    {
+        return $request->mode === PreflightMode::ReadOnlyReal
+            && app()->environment('production');
     }
 
     /**
