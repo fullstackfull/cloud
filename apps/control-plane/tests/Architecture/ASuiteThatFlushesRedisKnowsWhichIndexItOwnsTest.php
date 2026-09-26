@@ -41,7 +41,7 @@ final class ASuiteThatFlushesRedisKnowsWhichIndexItOwnsTest extends TestCase
     /** @return iterable<string, array{string}> */
     public static function unreadable(): iterable
     {
-        foreach (['foo', '', '3a', 'three', '4.5', '-1', ' 4', '0x1', 'false', 'null'] as $value) {
+        foreach (['foo', '', '3a', 'three', '4.5', '-1', ' 4', '0x1', 'false', 'true', 'null', '(null)', '(false)', '(true)', 'empty'] as $value) {
             yield var_export($value, true) => [$value];
         }
     }
@@ -89,6 +89,46 @@ final class ASuiteThatFlushesRedisKnowsWhichIndexItOwnsTest extends TestCase
         }
 
         $this->fail("{$suite} would flush Redis index {$index} for REDIS_DB=foo; it must refuse an index it cannot read.");
+    }
+
+    /**
+     * The words Laravel's `env()` turns into a boolean or a null.
+     *
+     * Read through `env()`, `null` and `(null)` arrive as absent and take the
+     * fallback, and `true`/`false` arrive as something that is not a string
+     * at all. Exported, each of them is a claim about isolation the suite
+     * cannot read, so each must be refused as it arrives, which only a read of
+     * the raw value can do.
+     *
+     * @return iterable<string, array{class-string, string, string}>
+     */
+    public static function suitesAndWordsEnvWouldRewrite(): iterable
+    {
+        foreach (self::suitesThatFlush() as $name => [$suite, $method]) {
+            foreach (['null', '(null)', 'false', '(false)', 'true', '(true)'] as $value) {
+                yield "{$name}, {$value}" => [$suite, $method, $value];
+            }
+        }
+    }
+
+    /**
+     * @param  class-string  $suite
+     */
+    #[Test]
+    #[DataProvider('suitesAndWordsEnvWouldRewrite')]
+    public function both_suites_refuse_an_exported_word_env_would_have_read_as_absent(string $suite, string $method, string $value): void
+    {
+        $this->export($value);
+
+        try {
+            $index = self::indexOf($suite, $method);
+        } catch (RuntimeException $refusal) {
+            $this->assertStringContainsString('is not a Redis database index', $refusal->getMessage());
+
+            return;
+        }
+
+        $this->fail("{$suite} would flush Redis index {$index} for REDIS_DB={$value}; it must refuse an index it cannot read.");
     }
 
     /**

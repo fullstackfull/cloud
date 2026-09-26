@@ -110,14 +110,21 @@
             pin, for the same reason as the database: an exported REDIS_DB is
             how a run chooses its own index.
 
-            Its value is 0, the default config/database.php already falls back
-            to, so the general Redis connection (cache, queue and locks outside
-            the queue harness) is where it would be without this entry. It is
-            not what WorkerHarness and ConsolePermitConcurrencyTest fell back to
-            without it, which was 15: with this entry they use 0 too. No single
-            value could preserve both, since both read the same variable, and 0
-            is the better of the two: 15 is the index every run that forgot the
-            variable used to land on, and these suites flush the whole index.
+            Its value is 0, the default config/database.php falls back to when
+            REDIS_DB is set nowhere. Only then is the general Redis connection
+            (cache, queue and locks outside the queue harness) where it would be
+            without this entry: a REDIS_DB in .env.testing used to reach that
+            connection and both flushing suites, and with this entry it reaches
+            neither (see the last paragraph). Nor is 0 what WorkerHarness and
+            ConsolePermitConcurrencyTest fell back to without it, which was 15:
+            with this entry they use 0 too. No single value could preserve both,
+            since both read the same variable, and 0 was preferred: 15 is the
+            index every run that forgot the variable used to land on, and these
+            suites flush the whole index. 0 is not free either. It is the index
+            the application itself uses on the same port when .env names no
+            REDIS_DB, as .env.example does not, so a run that exports neither
+            REDIS_PORT nor REDIS_DB on a machine running the application
+            flushes the application's own index.
             The entry is here at all so that the rule in
             ThePhpunitPinsHoldAgainstAnExportedVariableTest covers REDIS_DB:
             without it, a server entry for REDIS_DB would be a name in neither
