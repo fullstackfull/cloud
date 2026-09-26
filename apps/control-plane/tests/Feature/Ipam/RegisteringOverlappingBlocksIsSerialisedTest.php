@@ -15,7 +15,7 @@ use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
 use PHPUnit\Framework\Attributes\Test;
-use RuntimeException;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -337,24 +337,16 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
     /**
      * Every table but `migrations`, on a database that can only be a test one.
      *
-     * The same refusal WorkerHarness makes before its own truncate, for the
-     * same reason: this runs automatically, and it must not be able to run
+     * TestDatabaseGuard's refusal, the one WorkerHarness's rule shares, for
+     * the same reason: this runs automatically, and it must not be able to run
      * against a database somebody cares about because an environment file
      * was copied and never repointed.
      */
     private function emptyTheCommittedDatabase(): void
     {
         $connection = DB::connection($this->defaultConnection);
-        $database = (string) $connection->getDatabaseName();
 
-        if (! app()->environment('testing')
-            || $database !== (string) config('database.connections.pgsql.database')
-            || ! str_contains(strtolower($database), 'test')) {
-            throw new RuntimeException(sprintf(
-                'Refusing to empty "%s": this test only ever empties the configured test database.',
-                $database,
-            ));
-        }
+        TestDatabaseGuard::refuseToEmpty($connection);
 
         /** @var list<object{tablename: string}> $tables */
         $tables = $connection->select(

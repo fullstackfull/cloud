@@ -18,6 +18,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -73,6 +74,7 @@ final class CouponRedemptionConcurrencyTest extends TestCase
 
         // Cascades into coupon_redemptions and orders. Nothing rolled back for
         // us, so the next test starts from an empty table set.
+        TestDatabaseGuard::refuseToEmpty(DB::connection());
         DB::statement('TRUNCATE coupons, customers, users RESTART IDENTITY CASCADE');
 
         parent::tearDown();

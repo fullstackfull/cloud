@@ -15,6 +15,7 @@ use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -182,6 +183,7 @@ final class ConcurrentCaptureTest extends TestCase
      */
     private function wipe(): void
     {
+        TestDatabaseGuard::refuseToEmpty(DB::connection());
         DB::statement('truncate table webhook_events, refunds, transactions, customers restart identity cascade');
     }
 }

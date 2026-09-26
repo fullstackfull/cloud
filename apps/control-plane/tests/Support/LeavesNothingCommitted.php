@@ -32,6 +32,12 @@ use Illuminate\Support\Facades\DB;
  *
  * `migrations` itself is kept: dropping it would make the next test run
  * re-migrate a database that is already migrated.
+ *
+ * Emptying every table is as destructive as `DatabaseTruncation`, so it is
+ * guarded the same way: {@see TestDatabaseGuard::DESTROYING_TRAITS} lists this
+ * trait, which puts a class using it through the guard before its traits run,
+ * and {@see emptyEveryTable()} asks the guard again before its statement, for
+ * a class that reaches this trait without `Tests\TestCase`.
  */
 trait LeavesNothingCommitted
 {
@@ -44,6 +50,8 @@ trait LeavesNothingCommitted
 
     protected function emptyEveryTable(): void
     {
+        TestDatabaseGuard::refuseAnythingButATestDatabase(app());
+
         /** @var list<string> $tables */
         $tables = DB::table('information_schema.tables')
             ->where('table_schema', 'public')

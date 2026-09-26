@@ -15,6 +15,7 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionEnum;
 use SplFileInfo;
+use Tests\Support\EnumCaseReferences;
 
 /**
  * Every notification the platform declares is one some production code raises
@@ -109,13 +110,15 @@ use SplFileInfo;
  * the first produced for as long as the second was. The references are
  * therefore matched as tokens.
  *
- * {@see EveryStateAMachineCanEnterHasAProducerTest} classifies positions the
- * same way, but its subject is the destinations of discovered state machines,
- * and this enum is governed by no machine; widening that gate's subject would
- * move another architecture test's subject. Its classifier is private to it,
- * so this file carries its own, smaller one — without the machine discovery,
- * the `->value` projection rules or the query-builder heuristics, because a
- * notification type is never written through a query builder.
+ * {@see EveryStateAMachineCanEnterHasAProducerTest} and
+ * {@see EveryEnumCaseHasAProducerTest} classify positions the same way, through
+ * the shared {@see EnumCaseReferences}, and the second covers
+ * this enum's cases too. This file predates that, keeps its own, smaller
+ * classifier, and asks more of a notification type than that gate asks of a
+ * case: copy in both locales, no copy outliving its type, and every category
+ * the category of some type. Its classifier carries no machine discovery, `->value`
+ * projection rules or query-builder heuristics, because a notification type is
+ * never written through a query builder.
  *
  * {@see EveryControllerMethodIsReachableTest} and the capability gates
  * ({@see EveryDeclaredCapabilityHasAConsumerTest}, {@see NoDeadCapabilitiesTest})

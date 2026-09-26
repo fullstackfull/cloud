@@ -13,6 +13,7 @@ use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\HttpFoundation\Cookie;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -157,6 +158,7 @@ final class SessionRevocationTest extends TestCase
      */
     private function freshClientWith(array $recaller): TestResponse
     {
+        TestDatabaseGuard::refuseToEmpty(DB::connection());
         DB::table('sessions')->delete();
         $this->flushSession();
         $this->app['auth']->forgetGuards();

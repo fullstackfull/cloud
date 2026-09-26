@@ -17,6 +17,7 @@ use Lynomia\Modules\Provisioning\Domain\ValueObjects\ProvisioningResult;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningAttempt;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\TestDatabaseGuard;
 use Throwable;
 
 /**
@@ -283,6 +284,7 @@ final class ProvisioningConcurrencyTest extends ProvisioningTestCase
      */
     private function wipe(): void
     {
+        TestDatabaseGuard::refuseToEmpty(DB::connection());
         DB::statement('truncate table provisioning_attempts, provisioning_jobs, services, customers restart identity cascade');
     }
 }

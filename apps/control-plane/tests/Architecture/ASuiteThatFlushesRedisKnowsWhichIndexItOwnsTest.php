@@ -14,15 +14,21 @@ use Tests\Feature\Queue\WorkerHarness;
 use Tests\Support\RedisIndexForThisRun;
 
 /**
- * A run that names its Redis index unreadably is refused, not moved to 15.
+ * A run that names its Redis index unreadably, or not at all, is refused, not
+ * moved to an index nobody chose.
  *
  * The two suites that `flushdb` a whole Redis database used to fold every
  * value of `REDIS_DB` they could not read into index 15 — the same index a run
  * that forgets the variable lands on — so a typo put a run that believed it
  * was isolated on top of every forgetful one, each emptying the other's queue
- * mid-test. {@see RedisIndexForThisRun} holds the rule once; this pins the
- * rule, and pins that both suites use it, by setting the variable the way an
- * exported one arrives and asking each suite which index it would flush.
+ * mid-test. Later a default of 0 in phpunit.xml gave every run an index,
+ * the application's own, and kept `.env.testing`'s from ever arriving.
+ * {@see RedisIndexForThisRun} holds the rule once; this pins the rule, and
+ * pins that both suites use it, by setting the variable the way an exported
+ * one arrives (or removing it everywhere it arrives) and asking each suite
+ * which index it would flush. Whether a value in `.env.testing` arrives at all
+ * is measured, through PHPUnit's handler and dotenv, by
+ * {@see ThePhpunitPinsHoldAgainstAnExportedVariableTest}.
  */
 final class ASuiteThatFlushesRedisKnowsWhichIndexItOwnsTest extends TestCase
 {
@@ -53,15 +59,19 @@ final class ASuiteThatFlushesRedisKnowsWhichIndexItOwnsTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('is not a Redis database index');
 
-        RedisIndexForThisRun::from($value, 15);
+        RedisIndexForThisRun::from($value);
     }
 
     #[Test]
-    public function a_whole_number_is_the_index_and_absence_is_the_fallback(): void
+    public function a_whole_number_is_the_index_and_absence_is_refused(): void
     {
-        $this->assertSame(0, RedisIndexForThisRun::from('0', 15));
-        $this->assertSame(70, RedisIndexForThisRun::from('70', 15));
-        $this->assertSame(15, RedisIndexForThisRun::from(null, 15));
+        $this->assertSame(0, RedisIndexForThisRun::from('0'));
+        $this->assertSame(70, RedisIndexForThisRun::from('70'));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('is set nowhere');
+
+        RedisIndexForThisRun::from(null);
     }
 
     /** @return iterable<string, array{class-string, string}> */
@@ -148,11 +158,19 @@ final class ASuiteThatFlushesRedisKnowsWhichIndexItOwnsTest extends TestCase
      */
     #[Test]
     #[DataProvider('suitesThatFlush')]
-    public function both_suites_fall_back_to_their_own_index_when_nothing_names_one(string $suite, string $method): void
+    public function both_suites_refuse_when_nothing_names_an_index(string $suite, string $method): void
     {
         $this->export(null);
 
-        $this->assertSame(15, self::indexOf($suite, $method));
+        try {
+            $index = self::indexOf($suite, $method);
+        } catch (RuntimeException $refusal) {
+            $this->assertStringContainsString('is set nowhere', $refusal->getMessage());
+
+            return;
+        }
+
+        $this->fail("{$suite} would flush Redis index {$index} when nothing names one; it must refuse to choose.");
     }
 
     /** @param class-string $suite */

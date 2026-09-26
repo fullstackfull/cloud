@@ -28,6 +28,7 @@ use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\Support\RedisIndexForThisRun;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -59,22 +60,9 @@ abstract class WorkerHarness extends TestCase
     protected const string CONNECTION = 'queue_test';
 
     /**
-     * The index for a runner that names none.
-     *
-     * Not reached under this repository's `phpunit.xml`, which gives
-     * `REDIS_DB` a default of its own (0) that an exported value overrides —
-     * so inside `php artisan test` this constant is never the answer. It is
-     * still the answer for a runner that does not use that file's entry, such
-     * as `vendor/bin/phpunit -c <a copy without it>`, and deleting it would
-     * leave that runner with nothing. An unreadable `REDIS_DB` does not reach
-     * it either: {@see RedisIndexForThisRun} refuses one.
-     */
-    protected const int REDIS_DATABASE = 15;
-
-    /**
      * Which Redis database this run owns.
      *
-     * The index used to be the constant above and nothing else, which is
+     * The index used to be a constant, 15, and nothing else, which is
      * correct for one checkout and wrong for several. `setUp()` empties the
      * whole database — `flushdb`, not a prefixed delete — so two checkouts
      * running these suites at once delete each other's queued messages
@@ -85,21 +73,23 @@ abstract class WorkerHarness extends TestCase
      * here as fifteen Simulation failures that became none the moment the two
      * runs stopped sharing an index.
      *
-     * So the index is a default rather than a fact. `REDIS_DB` is already the
-     * variable `config/database.php` reads and already the one this harness
-     * hands its worker subprocesses, so a checkout that wants its own
-     * keyspace sets that and everything downstream follows.
+     * So the index is chosen by the run. `REDIS_DB` is already the variable
+     * `config/database.php` reads and already the one this harness hands its
+     * worker subprocesses, so a checkout exports it, or writes it in its
+     * `.env.testing`, and everything downstream follows (the precedence is in
+     * phpunit.xml's comment).
      *
-     * A value that is set and cannot be read as an index is refused rather
-     * than folded into the fallback: the old `is_numeric` line put `foo`, `''`
-     * and `3a` on the same index as every run that forgot the variable, while
-     * the run believed it was isolated, and read `4.5` as 4. The rule is in
-     * {@see RedisIndexForThisRun}, shared with the console permit concurrency
-     * proof, which carried a byte-identical copy of that line.
+     * A run that names no index, or names one that cannot be read as an index,
+     * is refused rather than given a fallback: the old `is_numeric` line put
+     * `foo`, `''` and `3a` on the same index as every run that forgot the
+     * variable, while the run believed it was isolated, and read `4.5` as 4.
+     * The rule is in {@see RedisIndexForThisRun}, shared with the console
+     * permit concurrency proof, which carried a byte-identical copy of that
+     * line.
      */
     protected static function redisDatabase(): int
     {
-        return RedisIndexForThisRun::resolve(self::REDIS_DATABASE);
+        return RedisIndexForThisRun::resolve();
     }
 
     /** Where the fake hypervisor keeps its fleet for this test. */
@@ -231,9 +221,11 @@ abstract class WorkerHarness extends TestCase
      *    default connection — which {@see outsideTheTransaction()} does, and
      *    the concurrency tests do too — must not be able to point this at
      *    whatever was left set.
-     *  - **The database is the configured test database.** `phpunit.xml` names
-     *    it, so this compares against the same source PHPUnit reads rather
-     *    than against a pattern this class invented.
+     *  - **The database is the configured test database.** The run names it
+     *    (exported `DB_DATABASE`, else `.env.testing`'s; the precedence is in
+     *    phpunit.xml's comment), so this compares against the same
+     *    configuration the application reads rather than against a pattern
+     *    this class invented.
      *  - **The name says it is a test database.** The one that distrusts the
      *    configuration rather than the connection: `.env.testing` is a file
      *    people copy, and a copy that was never repointed satisfies all three
@@ -283,11 +275,13 @@ abstract class WorkerHarness extends TestCase
          * rows — at which point conditions one to three all hold and the
          * schema is emptied anyway.
          *
-         * The same idiom the browser suite already uses, which insists its own
-         * database is named for what it is before it seeds fixed fixtures into
-         * it.
+         * The rule is {@see TestDatabaseGuard::isNamedAsATestDatabase()}, the
+         * one the schema-dropping traits are held to: `test` as a whole word
+         * of the name. A substring would admit `lynomia_latest`. The browser
+         * suite insists on the same idea for its own database before it seeds
+         * fixed fixtures into it.
          */
-        if (! str_contains(strtolower($target), 'test')) {
+        if (! TestDatabaseGuard::isNamedAsATestDatabase($target)) {
             throw new RuntimeException(sprintf(
                 'The worker harness refuses to empty "%s": a database it may empty has to be named as a test database.',
                 $target,

@@ -50,12 +50,13 @@ use Tests\Support\TestDatabaseGuard;
  * ---------------------------------------------------------------------------
  *
  * A pin **yields** when it says only *where* the suite's disposable state
- * lives — the database address and the Redis index — because choosing that per
+ * lives — the database server's address — because choosing that per
  * run is how concurrent runs on one machine stay apart, and what arrives is
  * checked by a guard rather than trusted: {@see TestDatabaseGuard}
  * refuses a database not named as a test database before anything is dropped,
  * and {@see RedisIndexForThisRun} refuses an index it cannot
- * read. Every other pin says *what* the suite is testing against — drivers,
+ * read. The database name and the Redis address are not pins at all: see
+ * THE_DATABASE_THE_RUN_CHOOSES and LEFT_TO_THE_RUN. Every other pin says *what* the suite is testing against — drivers,
  * providers, environment, currency, published documents — and an exported
  * value there changes what a green result means, so it must not yield.
  *
@@ -110,10 +111,41 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
     private const array MUST_YIELD = [
         'DB_HOST',
         'DB_PORT',
-        'DB_DATABASE',
         'DB_USERNAME',
         'DB_URL',
+    ];
+
+    /**
+     * Where the suite's database is, by name: chosen by the run, and named
+     * nowhere in phpunit.xml.
+     *
+     * A `lynomia_test` default here was applied before dotenv, so a
+     * DB_DATABASE in `.env.testing` never reached a run (measured: a
+     * `.env.testing` naming `lynomia_test_v3g08` ran on `lynomia_test`), the
+     * same shape as REDIS_DB. With nothing exported and nothing in
+     * `.env.testing`, `config/database.php` falls back to `laravel`, which
+     * TestDatabaseGuard refuses before anything is dropped.
+     *
+     * @var list<string>
+     */
+    private const array THE_DATABASE_THE_RUN_CHOOSES = ['DB_DATABASE'];
+
+    /**
+     * Where the suite's Redis lives: chosen by the run, and named nowhere in
+     * phpunit.xml.
+     *
+     * An entry there, even an unforced default, is applied before dotenv, and
+     * dotenv never overwrites; so a `REDIS_DB` in `.env.testing` never reached
+     * a run while `REDIS_PORT` (never in phpunit.xml) did, and one connection
+     * took its port and its index from two different places. Every checkout
+     * that isolated itself through `.env.testing` then shared index 0 of its
+     * port — the index the two flushing suites empty before every test.
+     *
+     * @var list<string>
+     */
+    private const array LEFT_TO_THE_RUN = [
         'REDIS_DB',
+        'REDIS_PORT',
     ];
 
     #[Test]
@@ -248,6 +280,58 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
     }
 
     /**
+     * The precedence for the Redis address, measured through PHPUnit's own
+     * handler and dotenv in a clean child: an exported value wins; otherwise
+     * `.env.testing`'s; otherwise nothing, and the suites that flush Redis
+     * refuse ({@see RedisIndexForThisRun}).
+     */
+    #[Test]
+    public function the_redis_address_is_the_exported_one_then_env_testings_and_never_phpunit_xmls(): void
+    {
+        foreach (self::LEFT_TO_THE_RUN as $name) {
+            $this->assertArrayNotHasKey($name, self::pins('env'), "{$name} must not be in phpunit.xml at all: an <env> there is applied before dotenv, so .env.testing's {$name} would never reach a run.");
+            $this->assertArrayNotHasKey($name, self::pins('server'), "{$name} must not be in phpunit.xml at all.");
+        }
+
+        $dotenv = ['REDIS_DB' => '12', 'REDIS_PORT' => '6390'];
+
+        $fromTheFile = self::throughPhpunit([], $dotenv);
+        $exported = self::throughPhpunit(['REDIS_DB' => '7', 'REDIS_PORT' => '6391'], $dotenv);
+        $neither = self::throughPhpunit([], []);
+
+        foreach (self::LEFT_TO_THE_RUN as $name) {
+            $this->assertSame($dotenv[$name], $fromTheFile[$name]['laravel'], "A {$name} in .env.testing must reach env() when nothing is exported.");
+            $this->assertSame($dotenv[$name], $fromTheFile[$name]['getenv'], "A {$name} in .env.testing must reach getenv(), which a worker subprocess inherits.");
+            $this->assertNotSame($dotenv[$name], $exported[$name]['laravel'], "An exported {$name} must win over .env.testing's.");
+            $this->assertSame($exported[$name]['getenv'], $exported[$name]['laravel'], "An exported {$name} must be what env() and getenv() both read.");
+            $this->assertNull($neither[$name]['laravel'], "With {$name} neither exported nor in .env.testing, nothing may supply one.");
+        }
+    }
+
+    /**
+     * The same precedence for the database name: exported, then
+     * `.env.testing`, then nothing phpunit.xml supplies.
+     */
+    #[Test]
+    public function the_database_name_is_the_exported_one_then_env_testings_and_never_phpunit_xmls(): void
+    {
+        $this->assertArrayNotHasKey('DB_DATABASE', self::pins('env'), 'DB_DATABASE must not be in phpunit.xml: an <env> there is applied before dotenv, so .env.testing\'s DB_DATABASE would never reach a run.');
+        $this->assertArrayNotHasKey('DB_DATABASE', self::pins('server'), 'DB_DATABASE must not be in phpunit.xml at all.');
+
+        $dotenv = ['DB_DATABASE' => 'lynomia_test_from_the_file'];
+
+        $fromTheFile = self::throughPhpunit([], $dotenv);
+        $exported = self::throughPhpunit(['DB_DATABASE' => 'lynomia_test_exported'], $dotenv);
+        $neither = self::throughPhpunit([], []);
+
+        $this->assertSame('lynomia_test_from_the_file', $fromTheFile['DB_DATABASE']['laravel'], '.env.testing\'s DB_DATABASE must reach env() when nothing is exported.');
+        $this->assertSame('lynomia_test_from_the_file', $fromTheFile['DB_DATABASE']['getenv'], '.env.testing\'s DB_DATABASE must reach getenv(), which a worker subprocess inherits.');
+        $this->assertSame('lynomia_test_exported', $exported['DB_DATABASE']['laravel'], 'An exported DB_DATABASE must win over .env.testing\'s.');
+        $this->assertSame('lynomia_test_exported', $exported['DB_DATABASE']['getenv']);
+        $this->assertNull($neither['DB_DATABASE']['laravel'], 'With DB_DATABASE neither exported nor in .env.testing, phpunit.xml must not supply one.');
+    }
+
+    /**
      * The `<env>` or `<server>` entries of phpunit.xml's `<php>` block.
      *
      * @return array<string, array{value: string, force: bool}>
@@ -298,7 +382,7 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
         }
         file_put_contents($directory.'/.env.testing', $lines);
 
-        $names = [...self::MUST_NOT_YIELD, ...self::MUST_YIELD];
+        $names = [...self::MUST_NOT_YIELD, ...self::MUST_YIELD, ...self::LEFT_TO_THE_RUN, ...self::THE_DATABASE_THE_RUN_CHOOSES];
 
         $code = <<<'PHP'
             [, $autoload, $configuration, $directory, $names] = $argv;

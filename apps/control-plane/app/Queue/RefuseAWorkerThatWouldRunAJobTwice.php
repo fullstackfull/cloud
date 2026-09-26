@@ -42,10 +42,14 @@ use Throwable;
  * fallback is restated below. An input that does not bind is left alone: the
  * command itself will refuse it a moment later with Symfony's own message.
  *
- * Not testable by running a real command under `APP_ENV=testing`: Laravel's
- * console kernel only reroutes Symfony's command events when
- * `! runningUnitTests()`, so `CommandStarting` never fires in the test
- * environment. The tests call {@see handle()} directly.
+ * Inert under `APP_ENV=testing`: Laravel's console kernel only reroutes
+ * Symfony's command events when `! runningUnitTests()`, so `CommandStarting`
+ * never fires in the test environment, and a worker started there is not
+ * checked. Most tests therefore call {@see handle()} directly
+ * (`EveryQueueOutlivesItsLongestJobTest`); the real path — the listener
+ * registered and reached by a real `queue:work` — is proved by
+ * `AWorkerThatWouldRunAJobTwiceDoesNotStartTest`, which starts the worker as a
+ * child process under `APP_ENV=staging`.
  */
 final readonly class RefuseAWorkerThatWouldRunAJobTwice
 {

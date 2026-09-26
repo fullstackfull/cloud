@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Queue;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use ReflectionMethod;
 use RuntimeException;
@@ -21,7 +22,7 @@ use Tests\TestCase;
  *
  * That is acceptable only under hard isolation, so the harness establishes
  * where it is before it empties anything: the testing environment, its own
- * connection, the database `phpunit.xml` names, and not the database this
+ * connection, the test database the run names, and not the database this
  * machine develops against.
  *
  * ---------------------------------------------------------------------------
@@ -125,6 +126,42 @@ final class TheHarnessRefusesAnUnsafeDatabaseTest extends TestCase
         $this->guard()->invoke($this->harness(), $this->app['db']->connection('queue_test'));
     }
 
+    /**
+     * The name rule is `test` as a whole word, the rule
+     * `TestDatabaseGuard::isNamedAsATestDatabase()` states. A substring
+     * rule admitted each of these; `lynomia_latest` was created and migrated
+     * by a run the schema-dropping guard let through. Configuration and
+     * connection agree here, so only the name condition can refuse.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function namesThatOnlyContainTheLetters(): iterable
+    {
+        foreach (['lynomia_latest', 'contest', 'attestation', 'lynomiatest', 'lynomia_testing'] as $name) {
+            yield $name => [$name];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('namesThatOnlyContainTheLetters')]
+    public function a_name_that_only_contains_the_letters_test_is_refused(string $name): void
+    {
+        config([
+            'database.connections.pgsql.database' => $name,
+            'database.connections.queue_test' => [
+                ...(array) config('database.connections.pgsql'),
+                'database' => $name,
+            ],
+        ]);
+
+        $this->app['db']->purge('queue_test');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('has to be named as a test database');
+
+        $this->guard()->invoke($this->harness(), $this->app['db']->connection('queue_test'));
+    }
+
     #[Test]
     public function a_database_that_is_not_the_configured_test_database_is_refused(): void
     {
@@ -157,7 +194,7 @@ final class TheHarnessRefusesAnUnsafeDatabaseTest extends TestCase
         /*
          * The positive twin, and the reason the other two are not simply a
          * blanket refusal: the harness has to be able to do its job. Same
-         * connection, same database `phpunit.xml` names, testing environment
+         * connection, same test database the run names, testing environment
          * — and the guard returns without complaint.
          *
          * It returns void, so the assertion is that nothing was thrown. The
