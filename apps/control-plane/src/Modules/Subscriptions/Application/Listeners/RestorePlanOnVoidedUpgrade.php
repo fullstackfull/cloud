@@ -34,6 +34,11 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * Otherwise the void is of a change the subscription has already left, or of
  * the open invoices of a subscription being wound up, and there is nothing to
  * put back - an ended subscription is not moved or audited as a plan change.
+ * That holds for the wind-up because WindUpAnEndedSubscription ends the
+ * subscription before it voids the invoices (in one transaction, the invoices
+ * locked first): the void is heard with the subscription already terminal.
+ * It used to void them first, so the subscription was restored to the plan
+ * and audited as plan_changed on its way out (O-4).
  *
  * The plan it goes back to always has room: while an upgrade is unpaid, the
  * unit it left keeps counting against that plan (PlanCapacity::claimed()), so

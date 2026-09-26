@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Payments\Application\Actions;
 
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\TheSubscriptionAnInvoiceBills;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -167,6 +168,12 @@ final readonly class StartInvoicePayment
 
             if (! $locked->status->isCollectible()) {
                 throw InvoiceNotPayableException::forStatus((string) $locked->getKey(), $locked->status);
+            }
+
+            // Nothing more is delivered on a subscription that has ended, so
+            // an invoice of it left open is not paid for nothing (O-1, N-3).
+            if (TheSubscriptionAnInvoiceBills::hasEnded($locked)) {
+                throw InvoiceNotPayableException::becauseItsSubscriptionHasEnded((string) $locked->getKey());
             }
 
             $amount = $locked->amountDue();

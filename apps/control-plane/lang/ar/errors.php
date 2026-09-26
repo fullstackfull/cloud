@@ -141,6 +141,7 @@ return [
         'paid_cannot_be_voided' => 'لا يمكن إبطال فاتورة مدفوعة.',
         'payment_not_settleable' => 'لا يمكن تطبيق هذه الدفعة على الفاتورة.',
         'refund_exceeds_payment' => 'لا يمكن أن يتجاوز المبلغ المسترد ما تم دفعه.',
+        'subscription_ended' => 'انتهى الاشتراك الذي صدرت له هذه الفاتورة، لذا لم يعد بالإمكان دفعها.',
     ],
     'subscription' => [
         'already_ended' => 'انتهى هذا الاشتراك بالفعل.',

@@ -655,6 +655,154 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
         $this->assertSame(90_000, $this->renewalLineAfterThePeriod($subscription)->unit_amount_minor);
     }
 
+    // ---- an ended subscription's open invoices (O-1) -------------------------
+
+    #[Test]
+    public function an_immediate_cancellation_withdraws_its_open_upgrade_and_renewal(): void
+    {
+        /*
+         * O-1. Cancelling now voided nothing: the upgrade's proration and an
+         * open renewal stayed payable by card and by wallet, and paying the
+         * upgrade queued a resize onto the cancelled subscription's machine.
+         */
+        [$customer, $upgrade, $capture] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        $renewal = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 90_000,
+            'total_minor' => 90_000,
+        ]);
+
+        app(CancelSubscription::class)->execute($subscription, immediately: true);
+
+        $this->assertSame(SubscriptionStatus::Cancelled, $subscription->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Void, $renewal->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer), 'What the upgrade held went back to the wallet.');
+        $this->assertSame(5_000, (int) WalletTransaction::query()->where('invoice_id', $upgrade->getKey())->sum('amount_minor'));
+
+        // O-4: an ended subscription is not moved back to the plan the voided
+        // upgrade left, nor audited as a plan change.
+        $this->assertSame($this->large->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(0, AuditEntry::query()->where('action', AuditAction::PlanChanged->value)->where('context->reason', 'proration_invoice_voided')->count());
+
+        // Neither can be paid any more...
+        foreach ([$upgrade, $renewal] as $invoice) {
+            try {
+                app(PayInvoiceFromWallet::class)->execute($customer, $invoice->fresh(), 'after-cancel-'.$invoice->id);
+                $this->fail('An invoice of a cancelled subscription was paid from the wallet.');
+            } catch (InvoiceNotPayableException) {
+            }
+        }
+
+        // ...and a card payment already in flight for the upgrade lands in
+        // the wallet, once, rather than on the invoice.
+        $late = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create(['invoice_id' => $upgrade->getKey()]);
+        app(SettleInvoiceOnPaymentCaptured::class)->handle(new PaymentCaptured(
+            transactionId: (string) $late->getKey(),
+            customerId: (string) $customer->getKey(),
+            invoiceId: (string) $upgrade->getKey(),
+            provider: (string) $late->provider,
+            providerReference: (string) $late->provider_reference,
+            amount: Money::ofMinor(1_000, 'KWD'),
+            capturedAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(6_000, $this->walletOf($customer));
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+
+        // A card refund of the first capture is now refused: its money is in
+        // the wallet.
+        try {
+            app(IssueRefund::class)->execute($capture->fresh(), Money::ofMinor(5_000, 'KWD'), 'customer asked');
+            $this->fail('Money returned to the wallet was refunded to the card as well.');
+        } catch (RefundExceedsCaptureException) {
+        }
+    }
+
+    #[Test]
+    public function a_capture_recorded_but_not_yet_settled_when_the_subscription_ends_is_returned_once(): void
+    {
+        /*
+         * RecordPaymentCapture attaches a capture to its invoice before the
+         * queue settles it. The wind-up returns what the invoice holds -
+         * that capture included - and voids it; the settlement then finds a
+         * void invoice and compensates. Crediting the capture in full there
+         * as well would hand the same 1.000 back twice.
+         */
+        [$customer, $upgrade] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        $inFlight = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create(['invoice_id' => $upgrade->getKey()]);
+
+        app(CancelSubscription::class)->execute($subscription, immediately: true);
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(6_000, $this->walletOf($customer));
+
+        app(SettleInvoiceOnPaymentCaptured::class)->handle(new PaymentCaptured(
+            transactionId: (string) $inFlight->getKey(),
+            customerId: (string) $customer->getKey(),
+            invoiceId: (string) $upgrade->getKey(),
+            provider: (string) $inFlight->provider,
+            providerReference: (string) $inFlight->provider_reference,
+            amount: Money::ofMinor(1_000, 'KWD'),
+            capturedAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(6_000, $this->walletOf($customer), '6.000 paid, 6.000 back - not 7.000.');
+    }
+
+    #[Test]
+    public function an_upgrade_paid_the_moment_before_the_end_resizes_nothing_after_it(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'paid-then-ended-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        // Paid, and the settlement's listeners not yet heard.
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+        $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
+
+        app(CancelSubscription::class)->execute($subscription, immediately: true);
+
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid(
+            invoiceId: (string) $upgrade->getKey(),
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+    }
+
+    #[Test]
+    public function a_cancellation_at_the_end_of_the_period_withdraws_nothing_until_the_period_ends(): void
+    {
+        [$customer, $upgrade] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        app(CancelSubscription::class)->execute($subscription);
+
+        // Still running, so the upgrade is still for something.
+        $this->assertSame(InvoiceStatus::Open, $upgrade->fresh()?->status);
+        $this->assertSame(0, $this->walletOf($customer));
+
+        app(CancelSubscription::class)->applyScheduled($subscription->fresh(), CarbonImmutable::parse('2026-05-01 00:00:01', 'UTC'));
+
+        $this->assertSame(SubscriptionStatus::Cancelled, $subscription->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(5_000, $this->walletOf($customer));
+    }
+
     // ---- helpers ------------------------------------------------------------
 
     /**

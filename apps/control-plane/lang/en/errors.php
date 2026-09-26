@@ -147,6 +147,7 @@ return [
         'paid_cannot_be_voided' => 'A paid invoice cannot be voided.',
         'payment_not_settleable' => 'This payment cannot be applied to the invoice.',
         'refund_exceeds_payment' => 'A refund cannot exceed what was paid.',
+        'subscription_ended' => 'The subscription this invoice was for has ended, so it can no longer be paid.',
     ],
     'subscription' => [
         'already_ended' => 'This subscription has already ended.',

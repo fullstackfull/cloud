@@ -5,13 +5,12 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
 use Illuminate\Support\Facades\Log;
-use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
-use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Application\Actions\TransitionSubscription;
+use Lynomia\Modules\Subscriptions\Application\Actions\WindUpAnEndedSubscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Throwable;
 
@@ -41,8 +40,12 @@ use Throwable;
  *    `next_invoice_at` and `auto_renew`, which is what the renewal sweep
  *    selects on.
  *
- * And its unpaid invoices are voided (withdrawWhatItStillAsksFor()), so an
- * open renewal cannot be paid for something that no longer exists.
+ * And its open invoices are withdrawn ({@see WindUpAnEndedSubscription}), so
+ * an open renewal cannot be paid for something that no longer exists: an
+ * unpaid one is voided, and a partly paid one has what it still holds
+ * returned to the wallet, recorded against it, and is voided too. A partly
+ * paid invoice used to be left open "for an operator", and the customer could
+ * pay the rest of it for a service already terminated (N-3).
  *
  * Arriving at CANCELLED is heard by EnforceServiceStateForSubscription, which
  * acts only on services that are still ACTIVE or SUSPENDED — none, by the time
@@ -59,7 +62,7 @@ final readonly class EndTheSubscriptionWithItsService
 {
     public function __construct(
         private TransitionSubscription $transition,
-        private VoidInvoice $voidInvoice,
+        private WindUpAnEndedSubscription $windUp,
     ) {}
 
     public function handle(ServiceStatusChanged $event): void
@@ -103,16 +106,20 @@ final readonly class EndTheSubscriptionWithItsService
             return;
         }
 
-        // Its invoices first, then the subscription: voiding locks each
-        // invoice, and a renewal takes an invoice lock before the
-        // subscription's, so taking them in the same order here means the
-        // two can never wait on each other.
-        $this->withdrawWhatItStillAsksFor($subscriptionId);
+        // Its invoices first, then the subscription, then the withdrawals:
+        // the wind-up takes them in the money-path lock order, the one a
+        // renewal takes an invoice and its subscription in.
+        $this->windUp->execute($subscription, 'the service it paid for has ended', function () use ($subscription, $subscriptionId, $serviceId): void {
+            /** @var Subscription $locked */
+            $locked = Subscription::query()->findOrFail($subscription->getKey());
 
-        if (! $subscription->status->isTerminal()) {
+            if ($locked->status->isTerminal()) {
+                return;
+            }
+
             $this->transition->execute(
-                $subscription,
-                $subscription->status === SubscriptionStatus::Suspended
+                $locked,
+                $locked->status === SubscriptionStatus::Suspended
                     ? SubscriptionStatus::Terminated
                     : SubscriptionStatus::Cancelled,
             );
@@ -121,59 +128,6 @@ final readonly class EndTheSubscriptionWithItsService
                 'subscription_id' => $subscriptionId,
                 'service_id' => $serviceId,
             ]);
-        }
-    }
-
-    /**
-     * Voids the subscription's invoices that are still collectible and have
-     * taken no money.
-     *
-     * An open renewal invoice — issued before the service ended, perhaps the
-     * one dunning was chasing — would otherwise stay payable for a service
-     * that no longer exists, and paying it used to reach
-     * ReviveSubscriptionOnRenewalPayment, which cannot revive an ended
-     * subscription and threw on every retry. Voided, it cannot open a
-     * payment, and a capture already in flight for it is credited to the
-     * wallet by CompensateUncollectableCapture.
-     *
-     * An invoice that has taken part of its money is left open and logged:
-     * VoidInvoice refuses it, rightly, and what is owed or returned on it is
-     * an operator's decision.
-     */
-    private function withdrawWhatItStillAsksFor(string $subscriptionId): void
-    {
-        $invoices = Invoice::query()->where('subscription_id', $subscriptionId)->orderBy('id')->get();
-
-        foreach ($invoices as $invoice) {
-            if (! $invoice->status->isCollectible()) {
-                continue;
-            }
-
-            if ($invoice->amountPaid()->isPositive()) {
-                Log::warning('A subscription ended with a partly paid invoice still open; it was left for an operator.', [
-                    'subscription_id' => $subscriptionId,
-                    'invoice_id' => (string) $invoice->getKey(),
-                ]);
-
-                continue;
-            }
-
-            /*
-             * One at a time, each in its own guard: a void that fails — a
-             * lock timeout, a listener on the void that throws — must not
-             * leave the invoices after it payable. The failure is logged for
-             * an operator; the next ending of anything on this subscription
-             * does not revisit it, so the log line is the record.
-             */
-            try {
-                $this->voidInvoice->execute($invoice, 'the service this subscription paid for has ended');
-            } catch (Throwable $e) {
-                Log::warning('A subscription ended and one of its open invoices could not be voided; it is still payable.', [
-                    'subscription_id' => $subscriptionId,
-                    'invoice_id' => (string) $invoice->getKey(),
-                    'reason' => $e->getMessage(),
-                ]);
-            }
-        }
+        });
     }
 }

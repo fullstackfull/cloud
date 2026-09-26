@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Wallet\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
+use Lynomia\Modules\Billing\Application\Queries\TheSubscriptionAnInvoiceBills;
 use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
@@ -136,6 +137,12 @@ final readonly class PayInvoiceFromWallet
 
             if (! $locked->status->isCollectible()) {
                 throw InvoiceNotPayableException::forStatus((string) $locked->getKey(), $locked->status);
+            }
+
+            // Nothing more is delivered on a subscription that has ended, so
+            // an invoice of it left open is not paid for nothing (O-1, N-3).
+            if (TheSubscriptionAnInvoiceBills::hasEnded($locked)) {
+                throw InvoiceNotPayableException::becauseItsSubscriptionHasEnded((string) $locked->getKey());
             }
 
             $due = $locked->amountDue();
