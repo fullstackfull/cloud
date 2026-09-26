@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\SharedHosting\Infrastructure\Providers;
 
 use Carbon\CarbonImmutable;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\HostingProvider;
 use Lynomia\Modules\SharedHosting\Domain\Contracts\WordPressInstaller;
@@ -51,7 +52,20 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
  *
  *  - it refuses to exist in production. The fake reports accounts as created
  *    without creating them, so in production it would mark services active and
- *    send login details for hosting that is not there.
+ *    send login details for hosting that is not there;
+ *
+ *  - it refuses a credential nobody can log in with: an empty or blank
+ *    password, or the redactor's own placeholder, on an account, a password
+ *    change or a WordPress install. It used to take anything, never looking
+ *    at the one field an account is useless without, and the platform sent
+ *    it both — an account build that read a `password` key nothing wrote, and
+ *    an install that read back an `admin_password` the payload's cast had
+ *    already replaced — with every test on those paths green (F-24). This is
+ *    not a model of a panel: what WHM or DirectAdmin does with an empty
+ *    password has never been established in this repository. It is the
+ *    simulator declining to report success for a request no caller can have
+ *    meant, as the compute simulator declines a resize with nothing to
+ *    change.
  */
 final class FakeHostingProvider implements HostingProvider, WordPressInstaller, WordPressStagingProvider
 {
@@ -153,6 +167,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function createAccount(HostingNode $node, CreateAccountRequest $request): HostingAccountResult
     {
         $this->assertNoMarkers($node, $request->username, 'create_account');
+        $this->assertCredentialIsUsable($node, $request->username, $request->password, 'create_account');
 
         $this->restore();
 
@@ -258,6 +273,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     public function changePassword(HostingNode $node, string $username, string $password): void
     {
         $this->require($node, $username, 'change_password');
+        $this->assertCredentialIsUsable($node, $username, $password, 'change_password');
 
         // Held by the panel, as a real panel holds it — and only by the panel.
         // Nothing the platform writes can read it back from here; a test that
@@ -427,6 +443,49 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
         }
     }
 
+    /**
+     * Refuse a credential nobody can log in with, and record nothing.
+     *
+     * A refusal, not an unknown outcome: nothing was written, and a caller is
+     * entitled to know it. The credential itself is never quoted back, and a
+     * refused one is not held.
+     *
+     * The two arms are not equally strong, and the difference is worth
+     * keeping in view. A blank password is useless to anybody. `[redacted]`
+     * is a perfectly valid ten-character password; it is refused because on
+     * this platform it is evidence of a bug — a credential read back from a
+     * column cast through RedactedJsonCast, whose redactor had already
+     * replaced it — which makes this an oracle's assertion, not a panel's
+     * behaviour, and it is marked as one.
+     *
+     * This is where that bug becomes observable, in simulation. It is not
+     * where it is prevented. Against a real panel nothing here runs, so the
+     * guards that hold in production are the handlers' own: the account build
+     * mints its password when it runs (F-04), and the WordPress install mints
+     * its own and refuses a job whose payload carries `admin_password` at all
+     * (F-45).
+     *
+     * @throws HostingProviderException
+     */
+    private function assertCredentialIsUsable(HostingNode $node, string $username, string $credential, string $operation): void
+    {
+        $unusable = match (true) {
+            trim($credential) === '' => 'the platform sent an empty credential',
+            $credential === SecretRedactor::PLACEHOLDER => "the platform sent the redactor's own placeholder instead of a credential",
+            default => null,
+        };
+
+        if ($unusable === null) {
+            return;
+        }
+
+        throw HostingProviderException::requestFailed(self::NAME, $operation, [
+            'node' => $node->hostname,
+            'username' => $username,
+            'provider_message' => $unusable.'; the fake panel will not report success for a login nobody can use',
+        ]);
+    }
+
     private function require(HostingNode $node, string $username, string $operation): RemoteAccount
     {
         $this->assertNoMarkers($node, $username, $operation);
@@ -450,6 +509,7 @@ final class FakeHostingProvider implements HostingProvider, WordPressInstaller, 
     {
         $this->assertNoMarkers($node, $request->username, 'install_wordpress');
         $this->require($node, $request->username, 'install_wordpress');
+        $this->assertCredentialIsUsable($node, $request->username, $request->adminPassword, 'install_wordpress');
 
         $this->restore();
 

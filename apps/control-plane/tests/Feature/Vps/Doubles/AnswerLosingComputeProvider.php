@@ -22,12 +22,16 @@ use Throwable;
  * The controlled hypervisor, with one thing added: it can build a machine and
  * then lose the answer.
  *
- * That is the case F-15 is about and the one the plain fake cannot produce on
- * its own terms — its timeout marker records nothing, so "the call timed out"
- * and "nothing exists" always coincide there. On a real cluster they do not:
- * `qmcreate` keeps running after the HTTP request that started it has been
- * abandoned. Everything else is delegated, so the fleet this wraps is the one
- * every assertion reads.
+ * That is the case F-15 is about. The plain fake's timeout marker records
+ * nothing, so there "the call timed out" and "nothing exists" coincide; on a
+ * real cluster they do not: `qmcreate` keeps running after the HTTP request
+ * that started it has been abandoned. The plain fake can now produce the
+ * landed case on its own too, with its built-unanswered marker (F-24) — but a
+ * marker is in the hostname, so every create of that name loses its answer.
+ * These tests need the answer lost on one attempt and delivered on the next
+ * for the same order, which is a switch rather than a name, and that is what
+ * this double still is. Everything else is delegated, so the fleet this wraps
+ * is the one every assertion reads.
  *
  * It also records what it was asked, and can run a probe at the instant a
  * create is sent — which is how a test asks "had the platform written the
