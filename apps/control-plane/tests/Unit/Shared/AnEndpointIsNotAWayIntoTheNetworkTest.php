@@ -103,6 +103,25 @@ final class AnEndpointIsNotAWayIntoTheNetworkTest extends TestCase
         $this->policy->assertProviderEndpoint('fake://connected', controlledDriver: true, onOurHardware: false, production: true);
     }
 
+    /**
+     * 5f00::/16 (SRv6 SIDs, RFC 9602) is refused on the public road as on the
+     * others; its neighbours either side are not, so the block is refused as
+     * a /16 and not as something wider.
+     */
+    #[Test]
+    public function the_srv6_sid_block_is_refused_and_only_that_block(): void
+    {
+        try {
+            $this->policy->assertProviderEndpoint('https://[5f00:1::10]/', controlledDriver: false, onOurHardware: false, production: true);
+            $this->fail('5f00:1::10 was accepted as a public provider endpoint');
+        } catch (EndpointRefused $refused) {
+            $this->assertStringContainsString('5f00::/16', $refused->getMessage());
+        }
+
+        $this->policy->assertMachineAddress('5eff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', production: false);
+        $this->policy->assertMachineAddress('5f01::1', production: false);
+    }
+
     #[Test]
     public function a_machine_address_is_a_host_and_may_be_private_but_never_this_host(): void
     {
