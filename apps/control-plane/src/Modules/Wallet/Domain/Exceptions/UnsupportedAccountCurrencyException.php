@@ -44,7 +44,9 @@ final class UnsupportedAccountCurrencyException extends DomainException
 
         // The customer's own account currency, and nothing else. It is the one
         // fact that makes the failure diagnosable, and it is already theirs.
-        return $exception->withContext(['currency' => strtoupper($currency)]);
+        // The currency is the one on the caller's own account, so naming it
+        // tells them nothing new and tells support which value is wrong.
+        return $exception->withContext(['currency' => strtoupper($currency)])->publishing('currency');
     }
 
     public function errorCode(): string

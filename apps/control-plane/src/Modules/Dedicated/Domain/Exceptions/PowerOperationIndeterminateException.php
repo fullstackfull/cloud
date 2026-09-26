@@ -48,7 +48,7 @@ final class PowerOperationIndeterminateException extends DomainException
             // either.
             'indeterminate' => true,
             'safe_to_retry' => false,
-        ]);
+        ])->publishing('indeterminate', 'safe_to_retry');
     }
 
     public function errorCode(): string

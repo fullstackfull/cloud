@@ -54,7 +54,7 @@ final class DedicatedOperationRefusedException extends DomainException
             'dedicated_server_id' => $serverId,
             'status' => $status->value,
             'required_status' => DedicatedServerStatus::Active->value,
-        ]);
+        ])->publishing('status');
     }
 
     /**
@@ -72,10 +72,12 @@ final class DedicatedOperationRefusedException extends DomainException
             $kind->value,
         ));
 
+        // Which of the caller's own operations is still running is the answer
+        // to "why not?", and what a client waits on before asking again.
         return $exception->withContext([
             'dedicated_server_id' => $serverId,
             'in_flight_kind' => $kind->value,
-        ]);
+        ])->publishing('in_flight_kind');
     }
 
     /**

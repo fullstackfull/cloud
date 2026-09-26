@@ -32,7 +32,7 @@ final class HostingPanelSessionUnavailableException extends DomainException
         return $exception->withContext([
             'account_id' => $accountId,
             'status' => $status->value,
-        ]);
+        ])->publishing('status');
     }
 
     public static function suspended(string $accountId): self
@@ -45,7 +45,7 @@ final class HostingPanelSessionUnavailableException extends DomainException
         return $exception->withContext([
             'account_id' => $accountId,
             'status' => HostingAccountStatus::Suspended->value,
-        ]);
+        ])->publishing('status');
     }
 
     public static function gone(string $accountId, HostingAccountStatus $status): self
@@ -55,7 +55,7 @@ final class HostingPanelSessionUnavailableException extends DomainException
         return $exception->withContext([
             'account_id' => $accountId,
             'status' => $status->value,
-        ]);
+        ])->publishing('status');
     }
 
     /**

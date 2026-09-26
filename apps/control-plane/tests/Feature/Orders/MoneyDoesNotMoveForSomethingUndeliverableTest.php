@@ -239,11 +239,12 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
     public function the_refusal_tells_the_customer_nothing_about_the_estate(): void
     {
         /*
-         * `error.details` is published to the client verbatim, so anything put
-         * on the exception's context is a public field. The reason a plan
-         * cannot be placed names a cluster, an IP pool or a panel package —
-         * the shape of the estate, handed to anybody who can reach the
-         * checkout endpoint, for a refusal they cannot act on anyway.
+         * `error.details` is whatever the exception's class declares with
+         * publishing(), and a context is one declaration away from it. The
+         * reason a plan cannot be placed names a cluster, an IP pool or a
+         * panel package — the shape of the estate, handed to anybody who can
+         * reach the checkout endpoint, for a refusal they cannot act on
+         * anyway — so it is not carried at all, and this row reads the body.
          */
         [, $user] = $this->accountWithOwner();
         $vps = $this->vpsPlan(withPlacement: false);
