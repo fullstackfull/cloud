@@ -4,11 +4,16 @@
 A pipeline that can reimage a node on merge is a pipeline that eventually will,
 on a branch nobody meant to merge. This parses the workflow files -- `.yml` and
 `.yaml` alike, because GitHub Actions runs both -- and reads the `run:` text of
-every step for the commands in `APPLYING`. Comment lines -- those whose first
-non-blank character is `#` -- are removed first, so a pattern on one neither
-disarms the check nor trips it. A trailing comment after a command is read as
-part of its line, so a forbidden OpenTofu verb in one is refused: a false red,
-the safe direction.
+every step for the commands in `APPLYING`.
+
+A step bash runs (`reads_as_bash`) is read as bash reads it (`code_lines`):
+quotes, escapes and comments are followed from the top of the text, comments
+are removed and line continuations joined, so a comment neither disarms the
+check nor trips it, and a line that only looks like one -- a `#` inside a
+quote an earlier line left open -- is read as the command it is. From the first
+construct that reading does not follow, and in every step another shell runs,
+no comment is removed: one there is read as code, a false red, the safe
+direction.
 
 It reads text; it does not execute or follow anything. A `uses:` step runs an
 action's code, a job-level `uses:` runs a reusable workflow, and a `run:` step
@@ -16,13 +21,13 @@ can call a script or a Makefile target (`make deploy-staging` runs
 ansible-playbook without --check). None of those is opened here, except a
 reusable workflow that is itself a file in `.github/workflows`, which is read
 like any other. What passing establishes is therefore narrower than "no
-workflow applies infrastructure": no step's `run:` text matches a pattern in
-`APPLYING`, a list that names the known applying commands and cannot name
-every way to reach one.
+workflow applies infrastructure": no step's `run:` text, read as above, matches
+a pattern in `APPLYING`, a list that names the known applying commands and
+cannot name every way to reach one.
 
-Exit status 0 when no step's `run:` text matches a pattern in `APPLYING`; 1
-when one does, and 1 when there is no workflow file, or no `run:` text, to
-read.
+Exit status 0 when no step's `run:` text, read as above, matches a pattern in
+`APPLYING`; 1 when one does, and 1 when there is no workflow file, or no `run:`
+text, to read.
 """
 
 from __future__ import annotations
@@ -43,7 +48,128 @@ except ImportError:  # pragma: no cover
 # quoted value included, may stand between the binary and the verb.
 _GLOBAL_OPTIONS = r"""(?:\s+-(?:[^\s"']|"[^"]*"|'[^']*')+)*"""
 
-CHECK_MODE_FLAGS = {"--check", "--syntax-check"}
+CHECK_MODE_FLAGS = {"--check", "-C", "--syntax-check"}
+
+# After one of these -- bash's metacharacters -- a word begins, and a word that
+# begins with `#` is a comment, running to the end of its line.
+_BREAKS = " \t\n;&|<>()"
+
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# A `${...}` holding none of these reads as one opaque word wherever it stands:
+# bash reads no comment inside it (`${x:- #}` is `#`). One holding a quote, an
+# escape, a nested expansion or a brace of its own -- a GitHub `${{ }}`, whose
+# value is not in the text -- is where following stops.
+_PLAIN_EXPANSION = re.compile(r"\$\{[^{}'\"`\\$\n]*\}")
+
+# A backslash-newline that is not itself escaped.
+_CONTINUATION = re.compile(r"(?<!\\)((?:\\\\)*)\\\n")
+
+
+def code_lines(text: str) -> str:
+    """`text` as bash reads it: comments removed, line continuations joined.
+
+    Quotes ('...', "..." and $'...'), backslash escapes and comments are
+    followed from the top as bash follows them, so a `#` is a comment only
+    where bash takes one: beginning a word, outside quotes. A line inside a
+    quote an earlier line left open is kept, and so is one a trailing backslash
+    joins to the word before it (`a\\` then `#b` is the word `a#b`).
+
+    Bash's reading of some constructs depends on context this does not track:
+    a heredoc, a backtick, `((`, `$[`, a `$(` inside double quotes, a `${...}`
+    other than a plain one, an array subscript or compound assignment, and a
+    `#` right after `(` or `)` (`(true)#x` is a comment, `$(true)#x` is not).
+    At the first of them following stops, and the rest of the text is kept as
+    it is -- comments included, continuations joined unless escaped.
+    """
+    out: list[str] = []
+    quote = ""  # the quote open here: "", "'", '"' or "$'"
+    word = ""  # the word read so far, "" where one begins
+    at = 0
+    while at < len(text):
+        char, pair = text[at], text[at:at + 2]
+        if quote in ("'", "$'"):
+            step = 2 if quote == "$'" and char == "\\" else 1
+            out.append(text[at:at + step])
+            quote = "" if char == "'" else quote
+            at += step
+            continue
+        if pair == "\\\n":  # outside quotes and inside "...", bash removes it
+            at += 2
+            continue
+        if char == "\\":
+            out.append(pair)
+            word += pair
+            at += 2
+            continue
+        plain = _PLAIN_EXPANSION.match(text, at)
+        if plain:
+            out.append(plain.group())
+            word += plain.group()
+            at = plain.end()
+            continue
+        if char == "`" or pair in ("${", "$[") or (quote == '"' and pair == "$("):
+            break
+        if quote == '"':
+            out.append(char)
+            word += char
+            quote = "" if char == '"' else quote
+            at += 1
+            continue
+        if text.startswith("<<<", at):  # a here-string, not a heredoc
+            out.append("<<<")
+            word = ""
+            at += 3
+            continue
+        if pair in ("<<", "((") or (char == "(" and word.endswith("=")) or (
+            char == "[" and _IDENTIFIER.fullmatch(word)
+        ):
+            break
+        if char == "#" and not word:
+            if out and out[-1][-1:] in ("(", ")"):
+                break
+            end = text.find("\n", at)
+            at = len(text) if end < 0 else end
+            continue
+        if char in ("'", '"') or pair == "$'":
+            quote = pair if pair == "$'" else char
+            out.append(quote)
+            word += quote
+            at += len(quote)
+            continue
+        out.append(char)
+        word = "" if char in _BREAKS else word + char
+        at += 1
+    else:
+        return "".join(out)
+    return "".join(out) + _CONTINUATION.sub(r"\1", text[at:])
+
+
+def reads_as_bash(workflow: dict, job: dict, step: dict) -> bool:
+    """Whether GitHub runs this step's `run:` with bash: the `shell:` in force
+    -- the step's, else the job's default, else the workflow's -- names bash,
+    or none is set and the job runs outside a container on one GitHub-hosted
+    Linux or macOS runner label (`ubuntu-*`, `macos-*`), where bash is the
+    default. Any other step may be run by a shell whose comments and quotes
+    are not bash's."""
+    for scope in (
+        step,
+        (job.get("defaults") or {}).get("run") or {},
+        (workflow.get("defaults") or {}).get("run") or {},
+    ):
+        if scope.get("shell") is not None:
+            words = str(scope["shell"]).split()
+            return bool(words) and words[0].rsplit("/", 1)[-1] == "bash"
+    if job.get("container") is not None:
+        return False
+    labels = job.get("runs-on")
+    labels = [labels] if isinstance(labels, str) else labels
+    return (
+        isinstance(labels, list)
+        and len(labels) == 1
+        and isinstance(labels[0], str)
+        and re.fullmatch(r"(?:ubuntu|macos)-[\w.-]+", labels[0]) is not None
+    )
 
 
 def command_words(body: str, start: int) -> list[str] | None:
@@ -79,7 +205,7 @@ def command_words(body: str, start: int) -> list[str] | None:
 
 
 def runs_playbook_outside_check_mode(body: str) -> bool:
-    """True if any `ansible-playbook` in the body lacks --check or
+    """True if any `ansible-playbook` in the body lacks --check, -C or
     --syntax-check among its own command's words. A flag in the next command,
     in a quoted argument or in a trailing comment is not that command's."""
     for found in re.finditer(r"ansible-playbook", body):
@@ -114,7 +240,7 @@ APPLYING = [
 def steps_of(workflow: dict):
     for job_name, job in (workflow.get("jobs") or {}).items():
         for step in job.get("steps") or []:
-            yield job_name, step
+            yield job_name, job, step
 
 
 def main(argv: list[str]) -> int:
@@ -130,20 +256,20 @@ def main(argv: list[str]) -> int:
 
     for path in workflows:
         workflow = yaml.safe_load(path.read_text()) or {}
-        for job_name, step in steps_of(workflow):
+        for job_name, job, step in steps_of(workflow):
             command = step.get("run")
             if not command:
                 continue
             checked += 1
-            # Strip comment lines: a comment explaining why we do not apply is
-            # not an apply. Then rejoin shell line-continuations, because a
+            # A comment explaining why we do not apply is not an apply, and a
             # command split over three lines with backslashes is still one
-            # command, and reading it as three is how `ansible-playbook ... \
-            # --syntax-check` gets mistaken for a real run.
-            body = "\n".join(
-                line for line in command.splitlines() if not line.strip().startswith("#")
-            )
-            body = re.sub(r"\\\n\s*", " ", body)
+            # command -- reading it as three is how `ansible-playbook ... \
+            # --syntax-check` gets mistaken for a real run. Both are bash's
+            # rules, so they are applied only where bash runs the step.
+            if reads_as_bash(workflow, job, step):
+                body = code_lines(command)
+            else:
+                body = _CONTINUATION.sub(r"\1", command)
             for applies, what in APPLYING:
                 if applies(body):
                     problems.append(

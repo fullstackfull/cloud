@@ -83,6 +83,14 @@ def step(run_body: str) -> str:
 """
 
 
+def block(run_text: str, shell: str | None = None) -> str:
+    """GOOD with one more step whose `run: |` block is `run_text`, verbatim,
+    and whose `shell:` is `shell` when one is given."""
+    lines = "".join(f"          {line}\n" if line else "\n" for line in run_text.split("\n"))
+    chosen = f"        shell: {shell}\n" if shell else ""
+    return GOOD + f"      - name: the step under test\n{chosen}        run: |\n{lines}"
+
+
 CASES: list[tuple[str, dict[str, str] | None, str | tuple[str, ...] | None]] = [
     ("a workflow that only validates passes", {"ci.yml": GOOD}, None),
     (
@@ -335,6 +343,86 @@ jobs:
         {"ci.yml": step("ansible-playbook -i hosts.yml site.yml --check && echo done")},
         None,
     ),
+    # F-38, round six. Every line whose first non-blank character was `#` was
+    # removed as a comment, whatever bash made of it, and continuations were
+    # joined with a space bash does not put there. Each red case below passed
+    # the gate before this round; each bash one reached its apply when bash ran
+    # it with a stub standing in for the command. The PowerShell one follows
+    # PowerShell's documented block comment and was not run: no pwsh here.
+    (
+        "a `#` line inside a quote an earlier line left open is not a comment",
+        {"ci.yml": block('echo "deploying\n# "; tofu apply -auto-approve')},
+        "applies OpenTofu",
+    ),
+    (
+        "a playbook after a `#` line inside an open quote is not hidden either",
+        {"ci.yml": block('echo "configuring\n# "; ansible-playbook -i inventories/production playbooks/control-plane.yml')},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a quote inside a comment opens nothing",
+        {"ci.yml": block("true # it's fine\necho 'x\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a `#` a trailing backslash joins to the word before it is not a comment",
+        {"ci.yml": block("echo a\\\n#b; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a comment after a line continuation ends the command; a flag below it is not its",
+        {"ci.yml": block("ansible-playbook -i inventories/production playbooks/control-plane.yml \\\n# a note\n--check")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a line continuation joins words as bash does, with no space between",
+        {"ci.yml": block("ansible-playbook -i inventories/production/hosts.yml\\\n--check playbooks/control-plane.yml")},
+        "runs a playbook outside check mode",
+    ),
+    (
+        "a command split mid-word by a line continuation is read whole",
+        {"ci.yml": block("tof\\\nu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a `#` inside ${...} starts no comment",
+        {"ci.yml": block("echo ${x:- #} 'a\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "after a heredoc, which this does not follow, no comment line is removed",
+        {"ci.yml": block("cat <<EOF\ndon't\nEOF\necho 'x\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a `#` right after `)`, where bash's reading depends on context, is not guessed at",
+        {"ci.yml": block("x=$(true)#'\n# '; tofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "a step another shell runs keeps its comment lines",
+        # PowerShell: `<# ... #>` is one comment, so the apostrophe inside it
+        # opens nothing, and the last line runs tofu.
+        {"ci.yml": block("<#\nit's\n#>\necho 'x\n# '; tofu apply -auto-approve", shell="pwsh")},
+        "applies OpenTofu",
+    ),
+    # And the other direction: the reading must still find the comments bash
+    # finds, or the gate goes red on prose.
+    (
+        "a `#` line after a quote closed on an earlier line is still a comment",
+        {"ci.yml": block('echo "one\ntwo"\n# tofu apply is for a person, never CI\ntofu plan')},
+        None,
+    ),
+    (
+        "a pattern in a trailing comment is not an apply",
+        {"ci.yml": block("tofu plan  # never tofu apply here")},
+        None,
+    ),
+    (
+        "ansible-playbook -C is check mode",
+        {"ci.yml": step("ansible-playbook -i hosts.yml site.yml -C")},
+        None,
+    ),
 ]
 
 
@@ -343,7 +431,7 @@ jobs:
 # exists to refuse. The count is literal source in this file, maintained by
 # whoever edits the table, so adding or removing a case is a deliberate edit
 # of this number too.
-EXPECTED_CASES = 32
+EXPECTED_CASES = 46
 
 
 def main() -> int:
