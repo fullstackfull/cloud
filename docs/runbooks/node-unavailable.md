@@ -2,7 +2,12 @@
 
 ## What you are seeing
 
-`NodeNearCapacity` before it, or a node that stopped answering entirely.
+One of the alerts that send you here, or a node that stopped answering entirely:
+
+- **`NodeDown`** — a host has failed every scrape for two minutes.
+- **`HypervisorNodeOffline`** — Proxmox itself reports the node offline.
+- **`HypervisorDiskAlmostFull`** — a hypervisor filesystem has had less than 12%
+  free for ten minutes.
 
 ## What it means
 
@@ -35,9 +40,12 @@ doing it in bulk during an outage is how one failed node becomes several.
 
 ## Capacity warnings
 
-`NodeNearCapacity` fires at 85%. That is a purchasing signal, not an incident.
-Placement already refuses to schedule onto a node past its configured
-overcommit ratio, so the warning means "buy hardware", not "act now".
+`ComputeNodeCapacityExhausted` fires when a node has been more than 90%
+**allocated** on one dimension for 30 minutes — allocation, not use. That is a
+purchasing signal, not an incident, and it will not bring you to this page: it
+carries only a `runbook_url`, to a capacity-planning page outside this
+repository. Placement already refuses to schedule onto a node past its
+configured overcommit ratio, so the warning means "buy hardware", not "act now".
 
 ## What not to do
 

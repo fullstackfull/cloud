@@ -2,7 +2,11 @@
 
 ## What you are seeing
 
-`WordPressProvisioningStuck`, or a site that never leaves `installing`.
+A site that never leaves `installing`.
+
+No alert fires for this, so nothing will page you. `lynomia_wordpress_sites_total`
+is exported, by disposition — `building`, `waiting_on_dns`, `stuck`, `live` —
+and no rule reads it.
 
 ## What it means
 
@@ -53,6 +57,6 @@ HTTPS. That is why it is still `installing` — the platform has not seen it wor
 
 ## What not to do
 
-Do not mark a site ready to clear the alert. The state means "we looked and it
-worked", and a customer told their site is live when it is not will find out
+Do not mark a site ready to get it off the list. The state means "we looked and
+it worked", and a customer told their site is live when it is not will find out
 before you do.
