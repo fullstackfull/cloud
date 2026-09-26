@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Backups;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Lynomia\Modules\Backups\Application\Actions\RestoreBackupFiles;
 use Lynomia\Modules\Backups\Application\Actions\RestoreServiceBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
@@ -22,6 +20,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\LeavesNothingCommitted;
 use Tests\TestCase;
 
 /**
@@ -36,14 +35,15 @@ use Tests\TestCase;
  * in two processes at once, run their guards one after the other rather than
  * both passing.
  *
- * Everything created here is deleted afterwards, newest first.
+ * Every table is emptied afterwards (LeavesNothingCommitted, which asks the
+ * test-database guard first), so a row the code under test writes by any
+ * route is gone too.
  */
 final class TwoRestoresOnTwoConnectionsTest extends TestCase
 {
-    private const string SECOND = 'backup_race';
+    use LeavesNothingCommitted;
 
-    /** @var list<Model> */
-    private array $created = [];
+    private const string SECOND = 'backup_race';
 
     protected function setUp(): void
     {
@@ -52,30 +52,12 @@ final class TwoRestoresOnTwoConnectionsTest extends TestCase
         config()->set('database.connections.'.self::SECOND, config('database.connections.pgsql'));
         config()->set('billing.providers.backup', 'fake');
         $this->app->singleton(BackupProviderFactory::class);
-
-        Event::listen('eloquent.created: *', function (string $event, array $payload): void {
-            foreach ($payload as $model) {
-                if ($model instanceof Model) {
-                    $this->created[] = $model;
-                }
-            }
-        });
     }
 
     protected function tearDown(): void
     {
-        Event::forget('eloquent.created: *');
-
-        foreach (array_reverse($this->created) as $model) {
-            try {
-                $model->newQueryWithoutScopes()->whereKey($model->getKey())->delete();
-            } catch (\Throwable) {
-                // Taken already by a cascade from its parent.
-            }
-        }
-
-        $this->created = [];
         DB::purge(self::SECOND);
+        $this->emptyEveryTable();
 
         parent::tearDown();
     }
