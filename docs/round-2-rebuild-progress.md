@@ -101,7 +101,7 @@ independent re-audit follows. The specification is
 
 | Group | Scope | Status | Commit |
 |---|---|---|---|
-| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | re-verifying after repair | `708bfb1` |
+| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | rejected again (sibling subscriptions of one order mint credit after a partial refund), repairing; voided-upgrade billing added | `708bfb1` |
 | 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | verifying | `505cbba` |
 | 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | rejected (withdrawn profile strands a chassis), repairing | `c86647f` |
 | 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | verifying | `defcd5c` |
