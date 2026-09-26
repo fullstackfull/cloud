@@ -297,7 +297,12 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.primary_domain', 'right.example.test');
 
-        $this->assertSame('right.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
+        // Recorded beside the payload, never in it (F-04 x F-15): the build
+        // reads the operator's name through hostingDomain(), and the payload
+        // keeps what the job was created with.
+        $this->assertSame('right.example.test', $job->fresh()?->hostingDomain());
+        $this->assertSame('right.example.test', $job->fresh()?->operator_named_domain);
+        $this->assertSame('wrong.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
     }
 
     #[Test]
