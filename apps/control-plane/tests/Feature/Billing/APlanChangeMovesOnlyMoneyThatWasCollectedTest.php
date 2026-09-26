@@ -589,6 +589,51 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->assertSame($this->large->id, $jobs->sole()->payload['plan_id'] ?? null);
     }
 
+    #[Test]
+    public function a_legacy_invoice_builds_what_its_audit_entry_says_it_bought_not_a_later_plan(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        [$subscription, $first, $second] = $this->twoLegacyUpgrades($customer, $user);
+
+        // Only the cheap first invoice is paid.
+        $this->settle($first->fresh(), $customer);
+
+        $built = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->get()
+            ->map(static fn (ProvisioningJob $job): mixed => $job->payload['plan_id'] ?? null)->all();
+
+        $this->assertSame([$this->mid->id], $built, 'The first invoice bought mid; large is the unpaid second one.');
+        $this->assertSame(InvoiceStatus::Open, $second->fresh()?->status);
+    }
+
+    #[Test]
+    public function a_legacy_invoice_paid_after_a_later_one_builds_nothing_over_it(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        [$subscription, $first, $second] = $this->twoLegacyUpgrades($customer, $user);
+
+        // The later (large) one is paid first; the earlier (mid) one after.
+        $this->settle($second->fresh(), $customer);
+        $this->finishEveryProvisioningJob();
+        $this->settle($first->fresh(), $customer);
+
+        $built = ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->get()
+            ->map(static fn (ProvisioningJob $job): mixed => $job->payload['plan_id'] ?? null)->all();
+
+        $this->assertSame([$this->large->id], $built, 'Mid must not be built on top of the large plan paid for since.');
+    }
+
+    #[Test]
+    public function a_legacy_invoice_whose_purchase_cannot_be_established_builds_nothing_when_a_later_change_followed(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        [$subscription, $first] = $this->twoLegacyUpgrades($customer, $user);
+        AuditEntry::query()->delete();
+
+        $this->settle($first->fresh(), $customer);
+
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+    }
+
     // ---- 8. a later settled change decides the machine ---------------------
 
     #[Test]
@@ -813,6 +858,32 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->finishEveryProvisioningJob();
 
         app(RecordInvoiceRefund::class)->execute($invoice->fresh(), Money::ofMinor($invoice->total_minor, $invoice->currency));
+    }
+
+    /**
+     * Two upgrades as the code before the plan-change record made them:
+     * small -> mid, then mid -> large while the first invoice was still open,
+     * and no record behind either.
+     *
+     * @return array{0: Subscription, 1: Invoice, 2: Invoice}
+     */
+    private function twoLegacyUpgrades(Customer $customer, User $user): array
+    {
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->mid, 'legacy-mid-1')->assertOk();
+        $first = $this->openProrationInvoice($subscription);
+
+        // The old rule let a second change through while the first was open.
+        $first->forceFill(['status' => InvoiceStatus::Draft])->save();
+        $this->changePlan($user, $subscription, $this->large, 'legacy-large-1')->assertOk();
+        $second = $this->openProrationInvoice($subscription);
+        $first->forceFill(['status' => InvoiceStatus::Open])->save();
+
+        PlanChange::query()->delete();
+
+        return [$subscription, $first, $second];
     }
 
     private function openProrationInvoice(Subscription $subscription): Invoice

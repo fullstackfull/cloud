@@ -20,6 +20,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeQuote;
 use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
+use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -62,6 +63,7 @@ final readonly class QuotePlanChange
         private PricingEngine $pricing,
         private PlanCapacity $capacity,
         private MoneyCollectedForThePeriod $collected,
+        private UnpaidUpgrade $unpaid,
     ) {}
 
     /**
@@ -109,7 +111,8 @@ final readonly class QuotePlanChange
          */
         $credit = $refusals === []
             ? $this->pricing->prorate(
-                $subscription->recurringAmount(),
+                // What was paid for; see ChangeSubscriptionPlan.
+                $this->unpaid->recurringPaidFor($subscription),
                 $subscription->current_period_start,
                 $subscription->current_period_end,
                 $now,

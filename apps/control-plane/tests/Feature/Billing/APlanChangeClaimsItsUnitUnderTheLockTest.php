@@ -140,7 +140,17 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
             'amount_refunded_minor' => 150_000,
         ]);
 
-        $results = $this->race(array_map(
+        /*
+         * Made deterministic rather than left to timing. Before the racers are
+         * released, a second connection locks both target plan rows, so each
+         * racer gets as far as the plan lock and stops. Without the order lock
+         * both have read the order's pool by then and each takes it in full;
+         * with it, the second is still queued on the order row. The hold is
+         * released once both are waiting on a row lock.
+         */
+        $hold = [(string) $targets[0]->getKey(), (string) $targets[1]->getKey()];
+
+        $results = $this->race(holdingPlans: $hold, arguments: array_map(
             static fn (int $i): array => [
                 (string) $subscriptions[$i]->getKey(),
                 (string) $targets[$i]->getKey(),
@@ -158,10 +168,20 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
 
     /**
      * @param  list<list<string>>  $arguments
+     * @param  list<string>  $holdingPlans  plan rows a second connection holds locked until every racer waits on a row lock
      * @return list<array{accepted: bool, code: ?string, refusals: list<string>}>
      */
-    private function race(array $arguments): array
+    private function race(array $arguments, array $holdingPlans = []): array
     {
+        if ($holdingPlans !== []) {
+            config(['database.connections.pgsql_plan_hold' => config('database.connections.'.config('database.default'))]);
+            DB::connection('pgsql_plan_hold')->beginTransaction();
+
+            foreach ($holdingPlans as $planId) {
+                DB::connection('pgsql_plan_hold')->table('plans')->where('id', $planId)->lockForUpdate()->first();
+            }
+        }
+
         DB::select('SELECT pg_advisory_lock(424243)');
 
         /** @var list<Process> $processes */
@@ -196,6 +216,24 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
         }
 
         DB::select('SELECT pg_advisory_unlock(424243)');
+
+        if ($holdingPlans !== []) {
+            $deadline = microtime(true) + 45.0;
+
+            // Every racer is now stopped on a row lock: the held plan row, or
+            // (with the order lock) the order row another racer holds.
+            while ((int) DB::scalar("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event IN ('transactionid', 'tuple')") < count($arguments)) {
+                if (microtime(true) > $deadline) {
+                    DB::connection('pgsql_plan_hold')->rollBack();
+                    $this->fail('The racers never reached the held plan rows.');
+                }
+
+                usleep(20_000);
+            }
+
+            DB::connection('pgsql_plan_hold')->rollBack();
+            DB::purge('pgsql_plan_hold');
+        }
 
         $results = [];
 

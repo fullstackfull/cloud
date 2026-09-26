@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Orders\Application\Services;
 
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
@@ -126,6 +127,13 @@ final readonly class PlanCapacity
      * line reaches its subscription through the service it was built into
      * (`services.order_item_id`); a line with no service yet - an order
      * awaiting payment - counts against the plan it was ordered on.
+     *
+     * While the upgrade that moved it is unpaid, the unit also keeps counting
+     * against the plan it left. The move is provisional: a void or a lapse
+     * puts the subscription back, and the plan it goes back to must still
+     * have its unit. Released only once the upgrade's invoice is paid; an
+     * open plan-change invoice is always the subscription's latest change,
+     * because no other change can be made while one is open.
      */
     public function claimed(string $planId, ?Customer $customer = null): int
     {
@@ -133,7 +141,16 @@ final readonly class PlanCapacity
             ->join('orders', 'orders.id', '=', 'order_items.order_id')
             ->leftJoin('services as held_by', 'held_by.order_item_id', '=', 'order_items.id')
             ->leftJoin('subscriptions as held_on', 'held_on.id', '=', 'held_by.subscription_id')
-            ->whereRaw('coalesce(held_on.plan_id, order_items.plan_id) = ?', [$planId])
+            ->where(static fn (Builder $counted): Builder => $counted
+                ->whereRaw('coalesce(held_on.plan_id, order_items.plan_id) = ?', [$planId])
+                ->orWhereExists(static fn (Builder $pending): Builder => $pending
+                    ->selectRaw('1')
+                    ->from('subscription_plan_changes as pending')
+                    ->join('invoices as pending_invoice', 'pending_invoice.id', '=', 'pending.proration_invoice_id')
+                    ->whereColumn('pending.subscription_id', 'held_on.id')
+                    ->whereColumn('pending.to_plan_id', 'held_on.plan_id')
+                    ->where('pending.from_plan_id', $planId)
+                    ->where('pending_invoice.status', InvoiceStatus::Open->value)))
             ->when($customer !== null, fn ($query) => $query->where('orders.customer_id', $customer->getKey()));
 
         return (int) self::stillHolding($query)->sum('order_items.quantity');

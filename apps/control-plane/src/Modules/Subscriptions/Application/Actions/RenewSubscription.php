@@ -8,8 +8,8 @@ use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
-use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
@@ -18,8 +18,8 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\BillableLine;
 use Lynomia\Modules\Subscriptions\Application\DTOs\RenewalPlan;
+use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\SubscriptionNotRenewableException;
-use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Repositories\CouponTermsRepository;
 
@@ -50,6 +50,8 @@ final readonly class RenewSubscription
 {
     public function __construct(
         private CouponTermsRepository $coupons,
+        private UnpaidUpgrade $unpaid,
+        private VoidInvoice $voidInvoice,
     ) {}
 
     /**
@@ -63,6 +65,19 @@ final readonly class RenewSubscription
         $now = $at !== null ? CarbonImmutable::instance($at) : CarbonImmutable::now();
 
         return DB::transaction(function () use ($subscription, $now): ?RenewalPlan {
+            /*
+             * An upgrade still unpaid at the renewal lapses (below), which
+             * voids its invoice. VoidInvoice locks the invoice and then the
+             * subscription; the invoice is locked here first, before the
+             * subscription, so a renewal and an operator's void of the same
+             * invoice take the two rows in the same order.
+             */
+            $lapsing = $this->unpaid->openInvoiceOf($subscription);
+
+            if ($lapsing !== null) {
+                Invoice::query()->lockForUpdate()->find($lapsing->getKey());
+            }
+
             /** @var Subscription $locked */
             $locked = Subscription::query()
                 ->with('plan')
@@ -111,6 +126,29 @@ final readonly class RenewSubscription
 
             if ($dueAt->greaterThan($now)) {
                 return null;
+            }
+
+            /*
+             * An upgrade whose invoice is still unpaid when the period it was
+             * priced for ends lapses: its invoice is voided and the
+             * subscription goes back to the plan it has paid for, in this
+             * transaction, before the new period is billed. Renewing it
+             * instead - at either amount - let the customer pay the small
+             * proration invoice after the renewal and be built a whole period
+             * of the bigger plan, month after month (re-audit, B1). Paying a
+             * void invoice is refused, so it cannot be revived afterwards.
+             *
+             * An invoice something has already been paid on cannot be voided;
+             * that upgrade does not lapse, and is billed at the pre-change
+             * amount below until it is settled.
+             */
+            $open = $this->unpaid->openInvoiceOf($locked);
+
+            if ($open !== null && ! $open->amountPaid()->isPositive()) {
+                $this->voidInvoice->execute($open, 'The upgrade was not paid for before the period it was priced for ended.');
+
+                /** @var Subscription $locked */
+                $locked = Subscription::query()->with('plan')->findOrFail($locked->getKey());
             }
 
             // Measured before anything moves: how far ahead of the period end
@@ -177,13 +215,15 @@ final readonly class RenewSubscription
      * amount the moment it is confirmed and hands over nothing until its
      * invoice settles; renewing at the new amount before then billed a whole
      * period of the bigger plan for a machine still running the smaller one,
-     * and left the customer two open invoices for one upgrade. Until that
-     * invoice is paid the renewal bills what the subscription carried before
-     * the change. Once it is paid, the next renewal bills the new plan.
+     * and left the customer two open invoices for one upgrade. An unpaid
+     * upgrade normally lapses before this is reached (see execute()); one
+     * that could not lapse, because something was paid on its invoice, is
+     * billed at what the subscription carried before the change. Once its
+     * invoice is paid, the next renewal bills the new plan.
      */
     private function renewalLine(Subscription $subscription): BillableLine
     {
-        $unpaid = $this->unpaidUpgradeOnto($subscription);
+        $unpaid = $this->unpaid->onto($subscription);
 
         $billed = $unpaid === null
             ? $subscription->plan
@@ -204,35 +244,6 @@ final readonly class RenewSubscription
                 setupFee: Money::zero($subscription->currency),
             ),
         );
-    }
-
-    /**
-     * The plan change that moved this subscription onto its current plan, if
-     * that change's invoice has not been paid.
-     *
-     * Only the latest change is read: while a plan-change invoice is open no
-     * further change can be made, so an unpaid one is always the latest.
-     */
-    private function unpaidUpgradeOnto(Subscription $subscription): ?PlanChange
-    {
-        /** @var PlanChange|null $latest */
-        $latest = PlanChange::query()
-            ->where('subscription_id', $subscription->getKey())
-            ->orderByDesc('changed_at')
-            ->orderByDesc('id')
-            ->first();
-
-        if ($latest === null
-            || $latest->proration_invoice_id === null
-            || $latest->from_recurring_amount_minor === null
-            || $latest->to_plan_id !== $subscription->plan_id) {
-            return null;
-        }
-
-        $status = Invoice::query()->whereKey($latest->proration_invoice_id)->value('status');
-        $status = $status instanceof InvoiceStatus ? $status : InvoiceStatus::tryFrom((string) $status);
-
-        return $status === InvoiceStatus::Paid ? null : $latest;
     }
 
     /**

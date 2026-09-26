@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
+use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -30,29 +30,26 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * grown, because an upgrade is only delivered on payment.
  *
  * Only when the subscription is still exactly where the voided change put it,
- * and no change has been made since. Otherwise the void is of a change the
- * subscription has already left, and there is nothing to put back.
+ * no change has been made since, and the subscription has not ended.
+ * Otherwise the void is of a change the subscription has already left, or of
+ * the open invoices of a subscription being wound up, and there is nothing to
+ * put back - an ended subscription is not moved or audited as a plan change.
  *
- * Queued on payments beside the other invoice listeners, with the same
- * retry ladder; idempotent, because a second delivery finds the subscription
- * already back on the plan it came from.
+ * The plan it goes back to always has room: while an upgrade is unpaid, the
+ * unit it left keeps counting against that plan (PlanCapacity::claimed()), so
+ * nobody else can have been sold it. The plan row is still locked, through
+ * the lock every checkout takes, so the move and any checkout serialise.
+ *
+ * Synchronous, and inside VoidInvoice's transaction (see InvoiceVoided): the
+ * void and the restore are one unit. Queued, it left a window in which the
+ * invoice was void, nothing open refused a change, and the customer could
+ * step off the unpaid plan and be credited for it.
  */
-final class RestorePlanOnVoidedUpgrade implements ShouldQueue
+final readonly class RestorePlanOnVoidedUpgrade
 {
-    public string $queue = 'payments';
-
-    public int $tries = 5;
-
-    /**
-     * @return list<int>
-     */
-    public function backoff(): array
-    {
-        return [5, 15, 60, 300];
-    }
-
     public function __construct(
-        private readonly RecordAuditEntry $audit,
+        private RecordAuditEntry $audit,
+        private PlanCapacity $capacity,
     ) {}
 
     public function handle(InvoiceVoided $event): void
@@ -74,7 +71,9 @@ final class RestorePlanOnVoidedUpgrade implements ShouldQueue
             /** @var Subscription|null $subscription */
             $subscription = Subscription::query()->lockForUpdate()->find($change->subscription_id);
 
-            if ($subscription === null || $subscription->plan_id !== $change->to_plan_id) {
+            if ($subscription === null
+                || $subscription->status->isTerminal()
+                || $subscription->plan_id !== $change->to_plan_id) {
                 return;
             }
 
@@ -90,6 +89,8 @@ final class RestorePlanOnVoidedUpgrade implements ShouldQueue
             if ($superseded) {
                 return;
             }
+
+            $this->capacity->lock([(string) $change->from_plan_id]);
 
             $subscription->plan_id = $change->from_plan_id;
             $subscription->recurring_amount_minor = $change->from_recurring_amount_minor;

@@ -18,6 +18,7 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\BillableLine;
 use Lynomia\Modules\Subscriptions\Application\DTOs\ProrationPlan;
 use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
+use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\IncompatibleBillingPeriodException;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\SubscriptionNotChangeableException;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
@@ -53,6 +54,7 @@ final readonly class ChangeSubscriptionPlan
     public function __construct(
         private PricingEngine $pricing,
         private MoneyCollectedForThePeriod $collected,
+        private UnpaidUpgrade $unpaid,
     ) {}
 
     /**
@@ -113,11 +115,14 @@ final readonly class ChangeSubscriptionPlan
              * collected, less what earlier changes already returned. The
              * recurring amount says what a plan costs, not what was paid for
              * it, and pricing the credit from it alone minted wallet balance
-             * out of upgrades nobody paid for (F-01).
+             * out of upgrades nobody paid for (F-01). And the remainder is of
+             * the amount the subscription has paid for: while the change that
+             * put it on this plan is unpaid (or voided without being undone),
+             * that is the amount it came from, not the one it moved to.
              */
             $credit = $this->collected
                 ->ceilCredit(
-                    $this->pricing->prorate($locked->recurringAmount(), $periodStart, $periodEnd, $now),
+                    $this->pricing->prorate($this->unpaid->recurringPaidFor($locked), $periodStart, $periodEnd, $now),
                     $charge,
                     $locked,
                 )

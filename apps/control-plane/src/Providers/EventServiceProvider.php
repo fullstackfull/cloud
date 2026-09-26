@@ -137,6 +137,7 @@ final class EventServiceProvider extends BaseEventServiceProvider
              * A voided plan-change invoice is an upgrade that will never be
              * paid for: the subscription goes back to the plan and amount it
              * was paid at, instead of renewing as the plan it never bought.
+             * Synchronous, inside the void's transaction - see InvoiceVoided.
              */
             RestorePlanOnVoidedUpgrade::class,
         ],

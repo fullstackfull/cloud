@@ -62,21 +62,21 @@ final readonly class VoidInvoice
             $voided = $this->transitionInvoice->execute($locked, InvoiceStatus::Void)->refresh();
 
             /*
-             * Announced after the outermost commit, as InvoicePaid is: a
-             * plan-change invoice being voided puts the subscription back on
-             * the plan it was paid for, and that must not happen for a void
-             * that then rolls back.
+             * Announced inside this transaction, and heard synchronously. A
+             * voided plan-change invoice undoes the upgrade it billed, and
+             * that has to be one unit with the void: heard after the commit
+             * from a queue, there was a window in which the invoice was void,
+             * nothing was open to refuse a change, and the customer could
+             * step off the unpaid plan and be credited as though it had been
+             * paid (re-audit, B4). A listener that fails rolls the void back
+             * with it.
              */
-            $event = new InvoiceVoided(
+            event(new InvoiceVoided(
                 invoiceId: (string) $voided->getKey(),
                 customerId: (string) $voided->customer_id,
                 subscriptionId: $voided->subscription_id === null ? null : (string) $voided->subscription_id,
                 voidedAt: CarbonImmutable::now(),
-            );
-
-            DB::afterCommit(static function () use ($event): void {
-                event($event);
-            });
+            ));
 
             return $voided;
         });

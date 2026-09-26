@@ -110,7 +110,17 @@ final class APlanChangeIsHeldToTheCapacityACheckoutIsTest extends BillingApiTest
 
         $this->changePlan($user, $subscription, $large)->assertOk();
 
-        $this->assertSame(0, $capacity->claimed($this->small->id), 'The unit left behind is free to sell again.');
+        /*
+         * While the upgrade is unpaid it is provisional - a void or a lapse
+         * puts the subscription back - so the unit it left is still held.
+         * Round three changed this on purpose: before, the unit was released
+         * at once, sold to someone else, and the restore then oversold it.
+         */
+        $this->assertSame(1, $capacity->claimed($this->small->id), 'Held until the upgrade is paid.');
+        $upgrade = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', 'open')->sole();
+        $upgrade->forceFill(['status' => 'paid', 'amount_paid_minor' => $upgrade->total_minor, 'paid_at' => now()])->save();
+
+        $this->assertSame(0, $capacity->claimed($this->small->id), 'Once paid, the unit left behind is free to sell again.');
         $this->assertSame(1, $capacity->claimed($large->id), 'The unit moved onto is taken.');
         $this->assertSame(1, $capacity->claimed($large->id, $customer));
 

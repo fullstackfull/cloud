@@ -6,10 +6,14 @@ namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
@@ -68,12 +72,15 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *
  * A proration invoice with no recorded change can only be one issued before
  * the record existed: every change since writes its row in the transaction
- * that issues its invoice. Such an invoice was issued under the old rule, and
- * while it was open no further change could be made, so the plan the
- * subscription holds is the plan it bought. It is built as it always was,
- * from that plan, and the fallback says so in the log. Building nothing would
- * take a customer's money for an upgrade issued the day before this record
- * was deployed and never deliver it.
+ * that issues its invoice. The old rule allowed further changes while such an
+ * invoice was open, so the plan the subscription holds now is not
+ * necessarily what it bought (small -> mid, then mid -> large, then only the
+ * first invoice paid). What it bought is read from the plan_changed audit
+ * entry the old code wrote beside it, which names the invoice and the plan it
+ * moved to. When a later proration invoice has already been paid, that one
+ * decides the machine and this builds nothing. When the audit entry cannot be
+ * found, the subscription's plan is built only if no later proration invoice
+ * exists - otherwise nothing is built, and the log says why, for an operator.
  *
  * Queued on payments beside the other settlement work, and idempotent twice
  * over: the provisioning job is keyed on the invoice that paid for it, so a
@@ -122,7 +129,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
         $change = PlanChange::query()->where('proration_invoice_id', $event->invoiceId)->first();
 
         if ($change === null) {
-            $this->buildTheCurrentPlanForAnInvoiceIssuedBeforeTheRecord($event);
+            $this->buildForAnInvoiceIssuedBeforeTheRecord($event);
 
             return;
         }
@@ -151,16 +158,15 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
     }
 
     /**
-     * The rule proration invoices issued before `subscription_plan_changes`
-     * existed were issued under: build the plan the subscription holds.
+     * A proration invoice issued before `subscription_plan_changes` existed:
+     * build what it bought, read from the old code's audit entry.
      */
-    private function buildTheCurrentPlanForAnInvoiceIssuedBeforeTheRecord(InvoicePaid $event): void
+    private function buildForAnInvoiceIssuedBeforeTheRecord(InvoicePaid $event): void
     {
         $subscription = Subscription::query()->find($event->subscriptionId);
-        $plan = $subscription?->plan()->first();
 
-        if ($subscription === null || $plan === null) {
-            Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
+        if ($subscription === null) {
+            Log::warning('A paid proration invoice names a subscription that no longer exists.', [
                 'invoice_id' => $event->invoiceId,
                 'subscription_id' => $event->subscriptionId,
             ]);
@@ -168,10 +174,49 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return;
         }
 
-        Log::info('A paid proration invoice predates the plan-change record; building the plan the subscription holds.', [
-            'invoice_id' => $event->invoiceId,
-            'subscription_id' => $event->subscriptionId,
-        ]);
+        $later = Invoice::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->where('id', '>', $event->invoiceId)
+            ->whereHas('items', static fn ($items) => $items->where('kind', InvoiceItemKind::Proration->value))
+            ->get(['id', 'status']);
+
+        if ($later->contains(static fn (Invoice $invoice): bool => $invoice->status === InvoiceStatus::Paid)) {
+            Log::info('A paid proration invoice predates the plan-change record and a later one is already paid; the later one decides the machine.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+            ]);
+
+            return;
+        }
+
+        $bought = AuditEntry::query()
+            ->where('action', AuditAction::PlanChanged->value)
+            ->where('context->proration_invoice_id', $event->invoiceId)
+            ->latest('id')
+            ->first();
+
+        $planId = is_array($bought?->context) ? ($bought->context['to_plan_id'] ?? null) : null;
+        $plan = is_string($planId) ? Plan::query()->find($planId) : null;
+
+        if ($plan === null && $later->isNotEmpty()) {
+            Log::warning('A paid proration invoice predates the plan-change record, what it bought cannot be established, and a later plan change followed it; nothing was built.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+            ]);
+
+            return;
+        }
+
+        $plan ??= $subscription->plan()->first();
+
+        if ($plan === null) {
+            Log::warning('A paid proration invoice names a subscription with no plan.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+            ]);
+
+            return;
+        }
 
         $this->queueAtProvider->execute(
             subscription: $subscription,
