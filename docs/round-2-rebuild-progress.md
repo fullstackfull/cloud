@@ -32,11 +32,11 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-18 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged | `a327f44` |
 | F-19 | High | **UPHELD WITH RESERVATIONS** by independent verification (round 1, 0 blocking, 7 reservations); merged | `45d53af` |
 | F-20 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `05cafe8` |
-| F-21 | High | rebuilt; rounds 1–3 REJECTED on its frontend gate's parsing and query-state model (a new shape each round); final round under the occupancy precedent running | `7573746` |
+| F-21 | High | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected its frontend gate's parsing and query-state model); merged | `64581fe` |
 | F-22 | High | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected only the route-walk gate's model of Alertmanager/Prometheus/Loki — empty-label, Loki-flag and duplicate-key gaps fixed, sentences narrowed); merged | `42b1d71` |
 | F-23 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged; nine F-19 excuses retired at F-19's merge | `5ae2e58` |
 | F-24 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking; built on F-04, F-11, F-15 and F-45 — no longer red by design); the verifier was cut short before its green runs, which the coordinator ran after merging: 1,165/1,165 across Compute, SharedHosting, Simulation, Vps, Dns and Architecture | `0586031` |
-| F-41 | High | queued (last: changes the test harness) | |
+| F-41 | High | rebuild + verification running (last: it changes the test harness's own environment handling) | |
 | F-46 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); census rebuilt first; merged | `3fa4d48` |
 | F-25 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `272d8a3` |
 | F-26 | Medium | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected an IDN platform host left unreserved — now folded to its A-label); merged | `6b32e9b` |
@@ -51,9 +51,9 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-35 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `68c33c0` |
 | F-36 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `eab4d6b` |
 | F-37 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `a922b43` |
-| F-38 | Medium | rebuilt; rounds 1–3 REJECTED on the inventory/no-apply gates' model of Ansible and bash (a new shape each round); final round under the occupancy precedent running | `fe3c54d` |
-| F-39 | Medium | rebuilt; rounds 1–3 REJECTED on the runbook gate's Markdown reading (a new shape each round); final round under the occupancy precedent running | `c359835` |
-| F-40 | Medium | rebuilt; rounds 1–3 REJECTED on LayeringTest's reading of PHP names (goto labels, spliced strings, qualified imports); final round under the occupancy precedent running | `3cc8a53` |
+| F-38 | Medium | **UPHELD WITH RESERVATIONS** (round 5, under the occupancy precedent; round 4 rejected an empty-YAML inventory the INI plugin reads — fixed); merged, its self-test arity guard carried onto F-22's grown table (77 cases) | `f31f42d` |
+| F-39 | Medium | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected the runbook gate's Markdown reading); merged; counts block regenerated for F-22/F-37's alerts | `853892f` |
+| F-40 | Medium | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected LayeringTest's reading of PHP names); merged | `831096a` |
 | F-42 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged — status stays PARTIAL as the ledger recorded: mechanism established, budget question unanswerable at obtainable sample sizes | `cd99002` |
 | F-43 | Medium | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); merged | `8799204` |
 | F-44 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `a0462ca` |
@@ -74,5 +74,6 @@ round two and are already in the tree.
 | after workflow A (12 more findings) | 24 findings | 4,836 / 4,837 — the one failure was the ledger-predicted F-26 × F-27 row, fixed next commit as the ledger ruled (804/804 in Dns, Api, Security, Architecture after) | exit 1 on that run; frontend vitest 473/473, tsc + eslint clean |
 | after F-13, F-15, F-22 final repairs | 25 findings | 5,020 / 5,020 passed, 166,820 assertions | JSON `tests == passed`; junit 600 testsuites, all `skipped="0"`; exit 0 |
 | after workflow B's eight upheld findings | 34 findings | 5,094 / 5,094 passed, 167,461 assertions | JSON `tests == passed`; junit 609 testsuites, all `skipped="0"`; exit 0; frontend vitest 495/495, tsc + eslint clean |
+| after F-21, F-24, F-38, F-39, F-40 | 35 findings | 5,117 / 5,117 passed, 167,555 assertions | JSON `tests == passed`; junit 615 testsuites, all `skipped="0"`; exit 0; frontend vitest 627/627, tsc + eslint clean; every validator and self-test green (safety-gate 10/10 with ansible-core on PATH — it is 5/10 without, identically on `main`) |
 
 Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
