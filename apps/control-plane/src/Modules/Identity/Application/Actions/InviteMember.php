@@ -134,10 +134,14 @@ final readonly class InviteMember
      * partial unique index with an answer of its own, and the wait is not
      * what stands in the way.
      *
-     * The earlier offers are locked, not just read. A resend of the open one
-     * commits a fresh `last_sent_at` under that row's lock; read without a
-     * lock, a withdraw-and-invite racing it could see the older time, and the
-     * address would get two mails inside one wait.
+     * The earlier offers are locked, not just read. Withdrawing an offer
+     * closes it under that row's lock. Read without a lock while a withdrawal
+     * is still in flight, the offer would look open and be left out of the
+     * comparison; the insert would then wait on the partial unique index for
+     * the withdrawal to commit, and succeed — two mails to the address inside
+     * one wait. Locked, the read waits for the withdrawal instead and gets
+     * the row as it committed it: closed, and carrying its latest
+     * `last_sent_at`, a resend's included.
      */
     private function assertTheAddressWasNotJustMailed(Customer $customer, string $address): void
     {

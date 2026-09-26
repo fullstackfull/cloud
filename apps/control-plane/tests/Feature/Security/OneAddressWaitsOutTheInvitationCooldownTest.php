@@ -47,8 +47,8 @@ use Tests\Feature\Team\TeamApiTestCase;
  * racing each other. Both actions compare under a row lock and say why. The
  * withdraw-and-invite case pins that InviteMember takes its lock, and
  * `a_resend_compares_the_row_it_locked_not_the_one_it_was_handed` pins that
- * ResendInvitation reads the time from the row it locked; nothing can make two
- * requests race, because PHPUnit runs one at a time.
+ * ResendInvitation takes its lock and reads the time from the row it locked;
+ * nothing can make two requests race, because PHPUnit runs one at a time.
  */
 final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
 {
@@ -148,10 +148,11 @@ final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'membership.invitation_sent_too_recently');
 
-        // Locked, not just read: a resend racing this commits its new
-        // last_sent_at under the offer's row lock, and an unlocked read could
-        // see the older time. This pins that the lock is taken; it cannot make
-        // two requests race.
+        // Locked, not just read: read without the lock while a withdrawal of
+        // the offer is still in flight, the offer would look open, be left out
+        // of the comparison, and the insert would wait for the withdrawal to
+        // commit and then succeed. This pins that the lock is taken; it cannot
+        // make two requests race.
         $this->assertCount(1, $locks, 'InviteMember read the earlier offers to this address without locking them.');
 
         Mail::assertQueuedCount(1);
@@ -290,11 +291,18 @@ final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
      * The time is read from the row the resend locked, not from the copy it
      * was handed.
      *
-     * The copy is what route-model binding loaded before the lock. Another
-     * resend committing in between — here, the row's `last_sent_at` moved to
-     * now behind the copy's back — leaves the copy an hour stale; compared
-     * with that, the resend would go, and the address would get two mails
-     * inside one wait. It must be refused, and write nothing.
+     * In a request, the copy is what TeamController::invitationOfThisAccount()
+     * loaded with a plain query before the resend's transaction began; here,
+     * `$stale` stands for it. Another resend committing in between — here,
+     * the row's `last_sent_at` moved to now behind the copy's back — leaves
+     * the copy an hour stale; compared with that, the resend would go, and
+     * the address would get two mails inside one wait. It must be refused,
+     * and write nothing.
+     *
+     * Re-reading is not enough on its own: two resends that both re-read
+     * before either writes would both see the old time. So the re-read is a
+     * locking one, and this pins that the lock is taken — it cannot make two
+     * requests race.
      */
     #[Test]
     public function a_resend_compares_the_row_it_locked_not_the_one_it_was_handed(): void
@@ -312,6 +320,15 @@ final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
         CustomerInvitation::query()->whereKey($offer->getKey())->update(['last_sent_at' => CarbonImmutable::now()]);
         $before = $this->rowOf($offer);
 
+        $locks = [];
+        DB::listen(static function (QueryExecuted $query) use (&$locks): void {
+            $sql = strtolower($query->sql);
+
+            if (str_contains($sql, 'customer_invitations') && str_contains($sql, 'for update')) {
+                $locks[] = $sql;
+            }
+        });
+
         try {
             app(ResendInvitation::class)->execute($stale);
             $this->fail('A resend compared the copy it was handed, an hour stale, and mailed an address mailed just now.');
@@ -319,6 +336,7 @@ final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
             $this->assertSame('membership.invitation_sent_too_recently', $refused->errorCode());
         }
 
+        $this->assertCount(1, $locks, 'ResendInvitation re-read the offer without locking it, so two resends could both read the old last_sent_at.');
         $this->assertSame($before, $this->rowOf($offer));
     }
 

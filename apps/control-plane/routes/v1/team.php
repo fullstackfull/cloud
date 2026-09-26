@@ -42,8 +42,11 @@ Route::get('team/invitations', [TeamController::class, 'invitations'])->name('te
  * has resolved it — the budget silently became one per administrator.
  * ThrottleAfterAccountResolution runs the same limiter where it is declared.
  * TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest holds every route
- * whose controller method refers to InvitationMailer itself to both halves of
- * that; a send reached through a helper, a service or a job is outside it.
+ * whose controller method uses InvitationMailer — as a typed parameter, by
+ * the class's name, or through a property of that type read with PHP's
+ * property syntax, however it is laid out — to both halves of that. Its
+ * docblock lists those ways exactly, and what lies outside them: a send
+ * reached through a helper, a service or a job, among others.
  */
 Route::post('team/invitations', [TeamController::class, 'invite'])
     ->middleware(ThrottleAfterAccountResolution::class.':team-invitations')
