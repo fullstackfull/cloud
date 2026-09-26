@@ -102,7 +102,7 @@ final class EveryOperatorActLeavesAJobsPayloadAsItWasWrittenTest extends TestCas
         $this->nameHostingDomainAsOperator($job, 'shop.example.test')
             ->assertStatus(409)
             ->assertJsonPath('error.code', 'hosting.job_not_a_hosting_build');
-        $this->assertUntouched($job, $written, 'the hosting-domain correction, refused for a VPS create');
+        $this->assertUntouched($job, $written, 'the hosting-domain correction, refused for a VPS create', sent: false);
         $this->assertNull($job->refresh()->operator_named_domain);
 
         $this->repointAsOperator($job)->assertOk();
