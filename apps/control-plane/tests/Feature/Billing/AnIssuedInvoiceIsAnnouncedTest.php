@@ -8,14 +8,17 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Mail;
 use Lynomia\Modules\Billing\Application\Actions\IssueInvoice;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Services\PricingEngine;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Domain\ValueObjects\TaxRate;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Notifications\Infrastructure\Mail\NotificationMail;
 use Lynomia\Modules\Notifications\Infrastructure\Models\Notification;
@@ -40,6 +43,8 @@ use Tests\TestCase;
 final class AnIssuedInvoiceIsAnnouncedTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const string INJECTED = 'injected by the test: ';
 
     #[Test]
     public function an_issued_invoice_is_announced_once_to_the_accounts_billing_address(): void
@@ -126,6 +131,38 @@ final class AnIssuedInvoiceIsAnnouncedTest extends TestCase
 
         $this->assertCount(1, $told);
         $this->assertSame((string) $invoice->getKey(), $told->first()->subject_id);
+    }
+
+    #[Test]
+    public function the_invoice_stands_when_announcing_it_fails(): void
+    {
+        /*
+         * Never at the expense of the invoice: it has committed by the time
+         * the announcement runs, and an announcement that cannot be raised is
+         * reported rather than thrown into the checkout or the sweep that
+         * issued it. Every query NotifyCustomer makes fails here — before it
+         * reaches the database, so the transaction this test runs in is not
+         * aborted by PostgreSQL for a reason other than the one under test.
+         */
+        Exceptions::fake();
+        $customer = Customer::factory()->create(['currency' => 'KWD']);
+
+        DB::beforeExecuting(static function (string $sql): void {
+            foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $frame) {
+                if (($frame['class'] ?? null) === NotifyCustomer::class) {
+                    throw new RuntimeException(self::INJECTED.$sql);
+                }
+            }
+        });
+
+        $invoice = $this->issue($customer);
+
+        $this->assertSame(InvoiceStatus::Open, $invoice->status);
+        $this->assertSame(1, Invoice::query()->whereKey($invoice->getKey())->count());
+        $this->assertCount(0, $this->announcements($customer));
+        Exceptions::assertReported(
+            static fn (RuntimeException $e): bool => str_starts_with($e->getMessage(), self::INJECTED),
+        );
     }
 
     private function issue(Customer $customer, ?Order $order = null): Invoice
