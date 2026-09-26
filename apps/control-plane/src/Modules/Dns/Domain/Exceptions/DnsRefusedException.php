@@ -31,8 +31,13 @@ final class DnsRefusedException extends DomainException
 
     public static function zoneIsReserved(string $name): self
     {
+        // `zone` is published: it is the name the customer submitted in the
+        // request being refused, so telling it back discloses nothing they did
+        // not send (F-27's rule — whether the caller already knows it). Pinned
+        // by F-26's ClaimingAZoneTest, which reads it from error.details.
         return (new self('This domain is used by the platform itself and cannot be held by an account.'))
             ->withContext(['zone' => $name])
+            ->publishing('zone')
             ->as('dns.zone.reserved')
             ->withStatus(403);
     }

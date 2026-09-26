@@ -87,6 +87,8 @@ final class ErrorDetailsAreOnlyWhatTheCallerAlreadyKnowsTest extends TestCase
         'Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedControlUnavailableException' => ['action', 'dedicated_server_id', 'safe_to_retry'],
         'Lynomia\Modules\Dedicated\Domain\Exceptions\DedicatedOperationRefusedException' => ['in_flight_kind', 'status'],
         'Lynomia\Modules\Dedicated\Domain\Exceptions\PowerOperationIndeterminateException' => ['indeterminate', 'safe_to_retry'],
+        // The zone name the customer submitted, told back (F-26 x F-27).
+        'Lynomia\Modules\Dns\Domain\Exceptions\DnsRefusedException' => ['zone'],
         'Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException' => ['value'],
         'Lynomia\Modules\Identity\Domain\Exceptions\EmailAddressNotVerifiedException' => ['email', 'resend_endpoint'],
         'Lynomia\Modules\Identity\Domain\Exceptions\TwoFactorRequiredException' => ['challenge_token'],
