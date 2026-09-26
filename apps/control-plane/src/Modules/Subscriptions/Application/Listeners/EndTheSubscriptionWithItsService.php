@@ -138,7 +138,7 @@ final readonly class EndTheSubscriptionWithItsService
      */
     private function withdrawWhatItStillAsksFor(string $subscriptionId): void
     {
-        $invoices = Invoice::query()->where('subscription_id', $subscriptionId)->get();
+        $invoices = Invoice::query()->where('subscription_id', $subscriptionId)->orderBy('id')->get();
 
         foreach ($invoices as $invoice) {
             if (! $invoice->status->isCollectible()) {
@@ -154,7 +154,22 @@ final readonly class EndTheSubscriptionWithItsService
                 continue;
             }
 
-            $this->voidInvoice->execute($invoice, 'the service this subscription paid for has ended');
+            /*
+             * One at a time, each in its own guard: a void that fails — a
+             * lock timeout, a listener on the void that throws — must not
+             * leave the invoices after it payable. The failure is logged for
+             * an operator; the next ending of anything on this subscription
+             * does not revisit it, so the log line is the record.
+             */
+            try {
+                $this->voidInvoice->execute($invoice, 'the service this subscription paid for has ended');
+            } catch (Throwable $e) {
+                Log::warning('A subscription ended and one of its open invoices could not be voided; it is still payable.', [
+                    'subscription_id' => $subscriptionId,
+                    'invoice_id' => (string) $invoice->getKey(),
+                    'reason' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

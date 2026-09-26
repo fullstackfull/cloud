@@ -34,6 +34,12 @@ use Throwable;
  * because an aggregate cannot be locked: serialising on the parent is what
  * makes the sum that follows it authoritative.
  *
+ * Two rows are locked, in this order: the invoice the capture paid, then the
+ * capture. The invoice's lock is what lets the refund be held to what the
+ * invoice still holds (money already credited to the wallet against it is not
+ * refundable again), and invoice-before-charge is the order
+ * PayInvoiceFromWallet uses, so the two cannot deadlock.
+ *
  * The provider call happens *after* the lock is released, with the refund row
  * already written as pending. That ordering is the reason the balance holds: a
  * pending refund counts against the capture from the instant it is committed,
@@ -220,8 +226,27 @@ final readonly class IssueRefund
         ?User $issuedBy,
         ?string $invoiceId,
     ): Refund {
+        /*
+         * Lock order: the invoice the capture paid, then the capture. That is
+         * the order PayInvoiceFromWallet takes the same two rows in (invoice,
+         * then the wallet charge), so a refund and a wallet payment on one
+         * invoice cannot deadlock each other. The invoice is found from an
+         * unlocked read of the transaction; if a settlement attached the
+         * capture to an invoice in between, that one is locked after the
+         * capture — the order SettleInvoice itself uses — rather than refunded
+         * without its lock.
+         */
+        $invoiceIdSeen = Transaction::query()->whereKey($transaction->getKey())->value('invoice_id');
+        $invoice = is_string($invoiceIdSeen) && $invoiceIdSeen !== ''
+            ? Invoice::query()->lockForUpdate()->find($invoiceIdSeen)
+            : null;
+
         /** @var Transaction $locked */
         $locked = Transaction::query()->lockForUpdate()->findOrFail($transaction->getKey());
+
+        if ($locked->invoice_id !== null && $locked->invoice_id !== $invoiceIdSeen) {
+            $invoice = Invoice::query()->lockForUpdate()->find($locked->invoice_id);
+        }
 
         $captured = $locked->amount();
         // Safe to aggregate without locking the refund rows: every writer of
@@ -238,7 +263,7 @@ final readonly class IssueRefund
             );
         }
 
-        $this->assertNotAlreadyInTheWallet($locked, $amount);
+        $this->assertNotAlreadyInTheWallet($locked, $invoice, $amount);
 
         return Refund::create([
             'transaction_id' => $locked->id,
@@ -261,8 +286,8 @@ final readonly class IssueRefund
      * (CreditWhatACancelledOrderPaid). Refunding it in full afterwards would
      * return the same money twice, once as stored value and once to the card.
      * So the refund is also held to what the invoice still holds
-     * (WhatAnInvoiceStillHolds), read under the invoice's row lock — taken
-     * after the transaction's, the order SettleInvoice uses.
+     * (WhatAnInvoiceStillHolds), read under the invoice's row lock, which
+     * reserve() takes before the transaction's.
      *
      * Nothing is clawed back. A wallet credit the customer has already spent
      * stays spent; this refuses only the card refund of money that went to the
@@ -270,14 +295,8 @@ final readonly class IssueRefund
      *
      * @throws RefundExceedsCaptureException
      */
-    private function assertNotAlreadyInTheWallet(Transaction $locked, Money $amount): void
+    private function assertNotAlreadyInTheWallet(Transaction $locked, ?Invoice $invoice, Money $amount): void
     {
-        if ($locked->invoice_id === null) {
-            return;
-        }
-
-        $invoice = Invoice::query()->lockForUpdate()->find($locked->invoice_id);
-
         if ($invoice === null || WhatAnInvoiceStillHolds::creditedToTheWalletMinor($invoice) === 0) {
             return;
         }

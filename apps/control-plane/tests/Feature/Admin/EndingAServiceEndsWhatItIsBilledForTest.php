@@ -7,7 +7,9 @@ namespace Tests\Feature\Admin;
 use Carbon\CarbonImmutable;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
@@ -19,6 +21,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -34,7 +37,9 @@ use Lynomia\Modules\Subscriptions\Application\Actions\TransitionSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
+use RuntimeException;
 use Tests\Support\BuysSharedHosting;
 use Tests\TestCase;
 
@@ -329,6 +334,127 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
 
         $this->assertNull(app(EndHostingService::class)->afterTheAccountEnded($account));
         $this->assertSame(ServiceStatus::Provisioning, $service->fresh()?->status);
+    }
+
+    #[Test]
+    public function a_partly_paid_invoice_is_left_open_and_the_ones_after_it_are_still_voided(): void
+    {
+        [$customer, $service, $subscription] = $this->activeServiceOnASubscription();
+
+        $partlyPaid = $this->openInvoiceOn($subscription, $customer);
+        $unpaid = $this->openInvoiceOn($subscription, $customer);
+
+        app(SettleInvoice::class)->execute($partlyPaid, Transaction::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'invoice_id' => $partlyPaid->getKey(),
+            'amount_minor' => 500,
+            'currency' => 'KWD',
+        ]));
+        $this->assertSame(InvoiceStatus::Open, $partlyPaid->refresh()->status);
+
+        Log::spy();
+
+        app(TransitionService::class)->execute($service, ServiceStatus::Terminated);
+
+        /*
+         * Skipped as a decision, and said so, rather than attempted and
+         * caught as a failure: the operator's log line has to say "left for
+         * you because money is on it", not "could not be voided".
+         */
+        Log::shouldHaveReceived('warning')->with(
+            'A subscription ended with a partly paid invoice still open; it was left for an operator.',
+            Mockery::on(static fn (array $context): bool => $context['invoice_id'] === (string) $partlyPaid->getKey()),
+        );
+        Log::shouldNotHaveReceived('warning', [
+            'A subscription ended and one of its open invoices could not be voided; it is still payable.',
+            Mockery::any(),
+        ]);
+
+        // Money is on it: VoidInvoice would refuse, and what is owed or
+        // returned is an operator's decision.
+        $this->assertSame(InvoiceStatus::Open, $partlyPaid->refresh()->status);
+        $this->assertSame(InvoiceStatus::Void, $unpaid->refresh()->status);
+    }
+
+    #[Test]
+    public function one_invoice_that_cannot_be_voided_does_not_leave_the_next_one_payable(): void
+    {
+        [$customer, $service, $subscription] = $this->activeServiceOnASubscription();
+
+        $first = $this->openInvoiceOn($subscription, $customer);
+        $second = $this->openInvoiceOn($subscription, $customer);
+
+        // The first void fails — a lock timeout, a listener on the void
+        // that throws; anything.
+        Invoice::updating(static function (Invoice $invoice) use ($first): void {
+            if ((string) $invoice->getKey() === (string) $first->getKey()) {
+                throw new RuntimeException('The void of this invoice failed.');
+            }
+        });
+
+        try {
+            app(TransitionService::class)->execute($service, ServiceStatus::Terminated);
+        } finally {
+            Invoice::flushEventListeners();
+        }
+
+        $this->assertTrue($subscription->refresh()->status->isTerminal());
+        $this->assertSame(InvoiceStatus::Open, $first->refresh()->status, 'Precondition: the first void really failed.');
+        $this->assertSame(InvoiceStatus::Void, $second->refresh()->status, 'One failed void left a later invoice payable.');
+    }
+
+    #[Test]
+    public function an_operator_without_service_terminate_clears_an_expired_account_and_leaves_the_service_alone(): void
+    {
+        /*
+         * hosting_account.manage alone is for clearing out accounts whose
+         * window has run out. The account goes; ending the service, its
+         * order and its billing is service.terminate's, so the service stays
+         * suspended beside it.
+         */
+        [$account, $service, $order, $subscription] = $this->liveHosting();
+
+        app(TransitionSubscription::class)->execute($subscription, SubscriptionStatus::PastDue);
+        app(TransitionSubscription::class)->execute($subscription->refresh(), SubscriptionStatus::Suspended);
+        $this->travel(31)->days();
+
+        $manager = User::factory()->create();
+        $manager->givePermissionTo([Permission::HostingAccountManage->value]);
+
+        $this->actingAs($manager->fresh() ?? $manager)
+            ->deleteJson('/api/admin/hosting-accounts/'.$account->getKey(), ['reason' => 'Window elapsed, clearing out.'])
+            ->assertOk()
+            ->assertJsonPath('data.status', HostingAccountStatus::Terminated->value);
+
+        $this->assertSame(ServiceStatus::Suspended, $service->fresh()?->status);
+        $this->assertSame(SubscriptionStatus::Suspended, $subscription->refresh()->status);
+        $this->assertNotSame(OrderStatus::Terminated, $order->fresh()?->status);
+    }
+
+    /**
+     * @return array{Customer, Service, Subscription}
+     */
+    private function activeServiceOnASubscription(): array
+    {
+        $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $subscription = Subscription::factory()->priced(9_000)->create(['customer_id' => $customer->getKey()]);
+        $service = Service::factory()->active()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+        ]);
+
+        return [$customer, $service, $subscription];
+    }
+
+    private function openInvoiceOn(Subscription $subscription, Customer $customer): Invoice
+    {
+        return Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'currency' => 'KWD',
+            'subtotal_minor' => 9_000,
+            'total_minor' => 9_000,
+        ]);
     }
 
     private function assertBillingHasEnded(Subscription $subscription): void

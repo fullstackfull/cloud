@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Payments;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Actions\CreditWhatACancelledOrderPaid;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
@@ -15,6 +17,7 @@ use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Domain\Enums\RefundStatus;
 use Lynomia\Modules\Payments\Domain\Exceptions\RefundExceedsCaptureException;
+use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
@@ -128,6 +131,77 @@ final class MoneyReturnedToTheWalletIsNotAlsoRefundedToTheCardTest extends TestC
 
         $this->assertSame(900, app(CreditWhatACancelledOrderPaid::class)->execute((string) $invoice->order_id));
         $this->assertSame(900, $this->wallet($customer));
+    }
+
+    #[Test]
+    public function a_card_refund_still_pending_at_the_provider_is_not_credited_to_the_wallet_as_well(): void
+    {
+        /*
+         * The verifier's R2 shape: a 500 card refund is in flight (its row is
+         * pending; the invoice has not booked it yet) when a cancelled order's
+         * credit runs. Only what is left after it goes to the wallet.
+         */
+        [$customer, $invoice] = $this->invoiceFor(1_500, withOrder: true);
+
+        $capture = $this->capture($customer, $invoice, 1_500);
+        app(SettleInvoice::class)->execute($invoice, $capture);
+
+        Refund::query()->create([
+            'transaction_id' => $capture->getKey(),
+            'invoice_id' => $invoice->getKey(),
+            'amount_minor' => 500,
+            'currency' => 'KWD',
+            'status' => RefundStatus::Pending,
+            'reason' => 'in flight at the provider',
+        ]);
+
+        $this->assertSame(0, $invoice->refresh()->amount_refunded_minor, 'Precondition: the invoice has not booked the pending refund.');
+
+        $this->assertSame(1_000, app(CreditWhatACancelledOrderPaid::class)->execute((string) $invoice->order_id));
+        $this->assertSame(1_000, $this->wallet($customer));
+    }
+
+    #[Test]
+    public function a_refund_locks_the_invoice_before_the_capture(): void
+    {
+        /*
+         * PayInvoiceFromWallet locks the invoice and then the wallet charge.
+         * A refund taking the same two rows the other way round could
+         * deadlock with it, so the refund takes the invoice first. A single
+         * process cannot interleave the two; this reads the order the refund
+         * takes its locks in.
+         */
+        [$customer, $invoice] = $this->invoiceFor(1_500);
+        $capture = $this->capture($customer, $invoice, 1_500);
+        app(SettleInvoice::class)->execute($invoice, $capture);
+
+        $statements = [];
+        DB::listen(static function (QueryExecuted $query) use (&$statements): void {
+            $statements[] = strtolower($query->sql);
+        });
+
+        app(IssueRefund::class)->execute($capture->refresh(), Money::ofMinor(500, 'KWD'), 'part refund');
+
+        $invoiceLock = null;
+        $captureLock = null;
+
+        foreach ($statements as $i => $sql) {
+            if (! str_contains($sql, 'for update')) {
+                continue;
+            }
+
+            if ($invoiceLock === null && str_contains($sql, 'from "invoices"')) {
+                $invoiceLock = $i;
+            }
+
+            if ($captureLock === null && str_contains($sql, 'from "transactions"')) {
+                $captureLock = $i;
+            }
+        }
+
+        $this->assertNotNull($invoiceLock, 'The refund never locked the invoice the capture paid.');
+        $this->assertNotNull($captureLock);
+        $this->assertLessThan($captureLock, $invoiceLock, 'The refund locked the capture before the invoice: the opposite order to PayInvoiceFromWallet.');
     }
 
     /**

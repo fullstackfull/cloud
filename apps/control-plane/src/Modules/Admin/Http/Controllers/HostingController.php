@@ -214,8 +214,13 @@ final class HostingController
          * Only for an operator who may end a service. One holding
          * hosting_account.manage alone may still clear a suspended account
          * whose window has run out — the route's own purpose — and the
-         * suspended service beside it is ended by the retention sweep
-         * (EndExpiredServices), which reaches it through the same window.
+         * suspended service beside it is left as it is: SUSPENDED, with its
+         * subscription and order unchanged. The retention sweep
+         * (EndExpiredServices) ends such a service by itself only when its
+         * window was started by the customer's own cancellation
+         * (BeginRetentionWindow::BY_CUSTOMER); one suspended for non-payment
+         * stays suspended until an operator holding service.terminate ends it
+         * through the service route.
          */
         $endedService = $mayEndAService
             ? app(EndHostingService::class)->afterTheAccountEnded($terminated)

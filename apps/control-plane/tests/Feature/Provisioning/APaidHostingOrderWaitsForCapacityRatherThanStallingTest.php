@@ -6,8 +6,12 @@ namespace Tests\Feature\Provisioning;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
+use Lynomia\Modules\Payments\Application\Actions\StartInvoicePayment;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -100,6 +104,31 @@ final class APaidHostingOrderWaitsForCapacityRatherThanStallingTest extends Test
         $this->runTheJobsOf($order);
 
         $this->assertSame(ServiceStatus::Active, $this->serviceOf($order)->status);
+    }
+
+    #[Test]
+    public function a_fleet_that_fills_between_checkout_and_payment_is_refused_before_any_money_moves(): void
+    {
+        /*
+         * The other side of the split. Before money moves, the fleet IS asked:
+         * checkout does, and so does the recheck at the moment a payment is
+         * started (AssertOrderIsStillDeliverable), because the checkout's
+         * answer may be minutes old. After money moves it is not asked again.
+         */
+        $order = $this->placeSharedHostingOrder($this->customer(), $this->sharedHostingPlan('full'));
+
+        HostingNode::query()->update(['max_accounts' => 1, 'account_count' => 1]);
+
+        $invoice = Invoice::query()->where('order_id', $order->getKey())->sole();
+
+        try {
+            app(StartInvoicePayment::class)->execute($invoice);
+            $this->fail('A payment was started for a hosting plan no node can take any more.');
+        } catch (CheckoutRejectedException $e) {
+            $this->assertSame('checkout.not_deliverable', $e->errorCode());
+        }
+
+        $this->assertSame(0, Transaction::query()->count(), 'The refusal must land before the provider is asked.');
     }
 
     private function customer(): Customer
