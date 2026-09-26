@@ -83,10 +83,18 @@ final class LayeringTest extends TestCase
      * An import is read the way PHP reads one, so that no spelling of it is
      * missed: `use A\B`, `use A\B as C`, the list `use A, B`, the group
      * `use A\{B, C\D}`, `use function` and `use const`, with or without a
-     * leading backslash, over any number of lines. Each is recorded by the
-     * full name it brings in, without its alias. A trait's `use` inside a
-     * class and a closure's `use (...)` are not imports and stay with the
-     * other tokens, and so does a comment written inside a `use` statement.
+     * leading backslash, over any number of lines, at the top level of a file
+     * or of a braced namespace block. Each is recorded by the full name it
+     * brings in, without its alias. A trait's `use` inside a class and a
+     * closure's `use (...)` are not imports and stay with the other tokens,
+     * and so does a comment written inside a `use` statement.
+     *
+     * A statement ends at a semicolon or at a closing tag, which PHP reads as
+     * one. A reader that stopped only at the semicolon swallowed the code
+     * after `use Lynomia\Modules ?>` into the import's name, where no rule
+     * read it; and after a namespace declaration ended that way, it took the
+     * next class's brace for a namespace's, and the trait `use` inside for an
+     * import.
      *
      * It is read through PHP's own tokenizer, because a hand-rolled reader
      * gets strings wrong - apostrophes in prose are enough - and a reader that
@@ -564,9 +572,10 @@ final class LayeringTest extends TestCase
          * module's, `Lynomia\Modules` or `Lynomia` - aliased or not, because
          * every controller can be named through the latter without its name
          * appearing anywhere. PHP's import grammar is a closed set, and the
-         * check is shown each form of it before it reads the tree. A module
-         * that wants another's Domain imports the Domain class it wants, not
-         * the module.
+         * check is shown each form of it, and each place and way a `use`
+         * statement can begin and end, before it reads the tree:
+         * importsTheHttpRuleMustRefuse() walks them. A module that wants
+         * another's Domain imports the Domain class it wants, not the module.
          *
          * A controller named in full anywhere but a `use` statement - in a
          * docblock, inline, or in a string - or through a namespace the file
@@ -623,27 +632,95 @@ final class LayeringTest extends TestCase
 
     /**
      * One file of the Orders module per way a `use` statement can reach
-     * Billing's Http. PHP's import grammar is a closed set, and this is it:
-     * a class, a namespace at or above its layer, an alias of either, a
-     * group, a list, a leading backslash, and any letter case.
+     * Billing's Http. PHP's import grammar is a closed set, and this walks
+     * it: what is imported - a class, a function or a constant, or a
+     * namespace at each level from the layer's own up to `Lynomia` - and
+     * how: by its full name, with a leading backslash, under an alias, in
+     * another letter case, as a later name of a list whether or not an
+     * earlier one is aliased, or in a group - plain, typed or mixed, with the
+     * crossing in its first name or a later one. Then where the statement
+     * stands - after `<?php`, after another statement, after a comment,
+     * after a class, or inside a braced namespace block - and how it ends: at
+     * a semicolon, or at a closing tag, which PHP reads as one.
      *
      * @return array<string, string>
      */
     private static function importsTheHttpRuleMustRefuse(): array
     {
-        $file = static fn (string $imports, string $name): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$imports."\n\nfinal class Planted\n{\n    public const string C = ".$name."::class;\n}\n";
+        $file = static fn (string $imports, string $uses): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$imports."\n\nfinal class Planted\n{\n    public function run(): mixed\n    {\n        return ".$uses.";\n    }\n}\n";
 
         return [
-            'an import of a controller' => $file('use Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController'),
-            'an import of the layer itself' => $file('use Lynomia\\Modules\\Billing\\Http;', 'Http\\Controllers\\InvoiceController'),
-            'an aliased import of the layer' => $file('use Lynomia\\Modules\\Billing\\Http as BillingHttp;', 'BillingHttp\\Controllers\\InvoiceController'),
-            'an aliased import of the module' => $file('use Lynomia\\Modules\\Billing as BillingModule;', 'BillingModule\\Http\\Controllers\\InvoiceController'),
-            'an import of every module' => $file('use Lynomia\\Modules;', 'Modules\\Billing\\Http\\Controllers\\InvoiceController'),
-            'a group import' => $file('use Lynomia\\Modules\\Billing\\{Http\\Controllers\\InvoiceController};', 'InvoiceController'),
-            'a group import across lines' => $file("use Lynomia\\Modules\\{\n    Billing\\Http,\n};", 'Http\\Controllers\\InvoiceController'),
-            'the second import of a list' => $file('use Lynomia\\Modules\\Catalog\\Domain\\Enums\\ProductKind,Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController'),
-            'an import with a leading backslash' => $file('use \\Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController'),
-            'an import in another letter case' => $file('use lynomia\\modules\\billing\\http;', 'http\\Controllers\\InvoiceController'),
+            // What is imported.
+            'an import of a controller' => $file('use Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'an import of a function' => $file('use function Lynomia\\Modules\\Billing\\Http\\helper;', 'helper()'),
+            'an import of a constant' => $file('use const Lynomia\\Modules\\Billing\\Http\\VERSION;', 'VERSION'),
+            'an import of the layer itself' => $file('use Lynomia\\Modules\\Billing\\Http;', 'Http\\Controllers\\InvoiceController::class'),
+            'an import of the module' => $file('use Lynomia\\Modules\\Billing;', 'Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import of every module' => $file('use Lynomia\\Modules;', 'Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import of the root namespace' => $file('use Lynomia;', 'Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+
+            // How.
+            'an import with a leading backslash' => $file('use \\Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'an aliased import of a controller' => $file('use Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController as Invoices;', 'Invoices::class'),
+            'an aliased import of the layer' => $file('use Lynomia\\Modules\\Billing\\Http as BillingHttp;', 'BillingHttp\\Controllers\\InvoiceController::class'),
+            'an aliased import of the module' => $file('use Lynomia\\Modules\\Billing as BillingModule;', 'BillingModule\\Http\\Controllers\\InvoiceController::class'),
+            'an aliased import of the root namespace' => $file('use Lynomia as L;', 'L\\Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import of a controller in another letter case' => $file('use lynomia\\modules\\billing\\http\\controllers\\InvoiceController;', 'InvoiceController::class'),
+            'an import of the layer in another letter case' => $file('use lynomia\\modules\\billing\\http;', 'http\\Controllers\\InvoiceController::class'),
+            'the second import of a list' => $file('use Lynomia\\Modules\\Catalog\\Domain\\Enums\\ProductKind,Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'the second import of a list, after an alias' => $file('use Lynomia\\Modules\\Catalog\\Domain\\Enums\\ProductKind as Kind, Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'a group import' => $file('use Lynomia\\Modules\\Billing\\{Http\\Controllers\\InvoiceController};', 'InvoiceController::class'),
+            'the second name of a group' => $file('use Lynomia\\Modules\\Billing\\{Domain\\ValueObjects\\PricedOrder, Http\\Controllers\\InvoiceController};', 'InvoiceController::class'),
+            'a group import across lines' => $file("use Lynomia\\Modules\\{\n    Billing\\Http,\n};", 'Http\\Controllers\\InvoiceController::class'),
+            'a typed group import' => $file('use function Lynomia\\Modules\\Billing\\Http\\{helper};', 'helper()'),
+            'the second name of a mixed group' => $file('use Lynomia\\Modules\\Billing\\{Domain\\ValueObjects\\PricedOrder, function Http\\helper};', 'helper()'),
+
+            // Where it stands, and how it ends.
+            'an import in a file that declares no namespace' => <<<'PHP'
+                <?php
+
+                use Lynomia\Modules\Billing\Http\Controllers\InvoiceController;
+
+                return [InvoiceController::class, 'show'];
+                PHP,
+            'an import after a comment and a docblock' => $file("// The invoice this order produces.\n/** @see InvoiceController */\nuse Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;", 'InvoiceController::class'),
+            'an import after a class' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions;
+
+                final class Earlier {}
+
+                use Lynomia\Modules\Billing\Http\Controllers\InvoiceController;
+
+                final class Planted
+                {
+                    public function run(): string
+                    {
+                        return InvoiceController::class;
+                    }
+                }
+                PHP,
+            'an import inside a braced namespace block' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions {
+                    use Lynomia\Modules\Billing\Http\Controllers\InvoiceController;
+
+                    final class Planted
+                    {
+                        public function run(): string
+                        {
+                            return InvoiceController::class;
+                        }
+                    }
+                }
+                PHP,
+            'an import ended by a closing tag' => $file("use Lynomia\\Modules ?>\n<?php", 'Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
         ];
     }
 
@@ -659,7 +736,9 @@ final class LayeringTest extends TestCase
 
         return [
             "the file's own module's Http" => $file('use Lynomia\\Modules\\Orders\\Http\\Controllers\\OrderController;'),
+            "the file's own module's Http in another letter case" => $file('use lynomia\\modules\\orders\\http\\controllers\\OrderController;'),
             "the file's own module" => $file('use Lynomia\\Modules\\Orders;'),
+            "the file's own module in another letter case" => $file('use lynomia\\modules\\orders;'),
             "another module's Domain" => $file('use Lynomia\\Modules\\Catalog\\Domain;'),
             'a namespace outside the modules' => $file('use Lynomia\\Http\\Concerns\\BoundsPageSize;'),
         ];
@@ -788,8 +867,11 @@ final class LayeringTest extends TestCase
     /**
      * The rules in this file that hold each layer the agent instructions may
      * call a boundary between modules: the import rule, and the rule for
-     * every other way of naming the layer. A layer with no entry is one
-     * nothing holds; a layer with one is asserted.
+     * every other way of naming the layer. A layer with no entry is not held
+     * as a boundary, although part of it may be held: `Infrastructure` has
+     * none, because its `use` statements are allowed, while
+     * no_module_names_another_modules_infrastructure_or_http_out_of_sight()
+     * holds every other way of naming it. A layer with an entry is asserted.
      *
      * @var array<string, list<string>>
      */
@@ -948,16 +1030,16 @@ final class LayeringTest extends TestCase
          *
          * Reaching another module's Infrastructure is allowed and reaching its
          * Http is not, but either is done in a `use` line naming the class,
-         * where it is counted, or not at all. This holds everything else
-         * crossingsOutOfSight() can read at zero for both layers. It is a
+         * where the import rules see it, or not at all. This holds everything
+         * else crossingsOutOfSight() can read at zero for both layers. It is a
          * property rather than a list: nothing is exempt, and there is no count
          * to keep up to date. A name split at a point crossingsOutOfSight()
-         * does not list is past what reading the source can settle, and this
-         * does not claim it.
+         * does not list is not claimed.
          *
-         * The scanner is shown each shape it claims first, and a few it must
-         * not report. A scan that fails to parse a file does not go red; it
-         * reports the clean tree one was hoping for.
+         * The scanner is shown each shape it claims first - with each token
+         * read() must leave to it rather than take for an import - and a few
+         * it must not report. A scan that fails to parse a file does not go
+         * red; it reports the clean tree one was hoping for.
          */
         $unseen = array_keys(array_filter(self::outOfSightCrossingsTheScanMustFind(), static fn (string $source): bool => self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) === []));
 
@@ -1050,10 +1132,13 @@ final class LayeringTest extends TestCase
      * cannot see, as "line: name".
      *
      * The file is read by read(), and what importsIn() takes from it is left
-     * out, so a `use` statement naming a class is not reported. Every other
-     * token is read: comments, docblocks, inline names, and string literals
-     * with single or double backslashes. A name is matched without regard to
-     * letter case, as PHP resolves it.
+     * out, so a `use` statement naming a class is not reported. Of every
+     * other token, these are read: comments, docblocks, inline names -
+     * qualified, fully qualified, or relative to the namespace, since in a
+     * file that declares none `Lynomia\...` and `namespace\Lynomia\...` name
+     * the same class `\Lynomia\...` does - and string literals, with single or
+     * double backslashes. A name is matched without regard to letter case,
+     * as PHP resolves it.
      *
      * An import or a declared namespace at or above one of the layers is
      * reported as well, although it names no class: every class in the layer
@@ -1068,8 +1153,7 @@ final class LayeringTest extends TestCase
      * stops at another module's namespace, leaving the layer to runtime - with
      * or without a trailing separator: no reading of the source can tell what
      * either reaches. A name split at any other point - mid-word, or right
-     * after `Lynomia` - is past what reading the source can settle, and this
-     * does not claim it.
+     * after `Lynomia` - is not claimed.
      *
      * @param  list<string>  $layers
      * @return list<string>
@@ -1122,8 +1206,12 @@ final class LayeringTest extends TestCase
     }
 
     /**
-     * One source per shape crossingsOutOfSight() claims to find, each as it
-     * would appear in a file of the Orders module.
+     * One source per shape crossingsOutOfSight() claims to find, and per
+     * token read() must leave to it rather than take for an import - a
+     * comment inside a `use` statement, the code after one ended by a
+     * closing tag, a closure's `use`, a trait's `use` wherever the braces
+     * around it put it - each as it would appear in a file of the Orders
+     * module.
      *
      * @return array<string, string>
      */
@@ -1154,10 +1242,30 @@ final class LayeringTest extends TestCase
                     }
                 }
                 PHP),
+            'an inline qualified name in a file that declares no namespace' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                return [Lynomia\Modules\Billing\Http\Controllers\InvoiceController::class, 'show'];
+                PHP,
+            'an inline relative name in a file that declares no namespace' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                return [namespace\Lynomia\Modules\Billing\Http\Controllers\InvoiceController::class, 'show'];
+                PHP,
             'a class name in a string' => $file(<<<'PHP'
                 final class Planted
                 {
                     private const string MODEL = 'Lynomia\\Modules\\Catalog\\Infrastructure\\Models\\Plan';
+                }
+                PHP),
+            'a class name in a string with single backslashes' => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string MODEL = 'Lynomia\Modules\Catalog\Infrastructure\Models\Plan';
                 }
                 PHP),
             'a namespace prefix finished at runtime' => $file(<<<'PHP'
@@ -1258,6 +1366,93 @@ final class LayeringTest extends TestCase
                     public const string C = Billing\Http\Controllers\InvoiceController::class;
                 }
                 PHP,
+            'a class named through the root namespace declared' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia;
+
+                final class Planted
+                {
+                    public const string C = Modules\Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a class named through a namespace declared behind comments' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace /* every module */ /** at once */ Lynomia\Modules;
+
+                final class Planted
+                {
+                    public const string C = Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a name after an import ended by a closing tag' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Domain\Enums\ProductKind ?>
+                <?php
+
+                final class Planted
+                {
+                    public const string C = \Lynomia\Modules\Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP),
+            'a comment inside a `use` statement' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Domain\Enums\ProductKind /* {@see \Lynomia\Modules\Billing\Http\Controllers\InvoiceController} */;
+
+                final class Planted {}
+                PHP),
+            'a string in a closure that captures a variable' => $file(<<<'PHP'
+                $name = 'InvoiceController';
+
+                return static function () use ($name): string {
+                    return 'Lynomia\\Modules\\Billing\\Http\\Controllers\\'.$name;
+                };
+                PHP),
+            'a trait named in full inside a class' => $file(<<<'PHP'
+                final class Planted
+                {
+                    use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                }
+                PHP),
+            'a trait named in full after interpolated strings' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $a, string $b): string
+                    {
+                        return "{$a} ${b}";
+                    }
+
+                    use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                }
+                PHP),
+            'a trait named in full inside a class in a braced namespace block' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions {
+                    final class Planted
+                    {
+                        use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                    }
+                }
+                PHP,
+            'a trait named in full in a namespace ended by a closing tag' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions ?>
+                <?php
+
+                final class Planted
+                {
+                    use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                }
+                PHP,
         ];
     }
 
@@ -1279,6 +1474,12 @@ final class LayeringTest extends TestCase
             "the file's own module" => $file(<<<'PHP'
                 /**
                  * Answers {@see \Lynomia\Modules\Orders\Http\Controllers\OrderController}.
+                 */
+                final class Planted {}
+                PHP),
+            "the file's own module in another letter case" => $file(<<<'PHP'
+                /**
+                 * Answers {@see \lynomia\modules\orders\http\controllers\OrderController}.
                  */
                 final class Planted {}
                 PHP),
@@ -1318,6 +1519,25 @@ final class LayeringTest extends TestCase
                         return 'Lynomia\\Modules\\Orders\\'.$layer.'\\Models\\Order';
                     }
                 }
+                PHP),
+            "a layer of the file's own module chosen at runtime, in another letter case" => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return 'lynomia\\modules\\orders\\'.$layer.'\\Models\\Order';
+                    }
+                }
+                PHP),
+            'a namespace that only begins like a layer' => $file(<<<'PHP'
+                /**
+                 * Not {@see \Lynomia\Modules\Billing\HttpClients\Gateway}, which is no layer.
+                 */
+                final class Planted {}
+                PHP),
+            "the modules' namespace named in prose" => $file(<<<'PHP'
+                // Every module has a namespace of its own under Lynomia\Modules.
+                final class Planted {}
                 PHP),
         ];
     }
