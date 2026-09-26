@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Console;
 
+use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Redis\Connections\Connection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Vps\Application\Services\ConsoleSessionStore;
@@ -184,6 +186,75 @@ final class ConsolePermitConcurrencyTest extends TestCase
         }
 
         $this->assertGreaterThan(0, $inspected, 'The scan found nothing to search, so it proved nothing.');
+    }
+
+    #[Test]
+    public function an_expired_permit_is_refused_while_redis_still_holds_it(): void
+    {
+        /*
+         * Here because this is the file that talks to a real Redis server,
+         * and the finding this answers is about that server's clock. The two
+         * travel() tests elsewhere expire a permit by moving Carbon; Redis
+         * counts a TTL on its own wall clock, so under the production store
+         * the key outlived the travel and the expired permit was redeemed.
+         *
+         * So the record is rewritten with its deadline a minute gone and a
+         * TTL of an hour, and Redis itself is asked whether it still holds
+         * the key before consume() is called. It does; the code refuses.
+         *
+         * The key is asked for with the cache prefix and WITHOUT the
+         * connection's: phpredis applies the connection prefix itself, so a
+         * key handed back fully prefixed by keys() would be prefixed twice and
+         * miss.
+         */
+        $this->freezeSecond();
+
+        $id = (string) Str::ulid();
+        $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+
+        $store = app(ConsoleSessionStore::class);
+        $store->issue('vm-1', 'customer-1', null, $id, $token);
+
+        $this->rewriteDeadline($id, now()->subMinute());
+
+        $held = $this->cacheRedis()->ttl(Cache::getStore()->getPrefix().ConsoleSessionStore::PREFIX.$id);
+        $this->assertGreaterThan(
+            ConsoleSessionStore::TTL_SECONDS,
+            $held,
+            'Redis is not holding the record for the hour it was given, so Redis rather than the code could be what refuses it.',
+        );
+
+        $this->assertNull($store->consume($id, $token), 'Redis still held a permit past its deadline, and it was redeemed.');
+
+        /*
+         * Refused with nothing written: the record is still there, and no
+         * consumed marker was burnt — the same record made live is redeemed.
+         * A deadline check placed after add() is caught by that control: the
+         * marker the refusal burnt turns the live record away.
+         */
+        $this->assertGreaterThan(
+            0,
+            $this->cacheRedis()->ttl(Cache::getStore()->getPrefix().ConsoleSessionStore::PREFIX.$id),
+            'Refusing an expired permit deleted its record.',
+        );
+
+        $this->rewriteDeadline($id, now()->addSecond());
+
+        $this->assertNotNull($store->consume($id, $token), 'Refusing an expired permit burnt it, or the control never reached the record.');
+    }
+
+    /**
+     * Rewrite the deadline inside the record issue() wrote, with an hour of
+     * TTL. One statement for the refusal and its control, so a wrong key
+     * cannot make the refusal pass while the control still reads right.
+     */
+    private function rewriteDeadline(string $id, CarbonInterface $deadline): void
+    {
+        $record = Cache::get(ConsoleSessionStore::PREFIX.$id);
+
+        $this->assertIsArray($record, 'The record issue() wrote is not where this test looks for it.');
+
+        Cache::put(ConsoleSessionStore::PREFIX.$id, [...$record, 'expires_at' => $deadline->toIso8601String()], 3600);
     }
 
     private function redisIsReachable(): bool
