@@ -162,14 +162,17 @@ final class MoneyReturnedToTheWalletIsNotAlsoRefundedToTheCardTest extends TestC
     }
 
     #[Test]
-    public function a_refund_locks_the_invoice_before_the_capture(): void
+    public function a_refund_locks_the_capture_before_the_invoice(): void
     {
         /*
-         * PayInvoiceFromWallet locks the invoice and then the wallet charge.
-         * A refund taking the same two rows the other way round could
-         * deadlock with it, so the refund takes the invoice first. A single
-         * process cannot interleave the two; this reads the order the refund
-         * takes its locks in.
+         * The money-path lock order (WhatAnInvoiceStillHolds): the capture,
+         * then the invoice - the order SettleInvoice takes the same two rows
+         * in. This used to assert the opposite, and a refund of a capture
+         * already attached to its invoice deadlocked against that capture's
+         * settlement (N-2; raced across two processes by
+         * ARefundAndASettlementDoNotDeadlockTest). A single process cannot
+         * interleave the two; this reads the order the refund takes its locks
+         * in.
          */
         [$customer, $invoice] = $this->invoiceFor(1_500);
         $capture = $this->capture($customer, $invoice, 1_500);
@@ -201,7 +204,7 @@ final class MoneyReturnedToTheWalletIsNotAlsoRefundedToTheCardTest extends TestC
 
         $this->assertNotNull($invoiceLock, 'The refund never locked the invoice the capture paid.');
         $this->assertNotNull($captureLock);
-        $this->assertLessThan($captureLock, $invoiceLock, 'The refund locked the capture before the invoice: the opposite order to PayInvoiceFromWallet.');
+        $this->assertLessThan($invoiceLock, $captureLock, 'The refund locked the invoice before the capture: the opposite order to SettleInvoice.');
     }
 
     /**

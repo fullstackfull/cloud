@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Wallet\Application\Actions;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
@@ -55,10 +56,11 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
  *  3. **The charge row, then settlement**, which locks the charge and the
  *     invoice again — both already held by this transaction, so no new wait.
  *
- * The lock order is invoice → wallet → charge, and the external payments path
- * is charge → invoice → wallet. The charge here is a row this transaction
- * created, which no other transaction can be holding, so the two orders cannot
- * form a cycle.
+ * The money-path lock order ({@see WhatAnInvoiceStillHolds}) puts an existing
+ * capture before its invoice. The charge locked here after the invoice is a
+ * row this transaction created, which no other transaction can be holding or
+ * waiting for, so it cannot close a cycle. A replay never locks the charge the
+ * first request wrote (see execute()).
  *
  * ---------------------------------------------------------------------------
  * Repeating the request
@@ -113,7 +115,22 @@ final readonly class PayInvoiceFromWallet
                 $replay = $this->ledger->entryPostedUnder($wallet, $idempotencyKey);
 
                 if ($replay !== null) {
-                    return $this->settle->execute($locked, $this->chargeOf($replay->transaction_id));
+                    /*
+                     * The first request wrote the charge, the debit and the
+                     * settlement in one transaction, so finding its entry
+                     * means all three are committed: what settlement would
+                     * answer now is a redelivery, which moves nothing. Said
+                     * here rather than asked of SettleInvoice, because that
+                     * locks the charge, and a charge locked after its invoice
+                     * is the opposite of the money-path lock order
+                     * (WhatAnInvoiceStillHolds) - a replay racing a refund of
+                     * the same wallet charge would deadlock.
+                     */
+                    return new InvoiceSettlement(
+                        invoice: $locked->refresh(),
+                        applied: Money::zero($locked->currency),
+                        creditedToWallet: Money::zero($locked->currency),
+                    );
                 }
             }
 
@@ -204,15 +221,6 @@ final readonly class PayInvoiceFromWallet
             ->first();
 
         return $wallet;
-    }
-
-    /** The charge an earlier attempt already wrote. */
-    private function chargeOf(?string $id): Transaction
-    {
-        /** @var Transaction $charge */
-        $charge = Transaction::query()->whereKey($id)->lockForUpdate()->firstOrFail();
-
-        return $charge;
     }
 
     private function newCharge(Invoice $invoice, Money $applied, Customer $customer): Transaction

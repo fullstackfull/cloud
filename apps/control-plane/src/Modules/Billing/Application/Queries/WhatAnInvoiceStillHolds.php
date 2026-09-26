@@ -39,6 +39,36 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *
  * Read it under the invoice's row lock; each of the three actions holds it.
  *
+ * ---------------------------------------------------------------------------
+ * The money-path lock order
+ * ---------------------------------------------------------------------------
+ *
+ * Written down once, here, because every action that reads this figure takes
+ * the invoice's lock, and most of them take another row beside it. Two
+ * actions taking the same two rows in opposite orders deadlock under load,
+ * and PostgreSQL resolves it by killing one of them - a settlement, or the
+ * recording of a refund the provider has already made (N-2: IssueRefund took
+ * the invoice before the capture, SettleInvoice the capture before the
+ * invoice, and a capture attached to its invoice before settlement put the
+ * two in a real cycle).
+ *
+ *   1. the payment-side row that already exists - the capture
+ *      (`transactions`), or the refund (`refunds`);
+ *   2. the invoice (`invoices`), several in ascending id order;
+ *   3. the subscription (`subscriptions`);
+ *   4. the wallet (`wallets`, taken inside WalletLedger).
+ *
+ * Who takes what: SettleInvoice (capture, invoice, wallet for a surplus);
+ * IssueRefund (capture, invoice; the wallet only after both are released);
+ * RecordInvoiceRefund (refund, invoice); PayInvoiceFromWallet (invoice,
+ * wallet, then a charge row it has just created, which nobody else can hold);
+ * CreditWhatACancelledOrderPaid and ReturnWhatAnInvoiceStillHolds (invoice,
+ * wallet); VoidInvoice (invoice, then the subscription through
+ * RestorePlanOnVoidedUpgrade); RenewSubscription (the lapsing invoice, the
+ * subscription, the wallet); an ended subscription's wind-up (its invoices,
+ * the subscription, the wallet). Pinned by MoneyPathsTakeTheirLocksInOneOrderTest
+ * and raced across two processes by ARefundAndASettlementDoNotDeadlockTest.
+ *
  * What it does not do: claw back. A wallet credit the customer has already
  * spent on another invoice stays spent; what this prevents is the same money
  * also going back to the card afterwards. Money credited to the wallet is

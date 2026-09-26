@@ -34,11 +34,15 @@ use Throwable;
  * because an aggregate cannot be locked: serialising on the parent is what
  * makes the sum that follows it authoritative.
  *
- * Two rows are locked, in this order: the invoice the capture paid, then the
- * capture. The invoice's lock is what lets the refund be held to what the
- * invoice still holds (money already credited to the wallet against it is not
- * refundable again), and invoice-before-charge is the order
- * PayInvoiceFromWallet uses, so the two cannot deadlock.
+ * Two rows are locked, in this order: the capture, then the invoice it paid —
+ * the money-path lock order {@see WhatAnInvoiceStillHolds} writes down, and
+ * the order SettleInvoice takes the same two rows in. The invoice's lock is
+ * what lets the refund be held to what the invoice still holds (money already
+ * credited to the wallet against it is not refundable again). This used to
+ * take the invoice first, and a refund of a capture RecordPaymentCapture had
+ * already attached to its invoice deadlocked against that capture's
+ * settlement (N-2, measured across two processes: 40P01, the refund made at
+ * the provider and its recording rolled back).
  *
  * The provider call happens *after* the lock is released, with the refund row
  * already written as pending. That ordering is the reason the balance holds: a
@@ -227,26 +231,17 @@ final readonly class IssueRefund
         ?string $invoiceId,
     ): Refund {
         /*
-         * Lock order: the invoice the capture paid, then the capture. That is
-         * the order PayInvoiceFromWallet takes the same two rows in (invoice,
-         * then the wallet charge), so a refund and a wallet payment on one
-         * invoice cannot deadlock each other. The invoice is found from an
-         * unlocked read of the transaction; if a settlement attached the
-         * capture to an invoice in between, that one is locked after the
-         * capture — the order SettleInvoice itself uses — rather than refunded
-         * without its lock.
+         * Lock order: the capture, then the invoice it paid (see
+         * WhatAnInvoiceStillHolds). The invoice is read from the locked
+         * capture: SettleInvoice attaches a capture under the capture's own
+         * lock, so what is read here cannot change until this commits.
          */
-        $invoiceIdSeen = Transaction::query()->whereKey($transaction->getKey())->value('invoice_id');
-        $invoice = is_string($invoiceIdSeen) && $invoiceIdSeen !== ''
-            ? Invoice::query()->lockForUpdate()->find($invoiceIdSeen)
-            : null;
-
         /** @var Transaction $locked */
         $locked = Transaction::query()->lockForUpdate()->findOrFail($transaction->getKey());
 
-        if ($locked->invoice_id !== null && $locked->invoice_id !== $invoiceIdSeen) {
-            $invoice = Invoice::query()->lockForUpdate()->find($locked->invoice_id);
-        }
+        $invoice = $locked->invoice_id !== null
+            ? Invoice::query()->lockForUpdate()->find($locked->invoice_id)
+            : null;
 
         $captured = $locked->amount();
         // Safe to aggregate without locking the refund rows: every writer of
@@ -287,7 +282,7 @@ final readonly class IssueRefund
      * return the same money twice, once as stored value and once to the card.
      * So the refund is also held to what the invoice still holds
      * (WhatAnInvoiceStillHolds), read under the invoice's row lock, which
-     * reserve() takes before the transaction's.
+     * reserve() takes after the capture's.
      *
      * Nothing is clawed back. A wallet credit the customer has already spent
      * stays spent; this refuses only the card refund of money that went to the

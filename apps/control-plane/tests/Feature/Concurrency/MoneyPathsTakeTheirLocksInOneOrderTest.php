@@ -11,9 +11,13 @@ use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Payments\Application\Actions\IssueRefund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Refund;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -24,9 +28,12 @@ use Tests\TestCase;
  * payment row and then the invoice, and another to take the invoice and then
  * the payment, and enough traffic for the two to meet — at which point
  * PostgreSQL kills one of them, and what it kills is a customer's settlement or
- * an operator's refund. The convention is written down in SettleInvoice ("the
- * payment-side row first, then the invoice") and repeated in
- * RecordInvoiceRefund. This is what checks that the code still obeys it.
+ * an operator's refund. The convention is written down once, in
+ * WhatAnInvoiceStillHolds (the payment-side row, then the invoice, then the
+ * subscription, then the wallet), and SettleInvoice, IssueRefund,
+ * RecordInvoiceRefund and PayInvoiceFromWallet each point to it. This is what
+ * checks that the code still obeys it; ARefundAndASettlementDoNotDeadlockTest
+ * races the pair that did not (N-2) in two real processes.
  *
  * Checked from the statements the actions actually issue, in the order they
  * issue them, rather than from the order the calls appear in the source: the
@@ -111,6 +118,58 @@ final class MoneyPathsTakeTheirLocksInOneOrderTest extends TestCase
             array_search('transactions', $order, true),
             'SettleInvoice must take the payment-side row before the invoice.',
         );
+    }
+
+    #[Test]
+    public function issuing_a_refund_locks_the_capture_before_the_invoice(): void
+    {
+        [$invoice, $transaction] = $this->paidInvoice();
+        app(SettleInvoice::class)->execute($invoice, $transaction);
+
+        $order = $this->lockOrderOf(function () use ($transaction): void {
+            app(IssueRefund::class)->execute($transaction->refresh(), Money::ofMinor(1_000, 'KWD'), 'part refund');
+        });
+
+        $this->assertContains('transactions', $order);
+        $this->assertContains('invoices', $order);
+        $this->assertLessThan(
+            array_search('invoices', $order, true),
+            array_search('transactions', $order, true),
+            'IssueRefund must take the capture before the invoice, the order SettleInvoice takes them in (N-2).',
+        );
+    }
+
+    #[Test]
+    public function a_repeated_wallet_payment_locks_no_charge_after_its_invoice(): void
+    {
+        $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+
+        /** @var Invoice $invoice */
+        $invoice = Invoice::factory()->create([
+            'customer_id' => $customer->id,
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+            'subtotal_minor' => 9_000,
+            'total_minor' => 9_000,
+            'amount_paid_minor' => 0,
+            'amount_refunded_minor' => 0,
+        ]);
+
+        $ledger = app(WalletLedger::class);
+        $ledger->credit($ledger->walletFor($customer, 'KWD'), Money::ofMinor(9_000, 'KWD'), WalletTransactionKind::Topup, 'credit');
+
+        $first = app(PayInvoiceFromWallet::class)->execute($customer, $invoice, 'pay-once');
+        $this->assertSame(InvoiceStatus::Paid, $first->invoice->status);
+
+        // The charge the first request wrote now exists and can be refunded;
+        // a replay that locked it after the invoice would invert the order.
+        $order = $this->lockOrderOf(function () use ($customer, $invoice): void {
+            $replay = app(PayInvoiceFromWallet::class)->execute($customer, $invoice, 'pay-once');
+            $this->assertTrue($replay->movedNothing());
+            $this->assertSame(InvoiceStatus::Paid, $replay->invoice->status);
+        });
+
+        $this->assertSame(['invoices'], array_values(array_unique($order)), 'A replay locked more than its invoice: '.implode(', ', $order));
     }
 
     #[Test]
