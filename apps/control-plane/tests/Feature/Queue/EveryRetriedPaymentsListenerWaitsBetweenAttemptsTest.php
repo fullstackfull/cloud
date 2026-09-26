@@ -9,6 +9,9 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\Attributes\Tries;
+use Illuminate\Queue\Events\JobQueued;
+use Illuminate\Queue\Events\JobQueueing;
+use Illuminate\Support\Facades\Event;
 use Lynomia\Modules\Billing\Application\Listeners\RecordRefundAgainstTheInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Domains\Application\Listeners\RegisterDomainOnPayment;
@@ -207,6 +210,27 @@ final class EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest extends TestCas
 
         $this->assertSame('payments', $readings[0]['queue'] ?? null);
         $this->assertArrayHasKey(F08NamesNoQueue::class, $this->refusalsOf($readings));
+    }
+
+    /**
+     * The probe overrides `push()` and `later()` rather than `pushRaw()` and
+     * `laterRaw()`, so `enqueueUsing()` is never entered and nothing is
+     * announced as queued that never was. Overriding the inner pair builds the
+     * identical payload and raises both events for it, which is why no
+     * assertion on the payload can pin this.
+     */
+    #[Test]
+    public function reading_a_payload_announces_nothing_as_queued(): void
+    {
+        $announced = [];
+
+        Event::listen([JobQueueing::class, JobQueued::class], static function (object $event) use (&$announced): void {
+            $announced[] = $event::class;
+        });
+
+        $this->assertNotSame([], $this->probe->readDispatchOf(new F08RealLadder), 'push() built nothing.');
+        $this->assertNotSame([], $this->probe->readDispatchOf((new F08RealLadder)->delay(30)), 'later() built nothing.');
+        $this->assertSame([], $announced, 'The probe announced a message it never queued.');
     }
 
     #[Test]
