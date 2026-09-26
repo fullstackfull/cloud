@@ -321,9 +321,15 @@ final readonly class ReserveHostingNodeCapacity
      * build racing this one on another node passes it too, and the partial
      * unique index is what the loser meets — see translated().
      *
-     * The job's own row is excluded. It is the row this reservation is about
-     * to re-arm, and counting it as somebody else serving the name would
-     * refuse a job its own earlier attempt.
+     * The job's own row is excluded, and with today's statuses the exclusion
+     * changes nothing: an own row that holds its name also holds a slot, so
+     * reserve() has already returned or refused for it above, and one that
+     * holds neither is outside the status filter. It is kept for the day the
+     * two predicates part — occupiesNodeCapacity() and existsAtPanel() are
+     * separate methods that agree only case by case — when an own row the
+     * panel holds but that holds no slot would reach this check and, serving
+     * the name asked for, be counted as somebody else serving it: the job
+     * refused its own earlier attempt.
      *
      * @throws HostingDomainConflictException
      */

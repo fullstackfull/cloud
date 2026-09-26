@@ -74,6 +74,7 @@ it, and where nothing does, the row says so.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Browse the catalogue in their own currency | `/catalogue` | `GET /catalog/products` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Place an order | `/catalogue/:slug` | `POST /orders` | `PlaceOrder` | sync | — | — | — | `TESTED` | n/a |
+| Name the domain a hosting plan is bought for | `/catalogue/:slug` | `POST /orders` (`items.*.domain`) | `PlaceOrder` | sync | — | — | — | `TESTED` | n/a — `CheckoutAsksForTheHostingDomainTest`: required on a hosting line, refused on any other, and held to the platform's host-name rule |
 | Cancel an unpaid order | `/orders` | `POST /orders/{order}/cancel` | `CancelOrder` | sync | — | — | — | `TESTED` | n/a |
 | Pay an invoice | `/invoices` | `POST /invoices/{invoice}/payments` | `StartInvoicePayment` | sync | — | `createPaymentIntent` | — | `TESTED` | `BLOCKED_CREDENTIALS` — no gateway account |
 | Have a paid order become a running service | — | — | `ProvisionOrderedService` | `create_vps` / `create_hosting_account` / `provision_dedicated` | `CreateVpsHandler`, `CreateHostingAccountHandler`, `ProvisionDedicatedHandler` | `createVirtualMachine`, `createAccount`, BMC install | — | `RUNTIME_VERIFIED` | No — `ARealWorkerConsumesTheQueueTest` builds it with a real worker against a fake hypervisor |
@@ -147,7 +148,7 @@ it, and where nothing does, the row says so.
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | See accounts and their usage | `/hosting` | `GET /hosting`, `GET /hosting/{account}/usage` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
-| Have an ordered account actually opened | — | — | `ProvisionOrderedService` | `create_hosting_account` | `CreateHostingAccountHandler` | `createAccount` | — | `TESTED` | `BLOCKED_LICENSE` — `TheWholeLifeOfAHostingAccountTest` |
+| Have an ordered account actually opened, under the domain named at checkout, with a contact address and a password the platform mints | — | — | `ProvisionOrderedService` | `create_hosting_account` | `CreateHostingAccountHandler` | `createAccount` | — | `TESTED` | `BLOCKED_LICENSE` — `TheWholeLifeOfAHostingAccountTest`, `AHostingOrderReachesThePanelWithWhatItNeedsTest` |
 | Have usage figures be real | — | — | `SyncAccountUsage` | scheduler | — | `accountUsage` | — | `TESTED` | `BLOCKED_LICENSE` |
 | Open the control panel | `/hosting` | `POST /hosting/{account}/sso` | `IssueHostingPanelSession` | sync | — | `createSsoSession` | — | `TESTED` | `BLOCKED_LICENSE` |
 | Be suspended for non-payment | — | — | `SuspendHostingAccount` | `provisioning` | listener | `suspendAccount` | — | `TESTED` | `BLOCKED_LICENSE` |
@@ -243,6 +244,8 @@ that no screen shows is a service quietly not working.
 | Be told a hosting account exists here and not on the panel | `/admin/drift` | as above | `ReconcileHostingNodes` | scheduler (`hosting:reconcile`) | — | `listAccounts` | `reconciliation.e2e.ts` | `TESTED` | `BLOCKED_LICENSE` — five findings, and it repairs none of them |
 | Be told an account exists on the panel and not here, or a suspension the two disagree about | `/admin/drift` | as above | `ReconcileHostingNodes` | scheduler | — | `listAccounts` | `reconciliation.e2e.ts` (the orphan) | `TESTED` | `BLOCKED_LICENSE` |
 | Be told a job whose remote task never finished | `/admin/provisioning` | `GET /api/admin/provisioning/needs-review` | `PollProviderTasks` | scheduler (`compute:poll-tasks`) | — | `getTask` | `reconciliation.e2e.ts` | `RUNTIME_VERIFIED` | No — an indeterminate task goes to review and is never retried |
+| Correct the domain a hosting build that failed or waits for review will serve, then retry it | — | `PUT /api/admin/provisioning/jobs/{job}/hosting-domain`, then `POST /api/admin/provisioning/jobs/{job}/retry` | `NameTheDomainAHostingJobWillServe`, then `RetryProvisioningJob` | sync, then `create_hosting_account` | `CreateHostingAccountHandler` | `createAccount` | — | `TESTED` | `BLOCKED_LICENSE` — `NamingTheDomainAHostingBuildWillServeTest`; writes the job's domain and nothing else, audited |
+| Set a new panel password on a hosting account, shown once and stored nowhere | — | `POST /api/admin/hosting-accounts/{account}/password-reset` | `ResetHostingAccountPassword` | sync | — | `changePassword` | — | `TESTED` | `BLOCKED_LICENSE` — `ResettingAHostingAccountPasswordTest` |
 | See a service the platform has stopped trusting | `/admin/operations` | `GET /api/admin/operations/reinstalls` | — | sync | — | — | — | `TESTED` | n/a |
 | Answer a ticket, and write a note the customer never sees | `/admin/support` | `POST /api/admin/support/tickets/{ticket}/replies` | `ReplyToTicket` | `notifications` | `DeliverNotification` | SMTP | `support.e2e.ts` | `RUNTIME_VERIFIED` | No |
 | Read every state above in Arabic, translated rather than as its enum value | both portals | — | — | — | — | — | `reconciliation.e2e.ts`, `appearance.e2e.ts` | `RUNTIME_VERIFIED` | n/a — guarded by `EveryStateAScreenShowsIsTranslatedTest` |
