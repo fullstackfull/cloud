@@ -39,7 +39,9 @@ use Tests\TestCase;
  * Where it stops
  * ---------------------------------------------------------------------------
  *
- * At the point where the platform's own local feasibility rule stops refusing.
+ * At the point where the platform's own local feasibility rule stops refusing
+ * a VPS plan, and refuses a hosting plan for the one reason only a panel can
+ * clear: nobody has yet confirmed the new node's licence (step 7).
  * That is the honest end of this phase: it proves a production configuration
  * path exists, and it proves nothing whatever about whether a hypervisor
  * answers, a panel is licensed, or a card can be charged. Configured is an
@@ -223,11 +225,22 @@ final class AFreshDeploymentBecomesConfigurableTest extends TestCase
             $vps->isFeasible(),
             'A VPS plan is still unplaceable after an operator configured the estate: '.($vps->blockedReason ?? ''),
         );
-        $this->assertTrue(
+        /*
+         * Hosting is not placeable yet, and that is the honest answer. The
+         * node was registered with nothing claimed about it — `panel_licensed`
+         * false until `hosting:sync-nodes` has asked the panel — and the
+         * hosting scheduler excludes an unlicensed node, so the build would
+         * refuse every account on it. Feasibility used to check only the
+         * package and called this plan sellable; since F-07's round-three
+         * repair it asks the scheduler, and the refusal it gives is the
+         * build's own. The step that turns this green is a licence answer
+         * from a real panel, which no test here may ask for.
+         */
+        $this->assertFalse(
             $hosting->isFeasible(),
-            'A hosting plan is still unplaceable after an operator mapped its package: '
-            .($hosting->blockedReason ?? ''),
+            'A hosting plan was called placeable on a fleet whose only node has never had its licence confirmed.',
         );
+        $this->assertStringContainsString('No hosting node can take an account', (string) $hosting->blockedReason);
 
         // The cluster the placement resolved to is the one the operator made.
         $this->assertSame($cluster, $vps->values['cluster_id'] ?? null);
