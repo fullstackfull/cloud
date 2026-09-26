@@ -57,17 +57,16 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * over a machine — and they are three different provider tasks. This used to
  * poll `provider_task_id` for all of them.
  *
- * For a verification that is right, because {@see VerifyStoredArchives}
- * deliberately writes the verification's handle into both `provider_task_id`
- * and `verification_task_id`: the first is "whatever this row is waiting on
- * now", the second is the durable record.
- *
- * A restore cannot do that, and {@see RestoreServiceBackup} says why: writing
- * over `provider_task_id` would erase the identifier of the backup itself —
- * the one thing that finds the archive when a restore goes wrong, which is
- * exactly when it is needed — and `(provider, provider_task_id)` is unique, so
- * the write could be rejected outright. The restore's handle therefore lives
- * in `restore_task_id`, and nothing ever read it.
+ * Neither a verification nor a restore may write its handle over
+ * `provider_task_id`, and {@see RestoreServiceBackup} says why: that would
+ * erase the identifier of the backup itself — the one thing that finds the
+ * archive when a restore goes wrong, which is exactly when it is needed — and
+ * `(provider, provider_task_id)` is unique, so the write could be rejected
+ * outright. The restore's handle therefore lives in `restore_task_id`, and
+ * nothing ever read it. A verification's lives in `verification_task_id`; it
+ * used to be written over `provider_task_id` as well, so that this poller
+ * could read one column, which cost every verified archive its backup's
+ * handle. Each operation is now polled on its own column.
  *
  * The consequence was not a subtle one. A row in `Restoring` was polled with
  * the identifier of its own creation task, which had finished successfully
@@ -221,11 +220,12 @@ final readonly class ReconcileBackup
             return $restoreTask === '' ? null : $restoreTask;
         }
 
-        /*
-         * Everything else reads `provider_task_id`, including a verification:
-         * VerifyStoredArchives writes the verification's handle there as well
-         * as into its own column, precisely so that this line keeps working.
-         */
+        if ($backup->state === BackupState::Verifying) {
+            // Never null here: isAwaitingProvider() requires it for this state.
+            return (string) $backup->verification_task_id;
+        }
+
+        // The backup itself, the only operation whose handle is this column.
         return (string) $backup->provider_task_id;
     }
 
@@ -283,7 +283,7 @@ final readonly class ReconcileBackup
      * can be restored more than once and the second attempt is a different
      * event the customer is owed a word about. A backup row has exactly one
      * creation task, so its outcome needs no such qualifier — and must not
-     * borrow `provider_task_id`, which a later verification overwrites.
+     * borrow `provider_task_id`, which is the backup's own creation task.
      */
     private function announce(Backup $backup, BackupState $operation): Backup
     {

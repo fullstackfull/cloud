@@ -51,9 +51,9 @@ final readonly class BackupNotificationKey
     /**
      * A backup's own outcome. One row, one creation task, one of these.
      *
-     * Deliberately not scoped to `provider_task_id`: a verification overwrites
-     * that column, so a key built from it would not be stable for the life of
-     * the row.
+     * Deliberately not scoped to `provider_task_id`. A verification used to
+     * overwrite that column, so rows exist whose value is not the backup's
+     * own task, and a key built from it would not be stable for them.
      */
     public static function backup(string $backupId, string $outcome): string
     {
@@ -66,13 +66,14 @@ final readonly class BackupNotificationKey
      * Scoped to the row and nothing else, and that is the canonical identity
      * rather than a convenient one. Two facts from the model make it so: a
      * backup that went to review is never settled out of it
-     * (`BackupState::afterReview()` has no answer for one), and every backup run creates its own row, so one
-     * row reaches this outcome at most once in its life.
+     * (`BackupState::afterReview()` has no answer for one), and every backup
+     * run creates its own row, so one row reaches this outcome at most once in
+     * its life.
      *
      * Scoping it to the provider task would be weaker, not stronger. A
-     * verification overwrites `provider_task_id`, so it is not stable for the
-     * life of the row — and the route that matters most here, a start call
-     * that never answered, has no task id at all. That is what indeterminate
+     * verification used to overwrite `provider_task_id`, so it is not stable
+     * on older rows — and the route that matters most here, a start call that
+     * never answered, has no task id at all. That is what indeterminate
      * means.
      */
     public static function needsReview(string $backupId): string

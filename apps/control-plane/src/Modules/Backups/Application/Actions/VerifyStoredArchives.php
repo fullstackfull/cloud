@@ -58,7 +58,9 @@ use Throwable;
  * takes it out, and the poller settles it into `Verified` or `Failed` from
  * there. A row whose provider refused stays `Succeeded` with its attempt
  * counter raised, so a broken datastore is asked a few times and then left
- * alone rather than several hundred times an hour.
+ * alone rather than several hundred times an hour. So does a row whose
+ * cluster no longer exists: it is counted the same way, so it cannot sit at
+ * the front of the sweep and starve every archive behind it.
  *
  * Re-verification of an already-verified archive is deliberately NOT done
  * here. `Verified → Verifying` is a legal transition and a scheduled
@@ -148,12 +150,25 @@ final readonly class VerifyStoredArchives
         $cluster = $backup->cluster()->first();
 
         if ($cluster === null) {
-            // The cluster row is gone, so there is no datastore to ask and no
-            // adapter to ask it with. The archive may still be sitting on a
-            // datastore nobody is looking at, which is a person's problem.
-            $backup->transitionTo(BackupState::NeedsReview, [
+            /*
+             * The cluster row is gone, so there is no datastore to ask and no
+             * adapter to ask it with. Counted as a refused attempt, exactly as
+             * a datastore that refused would be, and left `Succeeded`.
+             *
+             * This used to move the row to `NeedsReview`, which the transition
+             * table does not allow from `Succeeded`. The call threw, the catch
+             * in execute() counted a failure, and nothing on the row changed —
+             * no attempt, no request stamp — so the sweep's ordering met the
+             * same archive first on every run. Enough of them filled the
+             * sweep's limit and no other archive was ever verified. Counting
+             * the attempt is what the attempt limit needs to end it, and the
+             * stamp moves it behind archives nobody has asked about yet.
+             */
+            $backup->forceFill([
+                'verification_requested_at' => now(),
+                'verification_attempts' => $backup->verification_attempts + 1,
                 'failure_reason' => 'the cluster this backup was taken on no longer exists, so the archive cannot be read back',
-            ]);
+            ])->save();
 
             return VerificationAttempt::Refused;
         }
@@ -208,16 +223,13 @@ final readonly class VerifyStoredArchives
 
         $backup->transitionTo(BackupState::Verifying, [
             /*
-             * Both columns, and they are not the same thing.
-             *
-             * `provider_task_id` is what the poller reads — one column for
-             * "whatever task this row is currently waiting on", which is what
-             * lets one reconciler settle backups, verifications and restores
-             * alike. `verification_task_id` is the durable record of which
-             * task was the verification, which survives the row moving on to
-             * its next operation.
+             * Its own column, and only there. `provider_task_id` is the
+             * backup's own handle — the one thing that finds the archive when
+             * a later restore goes wrong — and this used to write the
+             * verification's handle over it. ReconcileBackup reads
+             * `verification_task_id` for a row in `Verifying`, as it reads
+             * `restore_task_id` for a row in `Restoring`.
              */
-            'provider_task_id' => $operation->taskId,
             'verification_task_id' => $operation->taskId,
             /*
              * The clock this verification is measured on. The poller gives up

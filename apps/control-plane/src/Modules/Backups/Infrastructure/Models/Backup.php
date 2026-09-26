@@ -232,10 +232,20 @@ class Backup extends Model
 
     /**
      * Whether this row still needs the provider asked about it.
+     *
+     * A verification is waiting on its own task, `verification_task_id`;
+     * every other in-flight row is keyed on `provider_task_id`, the backup's
+     * own handle, which no later operation writes over.
      */
     public function isAwaitingProvider(): bool
     {
-        return $this->state->isInFlight() && $this->provider_task_id !== null;
+        if (! $this->state->isInFlight()) {
+            return false;
+        }
+
+        return $this->state === BackupState::Verifying
+            ? $this->verification_task_id !== null
+            : $this->provider_task_id !== null;
     }
 
     /**
@@ -352,7 +362,15 @@ class Backup extends Model
                 BackupState::Verifying->value,
                 BackupState::Restoring->value,
             ])
-            ->whereNotNull('provider_task_id')
+            // The same rule as isAwaitingProvider(): a verification by its
+            // own handle, everything else by the backup's.
+            ->where(static function (Builder $query): void {
+                $query->where(static function (Builder $query): void {
+                    $query->where('state', BackupState::Verifying->value)->whereNotNull('verification_task_id');
+                })->orWhere(static function (Builder $query): void {
+                    $query->where('state', '!=', BackupState::Verifying->value)->whereNotNull('provider_task_id');
+                });
+            })
             ->orderByRaw('last_polled_at nulls first')
             ->orderBy('created_at');
     }

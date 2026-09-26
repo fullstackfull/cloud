@@ -1002,7 +1002,16 @@ final class TheFailureMatrixTest extends GoldenPathHarness
                 'state' => BackupState::Verifying,
                 'archive_id' => $archive,
                 'provider' => 'fake',
-                'provider_task_id' => $operation->taskId,
+                /*
+                 * The shape VerifyStoredArchives writes: the verification's
+                 * handle in its own column, the backup's own handle left
+                 * alone. This fixture used to put the verification's handle in
+                 * `provider_task_id` only, a row the sweep never wrote (it
+                 * wrote both) and which the poller now rightly does not read.
+                 */
+                'provider_task_id' => 'UPID:fake:backup-of-'.$archive,
+                'verification_task_id' => $operation->taskId,
+                'verification_started_at' => now(),
                 'started_at' => now(),
                 'verified' => null,
                 'verified_at' => null,

@@ -240,7 +240,14 @@ final readonly class RestoreServiceBackup
             throw RestoreRefusedException::alreadyRestoring((string) $backup->getKey());
         }
 
-        if (! in_array($backup->state, [BackupState::Succeeded, BackupState::Verified], true)) {
+        /*
+         * The same states the portal offers, read from the one place that
+         * says which they are. A restored archive is still a good archive —
+         * the transition table has always allowed `Restored → Restoring` —
+         * and this list used to leave it out, so the portal showed a Restore
+         * button the server refused.
+         */
+        if (! $backup->state->isRestorable()) {
             throw RestoreRefusedException::notRestorable(
                 (string) $backup->getKey(),
                 sprintf('its state is %s, and only a completed backup can be restored', $backup->state->value),
