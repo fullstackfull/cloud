@@ -34,14 +34,17 @@ return [
     | child is a piece of the platform's name space held by somebody else.
     |
     | This list is not the whole reservation. The hosts of APP_URL and
-    | FRONTEND_URL are added to it when they are domain names, so an estate
-    | that has put the platform on its real name is covered without repeating
-    | it here. List what those two do not name — the registrable domain above
-    | them, above all, which covers every sibling as well.
+    | FRONTEND_URL are added to it when they are domain names — a Unicode host
+    | in the xn-- form DNS carries — so an estate that has put the platform on
+    | its real name is covered without repeating it here. List what those two
+    | do not name — the registrable domain above them, above all, which covers
+    | every sibling as well. On the shipped localhost they name nothing.
     |
-    | An entry that is not a domain name refuses every claim until it is
-    | corrected. The estate preflight reports it as `dns.reserved_zones`, and
-    | reports an empty reservation there too.
+    | Entries are ASCII: an internationalised name goes in its xn-- form. An
+    | entry that is not a domain name, or not a string at all, refuses every
+    | claim until it is corrected. The estate preflight reports it as
+    | `dns.reserved_zones`, and reports an empty reservation there too, with
+    | the reason each address gave no name.
     |
     */
 

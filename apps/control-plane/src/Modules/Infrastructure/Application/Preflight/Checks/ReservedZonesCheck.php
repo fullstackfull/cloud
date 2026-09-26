@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Infrastructure\Application\Preflight\Checks;
 
 use Lynomia\Modules\Dns\Application\Services\ConfiguredReservedZones;
+use Lynomia\Modules\Dns\Domain\Enums\NoDerivedName;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckCategory;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\EvidenceClass;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
@@ -19,10 +20,10 @@ use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
  *
  * The guard that refuses a claim is silent whenever it has nothing to refuse,
  * and "nothing is reserved" is the state a deployment starts in. Refusing to
- * boot on it would be wrong: a platform answering on an address or on a single
- * label has nothing an account could claim there either. Saying nothing would
- * be wrong too. So it is reported, in the one place an operator already reads
- * before calling an estate ready.
+ * boot on it would be wrong: it is the shipped configuration's state, and the
+ * guard is refusing nobody it should not. Saying nothing would be wrong too.
+ * So it is reported, in the one place an operator already reads before
+ * calling an estate ready.
  *
  * ===========================================================================
  * THE THREE STATES, AND WHY ONLY ONE BLOCKS
@@ -35,6 +36,12 @@ use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
  *     worth stopping a deployment for.
  *   - **Warning** — nothing is reserved at all, or one of the platform's own
  *     addresses contributed no name. Worth knowing; not a reason to stop.
+ *     Each address that gave nothing is named with its reason, a
+ *     {@see NoDerivedName}, because what is left unheld differs: nothing,
+ *     for an IP address; the names beneath it, for a single label; the name
+ *     the operator meant, perhaps, for a host with no scheme in front of it.
+ *     The reason's sentence is the Dns module's, beside the rules it
+ *     describes, and says only what is true of every address that has it.
  *   - **Pass** — a count of the names held and the variables they came from.
  *
  * ===========================================================================
@@ -43,9 +50,9 @@ use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
  *
  * A reserved name, a configured value or an address. It names variables and
  * counts entries, which is enough to find the line to change. A preflight
- * report is persisted, rendered and carried into an audit entry, and an entry
- * that fails to parse is exactly the value most likely to be something that
- * was pasted into the wrong variable.
+ * report is printed by `infra:preflight` wherever that is run and returned to
+ * the Control Center, and an entry that fails to parse is exactly the value
+ * most likely to be something that was pasted into the wrong variable.
  *
  * The count is of list entries: the listed ones plus the derived ones. Two
  * entries in one tree — a name and a host beneath it — are counted as two,
@@ -94,8 +101,9 @@ final readonly class ReservedZonesCheck
                     $malformed === 1 ? 'is' : 'are',
                 ),
                 sprintf(
-                    'Correct %s: a comma-separated list of domain names of two or more labels, with no scheme, port '
-                    .'or path. The entries that do not read are not quoted here; check each one against those rules.',
+                    'Correct %s: a comma-separated list of domain names of two or more labels, in ASCII — an '
+                    .'internationalised name in its xn-- form — with no scheme, port or path. The entries that do not '
+                    .'read are not quoted here; check each one against those rules.',
                     self::LIST,
                 ),
             )];
@@ -103,8 +111,9 @@ final readonly class ReservedZonesCheck
 
         $byVariable = $zones->derivedByVariable();
         $derived = $zones->derived();
+        $underived = $zones->underived();
         $consulted = array_keys($byVariable);
-        $empty = array_keys(array_diff_key($byVariable, $derived));
+        $empty = array_keys($underived);
 
         $sources = [...($configured > 0 ? [self::LIST] : []), ...array_keys($derived)];
         $held = $configured + count($derived);
@@ -115,16 +124,14 @@ final readonly class ReservedZonesCheck
                 CheckCategory::Configuration,
                 self::TARGET,
                 sprintf(
-                    'No name is reserved: %s is empty, and no host in %s is a domain name. Nothing is exposed '
-                    .'while the platform answers only on an address or a single label, because no account can claim '
-                    .'those either; a domain name it answers on that is in none of these places can be claimed by '
-                    .'any account, with its parents and everything beneath it.',
+                    'No name is reserved: %s is empty. %s Any name the platform answers on that the zone rules '
+                    .'accept can be claimed by any account, with its parents and everything beneath it.',
                     self::LIST,
-                    self::listOf($consulted, 'or'),
+                    self::why($underived),
                 ),
                 sprintf(
                     'Set %s to the domain this platform answers on — its registrable domain, so that every name '
-                    .'beneath it is covered — or set %s to the addresses the platform really answers on.',
+                    .'beneath it is covered — or set %s to the URLs the platform really answers on, scheme included.',
                     self::LIST,
                     self::listOf($consulted, 'and'),
                 ),
@@ -137,18 +144,16 @@ final readonly class ReservedZonesCheck
                 CheckCategory::Configuration,
                 self::TARGET,
                 sprintf(
-                    '%s contributed no name: %s host is not a domain name — an address, a single label, or nothing '
-                    .'at all — so there is nothing there an account could claim, and nothing is reserved for it. '
-                    .'%d name(s) reserved, from %s.',
-                    self::listOf($empty, 'and'),
-                    count($empty) === 1 ? 'its' : 'their',
+                    '%s %d name(s) reserved, from %s.',
+                    self::why($underived),
                     $held,
                     implode(', ', $sources),
                 ),
                 sprintf(
-                    'Nothing to do if %s is meant to answer on an address or a single label. If it will answer on a '
-                    .'domain name, set it to that address, or add the name to %s.',
-                    self::listOf($empty, 'and'),
+                    'If %s answers on a domain name, set it to that URL, scheme included, or list the name — better, '
+                    .'the registrable domain above it — in %s. If it is meant to answer on an IP address or a single '
+                    .'label, this is expected.',
+                    self::listOf($empty, 'or'),
                     self::LIST,
                 ),
             )];
@@ -165,6 +170,22 @@ final readonly class ReservedZonesCheck
             ),
             EvidenceClass::Configuration,
         )];
+    }
+
+    /**
+     * One sentence per address that gave no name, each with its reason.
+     *
+     * @param  array<string, NoDerivedName>  $underived
+     */
+    private static function why(array $underived): string
+    {
+        $sentences = [];
+
+        foreach ($underived as $variable => $reason) {
+            $sentences[] = sprintf('%s contributed no name: %s.', $variable, $reason->reason());
+        }
+
+        return implode(' ', $sentences);
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Dns\Domain\ValueObjects;
 
+use Lynomia\Modules\Dns\Domain\Enums\NoDerivedName;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
 
 /**
@@ -31,11 +32,44 @@ use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
  * anyway; what it does not cover is a sibling, which is what
  * `DNS_RESERVED_ZONES` is for.
  *
- * A host that is not a domain name contributes nothing: an address, or a
- * single label such as the one a development machine answers on. That is not
- * a gap. {@see DomainName} refuses both before a reservation is ever read, so
- * no account can claim them either, and reserving them would mean relaxing the
- * name rules for the one caller that needs them strictest.
+ * ---------------------------------------------------------------------------
+ * The form a host is held in
+ * ---------------------------------------------------------------------------
+ *
+ * The one DNS carries. An operator writes `https://münchen.example.net` the
+ * way people read it; a resolver is asked for `xn--mnchen-3ya.example.net`,
+ * and that A-label is what an account would type to claim the name. Held in
+ * Unicode, the host would be refused by {@see DomainName} and nothing would be
+ * held for it at all, while the name it stands for stayed claimable — so a
+ * host is percent-decoded and, where it is not ASCII, converted by UTS #46
+ * with nontransitional processing, which is what the URL standard specifies.
+ * The older transitional processing maps four characters (ß, ς and the two
+ * zero-width joiners) elsewhere — `straße` to `strasse` — and the name it
+ * produces is a different name, held only if it is listed.
+ *
+ * This is not the conversion {@see DomainName} declines to make for a name an
+ * account claims. That rule exists because a disagreement about what a
+ * Unicode name means is how a homograph gets through, and converting a claim
+ * decides what is admitted. Converting a reservation only adds to what is
+ * refused: at worst it holds a name the platform does not answer on, and it
+ * admits nothing that holding nothing would not have admitted. And
+ * `idn_to_ascii` is defined on every deployment of this application — by
+ * ext-intl where it is loaded, and otherwise by symfony/polyfill-intl-idn,
+ * which the framework requires through symfony/mime.
+ *
+ * ---------------------------------------------------------------------------
+ * An address that gives no name
+ * ---------------------------------------------------------------------------
+ *
+ * Unset, not a URL with a host, an IP address, a single label, or a host the
+ * name rules refuse even in the form above. What that leaves unheld is
+ * different for each — nothing at all, for an IP address; the names beneath
+ * it, for a single label; possibly the very name the operator meant, for a
+ * host with no scheme in front of it — so the reason is kept, as a
+ * {@see NoDerivedName}, and the preflight says it. A single label is not
+ * reserved, and neither is anything beneath it: the label is not a name a
+ * zone could be claimed for, and holding it would mean relaxing the name rules
+ * for the one caller that needs them strictest.
  *
  * ---------------------------------------------------------------------------
  * What a reserved name covers
@@ -120,9 +154,9 @@ final readonly class ReservedZones
     /**
      * Each of the platform's own addresses, and the name it contributes.
      *
-     * Null for an address that contributed nothing — unset, not a URL, or a
-     * host that is not a domain name. Kept rather than dropped, because "this
-     * variable was consulted and gave nothing" is itself worth reporting.
+     * Null for an address that contributed nothing; {@see self::underived()}
+     * says why. Kept rather than dropped, because "this variable was consulted
+     * and gave nothing" is itself worth reporting.
      *
      * @return array<string, string|null>
      */
@@ -131,10 +165,31 @@ final readonly class ReservedZones
         $derived = [];
 
         foreach ($this->platformUrls as $variable => $url) {
-            $derived[$variable] = self::hostOf($url);
+            $name = self::derive($url);
+            $derived[$variable] = is_string($name) ? $name : null;
         }
 
         return $derived;
+    }
+
+    /**
+     * Each of the platform's own addresses that contributed nothing, and why.
+     *
+     * @return array<string, NoDerivedName>
+     */
+    public function underived(): array
+    {
+        $underived = [];
+
+        foreach ($this->platformUrls as $variable => $url) {
+            $name = self::derive($url);
+
+            if ($name instanceof NoDerivedName) {
+                $underived[$variable] = $name;
+            }
+        }
+
+        return $underived;
     }
 
     /**
@@ -191,22 +246,54 @@ final readonly class ReservedZones
         return false;
     }
 
-    private static function hostOf(?string $url): ?string
+    /**
+     * The name an address contributes, or why it contributes none.
+     */
+    private static function derive(?string $url): string|NoDerivedName
     {
         if ($url === null || trim($url) === '') {
-            return null;
+            return NoDerivedName::Unset;
         }
 
         $host = parse_url(trim($url), PHP_URL_HOST);
 
-        if (! is_string($host) || $host === '') {
-            return null;
+        if (! is_string($host) || trim($host, '.') === '') {
+            return NoDerivedName::NotAUrl;
+        }
+
+        if (str_starts_with($host, '[') && str_ends_with($host, ']')
+            && filter_var(substr($host, 1, -1), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+            return NoDerivedName::IpAddress;
+        }
+
+        $host = self::asDnsCarriesIt($host);
+
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            return NoDerivedName::IpAddress;
         }
 
         try {
             return DomainName::fromString($host)->value();
         } catch (InvalidDomainNameException) {
-            return null;
+            return str_contains(rtrim($host, '.'), '.') ? NoDerivedName::NotADomainName : NoDerivedName::SingleLabel;
         }
+    }
+
+    /**
+     * A URL's host in the form a resolver is asked for — see "The form a host
+     * is held in" above. An ASCII host is left as it is, and a host that does
+     * not convert is left in Unicode, where the name rules refuse it.
+     */
+    private static function asDnsCarriesIt(string $host): string
+    {
+        $host = rawurldecode($host);
+
+        if (preg_match('/[^\x00-\x7F]/', $host) !== 1) {
+            return $host;
+        }
+
+        $ascii = idn_to_ascii($host, IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46);
+
+        return is_string($ascii) ? $ascii : $host;
     }
 }

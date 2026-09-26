@@ -38,9 +38,16 @@ final readonly class ConfiguredReservedZones
 
     public function read(): ReservedZones
     {
+        /*
+         * `DNS_RESERVED_ZONES` always arrives as strings. An edited
+         * config/dns.php need not, and an entry that is not a string is an
+         * entry that does not read: it is kept as the name of its type, which
+         * is one label and so never a name, and fails closed like any other
+         * rather than turning into an empty entry and quietly holding less.
+         */
         /** @var list<string> $configured */
         $configured = array_map(
-            static fn (mixed $entry): string => is_scalar($entry) ? (string) $entry : '',
+            static fn (mixed $entry): string => is_string($entry) ? $entry : get_debug_type($entry),
             array_values((array) config('dns.reserved_zones', [])),
         );
 

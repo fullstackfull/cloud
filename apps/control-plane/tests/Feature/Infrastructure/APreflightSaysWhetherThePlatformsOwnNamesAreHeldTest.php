@@ -6,11 +6,14 @@ namespace Tests\Feature\Infrastructure;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Lynomia\Modules\Dns\Domain\Enums\NoDerivedName;
 use Lynomia\Modules\Infrastructure\Application\Preflight\InfrastructurePreflightService;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\CheckStatus;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightFinding;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightMode;
 use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightRequest;
+use Lynomia\Modules\Infrastructure\Domain\Preflight\PreflightScope;
+use Lynomia\Modules\ProductReadiness\Domain\Enums\Product;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -28,15 +31,18 @@ use Tests\TestCase;
  *     reads the whole list before it compares anything, so it refuses every
  *     claim until the entry is corrected — correct, and an outage.
  *   - **Warning** when nothing is held, or when one of the platform's own
- *     addresses contributed nothing. Worth saying; not worth stopping a
- *     deployment for, because a platform answering on an address or on one
- *     label has nothing an account could claim there either.
+ *     addresses contributed nothing — and then why, because what is left
+ *     unheld depends on it: nothing, for an IP address; the names beneath it,
+ *     for a single label; the name itself, for a host with no scheme in front
+ *     of it. Worth saying; not worth stopping a deployment for, because the
+ *     guard is refusing nobody it should not, and the shipped configuration
+ *     starts here.
  *   - **Pass** otherwise, with a count and the variables it came from.
  *
  * The finding never quotes a reserved name or a configured value. It names
  * variables and counts entries, which is everything an operator needs to find
- * the line to change and nothing a report that is persisted, rendered and
- * audited should carry.
+ * the line to change and nothing a report printed by a command and rendered
+ * in the Control Center should carry.
  */
 final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCase
 {
@@ -65,6 +71,15 @@ final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCas
         ];
         yield 'an entry that is not a name' => [
             ['lynomia.test', 'zone_with_underscore.lynomia.test'], 'https://api.lynomia.test', 'https://portal.lynomia.test', CheckStatus::Fail,
+        ];
+        yield 'nothing listed, an internationalised address and a real name' => [
+            [], 'https://münchen.lynomia.test', 'https://portal.lynomia.test', CheckStatus::Pass,
+        ];
+        yield 'nothing listed, an address with no scheme in front of it' => [
+            [], 'panel.lynomia.test', 'https://portal.other.test', CheckStatus::Warning,
+        ];
+        yield 'nothing listed, an address whose host is not a name' => [
+            [], 'https://my_panel.lynomia.test', 'https://portal.lynomia.test', CheckStatus::Warning,
         ];
     }
 
@@ -125,6 +140,13 @@ final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCas
 
             if (is_string($host)) {
                 $values[] = $host;
+
+                // And the form it is held in, which is not the form it was written in.
+                $ascii = idn_to_ascii($host, IDNA_NONTRANSITIONAL_TO_ASCII, INTL_IDNA_VARIANT_UTS46);
+
+                if (is_string($ascii)) {
+                    $values[] = $ascii;
+                }
             }
         }
 
@@ -146,6 +168,94 @@ final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCas
 
         foreach (['DNS_RESERVED_ZONES', 'APP_URL', 'FRONTEND_URL'] as $variable) {
             $this->assertStringContainsString($variable, $summary);
+        }
+    }
+
+    #[Test]
+    public function the_shipped_configuration_says_why_each_address_gave_nothing(): void
+    {
+        $this->configure([], 'http://localhost:8000', 'http://localhost:5173');
+
+        $summary = $this->finding()->summary;
+
+        foreach (['APP_URL', 'FRONTEND_URL'] as $variable) {
+            $this->assertStringContainsString(
+                sprintf('%s contributed no name: %s', $variable, NoDerivedName::SingleLabel->reason()),
+                $summary,
+            );
+        }
+    }
+
+    /**
+     * @return iterable<string, array{0: string, 1: NoDerivedName}>
+     */
+    public static function addressesThatContributeNothing(): iterable
+    {
+        yield 'unset' => ['', NoDerivedName::Unset];
+        yield 'no scheme in front of the host' => ['panel.lynomia.test', NoDerivedName::NotAUrl];
+        yield 'an address' => ['http://203.0.113.10:8000', NoDerivedName::IpAddress];
+        yield 'a single label' => ['http://localhost:8000', NoDerivedName::SingleLabel];
+        yield 'a host that is not a name' => ['https://my_panel.lynomia.test', NoDerivedName::NotADomainName];
+    }
+
+    /**
+     * The partial warning says why, and says it from the one place that
+     * knows. What each reason claims about what can still be claimed is held
+     * against the guard in the Dns feature tests.
+     */
+    #[Test]
+    #[DataProvider('addressesThatContributeNothing')]
+    public function an_address_that_contributed_nothing_is_reported_with_its_reason(string $app, NoDerivedName $why): void
+    {
+        $this->configure(['lynomia.test'], $app, 'https://portal.lynomia.test');
+
+        $finding = $this->finding();
+
+        $this->assertSame(CheckStatus::Warning, $finding->status);
+        $this->assertStringStartsWith(sprintf('APP_URL contributed no name: %s', $why->reason()), $finding->summary);
+    }
+
+    #[Test]
+    public function a_failure_says_what_an_entry_has_to_look_like(): void
+    {
+        $this->configure(['lynomia.test', 'münchen.lynomia.test'], 'https://api.lynomia.test', 'https://portal.lynomia.test');
+
+        $finding = $this->finding();
+
+        $this->assertSame(CheckStatus::Fail, $finding->status);
+        $this->assertStringContainsString('ASCII', (string) $finding->nextAction);
+        $this->assertStringContainsString('xn--', (string) $finding->nextAction);
+    }
+
+    #[Test]
+    public function an_entry_that_is_not_text_is_a_failure_like_any_other(): void
+    {
+        // Only an edited config/dns.php can put one there; it must not vanish.
+        $this->configure([['lynomia.test']], 'https://api.lynomia.test', 'https://portal.lynomia.test');
+
+        $finding = $this->finding();
+
+        $this->assertSame(CheckStatus::Fail, $finding->status, $finding->summary);
+        $this->assertStringStartsWith('1 of the 1 entries', $finding->summary);
+    }
+
+    #[Test]
+    public function a_product_preflight_does_not_repeat_it(): void
+    {
+        $this->configure([], 'http://localhost:8000', 'http://localhost:5173');
+
+        foreach (Product::cases() as $product) {
+            $findings = app(InfrastructurePreflightService::class)
+                ->run(new PreflightRequest(PreflightMode::Simulation, PreflightScope::Product, $product->value))
+                ->findings;
+
+            foreach ($findings as $finding) {
+                $this->assertNotSame(self::ID, $finding->id, sprintf(
+                    'A %s preflight carries %s. It is a fact about the deployment and about no one product; the estate run says it once.',
+                    $product->value,
+                    self::ID,
+                ));
+            }
         }
     }
 
@@ -200,7 +310,7 @@ final class APreflightSaysWhetherThePlatformsOwnNamesAreHeldTest extends TestCas
     }
 
     /**
-     * @param  list<string>  $configured
+     * @param  list<mixed>  $configured
      */
     private function configure(array $configured, string $app, string $frontend): void
     {

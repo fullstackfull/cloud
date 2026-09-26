@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Dns;
 
+use Lynomia\Modules\Dns\Domain\Enums\NoDerivedName;
 use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
 use Lynomia\Modules\Dns\Domain\ValueObjects\DomainName;
 use Lynomia\Modules\Dns\Domain\ValueObjects\ReservedZones;
@@ -56,6 +57,21 @@ final class TheReservedZonesTest extends TestCase
         yield 'nothing at all' => ['', null];
         yield 'unset' => [null, null];
         yield 'not a URL' => ['lynomia.test', null];
+        yield 'written with space around it' => [" https://panel.lynomia.test \n", 'panel.lynomia.test'];
+
+        /*
+         * An internationalised host is held in the form DNS carries it — the
+         * A-label a resolver is actually asked for. Left in Unicode it is not
+         * a name the zone rules accept, and nothing would be held for it,
+         * while its A-label is exactly what an account would type to claim it.
+         */
+        yield 'an internationalised host' => ['https://münchen.lynomia.test', 'xn--mnchen-3ya.lynomia.test'];
+        yield 'an internationalised host in capitals' => ['https://MÜNCHEN.Lynomia.test', 'xn--mnchen-3ya.lynomia.test'];
+        yield 'an internationalised name in every label' => ['https://لوحة.مثال.test', 'xn--ogbh2eq.xn--mgbh0fb.test'];
+        yield 'an internationalised host written percent-encoded' => ['https://m%C3%BCnchen.lynomia.test', 'xn--mnchen-3ya.lynomia.test'];
+        yield 'a character the older, transitional processing maps elsewhere' => ['https://straße.lynomia.test', 'xn--strae-oqa.lynomia.test'];
+        yield 'an internationalised host that is not a name even in ASCII' => ['https://my_pänel.lynomia.test', null];
+        yield 'an underscore' => ['https://my_panel.lynomia.test', null];
     }
 
     #[Test]
@@ -65,6 +81,91 @@ final class TheReservedZonesTest extends TestCase
         $reserved = new ReservedZones([], ['APP_URL' => $url]);
 
         $this->assertSame(['APP_URL' => $expected], $reserved->derivedByVariable());
+    }
+
+    /**
+     * @return iterable<string, array{0: string|null, 1: NoDerivedName}>
+     */
+    public static function addressesThatContributeNothing(): iterable
+    {
+        yield 'unset' => [null, NoDerivedName::Unset];
+        yield 'empty' => ['', NoDerivedName::Unset];
+        yield 'blank' => ['   ', NoDerivedName::Unset];
+        yield 'a host with no scheme in front of it' => ['panel.lynomia.test', NoDerivedName::NotAUrl];
+        yield 'a scheme with no host after it' => ['https:///panel', NoDerivedName::NotAUrl];
+        yield 'a host that is only the root' => ['https://./', NoDerivedName::NotAUrl];
+        yield 'an IPv4 literal' => ['http://203.0.113.10:8000', NoDerivedName::IpAddress];
+        yield 'an IPv4 literal in full-width digits' => ['http://２０３．０．１１３．１０/', NoDerivedName::IpAddress];
+        yield 'an IPv6 literal' => ['http://[2001:db8::1]:8000', NoDerivedName::IpAddress];
+        yield 'localhost' => ['http://localhost:8000', NoDerivedName::SingleLabel];
+        yield 'an internationalised single label' => ['https://münchen', NoDerivedName::SingleLabel];
+        yield 'an underscore' => ['https://my_panel.lynomia.test', NoDerivedName::NotADomainName];
+        yield 'a number where the top-level label goes' => ['https://panel.123', NoDerivedName::NotADomainName];
+        yield 'an internationalised host that is not a name even in ASCII' => ['https://my_pänel.lynomia.test', NoDerivedName::NotADomainName];
+    }
+
+    /**
+     * Why an address gave nothing is what the report says about it, and what
+     * it says is only true of the right case: "no zone at, above or beneath it
+     * can be claimed" is true of an address and false of a host with no scheme
+     * in front of it, whose name any account can claim.
+     */
+    #[Test]
+    #[DataProvider('addressesThatContributeNothing')]
+    public function an_address_that_contributes_nothing_says_why(?string $url, NoDerivedName $why): void
+    {
+        $reserved = new ReservedZones([], ['APP_URL' => $url, 'FRONTEND_URL' => 'https://portal.lynomia.test']);
+
+        $this->assertSame(['APP_URL' => $why], $reserved->underived());
+        $this->assertSame(['APP_URL' => null, 'FRONTEND_URL' => 'portal.lynomia.test'], $reserved->derivedByVariable());
+    }
+
+    #[Test]
+    public function an_address_that_contributed_a_name_has_no_reason_against_it(): void
+    {
+        $reserved = new ReservedZones([], ['APP_URL' => 'https://münchen.lynomia.test', 'FRONTEND_URL' => 'https://portal.lynomia.test']);
+
+        $this->assertSame([], $reserved->underived());
+    }
+
+    /**
+     * What the report says about an address, held against the name rules it
+     * rests on. If those rules ever let a zone at, above or beneath an address
+     * through, this goes red rather than the report going on saying otherwise.
+     */
+    #[Test]
+    public function no_zone_at_above_or_beneath_an_address_is_a_name(): void
+    {
+        foreach (['203.0.113.10', '[2001:db8::1]', '[::ffff:192.0.2.1]'] as $address) {
+            $labels = explode('.', $address);
+            $candidates = ['panel.'.$address];
+
+            foreach (array_keys($labels) as $index) {
+                $candidates[] = implode('.', array_slice($labels, $index));
+            }
+
+            foreach ($candidates as $candidate) {
+                try {
+                    DomainName::fromString($candidate);
+                    $this->fail(sprintf('%s, at, above or beneath the address %s, reads as a name a zone could be claimed for.', $candidate, $address));
+                } catch (InvalidDomainNameException) {
+                    $this->addToAssertionCount(1);
+                }
+            }
+        }
+    }
+
+    #[Test]
+    public function a_single_label_is_not_a_name_a_zone_could_be_claimed_for(): void
+    {
+        foreach (['localhost', 'devbox', 'xn--mnchen-3ya'] as $label) {
+            try {
+                DomainName::fromString($label);
+                $this->fail(sprintf('The single label %s reads as a name a zone could be claimed for.', $label));
+            } catch (InvalidDomainNameException) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     #[Test]
@@ -109,6 +210,23 @@ final class TheReservedZonesTest extends TestCase
         $this->expectException(InvalidDomainNameException::class);
 
         $reserved->protects(DomainName::fromString('unrelated.test'));
+    }
+
+    #[Test]
+    public function the_whole_list_is_read_before_a_listed_name_is_compared_with_the_claim(): void
+    {
+        /*
+         * Order matters to what the customer is told, not only to whether
+         * they are refused. Compared one entry at a time, a claim of the
+         * first name here would be refused as reserved and never reach the
+         * entry that does not read; read whole, every claim meets the same
+         * failure, which is the state the preflight reports.
+         */
+        $reserved = new ReservedZones(['lynomia.test', 'not a name'], []);
+
+        $this->expectException(InvalidDomainNameException::class);
+
+        $reserved->protects(DomainName::fromString('lynomia.test'));
     }
 
     #[Test]
