@@ -17,27 +17,40 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * How much of the money captured against an invoice has not yet gone back to
  * the customer, by any route.
  *
- * One figure, read by the three actions that hand money back, so that they
- * cannot between them return the same money twice:
+ * One figure, read by every action that hands an invoice's money back, so
+ * that they cannot between them return the same money twice:
  *
- *  - CreditWhatACancelledOrderPaid credits a cancelled order's remainder to the
- *    wallet;
+ *  - ReturnWhatAnInvoiceStillHolds credits it to the wallet, for the callers
+ *    whose invoice will deliver nothing more: CreditWhatACancelledOrderPaid (a
+ *    cancelled order), RenewSubscription (an upgrade that lapsed unpaid) and
+ *    WindUpAnEndedSubscription (the open invoices of a subscription that has
+ *    ended, which it then voids);
+ *  - CompensateUncollectableCapture credits a capture that landed on a
+ *    withdrawn invoice, no more than the invoice still holds of it;
  *  - IssueRefund returns part of a capture to the card (or to the wallet it was
  *    spent from);
  *  - RecordInvoiceRefund books a refund against the document.
+ *
+ * Each records what it returned against the invoice - a wallet entry carrying
+ * the invoice's id, or a refund row against its capture - which is what makes
+ * it part of this figure for the next one. The renewal's lapse used to keep
+ * arithmetic of its own, from the document (`amount_paid - amount_refunded`),
+ * which cannot see a refund until the queue books it, and returned a pending
+ * card refund's money a second time (N-1).
  *
  * The figure is:
  *
  *     captured charges applied to the invoice
  *   − stored value already credited to the wallet against it (a top-up carrying
  *     the invoice's id: SettleInvoice's overpayment surplus, a compensation for
- *     a capture that landed on a withdrawn invoice, a cancelled order's credit)
+ *     a capture that landed on a withdrawn invoice, a cancelled order's, a
+ *     lapsed upgrade's or an ended subscription's return)
  *   − what has gone back by refund: the larger of the invoice's
  *     `amount_refunded_minor` and the refund rows still holding funds against
  *     its captures (a pending card refund is not on the invoice yet; a refund
  *     an operator booked straight onto the invoice has no row)
  *
- * Read it under the invoice's row lock; each of the three actions holds it.
+ * Read it under the invoice's row lock; each of those actions holds it.
  *
  * ---------------------------------------------------------------------------
  * The money-path lock order

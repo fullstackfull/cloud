@@ -8,12 +8,11 @@ use Carbon\CarbonImmutable;
 use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
+use Lynomia\Modules\Billing\Application\Actions\ReturnWhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
-use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
@@ -23,9 +22,6 @@ use Lynomia\Modules\Subscriptions\Application\Queries\UnpaidUpgrade;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\SubscriptionNotRenewableException;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Repositories\CouponTermsRepository;
-use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
-use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
-use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Advances a subscription into its next period and describes what to bill for
@@ -55,8 +51,7 @@ final readonly class RenewSubscription
     public function __construct(
         private CouponTermsRepository $coupons,
         private UnpaidUpgrade $unpaid,
-        private VoidInvoice $voidInvoice,
-        private WalletLedger $wallet,
+        private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
     ) {}
 
     /**
@@ -260,44 +255,28 @@ final readonly class RenewSubscription
     }
 
     /**
-     * Return what was paid on a lapsing upgrade's invoice, then void it.
+     * Return what a lapsing upgrade's invoice still holds, then void it.
      *
-     * The money goes to the wallet as a top-up recorded against the invoice
-     * (`invoice_id`), which is how the platform records stored value it holds
-     * for an invoice that no delivery claims - and what stops the same money
-     * also being refunded to the card afterwards. Only what the invoice still
-     * holds is returned: what it took, less what was refunded, less what was
-     * already credited to the wallet against it. The ledger key names the
-     * invoice and the amount, so a retried renewal credits it once.
+     * Through ReturnWhatAnInvoiceStillHolds, which reads WhatAnInvoiceStillHolds
+     * under the invoice's lock and credits it to the wallet as a top-up
+     * recorded against the invoice - what stops the same money also being
+     * refunded to the card afterwards. This used to compute its own figure
+     * from the document, `amount_paid - amount_refunded - top-ups`, which does
+     * not see a refund until the queued RecordRefundAgainstTheInvoice books
+     * it: a card refund still pending at the provider, or a wallet refund of a
+     * wallet part-payment (whose credit is kind refund, not top-up), both
+     * returned the money a second time here - 10.000 back for 5.000 paid - and
+     * the refund's own booking then failed into failed_jobs (N-1).
      */
     private function lapse(Invoice $invoice): void
     {
-        $held = $invoice->amount_paid_minor
-            - $invoice->amount_refunded_minor
-            - (int) WalletTransaction::query()
-                ->where('invoice_id', $invoice->getKey())
-                ->where('kind', WalletTransactionKind::Topup->value)
-                ->sum('amount_minor');
-
-        if ($held > 0) {
-            /** @var Customer $customer */
-            $customer = $invoice->customer()->firstOrFail();
-
-            $this->wallet->credit(
-                wallet: $this->wallet->walletFor($customer, $invoice->currency),
-                amount: Money::ofMinor($held, $invoice->currency),
-                kind: WalletTransactionKind::Topup,
-                description: sprintf('Payment for invoice %s returned: the upgrade lapsed unpaid', $invoice->number),
-                metadata: [
-                    'invoice_id' => (string) $invoice->getKey(),
-                    'reason' => 'plan_change_lapsed',
-                ],
-                idempotencyKey: sprintf('invoice:%s:lapsed-upgrade:%d', $invoice->getKey(), $invoice->amount_paid_minor),
-                invoiceId: (string) $invoice->getKey(),
-            );
-        }
-
-        $this->voidInvoice->execute($invoice, 'The upgrade was not paid for in full before the next period was billed.');
+        $this->returnWhatItHolds->andWithdraw(
+            $invoice,
+            'lapsed-upgrade',
+            sprintf('Payment for invoice %s returned: the upgrade lapsed unpaid', $invoice->number),
+            'The upgrade was not paid for in full before the next period was billed.',
+            ['reason' => 'plan_change_lapsed'],
+        );
     }
 
     /**

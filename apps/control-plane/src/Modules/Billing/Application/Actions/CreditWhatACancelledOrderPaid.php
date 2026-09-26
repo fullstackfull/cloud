@@ -4,13 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
-use Illuminate\Support\Facades\DB;
-use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
-use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
-use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
-use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
-use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 
 /**
  * Credits the customer with what they paid for an order that was cancelled
@@ -60,7 +54,7 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 final readonly class CreditWhatACancelledOrderPaid
 {
     public function __construct(
-        private WalletLedger $wallet,
+        private ReturnWhatAnInvoiceStillHolds $returnWhatItHolds,
     ) {}
 
     /**
@@ -73,59 +67,30 @@ final readonly class CreditWhatACancelledOrderPaid
         $ids = Invoice::query()->where('order_id', $orderId)->orderBy('id')->pluck('id');
 
         foreach ($ids as $id) {
-            $credited += DB::transaction(fn (): int => $this->creditTheRemainderOf((string) $id));
+            $credited += $this->creditTheRemainderOf((string) $id);
         }
 
         return $credited;
     }
 
+    /**
+     * Through ReturnWhatAnInvoiceStillHolds, the one implementation of "give
+     * back what this invoice still holds" (it reads WhatAnInvoiceStillHolds
+     * under the invoice's lock). The remainder is what this call moved; a
+     * second run under the same lock finds it already in the wallet and
+     * returns zero; the idempotency key is a backstop for the ledger, not the
+     * thing that makes a retry credit nothing.
+     */
     private function creditTheRemainderOf(string $invoiceId): int
     {
         /** @var Invoice $invoice */
-        $invoice = Invoice::query()->lockForUpdate()->findOrFail($invoiceId);
+        $invoice = Invoice::query()->findOrFail($invoiceId);
 
-        $capturedMinor = WhatAnInvoiceStillHolds::capturedMinor($invoice);
-        $alreadyInTheWalletMinor = WhatAnInvoiceStillHolds::creditedToTheWalletMinor($invoice);
-        $refundedMinor = WhatAnInvoiceStillHolds::refundedMinor($invoice);
-
-        $remainderMinor = $capturedMinor - $alreadyInTheWalletMinor - $refundedMinor;
-
-        if ($remainderMinor <= 0) {
-            return 0;
-        }
-
-        /** @var Customer $customer */
-        $customer = $invoice->customer()->firstOrFail();
-
-        $this->wallet->credit(
-            wallet: $this->wallet->walletFor($customer, $invoice->currency),
-            amount: Money::ofMinor($remainderMinor, $invoice->currency),
-            // Stored value the customer handed over that no delivery claims:
-            // the same kind, and so the same place in SettleInvoice's
-            // arithmetic, as an overpayment surplus.
-            kind: WalletTransactionKind::Topup,
-            description: sprintf('Payment for invoice %s returned: the order was cancelled', $invoice->number),
-            metadata: [
-                'invoice_id' => (string) $invoice->getKey(),
-                'order_id' => $invoice->order_id,
-                'captured_minor' => $capturedMinor,
-                'already_in_wallet_minor' => $alreadyInTheWalletMinor,
-                'refunded_minor' => $refundedMinor,
-            ],
-            idempotencyKey: sprintf(
-                'invoice:%s:cancelled-order:%d',
-                $invoice->getKey(),
-                $capturedMinor - $refundedMinor,
-            ),
-            invoiceId: (string) $invoice->getKey(),
+        return $this->returnWhatItHolds->toTheWallet(
+            $invoice,
+            'cancelled-order',
+            sprintf('Payment for invoice %s returned: the order was cancelled', $invoice->number),
+            ['order_id' => $invoice->order_id],
         );
-
-        /*
-         * The remainder is what this call moved. A second run under the same
-         * lock finds it already in the wallet and returns zero above; the
-         * idempotency key is a backstop for the ledger, not the thing that
-         * makes a retry credit nothing.
-         */
-        return $remainderMinor;
     }
 }
