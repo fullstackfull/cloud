@@ -60,6 +60,20 @@ final class FakeDedicatedProvider implements DedicatedProvider
      * resolve by retrying. Nothing is recorded as changed, deliberately — that
      * is what makes the marker useful, because the caller cannot tell and must
      * behave correctly anyway.
+     *
+     * That is one half of an unknown outcome, and the other half — the
+     * controller did the work and the answer was lost — is not modelled here.
+     * The shape it would matter for is a one-time PXE override armed without
+     * an answer and then consumed by a reset: a customer's server reinstalling
+     * itself. Its consequence is not the missing piece; AuthorisePxeBoot
+     * already tells an unanswered arm from a refused one and leaves the
+     * authorisation standing, because the controller may well have armed the
+     * override. What keeps the shape unwritable is this fake's own gate: the
+     * marker is read from the address, ahead of every method, so consuming
+     * the arm needs a reset on the same marked address — and the reset is
+     * refused by the same check before it runs. Writing it needs an outcome
+     * chosen per operation rather than per address, which this fake does not
+     * have; F-24 left it unwritten for that reason.
      */
     public const string TIMEOUT_MARKER = 'timeout';
 

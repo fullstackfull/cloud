@@ -65,19 +65,26 @@ final class FakeComputeProvider implements ComputeProvider
     /**
      * A hostname carrying this times out: the call fails with the outcome at
      * the cluster unknown, which is the state the platform must never resolve
-     * by retrying. Nothing is recorded as created, deliberately — that is what
-     * makes the marker useful, because the caller cannot tell and must behave
-     * correctly anyway.
+     * by retrying. Nothing is recorded as created — this is the half of an
+     * unknown outcome in which the request never reached the cluster.
+     *
+     * Only half. On its own it made "no answer" and "nothing built" the same
+     * thing in every test, so a platform that retried an unanswered create
+     * into a second machine could not be caught; the other half is
+     * {@see self::BUILT_UNANSWERED_MARKER}.
      */
     public const string TIMEOUT_MARKER = 'timeout';
 
     /**
-     * A machine carrying this cannot be destroyed conclusively.
+     * A machine carrying this cannot be destroyed conclusively, and survives.
      *
      * Its own word rather than a reuse of the timeout marker, because a
      * hostname is checked for every marker it contains: a name that meant
      * "time out on destroy" would also mean "time out on create", and the
      * machine could never be built in the first place.
+     *
+     * The half of an unknown destroy in which nothing happened; the other half
+     * is {@see self::DESTROYED_UNANSWERED_MARKER}.
      */
     public const string UNDESTROYABLE_MARKER = 'undestroyable';
 
@@ -92,6 +99,39 @@ final class FakeComputeProvider implements ComputeProvider
      * by any test.
      */
     public const string UNNAMED_MARKER = 'unnamed';
+
+    /**
+     * A hostname carrying this is built, and then the answer is lost.
+     *
+     * The dangerous case, and the one this simulator used to be unable to
+     * produce (F-24): `qmcreate` keeps running after the HTTP request that
+     * started it has been abandoned, so on a real cluster "the create did not
+     * answer" often means "the machine exists". The machine is registered —
+     * and the fleet written, so another process sees it too — before the
+     * indeterminate failure is thrown, which is the registrar simulator's
+     * shape for an unanswered registration copied rather than invented. A
+     * platform that retried this would build a second machine for the same
+     * order, and a test can now count the two.
+     *
+     * Every create of the name loses its answer, because the marker is in the
+     * request and a retry carries the same request. A test that needs the
+     * first answer lost and the second delivered wants a switch, not a
+     * hostname: F-15's AnswerLosingComputeProvider test double is that switch.
+     */
+    public const string BUILT_UNANSWERED_MARKER = 'built-unanswered';
+
+    /**
+     * A machine carrying this is destroyed, and then the answer is lost.
+     *
+     * The other direction. With only {@see self::UNDESTROYABLE_MARKER}, an
+     * unanswered destroy always meant the machine survived, and whatever the
+     * platform does when it did not — a second destroy that finds nothing, a
+     * reconciliation that finds the machine gone — was never executed by a
+     * test. The machine is removed and its tombstone written before the
+     * indeterminate failure is thrown. Read, like the undestroyable marker,
+     * from the name the machine was asked for.
+     */
+    public const string DESTROYED_UNANSWERED_MARKER = 'destroyed-unanswered';
 
     /** Appended to a UPID's id segment to mark a task that will report failure. */
     private const string FAILED_TASK_SUFFIX = '-failed';
@@ -206,6 +246,20 @@ final class FakeComputeProvider implements ComputeProvider
         unset($this->destroyed[$this->tombstoneKey($request->nodeName, $providerId)]);
 
         $this->writeSharedFleet();
+
+        if (self::hostnameCarries($request->hostname, self::BUILT_UNANSWERED_MARKER)) {
+            /*
+             * After the machine exists and the fleet is written, never before:
+             * that ordering is the whole marker. The caller is told nothing,
+             * and only a look at the cluster can settle what happened — which
+             * it can, because the machine really is there.
+             */
+            throw ComputeProviderException::requestFailed(self::NAME, 'create_vm', [
+                'node' => $request->nodeName,
+                'vmid' => $request->vmId,
+                'provider_message' => 'the fake provider built this machine and then stopped answering, by design',
+            ], indeterminate: true);
+        }
 
         return new VmOperation(
             taskId: $this->upid(
@@ -406,6 +460,15 @@ final class FakeComputeProvider implements ComputeProvider
         $this->destroyed[$this->tombstoneKey($nodeName, $providerId)] = true;
 
         $this->writeSharedFleet();
+
+        if (self::hostnameCarries(self::requestedHostnameOf($machine), self::DESTROYED_UNANSWERED_MARKER)) {
+            // Gone, and the caller is not told: see the marker.
+            throw ComputeProviderException::requestFailed(self::NAME, 'destroy_vm', [
+                'node' => $nodeName,
+                'vmid' => $providerId,
+                'provider_message' => 'the fake provider destroyed this machine and then stopped answering, by design',
+            ], indeterminate: true);
+        }
 
         return new VmOperation(
             taskId: $this->upid($nodeName, 'qmdestroy', $providerId, false),
