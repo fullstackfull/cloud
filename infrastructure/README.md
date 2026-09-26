@@ -438,7 +438,7 @@ exists because of a specific thing that went wrong:
 
 | Script | Refuses |
 | --- | --- |
-| `validate-inventory.py` | A host with no `safety_class`, an `allow_reimage` its class does not permit, or a variable that reads like a credential |
+| `validate-inventory.py` | A host with no `safety_class`, an `allow_reimage` its class does not permit, or a variable that reads like a credential — judged on the variables Ansible resolves for it, across every file Ansible reads from the environment's inventory directory — and an environment it cannot read that way: a source that is not YAML, a host range or port, a group loop, or no host at all |
 | `test_validate_inventory.py` | The above validator quietly stopping to reject any of those |
 | `test_safety_gate.sh` | The `safety_gate` role quietly stopping to enforce a classification — ten class-and-action pairs against a throwaway localhost inventory |
 | `validate-monitoring.py` | An alert naming a metric nothing emits, an alert with nowhere for the operator to look, a `runbook` path that does not exist, a directory this README claims and does not have, or a collector contract with no implementation and no acknowledgement of that |

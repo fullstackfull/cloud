@@ -591,7 +591,13 @@ jobs:
       # Nothing in this job applies anything. A pipeline that can reimage a node
       # on merge is a pipeline that eventually will, on a branch nobody meant to
       # merge. CI validates; a person applies.
-      - name: No workflow applies infrastructure
+      #
+      # The step is named for what the check reads: the `run:` text of every
+      # workflow step, for a list of known applying commands. It does not
+      # follow a step into a script, a Makefile target (`make deploy-staging`
+      # applies) or an action, so it is a tripwire over what CI spells out and
+      # not a proof that no workflow can apply; its docstring draws the line.
+      - name: No workflow run step names a known applying command
         run: python3 infrastructure/scripts/check-ci-cannot-apply.py .
 
       # Including the distinction that makes it usable rather than merely
