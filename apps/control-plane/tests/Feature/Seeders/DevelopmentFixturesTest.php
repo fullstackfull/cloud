@@ -113,9 +113,10 @@ final class DevelopmentFixturesTest extends TestCase
          * same three hosting plans. While the reference packages were loaded
          * on sale, every plan had two packages on sale and a purchase took
          * whichever row the heap returned first — sometimes a package from an
-         * estate whose own header says nothing in it exists. The platform now
-         * refuses to pick between two (F-32), so the reference packages load
-         * withdrawn, and this is what says the demo catalogue is still for sale.
+         * estate whose own seeder announces that nothing in it exists. The
+         * platform now refuses to pick between two (F-32), so the reference
+         * packages load withdrawn, and this is what says the demo catalogue is
+         * still for sale.
          */
         $this->seedDevelopmentFixtures();
 

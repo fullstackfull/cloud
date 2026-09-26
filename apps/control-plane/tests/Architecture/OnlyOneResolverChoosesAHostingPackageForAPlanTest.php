@@ -30,8 +30,9 @@ use SplFileInfo;
  * Every PHP file under `src/`, `app/` and `database/` — the three places code
  * that runs against the catalogue lives: modules, console wiring, and the
  * seeders and factories that build estates people then buy from. Tests are
- * not read: several of them pick a package by plan on purpose, with `sole()`,
- * to assert there is exactly one. The walk asserts it read at least one file
+ * not read: a test may pick a package by plan on purpose — the hosting golden
+ * path and the whole life of a hosting account each do, with `sole()`, to
+ * assert there is exactly one. The walk asserts it read at least one file
  * under each directory, because narrowing the list back to `src/` would leave
  * every other assertion here green — nothing under `app/` or `database/`
  * offends today.
@@ -50,8 +51,8 @@ use SplFileInfo;
  * `DB::table('hosting_packages')`, followed by its `->method(…)` calls.
  * It offends when both halves are in the same chain:
  *
- *   - narrowed by plan: a `'plan_id'` (or `'hosting_packages.plan_id'`)
- *     literal anywhere in the chain's arguments, closures included, or a
+ *   - narrowed by plan: a `'plan_id'` literal, bare or table-qualified,
+ *     anywhere in the chain's arguments, closures included, or a
  *     `wherePlanId(…)`; for `firstOrCreate`, `firstOrNew` and
  *     `updateOrCreate` only the first argument counts, since that is the one
  *     the row is found by;

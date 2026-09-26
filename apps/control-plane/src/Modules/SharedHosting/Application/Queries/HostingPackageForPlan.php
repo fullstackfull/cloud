@@ -25,21 +25,22 @@ use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
  * `plan_id` is not; withdrawing a package is `is_active = false` and nothing
  * deletes one. So replacing the package behind a plan leaves two rows naming
  * it, and the query above answered whichever one a scan met first — a fact
- * about the physical order of the table, which a single UPDATE can change. A
- * paid order could open its account on the
- * withdrawn package and report the old quota to a customer who had paid for
- * the new one, and a paid upgrade could tell the panel the legacy package.
+ * about the physical order of the table, which a single UPDATE can change.
+ * A paid order could open its account on the withdrawn package and report the
+ * old quota to a customer who had paid for the new one, and a paid upgrade
+ * could tell the panel the legacy package.
  *
  * ---------------------------------------------------------------------------
  * The rule: take the one on sale, or refuse
  * ---------------------------------------------------------------------------
  *
  * Only a package on sale is a candidate. When exactly one is, that is the
- * answer. When two are, nothing is chosen: this is the rule
+ * answer. When more than one is, nothing is chosen. That is the rule
  * {@see LocalPlacementFeasibility} already applies to clusters, IP pools and
- * OS images — "with two the platform has no basis for choosing, and taking the
- * first would place a customer by row order" — and it applies here for the
- * same reason. There is deliberately no `ORDER BY` below. An ordering would be
+ * OS images — in its own words, "With two clusters the platform has no basis
+ * for choosing, and picking the first would place a customer's machine by row
+ * order." — and it applies here for the same reason. There is deliberately no
+ * `ORDER BY` below. An ordering would be
  * a tiebreak, and it rests on an assumption stated here rather than hidden in
  * a sort: **nothing in this repository says which of two packages on sale a
  * plan sells** — not the newest, not the largest, not the one an operator
@@ -67,9 +68,9 @@ use Lynomia\Modules\Subscriptions\Application\Actions\QueuePlanChangeAtProvider;
  *
  * `OnlyOneResolverChoosesAHostingPackageForAPlanTest` walks every PHP file
  * under `src/`, `app/` and `database/`, with comments stripped, and fails on
- * any other expression that narrows hosting packages by a plan id and takes
- * one row out of the result. The spellings it catches and the ones it cannot
- * see are tables in that test, each asserted.
+ * any other expression it recognises that narrows hosting packages by a plan
+ * id and takes one row out of the result. What it recognises, and the
+ * spellings it cannot see, are tables in that test, each asserted.
  *
  * Callers: {@see LocalPlacementFeasibility} — which checkout, the payment-time
  * recheck and the build all resolve through — and

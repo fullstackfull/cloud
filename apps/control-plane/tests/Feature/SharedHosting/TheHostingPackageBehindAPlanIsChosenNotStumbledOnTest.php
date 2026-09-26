@@ -48,11 +48,12 @@ use Tests\TestCase;
  * package and report the old quota, and a paid upgrade could tell the panel
  * the legacy package.
  *
- * Most of what follows is built the way a customer does it — checkout, a
+ * Much of what follows is built the way a customer does it — checkout, a
  * settled invoice, the fake panel — because the wrong answer only costs money
- * at the end of that chain. The legacy package is always written first, so on
- * an unfixed tree a sequential scan meets it first; the tests that matter for
- * determinism then move rows around the heap and ask again.
+ * at the end of that chain. Where a plan's package was replaced, the withdrawn
+ * one is written first, as it would have been, so on an unfixed tree a scan
+ * meets it first. The test about determinism writes them the other way round
+ * and then moves a row, so that the heap and the right answer disagree.
  */
 final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCase
 {

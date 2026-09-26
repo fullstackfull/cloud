@@ -895,7 +895,7 @@ return [
          * nothing in it exists — and the platform now refuses to choose between
          * two at all (F-32), which would leave the development catalogue with
          * nothing it can sell. Withdrawn, they still show an engineer the shape
-         * of a package mapping without competing with the real one.
+         * of a package mapping without competing with the catalogue's own.
          */
 
         'hosting_node' => [
