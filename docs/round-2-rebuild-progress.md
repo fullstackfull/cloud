@@ -27,10 +27,10 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-08 | High | rebuilt — 12 of 47 new tests red→green; Queue+Billing+Architecture green | `f24548a` |
 | F-11 | High | rebuilt — new contract tests red→green; Dns+Simulation+Security+Architecture green; closes F-24 DNS limb | `d69856a` |
 | F-12 | High | rebuilt — 9+14 new tests red→green; Dedicated+Ipam+Api+Security+Architecture green | `e0aa0ab` |
-| F-15 | High | rebuilt — round six design + round seven's two blocking fixes; merged with the F-04 × F-15 fix (operator-named domain moved out of the payload) | `8e15efa` |
-| F-17 | High | rebuilt — limiter attachment + ordering fixed (limiter ran before the account was resolved); awaiting verification (ResendInvitation cooldown clause to adjudicate) | `171142b` |
+| F-15 | High | rebuilt + merged; verification rounds 1–3 REJECTED (2, 1, 1 blocking — stale finding on the operator screen, census blind spots, a rewritten test that lost its oracle), each repaired; round 4 (repair + re-verify) running, incl. a coordinator ruling that a first-attempt stranger must not be claimed | `8e15efa` |
+| F-17 | High | rebuilt + merged; verification rounds 1–3 REJECTED on sentence-vs-test reach; repairs built the per-address invitation cooldown the audit clause asks for; round 4 running | `171142b` |
 | F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
-| F-19 | High | rebuilt — order follows its services (all 9 states written), `completed_at` stamped, service-route termination behind F-18's authority (16-cell table driven); merged with F-04/F-23 consequences fixed | `45d53af` |
+| F-19 | High | **UPHELD WITH RESERVATIONS** by independent verification (round 1, 0 blocking, 7 reservations); merged | `45d53af` |
 | F-20 | High | in progress (rebuild → independent verification) | |
 | F-21 | High | in progress (rebuild → independent verification) | |
 | F-22 | High | rebuilt — drift alert + route pinned by validator (39/39), log path fixed; Architecture+Monitoring green | `bb1c77e` |
