@@ -59,7 +59,8 @@ webhook success rate, provisioning job outcomes.
 availability, and allocated-versus-total capacity.
 
 **Dedicated** — reachability, hardware alerts where the BMC exposes them, provisioning
-state distribution.
+state distribution, and power requests: which ones ended without a confirmed outcome, and
+which claims outlived the process that made them.
 
 **Shared hosting** — per-node health, disk, load average, account count.
 
@@ -86,6 +87,8 @@ does not exist.
 | `lynomia_service_status_total` | kind, status | Everything else a service can be — including `reactivating`, which is a customer who has paid and cannot use their server |
 | `lynomia_plan_change_total` | status | Upgrades whose money moved and whose machine has not caught up |
 | `lynomia_reinstall_operation_total` | kind, state | Rebuilds by state; `indeterminate` and `needs_review` are disks nobody can vouch for |
+| `lynomia_dedicated_power_operation_total` | action, outcome | Power requests to dedicated servers' controllers; `indeterminate` is a machine the platform may have reset and cannot say whether it did |
+| `lynomia_dedicated_power_claims_abandoned` | action | Power claims past their lease that the sweep has not settled yet; above zero for long is either a stopped sweep or workers dying mid-call, and the number cannot say which |
 | `lynomia_console_connection_total` | outcome | Consoles opened, and consoles that got a socket and no hypervisor |
 | `lynomia_console_refusal_total` | reason | Permits refused; a rising `machine_mismatch` from one source is somebody trying permits that are not theirs |
 | `lynomia_notification_delivery_total` | channel, status | Whether customers are actually being told things |
@@ -151,6 +154,8 @@ advance — which is to say, before the outage.
 | IP pool below runway threshold | Orders will start failing after payment |
 | Critical drift unresolved (`ResourceDriftOpen`) | A customer is paying for a machine the hypervisor does not have, or a suspended service is still running. Pages; acknowledging does not clear it, resolving does |
 | Drift unreviewed for a day (`DriftQueueUnworked`) | Disagreements with a provider are piling up unreviewed. Warning; acknowledging clears it |
+| Dedicated power request indeterminate (`DedicatedPowerOperationIndeterminate`) | A customer's physical machine may be mid-reset, off or untouched, and nothing will try again. Pages |
+| Dedicated power claims abandoned (`DedicatedPowerClaimsAbandoned`) | Claims are outliving their lease: the settling sweep has stopped, or requests keep dying mid-call. Warning |
 
 Every alert carries enough context to act: which node, which cluster, which customer where
 one is implicated, and a link to the runbook.

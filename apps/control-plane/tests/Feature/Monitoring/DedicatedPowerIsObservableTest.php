@@ -20,11 +20,12 @@ use Tests\TestCase;
  * The path that physically cycles a customer's machine has to be on the
  * dashboard called "dedicated".
  *
- * Sixteen collectors read the rest of the platform and none of them read
- * `dedicated_power_operations`. Dedicated was not wholly unmonitored — rebuilds
- * are exported by kind and a dedicated dashboard exists — which made the gap
- * worse rather than better: an operator reading that dashboard had no cue that
- * power requests were absent from it. In particular a power operation that
+ * The sixteen collectors that came before this one read the rest of the
+ * platform, and none of them read `dedicated_power_operations`. Dedicated was
+ * not wholly unmonitored — rebuilds are exported by kind and a dedicated
+ * dashboard exists — which made the gap worse rather than better: an operator
+ * reading that dashboard had no cue that power requests were absent from it.
+ * In particular a power operation that
  * ended `indeterminate` — a reset the platform may have sent and cannot say
  * whether it landed — was recorded and watched by nothing.
  *

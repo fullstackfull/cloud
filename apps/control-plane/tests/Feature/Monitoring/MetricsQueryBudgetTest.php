@@ -73,7 +73,18 @@ final class MetricsQueryBudgetTest extends TestCase
     // facts share another, because each pair is two aggregations over the same
     // grouping. The third is the per-group verification status, which groups
     // differently and cannot join them without a cross product.
-    private const int BUDGET = 45;
+    // 47: the dedicated collector, which put the power path on /metrics for
+    // the first time. Two GROUP BYs over dedicated_power_operations: power
+    // requests by action and outcome, and claims past their lease by action.
+    // seedFleet() gives it rows to read, so the N+1 assertion sees it.
+    //
+    // A caution the number carries with it: the N+1 assertion catches a loop
+    // whose cost grows with rows, not one whose cost is fixed — a query per
+    // action costs the same at both measurements, because the small fleet
+    // already holds all three actions. Such a loop is caught today only
+    // because this budget has no headroom. Raising it with slack for the next
+    // collector hides that shape from both tests.
+    private const int BUDGET = 47;
 
     private MetricsRegistry $registry;
 

@@ -16,8 +16,13 @@ use Tests\TestCase;
  * THE FAILURE THIS EXISTS TO PREVENT, WHICH ALREADY HAPPENED
  * ===========================================================================
  *
- * `MonitoringServiceProvider` — which registers all sixteen collectors with
- * the registry that serves `/metrics` — was not in `bootstrap/providers.php`.
+ * `MonitoringServiceProvider` — which registers every collector with the
+ * registry that serves `/metrics` — was not in `bootstrap/providers.php`.
+ * (There are seventeen collectors at the time of writing: seventeen files in
+ * `src/Modules/Monitoring/Application/Collectors/`, seventeen
+ * `$app->make(...)` lines in the provider, seventeen implementors of
+ * `MetricsCollector`. Nothing gates that number, so read it as a count taken
+ * once, not as a fact kept true.)
  * The consequence was total and silent: a booted application resolved
  * MetricsRegistry to a bare instance with **zero** collectors and exported
  * only the two families the registry uses to describe itself. Every alert rule
