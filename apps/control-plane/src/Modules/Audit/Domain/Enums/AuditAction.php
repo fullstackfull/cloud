@@ -129,6 +129,15 @@ enum AuditAction: string
      * which is why it is an assertion about the world as well as an act.
      */
     case ProvisioningIdentityRepointed = 'provisioning.identity_repointed';
+    /*
+     * An address a timed-out build left in quarantine, cleared by a person who
+     * looked at the provider (F-34). Both are assertions about the world:
+     * `adopted` says the machine the build made exists and answers on the
+     * address, and `released` says it demonstrably does not — the one row that
+     * records an address released by hand, since no column does.
+     */
+    case QuarantinedAddressAdopted = 'ipam.quarantined_address.adopted';
+    case QuarantinedAddressReleased = 'ipam.quarantined_address.released';
     case DriftAcknowledged = 'drift.acknowledged';
     case DriftResolved = 'drift.resolved';
     case ReconciliationRequested = 'infrastructure.reconciliation_requested';
@@ -396,7 +405,8 @@ enum AuditAction: string
             self::OrphanAdopted, self::ProvisioningIdentityRepointed,
             self::DriftResolved, self::DriftAcknowledged,
             self::ReinstallConfirmed, self::ReinstallAbandoned,
-            self::DedicatedServerReturnedToStock, self::DedicatedServerRetired => true,
+            self::DedicatedServerReturnedToStock, self::DedicatedServerRetired,
+            self::QuarantinedAddressAdopted, self::QuarantinedAddressReleased => true,
             default => false,
         };
     }

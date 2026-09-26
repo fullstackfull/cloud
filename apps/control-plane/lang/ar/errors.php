@@ -337,9 +337,11 @@ return [
     ],
     'ipam' => [
         'address_not_allocatable' => 'لا يمكن تخصيص هذا العنوان.',
+        'address_not_quarantined' => 'هذا العنوان ليس محجوزًا مؤقتًا، فلا يوجد ما يمكن إنهاؤه.',
         'invalid_hostname' => 'هذا ليس اسم مضيف صالحًا.',
         'invalid_ip_address' => 'هذا ليس عنوان IP صالحًا.',
         'pool_exhausted' => 'لا توجد عناوين IP متاحة في الوقت الحالي.',
+        'quarantine_not_clearable' => 'لا يمكن إنهاء الحجز المؤقت لهذا العنوان من هنا.',
         'reservation_expired' => 'انتهت صلاحية حجز هذا العنوان.',
         'reverse_dns_provider_failed' => 'لم يتم تطبيق تغيير DNS العكسي. حاول مرة أخرى بعد قليل.',
         'reverse_dns_provider_unavailable' => 'لا يمكن تغيير DNS العكسي في الوقت الحالي.',

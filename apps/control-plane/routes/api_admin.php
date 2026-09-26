@@ -11,6 +11,7 @@ use Lynomia\Modules\Admin\Http\Controllers\DomainsController;
 use Lynomia\Modules\Admin\Http\Controllers\DriftController;
 use Lynomia\Modules\Admin\Http\Controllers\HostingController;
 use Lynomia\Modules\Admin\Http\Controllers\InfrastructureController;
+use Lynomia\Modules\Admin\Http\Controllers\IpamQuarantineController;
 use Lynomia\Modules\Admin\Http\Controllers\OperationsController;
 use Lynomia\Modules\Admin\Http\Controllers\ProvisioningController;
 use Lynomia\Modules\Admin\Http\Controllers\ServiceController;
@@ -553,6 +554,28 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
         ->whereUlid('pool')
         ->middleware('permission:'.Permission::IpamManage->value)
         ->name('infrastructure.subnets.store');
+
+    /*
+     * Addresses a timed-out build left in quarantine (F-34). No clock ends
+     * one, so an operator does: they look at the provider, then adopt the
+     * address onto the machine that exists or release it because none does.
+     * Finding them is ipam.view like the rest of the address estate; either
+     * act is ipam.manage, because both change what the platform believes an
+     * address is doing on the strength of a person's word.
+     */
+    Route::get('infrastructure/ip-addresses/awaiting-clearance', [IpamQuarantineController::class, 'index'])
+        ->middleware('permission:'.Permission::IpamView->value)
+        ->name('infrastructure.ip_addresses.awaiting_clearance');
+
+    Route::post('infrastructure/ip-addresses/{address}/adopt', [IpamQuarantineController::class, 'adopt'])
+        ->whereUlid('address')
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.ip_addresses.adopt');
+
+    Route::post('infrastructure/ip-addresses/{address}/release', [IpamQuarantineController::class, 'release'])
+        ->whereUlid('address')
+        ->middleware('permission:'.Permission::IpamManage->value)
+        ->name('infrastructure.ip_addresses.release');
 
     Route::post('infrastructure/hosting-nodes', [InventoryController::class, 'storeHostingNode'])
         ->middleware('permission:'.Permission::HostingNodeManage->value)

@@ -3646,6 +3646,216 @@ paths:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/ip-addresses/awaiting-clearance":
+    get:
+      operationId: "api_admin_infrastructure_ip_addresses_awaiting_clearance"
+      tags:
+        - "Operator"
+      summary: "Addresses a timed-out build left waiting for a person"
+      description: |-
+        Every address quarantined because a provisioning call timed out. No clock ends these: the platform does not know whether the build made a machine with the address on it, and waiting does not tell it. Each row names the job the timeout closed and the customer the address was held for (null for the platform's own). `ends_on_a_clock` is false for every row, and says so beside `quarantined_until`, which nothing acts on for these. Other quarantines are not listed; they end on the pool's window, or when a held machine is declared empty.
+
+        Requires the `ipam.view` permission.
+      parameters:
+        - "$ref": "#/components/parameters/page"
+        - "$ref": "#/components/parameters/perPage"
+        - "$ref": "#/components/parameters/customerId"
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "A page of results."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminQuarantinedAddressPage"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/ip-addresses/{address}/adopt":
+    post:
+      operationId: "api_admin_infrastructure_ip_addresses_adopt"
+      tags:
+        - "Operator"
+      summary: "Keep a timed-out address with the machine that exists"
+      description: |-
+        The operator has looked at the provider and the machine the timed-out build made is there, answering on the address. Records the assignment that has been true since the build, for the customer the address was reserved for; `service_id` defaults to the timed-out job's service and may be named instead, and `mac_address` is optional. The assignment names no machine, and nothing on the platform can end an assignment that names no machine: an adopted address does not return to the pool. Refuses (409) an address that is not quarantined (`ipam.address_not_quarantined`) and any quarantine that is not a timeout's (`ipam.quarantine_not_clearable`). The evidence is required and audited.
+
+        Requires the `ipam.manage` permission.
+      parameters:
+        - name: "address"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+                service_id:
+                  description: "See the endpoint description; validated server-side."
+                mac_address:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminAdoptedAddressResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+  "/api/admin/infrastructure/ip-addresses/{address}/release":
+    post:
+      operationId: "api_admin_infrastructure_ip_addresses_release"
+      tags:
+        - "Operator"
+      summary: "Return a timed-out address whose machine does not exist"
+      description: |-
+        The operator has looked at the provider and the timed-out build made nothing. The address goes back to the pool in the state an elapsed quarantine leaves it in. Its reservation keeps `provisioning_timed_out` as the reason it ended; the by-hand reason, `operator_action`, is recorded in the audit trail. Refuses (409) an address that is not quarantined (`ipam.address_not_quarantined`) and any quarantine that is not a timeout's (`ipam.quarantine_not_clearable`). The evidence is required and audited.
+
+        Requires the `ipam.manage` permission.
+      parameters:
+        - name: "address"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+        - "$ref": "#/components/parameters/customerId"
+        - "$ref": "#/components/parameters/idempotencyKey"
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              properties:
+                evidence:
+                  description: "See the endpoint description; validated server-side."
+      security:
+        - sessionCookie: []
+        - personalAccessToken: []
+      responses:
+        200:
+          description: "The resource."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AdminReleasedAddressResponse"
+          headers:
+            X-Request-Id:
+              "$ref": "#/components/headers/RequestId"
+            X-RateLimit-Remaining:
+              "$ref": "#/components/headers/RateLimitRemaining"
+        401:
+          description: "Not authenticated. `auth.unauthenticated`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        403:
+          description: "Not permitted. `auth.forbidden`, whatever the underlying refusal was."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        422:
+          description: "The body did not validate. `validation.failed`, with the failing fields in `error.details`."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        404:
+          description: "Not found. An identifier belonging to another account answers this rather than 403: a 403 confirms the id exists, which over a loop is an inventory of the platform."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        429:
+          description: "Rate limited. `Retry-After` says how long to wait."
+          headers:
+            Retry-After:
+              "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/admin/infrastructure/ip-pools":
     get:
       operationId: "api_admin_infrastructure_ip_pools"
@@ -19438,6 +19648,38 @@ components:
             "$ref": "#/components/schemas/ActivityItem"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    AdminAdoptedAddress:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        address:
+          type: "string"
+        status:
+          type: "string"
+        assignment_id:
+          "$ref": "#/components/schemas/Ulid"
+        customer_id:
+          type:
+            - "string"
+            - "null"
+        service_id:
+          type:
+            - "string"
+            - "null"
+        mac_address:
+          type:
+            - "string"
+            - "null"
+          description: "Upper case, colon separated."
+    AdminAdoptedAddressResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminAdoptedAddress"
     AdminAdoptedJob:
       type: "object"
       additionalProperties: false
@@ -20435,6 +20677,50 @@ components:
             "$ref": "#/components/schemas/AdminProvisioningJob"
         meta:
           "$ref": "#/components/schemas/PaginationMeta"
+    AdminQuarantinedAddress:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        address:
+          type: "string"
+        subnet_id:
+          "$ref": "#/components/schemas/Ulid"
+        quarantine_reason:
+          type:
+            - "string"
+            - "null"
+          description: "Always `provisioning_timed_out` today: the only reason whose quarantine an operator clears."
+        quarantined_until:
+          "$ref": "#/components/schemas/Timestamp"
+        ends_on_a_clock:
+          type: "boolean"
+          description: "False: `quarantined_until` passes and nothing happens. Only adoption or a release by hand ends it."
+        provisioning_job_id:
+          type:
+            - "string"
+            - "null"
+          description: "The job the timeout closed."
+        customer_id:
+          type:
+            - "string"
+            - "null"
+          description: "Who the address was reserved for; null when the job was the platform's own."
+        timed_out_at:
+          "$ref": "#/components/schemas/Timestamp"
+    AdminQuarantinedAddressPage:
+      type: "object"
+      required:
+        - "data"
+        - "meta"
+      properties:
+        data:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AdminQuarantinedAddress"
+        meta:
+          "$ref": "#/components/schemas/PaginationMeta"
     AdminReconciliationRequest:
       type: "object"
       additionalProperties: false
@@ -20639,6 +20925,23 @@ components:
       properties:
         data:
           "$ref": "#/components/schemas/AdminReinstallVerdict"
+    AdminReleasedAddress:
+      type: "object"
+      additionalProperties: false
+      properties:
+        id:
+          "$ref": "#/components/schemas/Ulid"
+        address:
+          type: "string"
+        status:
+          type: "string"
+    AdminReleasedAddressResponse:
+      type: "object"
+      required:
+        - "data"
+      properties:
+        data:
+          "$ref": "#/components/schemas/AdminReleasedAddress"
     AdminRepointedJob:
       type: "object"
       additionalProperties: false
