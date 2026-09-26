@@ -36,12 +36,21 @@ defines. It found ten invented commands the first time it ran.
 ## Naming an alert on these pages
 
 An UpperCamelCase word of eight or more characters, with at least two
-capitalised segments, that is the whole of a code span — any number of
-backticks each side — is read as the name of an alert, and
-`validate-runbook-alerts.py` fails the build unless a rule file defines it. That
-is the check in the other direction from `validate-monitoring.py`'s, and it
-exists because fifteen alert names had been written on these pages that no rule
-defined: pages describing warnings that could never arrive.
+capitalised segments, that `validate-runbook-alerts.py` reads as the whole of a
+code span outside a fenced block is taken as the name of an alert, and the gate
+fails the build unless a rule file defines it. That is the check in the other
+direction from `validate-monitoring.py`'s, and it exists because fifteen alert
+names had been written on these pages that no rule defined: pages describing
+warnings that could never arrive.
+
+The gate reads these pages one line at a time with a grammar of its own — code
+spans on one line and fences, nothing else of Markdown — not the way a renderer
+does. Its docstring states that grammar, and lists the places found so far
+where a renderer shows a code span the gate does not read (a span split across
+two lines, a fence line inside an HTML block, a fence opened on a list marker's
+line, among others), each with a command that measures how often it occurs on
+these pages; none of them occurs today. Keep an alert's name on one line, in
+single backticks, outside HTML: that is the form the gate is written to read.
 
 When no alert sends anybody to a page, the page says so in words — nothing will
 page you, which series exists, and that no rule reads it — rather than naming
@@ -52,15 +61,16 @@ mentioned in prose, is declared on the page that writes it, next to where it is
 written: `<!-- not-an-alert: Word - what it actually is -->`, with a reason of at
 least twelve characters. The declaration is refused if the page does not cite
 the word, if the word is a defined alert, or if no code or configuration file
-outside `docs/` names it as a word of its own. A document never counts,
-wherever it is — Markdown and plain text are not searched at all, because an
-invented alert name can be written into any document, and calling it something
-else there does not make it real. A code or configuration file is read whole,
-comments and strings included: the gate cannot tell prose inside one from
-code, so a comment naming the word vouches for it as surely as the class that
-defines it. Reviewing that comment is the other half of the check. A rule
-defining `QueueBacklogGrowing` does not name a truncation of it: a prefix that
-matches two alerts is neither.
+outside `docs/` names it as a word of its own. A file whose name ends in
+`.md`, `.txt` or `.rst` never counts, wherever it is — only code and
+configuration suffixes are searched, judged by the last suffix of the name —
+because an invented alert name can be written into any document, and calling
+it something else there does not make it real. A code or configuration file is
+read whole, comments and strings included: the gate cannot tell prose inside
+one from code, so a comment naming the word vouches for it as surely as the
+class that defines it. Reviewing that comment is the other half of the check. A
+rule defining `QueueBacklogGrowing` does not name a truncation of it: a prefix
+that matches two alerts is neither.
 
 ## Alerts with no page here
 

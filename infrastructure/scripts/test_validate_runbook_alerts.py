@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Proof that the runbook-to-rules gate refuses what it claims to refuse.
+"""Cases that make the runbook-to-rules gate go red on what it claims to refuse.
 
 Why this exists
 ---------------
@@ -13,8 +13,9 @@ A gate is only evidence once it has been seen to go red, and this one has more
 ways to go quietly green than most: the citation shape could stop matching, the
 escape hatch could be used to excuse an invented name, the derived counts could
 be compared against themselves, and the register of pages with no alert could
-be edited to agree with anything. Every case below builds a synthetic tree that
-differs from a known-good one in one respect and requires the gate to name it.
+be edited to agree with anything. Each case below builds a synthetic tree that
+differs from a known-good one in one respect, and requires the gate to refuse
+it by name or, where the case expects a pass, to pass it.
 
 The zero-and-two drift cases are the finding itself: a tree with no invented
 name passes, and a tree with two fails naming both.
@@ -27,15 +28,28 @@ on the real tree and on the synthetic trees here, and `check_threshold` below
 pins the value at eight regardless. Write a seven-letter alert tomorrow and the
 same refusal names it.
 
+What the gate reads of a page is pinned at the forms its grammar describes. A
+fence closes only at a run of its own character at least as long, with
+nothing after it: a tilde fence holding a line of backticks, the mirror case,
+a shorter run, and a run of backticks with a word after it do not close one,
+and a line of backticks with a backtick after it, or indented four spaces or
+by a tab, does not open one. A fence never closed hides the rest of the page.
+The places attack has found where that grammar and a Markdown renderer part
+company are not cases here; the gate's docstring lists them with a command
+counting each on the real pages.
+
 The escape hatch is only as strict as its corroboration, so that is pinned too:
 a truncation of a real alert (`QueueBacklog`, inside `QueueBacklogGrowing`) is
-not named by the rule that contains it; this gate and this file, which quote
-invented names as fixtures, cannot vouch for them; a document cannot vouch for
-a word wherever it sits -- under `docs/`, beside the rules, at the repository
-root -- because the only thing an invented alert name needs to pass is a
-document that names it; and a dependency's code or another branch's worktree
-is not this tree's. The limit the gate states for itself is pinned from the
-other side: a comment in a rule file does vouch, because a code or
+not named by the rule that contains it, and a word joined to a longer
+identifier by an underscore is not named either; this gate and this file,
+which quote invented names as fixtures, cannot vouch for them; a file ending
+`.md` or `.txt` cannot vouch for a word at any of the five places the cases
+put one -- under `docs/`, beside the rules, at the repository root, in an
+application, as a plain-text note -- because the only thing an invented alert
+name needs to pass is a document that names it, and nor can a configuration
+file under top-level `docs/`; and a dependency's code or another branch's
+worktree is not this tree's. The limit the gate states for itself is pinned
+from the other side: a comment in a rule file does vouch, because a code or
 configuration file is read whole, and if that ever changes the gate's
 docstring has to change with it.
 
@@ -230,6 +244,63 @@ CASES: list[tuple[str, dict, str | None]] = [
         {"pages": queue_page("```", "grep `NotReadHereAtAll` /var/log", "```")},
         None,
     ),
+    (
+        "an alert name inside a tilde fence is not read as a citation",
+        {"pages": queue_page("~~~", "grep `NotReadHereAtAll` /var/log", "~~~")},
+        None,
+    ),
+    (
+        "a fence never closed hides the rest of the page",
+        {"pages": queue_page("```", "grep `NotReadHereAtAll` /var/log")},
+        None,
+    ),
+    (
+        # The round-three rejection: one flag for both kinds of fence took the
+        # backticks as a close and the second tilde line as a new open.
+        "a tilde fence is not closed by a line of backticks, so what follows it is read",
+        {"pages": queue_page("~~~", "```", "~~~", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a backtick fence is not closed by a line of tildes, so what follows it is read",
+        {"pages": queue_page("```", "~~~", "```", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a fence is not closed by a shorter run, so what follows it is read",
+        {"pages": queue_page("````", "```", "````", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a fence is closed by a longer run of its own character",
+        {"pages": queue_page("```", "make queue", "`````", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a fence is closed by a run indented three spaces with spaces after it",
+        {"pages": queue_page("```", "make queue", "   ```  ", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a line of backticks with a word after it does not close a fence",
+        {"pages": queue_page("```", "make queue", "```bash", "grep `NotReadHereAtAll` /var/log", "```")},
+        None,
+    ),
+    (
+        "a line of backticks with a backtick after it opens no fence",
+        {"pages": queue_page("``` `x`", "`QueueStalled` fires when nothing completes.", "```")},
+        "docs/runbooks/queue-backlog.md:8: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a line of backticks indented four spaces opens no fence",
+        {"pages": queue_page("Before the block.", "", "    ```", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "a line of backticks indented by a tab opens no fence",
+        {"pages": queue_page("Before the block.", "", "\t```", "", "`QueueStalled` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:11: `QueueStalled` is cited as an alert",
+    ),
     # -- the escape hatch, and the abuses of it that are refused ---------
     (
         "a word declared not-an-alert on the page, and named outside docs/, passes",
@@ -273,6 +344,36 @@ CASES: list[tuple[str, dict, str | None]] = [
             ("the repository README", "README.md"),
             ("an application changelog", "apps/control-plane/CHANGELOG.md"),
             ("a plain-text note", "infrastructure/monitoring/NOTES.txt"),
+        )
+    ],
+    (
+        # Top-level docs/ is excluded whatever the file type; an OpenAPI
+        # document there is a real YAML file, and it is not the platform's code.
+        "a configuration file under top-level docs/ does not vouch for a word",
+        {
+            "pages": queue_page(
+                "`ProviderTasksIndeterminate` fires on them.",
+                "<!-- not-an-alert: ProviderTasksIndeterminate - it is only prose now, honestly -->",
+            ),
+            "other": {"docs/openapi.yaml": "components:\n  schemas:\n    ProviderTasksIndeterminate: {}\n"},
+        },
+        "no code or configuration file outside docs/ names it",
+    ),
+    *[
+        (
+            f"a longer identifier joined by an underscore does not name the word ({where})",
+            {
+                "pages": queue_page(
+                    "`ProviderTasksIndeterminate` fires on them.",
+                    "<!-- not-an-alert: ProviderTasksIndeterminate - it is only prose now, honestly -->",
+                ),
+                "other": {"apps/control-plane/app/Metrics.php": f"<?php\n\nconst NAME = '{identifier}';\n"},
+            },
+            "no code or configuration file outside docs/ names it",
+        )
+        for where, identifier in (
+            ("after it", "ProviderTasksIndeterminate_total"),
+            ("before it", "lynomia_ProviderTasksIndeterminate"),
         )
     ],
     *[

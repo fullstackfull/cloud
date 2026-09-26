@@ -433,7 +433,7 @@ jobs:
       - name: Runbooks name alerts that exist
         run: python3 infrastructure/scripts/validate-runbook-alerts.py infrastructure
 
-      - name: The runbook alert gate still refuses what it claims to refuse
+      - name: The runbook alert gate still refuses each case its self-test pins
         run: python3 infrastructure/scripts/test_validate_runbook_alerts.py
 
       - name: Ansible syntax
