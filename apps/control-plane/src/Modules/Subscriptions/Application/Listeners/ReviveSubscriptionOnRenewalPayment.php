@@ -76,6 +76,28 @@ final class ReviveSubscriptionOnRenewalPayment implements ShouldQueue
             return;
         }
 
+        if ($subscription->status->isTerminal()) {
+            /*
+             * Paid after the subscription ended. Nothing can revive it —
+             * CANCELLED and TERMINATED have no way out — and asking would
+             * throw on every retry until the job reached failed_jobs. A
+             * subscription ended because its service ended has its unpaid
+             * invoices voided (EndTheSubscriptionWithItsService), and a
+             * capture that lands on a voided invoice goes to the wallet
+             * (CompensateUncollectableCapture) without announcing a payment.
+             * Reaching here therefore means an invoice that was not voided —
+             * one already partly paid, or a subscription ended another way —
+             * and the warning is what an operator reconciles it from.
+             */
+            Log::warning('A renewal invoice was paid for a subscription that has already ended.', [
+                'invoice_id' => $event->invoiceId,
+                'subscription_id' => $event->subscriptionId,
+                'status' => $subscription->status->value,
+            ]);
+
+            return;
+        }
+
         /*
          * recordSuccessfulPayment is idempotent by construction: it resets the
          * dunning counters whether or not the status moves, and

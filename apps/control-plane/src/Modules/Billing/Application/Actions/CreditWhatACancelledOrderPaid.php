@@ -47,9 +47,10 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * second time in the wallet.
  *
  * Computed under the invoice's row lock, which is the lock SettleInvoice and
- * the refund recorder take, and posted under a key naming the invoice and the
- * figure it credits up to, so a retried job or a concurrent run credits the
- * remainder once and a second run finds nothing left.
+ * the refund recorder take, so a retried job or a concurrent run waits for
+ * the first, then counts its credit among what is already in the wallet and
+ * finds nothing left. The entry is also posted under a key naming the invoice
+ * and the figure it credits up to, which the ledger will not post twice.
  *
  * The wallet and not the card, for the reason CompensateUncollectableCapture
  * gives: nothing automatic pays money out; a customer who wants it back on the
@@ -105,7 +106,7 @@ final readonly class CreditWhatACancelledOrderPaid
         /** @var Customer $customer */
         $customer = $invoice->customer()->firstOrFail();
 
-        $entry = $this->wallet->credit(
+        $this->wallet->credit(
             wallet: $this->wallet->walletFor($customer, $invoice->currency),
             amount: Money::ofMinor($remainderMinor, $invoice->currency),
             // Stored value the customer handed over that no delivery claims:
@@ -128,6 +129,12 @@ final readonly class CreditWhatACancelledOrderPaid
             invoiceId: (string) $invoice->getKey(),
         );
 
-        return $entry->wasRecentlyCreated ? $remainderMinor : 0;
+        /*
+         * The remainder is what this call moved. A second run under the same
+         * lock finds it already in the wallet and returns zero above; the
+         * idempotency key is a backstop for the ledger, not the thing that
+         * makes a retry credit nothing.
+         */
+        return $remainderMinor;
     }
 }

@@ -8,6 +8,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Lynomia\Modules\Audit\Application\Actions\RecordAuditEntry;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
+use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\SharedHosting\Application\Actions\EndHostingService;
 use Lynomia\Modules\SharedHosting\Application\Actions\ResetHostingAccountPassword;
@@ -145,9 +147,19 @@ final class HostingController
      *
      * Once the panel has removed it, the service the account was bought as
      * ends too (EndHostingService::afterTheAccountEnded), which moves the
-     * order and ends the subscription. The reverse of the rule above: a
+     * order and ends the subscription — for an operator who also holds
+     * service.terminate, since that is what ending a service needs on every
+     * route. The reverse of the rule above: a
      * service row that says live while its site is gone is billed for ever.
      */
+    private function servesALiveService(HostingAccount $account): bool
+    {
+        return $account->service_id !== null && Service::query()
+            ->whereKey($account->service_id)
+            ->where('status', '!=', ServiceStatus::Terminated->value)
+            ->exists();
+    }
+
     public function terminate(Request $request, string $account): JsonResponse
     {
         $found = HostingAccount::query()->findOrFail($account);
@@ -174,8 +186,21 @@ final class HostingController
             true,
         );
 
-        if (! $withinTheRoutesGrant && $request->user()?->can(Permission::ServiceTerminate->value) !== true) {
+        $mayEndAService = $request->user()?->can(Permission::ServiceTerminate->value) === true;
+
+        if (! $withinTheRoutesGrant && ! $mayEndAService) {
             abort(403, 'Destroying an account that is not waiting out its retention window needs permission to terminate a service.');
+        }
+
+        /*
+         * An account that is already gone has nothing left to destroy, so the
+         * only thing this request could still do is end the service it served
+         * — and ending a service is service.terminate's to grant, as it is on
+         * the service route. Without it, the request is refused rather than
+         * allowed to cancel a live service's billing through the weaker key.
+         */
+        if ($found->status === HostingAccountStatus::Terminated && ! $mayEndAService && $this->servesALiveService($found)) {
+            abort(403, 'Ending the service this account served needs permission to terminate a service.');
         }
 
         $terminated = app(TerminateHostingAccount::class)->execute($found, force: $force);
@@ -185,8 +210,16 @@ final class HostingController
          * and with it the order that follows the service and the subscription
          * that bills for it (I-1). Before this the route left all three
          * reading `active` for an account it had just deleted.
+         *
+         * Only for an operator who may end a service. One holding
+         * hosting_account.manage alone may still clear a suspended account
+         * whose window has run out — the route's own purpose — and the
+         * suspended service beside it is ended by the retention sweep
+         * (EndExpiredServices), which reaches it through the same window.
          */
-        $endedService = app(EndHostingService::class)->afterTheAccountEnded($terminated);
+        $endedService = $mayEndAService
+            ? app(EndHostingService::class)->afterTheAccountEnded($terminated)
+            : null;
 
         app(RecordAuditEntry::class)->execute(
             action: AuditAction::HostingAccountTerminated,

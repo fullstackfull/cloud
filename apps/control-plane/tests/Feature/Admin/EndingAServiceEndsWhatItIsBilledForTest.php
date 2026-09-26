@@ -8,7 +8,10 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
@@ -23,11 +26,14 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
+use Lynomia\Modules\SharedHosting\Application\Actions\EndHostingService;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingAccountStatus;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
 use Lynomia\Modules\Subscriptions\Application\Actions\TransitionSubscription;
+use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Support\BuysSharedHosting;
 use Tests\TestCase;
@@ -211,6 +217,118 @@ final class EndingAServiceEndsWhatItIsBilledForTest extends TestCase
 
         $this->assertSame(SubscriptionStatus::Active, $subscription->refresh()->status);
         $this->assertTrue($subscription->auto_renew);
+    }
+
+    #[Test]
+    public function an_open_renewal_invoice_is_withdrawn_when_the_service_ends(): void
+    {
+        /*
+         * The verifier's probe: a renewal was issued and not paid, dunning
+         * began, and an operator ended the service. The invoice stayed
+         * payable, and paying it reached ReviveSubscriptionOnRenewalPayment,
+         * which threw cancelled → active on every retry.
+         */
+        [, $service, , $subscription] = $this->liveHosting();
+
+        $this->travelTo($subscription->next_invoice_at?->addMinute());
+        app(RenewDueSubscriptions::class)->execute();
+
+        /** @var Invoice $renewal */
+        $renewal = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', InvoiceStatus::Open->value)->sole();
+        app(TransitionSubscription::class)->execute($subscription->refresh(), SubscriptionStatus::PastDue);
+
+        $this->actingAs($this->operator())
+            ->deleteJson('/api/admin/services/'.$service->getKey(), ['reason' => 'Erasure requested, ticket 7740.', 'force' => true])
+            ->assertStatus(202);
+
+        $this->assertTrue($subscription->refresh()->status->isTerminal());
+        $this->assertSame(InvoiceStatus::Void, $renewal->refresh()->status, 'An ended service left an invoice the customer could still pay.');
+
+        try {
+            app(PayInvoiceFromWallet::class)->execute($subscription->customer()->firstOrFail(), $renewal, 'pay-after-the-end-1');
+            $this->fail('A renewal was paid for a service that has ended.');
+        } catch (InvoiceNotPayableException $e) {
+            $this->assertSame('invoice.not_payable', $e->errorCode());
+        }
+    }
+
+    #[Test]
+    public function a_payment_announced_for_an_ended_subscription_does_not_fail_the_job(): void
+    {
+        /*
+         * The listener's own guard, for an invoice that was not voided (one
+         * already partly paid, or a subscription ended another way): it
+         * cannot revive an ended subscription, and must not throw trying.
+         */
+        $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $subscription = Subscription::factory()->cancelled()->create(['customer_id' => $customer->getKey()]);
+
+        app(ReviveSubscriptionOnRenewalPayment::class)->handle(new InvoicePaid(
+            invoiceId: '01jzzzzzzzzzzzzzzzzzzzzzzz',
+            customerId: (string) $customer->getKey(),
+            orderId: null,
+            subscriptionId: (string) $subscription->getKey(),
+            paidAt: CarbonImmutable::now(),
+        ));
+
+        $this->assertSame(SubscriptionStatus::Cancelled, $subscription->refresh()->status);
+    }
+
+    #[Test]
+    public function the_hosting_route_ends_a_service_only_for_an_operator_who_may_end_one(): void
+    {
+        /*
+         * An account already terminated beside a live service (the state
+         * I-1 left behind). Deleting it again destroys nothing, so the only
+         * effect left is ending the service and its billing — which is
+         * service.terminate's to grant, as on the service route.
+         */
+        [$account, $service, , $subscription] = $this->liveHosting();
+        $account->forceFill(['status' => HostingAccountStatus::Terminated])->save();
+
+        $manager = User::factory()->create();
+        $manager->givePermissionTo([Permission::HostingAccountManage->value]);
+
+        $this->actingAs($manager->fresh() ?? $manager)
+            ->deleteJson('/api/admin/hosting-accounts/'.$account->getKey(), ['reason' => 'Tidying terminated accounts.'])
+            ->assertStatus(403);
+
+        $this->assertSame(ServiceStatus::Active, $service->fresh()?->status);
+        $this->assertSame(SubscriptionStatus::Active, $subscription->refresh()->status);
+
+        // The same request from an operator who may end a service does.
+        $this->actingAs($this->operator())
+            ->deleteJson('/api/admin/hosting-accounts/'.$account->getKey(), ['reason' => 'Tidying terminated accounts.'])
+            ->assertOk();
+
+        $this->assertSame(ServiceStatus::Terminated, $service->fresh()?->status);
+        $this->assertBillingHasEnded($subscription);
+    }
+
+    #[Test]
+    public function a_service_that_cannot_end_from_where_it_stands_is_left_for_its_build(): void
+    {
+        /*
+         * An operator forced out the pending account of a build still in
+         * flight. PROVISIONING has no edge to TERMINATED; the service is left
+         * for the build's own outcome rather than forced, and nothing throws
+         * after the panel has already been asked.
+         */
+        $customer = Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']);
+        $service = Service::factory()->provisioning()->create([
+            'customer_id' => $customer->getKey(),
+            'kind' => 'shared_hosting',
+        ]);
+
+        $account = HostingAccount::factory()->create([
+            'hosting_node_id' => $this->sharedHostingNode()->getKey(),
+            'customer_id' => $customer->getKey(),
+            'service_id' => $service->getKey(),
+            'status' => HostingAccountStatus::Terminated,
+        ]);
+
+        $this->assertNull(app(EndHostingService::class)->afterTheAccountEnded($account));
+        $this->assertSame(ServiceStatus::Provisioning, $service->fresh()?->status);
     }
 
     private function assertBillingHasEnded(Subscription $subscription): void

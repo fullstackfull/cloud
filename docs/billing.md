@@ -148,7 +148,9 @@ A renewal is not issued for a service that was never delivered (a `PENDING` serv
 platform could not place, or a `FAILED` build) or that has ended (`TERMINATED`). Ending a
 service — through either operator route, the retention sweep, or a VPS destroy job —
 ends the subscription that paid for it: a suspended subscription is terminated, an active
-or past-due one is cancelled.
+or past-due one is cancelled, and its invoices that are still open and have taken no money
+are voided. Through the hosting-account route that step needs `service.terminate`, as it
+does on the service route.
 
 ## Payment confirmation
 

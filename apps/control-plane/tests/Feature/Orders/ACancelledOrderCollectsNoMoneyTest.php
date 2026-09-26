@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Orders;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Events\CallQueuedListener;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Lynomia\Modules\Billing\Application\Actions\CreditWhatACancelledOrderPaid;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
@@ -304,6 +306,46 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
         $this->assertSame(OrderStatus::Cancelled, $order->refresh()->status);
         $this->assertSame(0, Service::query()->where('order_id', $order->getKey())->count());
         $this->assertSame(0, Subscription::query()->where('order_id', $order->getKey())->count());
+    }
+
+    #[Test]
+    public function the_cancel_decides_on_the_invoice_under_its_lock_before_it_moves_the_order(): void
+    {
+        /*
+         * The refusal above is only as good as the read it makes. Without the
+         * invoice's row lock, a settlement committing between the read and
+         * the order's move is invisible, and the window this file is about
+         * reopens under concurrency. A single-process test cannot interleave
+         * two transactions, so this holds the mechanism: the cancel reads the
+         * invoice FOR UPDATE — the lock SettleInvoice takes before it applies
+         * money — and does so before the order is written.
+         */
+        [$customer] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+
+        $statements = [];
+        DB::listen(static function (QueryExecuted $query) use (&$statements): void {
+            $statements[] = strtolower($query->sql);
+        });
+
+        app(CancelOrder::class)->execute($order);
+
+        $lockedInvoiceRead = null;
+        $orderWrite = null;
+
+        foreach ($statements as $i => $sql) {
+            if ($lockedInvoiceRead === null && str_contains($sql, 'from "invoices"') && str_contains($sql, 'for update')) {
+                $lockedInvoiceRead = $i;
+            }
+
+            if ($orderWrite === null && str_starts_with($sql, 'update "orders"')) {
+                $orderWrite = $i;
+            }
+        }
+
+        $this->assertNotNull($lockedInvoiceRead, 'The cancel never read the order\'s invoice under a row lock.');
+        $this->assertNotNull($orderWrite, 'Precondition: the order was written.');
+        $this->assertLessThan($orderWrite, $lockedInvoiceRead, 'The invoice was locked only after the order had already moved.');
     }
 
     #[Test]
