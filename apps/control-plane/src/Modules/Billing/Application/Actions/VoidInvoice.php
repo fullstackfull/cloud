@@ -10,16 +10,25 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Exceptions\PaidInvoiceCannotBeVoidedException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Withdraws an invoice that should not have been issued.
  *
- * Voiding is only legal before any money has arrived, and the test is the
+ * Voiding is only legal while the invoice holds no money, and the test is the
  * money rather than the status: an invoice that is still open because it was
  * only half paid has taken a payment, and voiding it would leave that payment
  * attached to a document the platform says never applied. The state machine
  * refuses paid → void on its own; this action refuses the partially paid case
  * the machine cannot see.
+ *
+ * One exception: money already handed back to the wallet against it (a
+ * top-up carrying its id). An invoice some of whose payment went back that
+ * way may be voided once nothing is left on it - what was paid, less what was
+ * refunded, less what went back to the wallet. That is a lapsing plan-change
+ * upgrade, whose part payment the renewal returns before voiding it. Without
+ * a wallet return, any money on the invoice refuses the void as before.
  *
  * A void invoice keeps its number. Numbers are a series a tax authority may
  * audit, and a gap that turns out to be a withdrawn document is answerable in
@@ -44,7 +53,18 @@ final readonly class VoidInvoice
                 return $locked;
             }
 
-            if ($locked->amountPaid()->isPositive()) {
+            $returnedToTheWallet = (int) WalletTransaction::query()
+                ->where('invoice_id', $locked->getKey())
+                ->where('kind', WalletTransactionKind::Topup->value)
+                ->sum('amount_minor');
+
+            $held = $locked->amount_paid_minor - $locked->amount_refunded_minor - $returnedToTheWallet;
+
+            // Money on it and none of it handed back through the wallet is the
+            // original rule, unchanged - a refunded invoice included, which
+            // is refused here for its money before the state machine refuses
+            // the transition.
+            if (($locked->amountPaid()->isPositive() && $returnedToTheWallet === 0) || $held > 0) {
                 throw PaidInvoiceCannotBeVoidedException::forInvoice(
                     (string) $locked->getKey(),
                     $locked->amountPaid(),

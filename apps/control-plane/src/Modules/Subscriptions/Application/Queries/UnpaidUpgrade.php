@@ -56,8 +56,8 @@ final readonly class UnpaidUpgrade
     }
 
     /**
-     * The upgrade's invoice, when it is open and nothing has been paid on it -
-     * the one a renewal lapses by voiding.
+     * The upgrade's invoice, when it is open - the one a renewal lapses,
+     * returning whatever was paid on it and voiding it.
      */
     public function openInvoiceOf(Subscription $subscription): ?Invoice
     {

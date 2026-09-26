@@ -35,10 +35,13 @@ use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewDueSubscriptions;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 use Throwable;
@@ -258,21 +261,129 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
-    public function an_upgrade_with_money_already_on_its_invoice_does_not_lapse_and_renews_at_the_old_amount(): void
+    public function one_fils_paid_on_the_upgrade_does_not_keep_it_alive_across_the_renewal(): void
     {
         [$customer, $user] = $this->accountWithOwner();
         $subscription = $this->paidSubscriptionOn($customer, $this->small);
         $this->serviceWithMachine($customer, $subscription);
 
-        $this->changePlan($user, $subscription, $this->large, 'partial-up-1')->assertOk();
+        $this->changePlan($user, $subscription, $this->large, 'fils-up-1')->assertOk();
         $upgrade = $this->openUpgradeInvoice($subscription);
-        // Part-paid: a void would disown money that arrived, so it cannot lapse.
-        $upgrade->forceFill(['amount_paid_minor' => 1_000])->save();
+
+        // One fils in the wallet, spent on the upgrade: a part payment.
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(wallet: $ledger->walletFor($customer, 'KWD'), amount: Money::ofMinor(1, 'KWD'), kind: WalletTransactionKind::Topup, description: 'top-up');
+        $this->actingAs($user)
+            ->withHeader('Idempotency-Key', 'fils-wallet-pay-1')
+            ->postJson("/api/v1/invoices/{$upgrade->id}/wallet-credit", [])
+            ->assertOk();
+        $this->assertSame(1, $upgrade->fresh()?->amount_paid_minor);
 
         $line = $this->renewalLineAfterThePeriod($subscription);
 
-        $this->assertSame(InvoiceStatus::Open, $upgrade->fresh()?->status);
-        $this->assertSame(9_000, $line->unit_amount_minor, 'Billed at what was paid for until the upgrade is.');
+        // It lapsed all the same: the fils went back, the invoice is void.
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(1, $this->walletOf($customer));
+        $this->assertSame($this->small->id, $subscription->fresh()?->plan_id);
+        $this->assertSame(9_000, $line->unit_amount_minor);
+
+        // And the rest cannot be paid to get the large plan for the new period.
+        try {
+            app(SettleInvoice::class)->execute(
+                $upgrade->fresh(),
+                Transaction::factory()->forCustomer($customer)->create(['amount_minor' => $upgrade->total_minor - 1, 'currency' => 'KWD']),
+            );
+        } catch (Throwable) {
+        }
+
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+    }
+
+    #[Test]
+    public function a_lapse_returns_exactly_what_the_invoice_still_holds_and_only_once(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'held-up-1')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+        $upgrade->forceFill(['amount_paid_minor' => 1_000])->save();
+
+        // 400 of it was already returned to the wallet against this invoice.
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(
+            wallet: $ledger->walletFor($customer, 'KWD'),
+            amount: Money::ofMinor(400, 'KWD'),
+            kind: WalletTransactionKind::Topup,
+            description: 'returned earlier',
+            invoiceId: (string) $upgrade->getKey(),
+        );
+
+        $this->renewalLineAfterThePeriod($subscription);
+        // A second sweep, as a redelivered or re-run renewal would be.
+        app(RenewDueSubscriptions::class)->execute();
+
+        $returned = WalletTransaction::query()
+            ->where('invoice_id', $upgrade->getKey())
+            ->where('kind', WalletTransactionKind::Topup->value)
+            ->pluck('amount_minor')
+            ->sort()
+            ->values()
+            ->all();
+
+        $this->assertSame([400, 600], $returned, 'The 600 still held, once; never the 1.000 again.');
+        $this->assertSame(1_000, $this->walletOf($customer));
+        $this->assertSame(InvoiceStatus::Void, $upgrade->fresh()?->status);
+    }
+
+    #[Test]
+    public function an_upgrade_whose_invoice_was_never_paid_and_is_not_open_renews_at_the_old_amount(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'uncollectible-up-1')->assertOk();
+        // Written off as uncollectible: not open, so nothing lapses it.
+        $this->openUpgradeInvoice($subscription)->forceFill(['status' => InvoiceStatus::Uncollectible])->save();
+
+        $this->assertSame(9_000, $this->renewalLineAfterThePeriod($subscription)->unit_amount_minor);
+    }
+
+    #[Test]
+    public function a_renewal_locks_the_lapsing_invoice_before_the_subscription(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+
+        $this->changePlan($user, $subscription, $this->large, 'lock-order-up-1')->assertOk();
+
+        $locks = [];
+        DB::listen(static function (QueryExecuted $query) use (&$locks): void {
+            if (! str_contains($query->sql, 'for update')) {
+                return;
+            }
+
+            foreach (['invoices', 'subscriptions'] as $table) {
+                if (str_contains($query->sql, 'from "'.$table.'"')) {
+                    $locks[] = $table;
+                }
+            }
+        });
+
+        $this->renewalLineAfterThePeriod($subscription);
+
+        /*
+         * VoidInvoice locks the invoice and then (through the restore) the
+         * subscription. The renewal takes the two in the same order, so a
+         * renewal and an operator's void of the same invoice cannot deadlock.
+         */
+        $this->assertNotSame([], $locks);
+        $this->assertSame('invoices', $locks[0], 'The first row the renewal locks is the lapsing invoice: '.implode(', ', $locks));
+        $this->assertContains('subscriptions', $locks);
     }
 
     #[Test]
