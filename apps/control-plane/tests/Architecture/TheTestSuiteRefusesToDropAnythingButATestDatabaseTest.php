@@ -19,6 +19,7 @@ use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
 use SplFileInfo;
+use Tests\Support\LeavesNothingCommitted;
 use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 use Throwable;
@@ -77,6 +78,34 @@ final class TheTestSuiteRefusesToDropAnythingButATestDatabaseTest extends TestCa
         yield 'a connection pointed somewhere the configuration does not say' => ['testing', 'pgsql', 'pgsql', 'lynomia_test', 'lynomia', 'the configured test database is "lynomia_test"'];
         yield 'a connection naming no database' => ['testing', 'pgsql', 'pgsql', '', '', 'the configured test database is ""'];
         yield 'a database not named as a test database' => ['testing', 'pgsql', 'pgsql', 'lynomia', 'lynomia', 'has to be named as a test database'];
+
+        // A name that merely contains the letters. The substring rule let
+        // each of these through, and migrate:fresh then created and migrated
+        // lynomia_latest (measured in the re-audit).
+        foreach (['lynomia_latest', 'contest', 'attestation', 'lynomia_attested', 'latest_lynomia', 'lynomiatest', 'testlynomia', 'lynomia_testing', 'lynomia_tests'] as $name) {
+            yield "a name that only contains the letters: {$name}" => ['testing', 'pgsql', 'pgsql', $name, $name, 'has to be named as a test database'];
+        }
+    }
+
+    /**
+     * The names this programme and CI actually use, and the rule's edges.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function namesOfTestDatabases(): iterable
+    {
+        foreach (['lynomia_test', 'lynomia_test_r3g08', 'lynomia_test_f15m', 'LYNOMIA_TEST_X', 'test', 'test_lynomia', 'lynomia-test', 'lynomia.test.x'] as $name) {
+            yield $name => [$name];
+        }
+    }
+
+    #[Test]
+    #[DataProvider('namesOfTestDatabases')]
+    public function a_name_with_test_as_a_whole_word_is_a_test_database(string $name): void
+    {
+        TestDatabaseGuard::check('testing', 'pgsql', 'pgsql', $name, $name);
+
+        $this->assertTrue(TestDatabaseGuard::isNamedAsATestDatabase($name));
     }
 
     #[Test]
@@ -112,7 +141,7 @@ final class TheTestSuiteRefusesToDropAnythingButATestDatabaseTest extends TestCa
     #[Test]
     public function every_trait_that_destroys_schema_or_rows_is_guarded_and_a_transaction_alone_is_not(): void
     {
-        foreach ([RefreshDatabase::class, LazilyRefreshDatabase::class, DatabaseMigrations::class, DatabaseTruncation::class] as $trait) {
+        foreach ([RefreshDatabase::class, LazilyRefreshDatabase::class, DatabaseMigrations::class, DatabaseTruncation::class, LeavesNothingCommitted::class] as $trait) {
             $this->assertTrue(
                 TestDatabaseGuard::destroys(class_uses_recursive(self::userOf($trait))),
                 "{$trait} destroys schema or rows and must be guarded.",
@@ -171,6 +200,46 @@ final class TheTestSuiteRefusesToDropAnythingButATestDatabaseTest extends TestCa
             $reachedTheServer,
             "The trait reached the server before the guard refused: \"{$absent}\" was created by migrate:fresh, so the refusal came after the drop, not before it.",
         );
+    }
+
+    /**
+     * `LeavesNothingCommitted` empties every table in `tearDown()`, after the
+     * guard in `setUpTraits()` has run. A class that reaches the trait some
+     * other way — not through `Tests\TestCase`, or after repointing the
+     * connection mid-test — would truncate whatever the connection names, so
+     * the trait asks the guard itself, before its statement.
+     *
+     * Pointed at a database this server does not have, so that a missing
+     * guard fails on the connection rather than emptying anything.
+     */
+    #[Test]
+    public function leaving_nothing_committed_asks_the_guard_before_it_truncates(): void
+    {
+        $connection = (string) config('database.default');
+        $original = config("database.connections.{$connection}.database");
+        $absent = $this->aDatabaseThisServerDoesNotHave();
+
+        $user = new class
+        {
+            use LeavesNothingCommitted {
+                emptyEveryTable as public;
+            }
+        };
+
+        config()->set("database.connections.{$connection}.database", $absent);
+        DB::purge($connection);
+
+        try {
+            $user->emptyEveryTable();
+
+            $this->fail("emptyEveryTable() went ahead against \"{$absent}\"; the guard must refuse first.");
+        } catch (Throwable $refusal) {
+            $this->assertInstanceOf(RuntimeException::class, $refusal);
+            $this->assertStringContainsString("refuses to drop or empty \"{$absent}\"", $refusal->getMessage());
+        } finally {
+            config()->set("database.connections.{$connection}.database", $original);
+            DB::purge($connection);
+        }
     }
 
     private function theServerHas(string $database): bool
@@ -388,6 +457,10 @@ final class TheTestSuiteRefusesToDropAnythingButATestDatabaseTest extends TestCa
             DatabaseTruncation::class => new class
             {
                 use DatabaseTruncation;
+            },
+            LeavesNothingCommitted::class => new class
+            {
+                use LeavesNothingCommitted;
             },
             default => throw new RuntimeException("No user of {$trait} is written here; add one."),
         };

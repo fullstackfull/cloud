@@ -28,6 +28,7 @@ use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 use Tests\Support\RedisIndexForThisRun;
+use Tests\Support\TestDatabaseGuard;
 use Tests\TestCase;
 
 /**
@@ -283,11 +284,13 @@ abstract class WorkerHarness extends TestCase
          * rows — at which point conditions one to three all hold and the
          * schema is emptied anyway.
          *
-         * The same idiom the browser suite already uses, which insists its own
-         * database is named for what it is before it seeds fixed fixtures into
-         * it.
+         * The rule is {@see TestDatabaseGuard::isNamedAsATestDatabase()}, the
+         * one the schema-dropping traits are held to: `test` as a whole word
+         * of the name. A substring would admit `lynomia_latest`. The browser
+         * suite insists on the same idea for its own database before it seeds
+         * fixed fixtures into it.
          */
-        if (! str_contains(strtolower($target), 'test')) {
+        if (! TestDatabaseGuard::isNamedAsATestDatabase($target)) {
             throw new RuntimeException(sprintf(
                 'The worker harness refuses to empty "%s": a database it may empty has to be named as a test database.',
                 $target,
