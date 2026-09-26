@@ -24,15 +24,15 @@ namespace Lynomia\Modules\Dedicated\Domain\Enums;
  * An operator's act: `POST /api/admin/dedicated/{server}/retire` runs
  * `RetireDedicatedServer` behind the transition guard and the row lock, and
  * records the operator's evidence in the audit trail. It is a chassis leaving
- * the estate for good, not the tail of decommissioning —
- * `DecommissionDedicatedServer` writes `maintenance`, because a machine taken
- * back from a customer goes `active → maintenance → available` and its disks
- * are erased before it is sold again. Every other state lists `retired` among
- * its legal targets, seven doors in, and `retired` lists none out; that empty
- * list is the only thing standing between a machine sent for disposal and the
- * shelf, which `DecommissioningGivesTheAddressBackTest` pins through the
- * endpoints in both orders. That the state has a production writer at all is
- * held by `EveryStateAMachineCanEnterHasAProducerTest`.
+ * the estate for good, and decommissioning does not write it:
+ * `DecommissionDedicatedServer` takes a machine back from a customer into
+ * `maintenance`, and from there an operator either states that the disks are
+ * erased and returns it to stock, or retires it. Every other state lists
+ * `retired` among its legal targets, seven doors in, and `retired` lists none
+ * out; that empty list is the only thing standing between a machine sent for
+ * disposal and the shelf, which `DecommissioningGivesTheAddressBackTest` pins
+ * through the endpoints in both orders. That the state has a production
+ * writer at all is held by `EveryStateAMachineCanEnterHasAProducerTest`.
  *
  * ---------------------------------------------------------------------------
  * What nobody writes: the date
