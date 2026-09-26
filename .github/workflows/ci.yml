@@ -465,7 +465,10 @@ jobs:
           # Listed once, in an assignment `set -e` checks, and read from a
           # here-string: a pipeline's status is its last non-zero one, so a
           # failed listing followed by a grep with nothing to read is a 1.
-          tracked="$(git ls-files)"
+          # -z, because without it git quotes a name holding a non-ASCII
+          # byte, a quote or a backslash ("apps/\303\274/.env"), and a quoted
+          # name ends in a quote rather than in what the pattern looks for.
+          tracked="$(git ls-files -z | tr '\0' '\n')"
           env_files="$(mktemp)"
           scan grep -E '(^|/)\.env($|\.)' <<< "$tracked" > "$env_files" || true
           if scan grep -v '\.example$' "$env_files"; then
@@ -692,7 +695,8 @@ jobs:
             fi
             return "$status"
           }
-          tracked="$(git ls-files -- infrastructure)"
+          # -z: see the secret scan above; git quotes an unusual name otherwise.
+          tracked="$(git ls-files -z -- infrastructure | tr '\0' '\n')"
           if [ -z "$tracked" ]; then
             echo "::error::infrastructure/ has no tracked files; this scan would have nothing to scan."
             exit 1
@@ -706,7 +710,10 @@ jobs:
       # The scan steps above and in the other jobs read grep's exit status in
       # full, so that a scan which failed to run is not read as a clean one;
       # this runs each as written against throwaway repositories, including
-      # ones where grep or git grep is made to fail. It also holds the header
+      # ones where grep or git grep is made to fail, and then runs every step
+      # that defines `scan` over this checkout itself, so that a tracked file
+      # tripping a scan -- a test fixture, say -- fails here, where it is
+      # found, and not only in the job that runs the scan. It also holds the header
       # at the top of this file to the validators that refuse an empty
       # subject.
       - name: The scan steps still fail when a scan cannot run
@@ -782,11 +789,12 @@ jobs:
           # name with a space in it is one file, not two that do not exist.
           # A tracked symlink to a directory is skipped (there is one,
           # infrastructure/ansible/playbooks/group_vars); any other tracked
-          # name that is not a readable file -- which is what git's quoting of
-          # an unusual name looks like here -- fails the step rather than
-          # leaving the scan. The three excluded templates are matched as
-          # exact names.
-          listing="$(git -c core.quotePath=false ls-files -- "${specs[@]}")"
+          # name that is not a readable file (one deleted from the working
+          # tree, or one with a newline in it, which the listing splits) fails
+          # the step rather than leaving the scan. The three excluded templates are matched as
+          # exact names. -z, so that git does not quote a name with a
+          # non-ASCII byte, a quote or a backslash in it.
+          listing="$(git ls-files -z -- "${specs[@]}" | tr '\0' '\n')"
           templates=()
           while IFS= read -r file; do
             case "$file" in

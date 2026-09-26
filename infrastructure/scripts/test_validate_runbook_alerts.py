@@ -644,6 +644,9 @@ def check_threshold() -> list[str]:
 # A command in the gate's docstring, indented, followed by `#` and the output
 # it gives on this tree: `      grep -c x docs/runbooks/*.md    # 0`.
 MEASUREMENT = re.compile(r"^ {4,}(?P<command>\S.*?)\s{2,}# (?P<expected>\S+)\s*$")
+# Any indented line with a `#` and something after it looks like one; a line
+# that looks like one and does not parse is a measurement nobody checks.
+FIGURE_LIKE = re.compile(r"^ {4,}\S.*\s#\s*\S")
 
 
 def check_measurements() -> list[str]:
@@ -654,8 +657,10 @@ def check_measurements() -> list[str]:
     figure typed there once went on saying fourteen fence lines after a page
     added two, so every such line is run here, from the repository root, and
     its output compared with the figure written after it. At least one must be
-    found: a docstring whose measurements this can no longer read would
-    otherwise pass by checking none.
+    found, and a line that looks like one (indented, with a `#` and something
+    after it) but is not in that form is refused: a docstring whose
+    measurements this can no longer read would otherwise pass by checking
+    fewer of them, or none.
     """
     root = HERE.parent.parent
     problems: list[str] = []
@@ -663,6 +668,11 @@ def check_measurements() -> list[str]:
     for line in (gate.__doc__ or "").splitlines():
         found = MEASUREMENT.match(line)
         if not found:
+            if FIGURE_LIKE.match(line):
+                problems.append(
+                    f"{line.strip()!r} reads like a measurement and is not in the "
+                    f"`command  # figure` form this runs, so nothing checks it"
+                )
             continue
         measured += 1
         result = subprocess.run(

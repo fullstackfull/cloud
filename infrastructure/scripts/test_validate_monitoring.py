@@ -1011,6 +1011,51 @@ groups:
         "no service in docker-compose.monitoring.yml runs Loki",
     ),
     (
+        "a Loki service whose bind-mounted config file is missing is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "./loki/loki-config.yml:", "./loki/missing.yml:"),
+        }},
+        "loads its configuration from loki/missing.yml, which does not exist",
+    ),
+    (
+        # Docker lets the deepest mount win: a file mounted over a directory
+        # mount is what the container reads at that path.
+        "the config file is read through the deepest bind mount, as Docker resolves it",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "loki/real.yml": LOKI_WITH_RULER,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro\n",
+                "      - ./loki:/etc/loki:ro\n"
+                "      - ./loki/real.yml:/etc/loki/loki-config.yml:ro\n"),
+        }},
+        "loki/real.yml wires the ruler to http://alertmanager:9093 and mounts no rule files",
+    ),
+    (
+        # Go's flag package keeps the last value of a flag given twice.
+        "the last -config.file is the one read",
+        {"extra_yml": {
+            "loki/first.yml": "auth_enabled: false\n",
+            "loki/last.yml": LOKI_WITH_RULER,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                LOKI_COMMAND,
+                '    command: ["-config.file=/etc/loki/first.yml", "-config.file=/etc/loki/last.yml"]\n',
+            ).replace(
+                "      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro\n",
+                "      - ./loki:/etc/loki:ro\n"),
+        }},
+        "loki/last.yml wires the ruler to http://alertmanager:9093 and mounts no rule files",
+    ),
+    (
+        "a second Alertmanager service is held to the model as well as the first",
+        drift(compose=COMPOSE_ALERTMANAGER + (
+            "  alertmanager-standby:\n    image: prom/alertmanager:v0.31.0\n"
+        )),
+        "runs Alertmanager 'prom/alertmanager:v0.31.0' (service `alertmanager-standby`)",
+    ),
+    (
         "an unmodelled Alertmanager under another service key is refused",
         drift(compose=COMPOSE_ALERTMANAGER.replace("v0.28.1", "v0.31.0").replace(
             "  alertmanager:\n", "  alertmanager-primary:\n")),
@@ -1179,7 +1224,7 @@ def golden_failures() -> list[tuple[str, list[str]]]:
 # for the other checks and exit 0. The count is literal source in this file,
 # maintained by whoever edits the table, so adding or removing a case is a
 # deliberate edit of this number too.
-EXPECTED_CASES = 87
+EXPECTED_CASES = 91
 
 
 def main() -> int:

@@ -18,7 +18,9 @@ this script derives it from the tree.
 What it reads
 -------------
 Every directory under infrastructure/tofu, except those whose name starts
-with a dot (`.terraform/` is OpenTofu's own working directory). A directory is
+with a dot (`.terraform/` is OpenTofu's own working directory). A symbolic
+link to a directory is not followed: it is refused, so that what is validated
+is not decided by where a link points. A directory is
 a module when it holds a configuration file directly: a name ending `.tf`,
 `.tofu`, `.tf.json` or `.tofu.json`, which is what OpenTofu loads -- it does
 not read subdirectories, and an `.example` file is not configuration. A module
@@ -26,21 +28,25 @@ is called when another module's `module` block names it by a local `source`
 (one starting `./` or `../`), read from the text of a `.tf` or `.tofu` file by
 LOCAL_SOURCE and from the `module` object of a JSON one. A root module is one
 that no other calls, and validating it validates each module it calls, with
-the inputs it passes. A module no root calls is printed as a root of its own,
-so a module left behind by a refactor is still validated, standalone.
+the inputs it passes, and each module those call in turn. A module no other
+calls is printed as a root of its own, so a module left behind by a refactor
+is still validated, standalone.
 
 LOCAL_SOURCE is a pattern, not an HCL parser: it takes any `source = "./..."`
-or `source = "../..."` on a line that does not begin with `#` or `//`. A call
-commented out inside a `/* */` block, or after code on the same line, is still
-read as a call, and would make its module look called: if nothing else called
-it, it would drop out of what is validated. The self-test pins both readings.
+or `source = "../..."` on a line that does not begin with `#` or `//` and is
+not inside a heredoc (`<<EOT` or `<<-EOT` ending a line, through the line
+holding only `EOT`). A call commented out inside a `/* */` block, or after
+code on the same line, is still read as a call; it would make its module look
+called, and if nothing else called it, the module would be refused below as
+reached from no root rather than dropped. The self-test pins these readings.
 
 What it refuses
 ---------------
 Exit status 1, printing nothing to stdout, when infrastructure/tofu holds no
-configuration at all, when a local `source` names a directory that holds none,
-or when every module is called by another (a cycle, which OpenTofu refuses
-too). An empty answer would give the validate step nothing to run, which is
+configuration at all, when it holds a symbolic link to a directory, when a
+local `source` names a directory that holds none, or when a module is reached
+from no root -- modules that call only each other, which no validate would
+ever load, whether or not a real root stands beside them. An empty answer would give the validate step nothing to run, which is
 the silent pass this exists to end. Otherwise exit 0 and one root per line,
 relative to the repository root, sorted.
 
@@ -59,6 +65,27 @@ CONFIGURATION_SUFFIXES = (".tf", ".tofu", ".tf.json", ".tofu.json")
 
 # `source = "./modules/x"` or `source = "../x"`, anywhere in the text.
 LOCAL_SOURCE = re.compile(r"""\bsource\s*=\s*"(\.\.?/[^"]*)\"""")
+# A heredoc opening at the end of a line: `<<EOT` or `<<-EOT`.
+HEREDOC = re.compile(r"<<-?\s*([A-Za-z_][A-Za-z0-9_]*)\s*$")
+
+
+def code_text(text: str) -> str:
+    """`text` without whole-line `#` and `//` comments and heredoc bodies."""
+    kept: list[str] = []
+    closing: str | None = None
+    for line in text.splitlines():
+        if closing is not None:
+            if line.strip() == closing:
+                closing = None
+            continue
+        if line.lstrip().startswith(("#", "//")):
+            continue
+        opened = HEREDOC.search(line)
+        if opened:
+            closing = opened.group(1)
+            line = line[: opened.start()]
+        kept.append(line)
+    return "\n".join(kept)
 
 
 def configuration_files(directory: Path) -> list[Path]:
@@ -83,11 +110,7 @@ def local_sources(path: Path) -> list[str]:
                 if isinstance(source, str) and source.startswith(("./", "../")):
                     found.append(source)
         return found
-    lines = [
-        line for line in path.read_text().splitlines()
-        if not line.lstrip().startswith(("#", "//"))
-    ]
-    return LOCAL_SOURCE.findall("\n".join(lines))
+    return LOCAL_SOURCE.findall(code_text(path.read_text()))
 
 
 def root_modules(repo_root: Path) -> tuple[list[Path], list[str]]:
@@ -97,8 +120,16 @@ def root_modules(repo_root: Path) -> tuple[list[Path], list[str]]:
         return [], [f"{tree} does not exist, so there is no OpenTofu configuration to validate"]
 
     modules: dict[Path, list[Path]] = {}
+    links: list[str] = []
     for current, directories, _ in os.walk(tree):
         directories[:] = sorted(d for d in directories if not d.startswith("."))
+        for name in directories:
+            if (Path(current) / name).is_symlink():
+                links.append(
+                    f"{(Path(current) / name).relative_to(repo_root)} is a symbolic link to a "
+                    f"directory; it is not followed, so a module behind it would never be "
+                    f"validated. Move the module into the tree, or remove the link"
+                )
         files = configuration_files(Path(current))
         if files:
             modules[Path(current).resolve()] = files
@@ -108,8 +139,9 @@ def root_modules(repo_root: Path) -> tuple[list[Path], list[str]]:
             f"{tree}; `tofu validate` would have nothing to parse, and would say it is valid"
         ]
 
-    problems: list[str] = []
+    problems: list[str] = list(links)
     called: set[Path] = set()
+    calls: dict[Path, set[Path]] = {directory: set() for directory in modules}
     for directory, files in modules.items():
         for path in files:
             for source in local_sources(path):
@@ -121,11 +153,27 @@ def root_modules(repo_root: Path) -> tuple[list[Path], list[str]]:
                     )
                 elif target != directory:
                     called.add(target)
+                    calls[directory].add(target)
     roots = sorted(set(modules) - called)
     if not roots and not problems:
         problems.append(
             "every module under infrastructure/tofu is called by another, so none is "
             "a root to validate from"
+        )
+    reached: set[Path] = set()
+    pending = list(roots)
+    while pending:
+        module = pending.pop()
+        if module not in reached:
+            reached.add(module)
+            pending.extend(calls[module])
+    stranded = sorted(set(modules) - reached)
+    if roots and stranded:
+        problems.append(
+            "reached from no root module, so no validate would load them: "
+            + ", ".join(module.relative_to(repo_root.resolve()).as_posix() for module in stranded)
+            + ". Modules that call only each other are a cycle OpenTofu refuses; call one "
+            "from a root, or remove them"
         )
     return roots, problems
 

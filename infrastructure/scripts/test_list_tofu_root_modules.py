@@ -76,11 +76,18 @@ def with_files(base: dict[str, str | None], **changes: str | None) -> dict[str, 
     return {path: body for path, body in files.items() if body is not None}
 
 
+# A body starting with this makes the path a symbolic link to the rest.
+SYMLINK = "\0symlink:"
+
+
 def build(root: Path, files: dict[str, str]) -> None:
     for relative, body in files.items():
         target = root / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body)
+        if body.startswith(SYMLINK):
+            target.symlink_to(body[len(SYMLINK):], target_is_directory=True)
+        else:
+            target.write_text(body)
 
 
 def discover(files: dict[str, str]) -> tuple[int, str, str]:
@@ -157,6 +164,31 @@ CASES: list[tuple[str, dict[str, str], list[str] | None, str]] = [
         "OpenTofu's own .terraform directory is not a module",
         with_files(LAYOUT, **{"infrastructure/tofu/.terraform/modules/vm/main.tf": MODULE}),
         ["infrastructure/tofu"], "",
+    ),
+    (
+        # A root and its modules validate; a pair that call only each other
+        # beside them is reached from no root, so nothing would validate it.
+        "modules that call only each other, beside a real root, are refused",
+        with_files(LAYOUT, **{
+            "infrastructure/tofu/modules/a/main.tf": 'module "b" {\n  source = "../b"\n}\n',
+            "infrastructure/tofu/modules/b/main.tf": 'module "a" {\n  source = "../a"\n}\n',
+        }),
+        None, "reached from no root module",
+    ),
+    (
+        "a source line inside a heredoc is text, not a call",
+        with_files(LAYOUT, **{"infrastructure/tofu/main.tf": ROOT_MAIN.replace(
+            'module "dns" {\n  source = "./modules/dns"\n}\n',
+            'locals {\n  note = <<-EOT\n    source = "./modules/dns"\n  EOT\n}\n')}),
+        ["infrastructure/tofu", "infrastructure/tofu/modules/dns"], "",
+    ),
+    (
+        # os.walk does not follow a symbolic link to a directory, so a module
+        # behind one would never be found; it is refused rather than followed,
+        # so what is validated is not decided by where a link points.
+        "a symbolic link to a directory under infrastructure/tofu is refused",
+        with_files(LAYOUT, **{"infrastructure/tofu/modules/linked": SYMLINK + "vm"}),
+        None, "is a symbolic link to a directory",
     ),
     (
         "modules that only call each other leave no root, and are refused",
