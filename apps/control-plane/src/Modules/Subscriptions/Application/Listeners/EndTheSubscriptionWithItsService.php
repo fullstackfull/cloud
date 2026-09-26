@@ -103,6 +103,12 @@ final readonly class EndTheSubscriptionWithItsService
             return;
         }
 
+        // Its invoices first, then the subscription: voiding locks each
+        // invoice, and a renewal takes an invoice lock before the
+        // subscription's, so taking them in the same order here means the
+        // two can never wait on each other.
+        $this->withdrawWhatItStillAsksFor($subscriptionId);
+
         if (! $subscription->status->isTerminal()) {
             $this->transition->execute(
                 $subscription,
@@ -116,8 +122,6 @@ final readonly class EndTheSubscriptionWithItsService
                 'service_id' => $serviceId,
             ]);
         }
-
-        $this->withdrawWhatItStillAsksFor($subscriptionId);
     }
 
     /**
