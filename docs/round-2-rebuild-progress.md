@@ -71,5 +71,6 @@ round two and are already in the tree.
 | after F-15 + F-04 × F-15 (`9065968`) | + F-17, F-15 | 4,326 / 4,327 — one timing-dependent failure in the new F-04 × F-15 test (`updated_at` to the second), fixed next commit, 5/5 green after | exit 1 on that run |
 | after F-19 (`b14fee5`) | + F-19 (12 findings) | 4,357 / 4,357 passed, 155,166 assertions | JSON `tests == passed`; junit 555 testsuites, all `skipped="0"`; exit 0 |
 | after upheld repairs F-04/F-08/F-12 (`501cab7`) | 12 findings + 3 repair rounds | 4,381 / 4,381 passed, 155,284 assertions | JSON `tests == passed`; junit 557 testsuites, all `skipped="0"`; exit 0 |
+| after workflow A (12 more findings) | 24 findings | 4,836 / 4,837 — the one failure was the ledger-predicted F-26 × F-27 row, fixed next commit as the ledger ruled (804/804 in Dns, Api, Security, Architecture after) | exit 1 on that run; frontend vitest 473/473, tsc + eslint clean |
 
 Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
