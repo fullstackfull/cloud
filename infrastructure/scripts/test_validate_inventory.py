@@ -939,6 +939,18 @@ TREE_CASES: list[tuple[str, dict[str, str] | None, int, str | tuple[str, ...]]] 
         1,
         "reads as a secret",
     ),
+    # Ansible given a directory reads the inventory sources in its
+    # subdirectories too (ansible-inventory lists sub-1 here), so the validator
+    # recurses; no environment has a subdirectory of sources today.
+    (
+        "an inventory source in a subdirectory of an environment is read too",
+        {
+            "dev/hosts.yml": GOOD,
+            "dev/sub/b.yml": "sidecar:\n  hosts:\n    sub-1:\n      ansible_host: 198.51.100.202\n      bmc_password: hunter2\n",
+        },
+        1,
+        ("does not declare safety_class", "reads as a secret"),
+    ),
     (
         "a vars file Ansible loads that is a list, not a mapping, is refused",
         {"dev/hosts.yml": GOOD, "dev/group_vars/all.yml": "- bmc_password\n"},
@@ -948,7 +960,7 @@ TREE_CASES: list[tuple[str, dict[str, str] | None, int, str | tuple[str, ...]]] 
 ]
 
 # Pinned for the same reason, and maintained the same way, as EXPECTED_CASES.
-EXPECTED_TREE_CASES = 23
+EXPECTED_TREE_CASES = 24
 
 
 def main() -> int:

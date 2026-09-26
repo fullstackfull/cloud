@@ -487,6 +487,30 @@ jobs:
                        "    runs-on: windows-latest\n")},
         "applies OpenTofu",
     ),
+    # Past the point where `code_lines` stops, and in a step read as another
+    # shell, a backslash that ends a comment line is still inside the comment:
+    # bash does not join the next line to it, and runs that line. Joining the
+    # two would hide the apply inside the comment (`# deploytofu apply`).
+    (
+        "after a GitHub expression stops the reading, a comment ending in a backslash does not swallow the apply",
+        {"ci.yml": block('echo "${{ github.sha }}"\n# deploy\\\ntofu apply -auto-approve')},
+        "applies OpenTofu",
+    ),
+    (
+        "after `(true)#x` stops the reading, its trailing backslash does not swallow the apply",
+        {"ci.yml": block("(true)#x\\\ntofu apply -auto-approve")},
+        "applies OpenTofu",
+    ),
+    (
+        "in a step another shell runs, a comment ending in a backslash does not swallow the apply",
+        {"ci.yml": block("# deploy\\\ntofu apply -auto-approve", shell="sh")},
+        "applies OpenTofu",
+    ),
+    (
+        "after the reading stops, a command continued over lines is still read joined",
+        {"ci.yml": block('echo "${{ github.sha }}"\ntofu \\\n  apply -auto-approve')},
+        "applies OpenTofu",
+    ),
     # And the other direction: these keep a comment line bash drops, which
     # would turn a mention of an apply in prose into a red.
     (
@@ -507,7 +531,7 @@ jobs:
 # exists to refuse. The count is literal source in this file, maintained by
 # whoever edits the table, so adding or removing a case is a deliberate edit
 # of this number too.
-EXPECTED_CASES = 57
+EXPECTED_CASES = 61
 
 
 def main() -> int:

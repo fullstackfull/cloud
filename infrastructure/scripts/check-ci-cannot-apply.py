@@ -13,9 +13,12 @@ ansible-playbook without --check, -C or --syntax-check among its own command's
 words (`command_words`). Before matching, a step `reads_as_bash` picks out has
 its comments removed and line continuations joined by `code_lines`, a reading
 of a subset of bash's grammar that stops at the first construct outside the
-subset and keeps the rest verbatim; any other step only has its continuations
-joined. Kept text is the safe direction -- a comment read as code is a false
-red -- and removed text that bash runs is the dangerous one.
+subset and keeps the rest, comments included. Text kept that way, and the
+whole of any other step, is read twice (`both_readings`): as written, and with
+its continuations joined, since a backslash ending a comment line does not
+join the next line in bash and one ending a command does. Kept text is the
+safe direction -- a comment read as code is a false red -- and removed or
+joined-away text that bash runs is the dangerous one.
 
 What it does not read. A `uses:` step runs an action's code, a job-level
 `uses:` runs a reusable workflow, and a `run:` step can call a script or a
@@ -90,6 +93,21 @@ _PLAIN_EXPANSION = re.compile(r"\$\{[^{}'\"`\\$\n]*\}")
 _CONTINUATION = re.compile(r"(?<!\\)((?:\\\\)*)\\\n")
 
 
+def both_readings(text: str) -> str:
+    """`text` as written, then again with its continuations joined, one after
+    the other, for text whose comments are not known.
+
+    Joined alone would be wrong: a backslash that ends a comment line is inside
+    the comment, bash does not join the next line to it and runs that line,
+    and joining turns `# deploy\\` then `tofu apply` into the one comment
+    `# deploytofu apply`. As written alone would read `tofu \\` then `apply`
+    as two lines. A pattern that matches either reading matches here; a match
+    only one reading makes is a red where bash may not apply, which is the
+    safe direction.
+    """
+    return text + "\n" + _CONTINUATION.sub(r"\1", text)
+
+
 def code_lines(text: str) -> str:
     """`text` with comments removed and line continuations joined, by a
     reading of a subset of bash's grammar.
@@ -106,9 +124,10 @@ def code_lines(text: str) -> str:
     `((`, `$[`, a `$(` inside double quotes, a `${...}` other than a plain one,
     an array subscript or compound assignment, and a `#` right after `(` or `)`
     (`(true)#x` is a comment, `$(true)#x` is not). From there the rest of the
-    text is kept as it is -- comments included, continuations joined unless
-    escaped. Those are the constructs attack has found so far, not every place
-    bash and this reading part: one not listed that bash reads differently
+    text is kept, comments included, and read twice by `both_readings`: as
+    written, and with continuations joined. Those are the constructs attack
+    has found so far, not every place bash and this reading part: one not
+    listed that bash reads differently
     could make this remove a line bash runs. In the tree today it stops early
     in 5 of the 44 `run:` steps, and in none does removing comments change the
     verdict (the module docstring has the measurement).
@@ -173,7 +192,7 @@ def code_lines(text: str) -> str:
         at += 1
     else:
         return "".join(out)
-    return "".join(out) + _CONTINUATION.sub(r"\1", text[at:])
+    return "".join(out) + both_readings(text[at:])
 
 
 def reads_as_bash(workflow: dict, job: dict, step: dict) -> bool:
@@ -307,7 +326,7 @@ def main(argv: list[str]) -> int:
             if reads_as_bash(workflow, job, step):
                 body = code_lines(command)
             else:
-                body = _CONTINUATION.sub(r"\1", command)
+                body = both_readings(command)
             for applies, what in APPLYING:
                 if applies(body):
                     problems.append(
