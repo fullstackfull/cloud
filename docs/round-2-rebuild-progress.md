@@ -21,20 +21,20 @@ immediately, so a stoppage loses at most the finding in flight.
 
 | Finding | Sev | Status | Commit |
 |---|---|---|---|
-| F-04 | Critical | rebuilt — 84 new tests (82 red→green), 1,792 related tests green; 3 migrations | `9ff1e82` |
-| F-13 | Critical | rebuilt — 47 new tests red→green, Providers+Architecture green | `79b6b13` |
-| F-14 | Critical | rebuilt — 91 new tests (71 red→green), SharedHosting+Architecture green | `b2f33d1` |
-| F-08 | High | rebuilt — 12 of 47 new tests red→green; Queue+Billing+Architecture green | `f24548a` |
-| F-11 | High | rebuilt — new contract tests red→green; Dns+Simulation+Security+Architecture green; closes F-24 DNS limb | `d69856a` |
-| F-12 | High | rebuilt — 9+14 new tests red→green; Dedicated+Ipam+Api+Security+Architecture green | `e0aa0ab` |
+| F-04 | Critical | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected a contact-address fallback that skipped a blank billing address — fixed); merged with F-04 × F-15 | `50edbe1` |
+| F-13 | Critical | rebuilt + merged; rounds 1–3 REJECTED only on completeness claims of its source-reading gates (a new escape each round, none present in the tree); final round under the ledger's occupancy precedent running | `79b6b13` |
+| F-14 | Critical | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 10 reservations); merged | `b2f33d1` |
+| F-08 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); merged | `6f605da` |
+| F-11 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 6 reservations); merged; closes F-24 DNS limb | `d69856a` |
+| F-12 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected two docblock-held ordering keys — now held); merged | `db4bcc6` |
 | F-15 | High | rebuilt + merged; verification rounds 1–3 REJECTED (2, 1, 1 blocking — stale finding on the operator screen, census blind spots, a rewritten test that lost its oracle), each repaired; round 4 (repair + re-verify) running, incl. a coordinator ruling that a first-attempt stranger must not be claimed | `8e15efa` |
 | F-17 | High | rebuilt + merged; verification rounds 1–3 REJECTED on sentence-vs-test reach; repairs built the per-address invitation cooldown the audit clause asks for; round 4 running | `171142b` |
-| F-18 | High | rebuilt — 14 new tests red→green; Admin+Termination+SharedHosting+Security+Architecture green | `a327f44` |
+| F-18 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged | `a327f44` |
 | F-19 | High | **UPHELD WITH RESERVATIONS** by independent verification (round 1, 0 blocking, 7 reservations); merged | `45d53af` |
 | F-20 | High | in progress (rebuild → independent verification) | |
 | F-21 | High | in progress (rebuild → independent verification) | |
-| F-22 | High | rebuilt — drift alert + route pinned by validator (39/39), log path fixed; Architecture+Monitoring green | `bb1c77e` |
-| F-23 | High | rebuilt — reachability gate red→green (11 unwritten states allow-listed to owners), WordPress state strings added; Architecture 135/135, vitest/tsc/eslint clean | `5ae2e58` |
+| F-22 | High | rebuilt + merged; rounds 1–3 REJECTED only on the route-walk gate's model of Alertmanager/Prometheus/Loki (a new divergence each round, none present in the tree); final round under the occupancy precedent running | `bb1c77e` |
+| F-23 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged; nine F-19 excuses retired at F-19's merge | `5ae2e58` |
 | F-24 | High | queued | |
 | F-41 | High | queued (last: changes the test harness) | |
 | F-46 | High | in progress (rebuild → independent verification) | |
