@@ -9,10 +9,10 @@ production ready.
 
 <!-- counts:begin -->
 <!-- Written by `validate-runbook-alerts.py --write` from the tree, and compared on every run. Do not edit by hand. -->
-- **31** files here: **30** pages and this README.
-- **66** alerts are defined in `infrastructure/monitoring/prometheus/rules/`.
-- **48** of them name a page here with `runbook:`; **18** name no page here.
-- **8** of the 30 pages are named by no alert, and are listed under *Pages with no alert here* with the reason.
+- **32** files here: **31** pages and this README.
+- **68** alerts are defined in `infrastructure/monitoring/prometheus/rules/`.
+- **50** of them name a page here with `runbook:`; **18** name no page here.
+- **8** of the 31 pages are named by no alert, and are listed under *Pages with no alert here* with the reason.
 <!-- counts:end -->
 
 Those numbers are derived from the tree by
