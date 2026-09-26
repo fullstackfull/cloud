@@ -51,6 +51,53 @@ final class SpellingsOfTheInvitationMailer
             ->send($issued);
     }
 
+    public function commentsBetweenTheParts(IssuedInvitation $issued): void
+    {
+        $this /* the controller */ -> /** its mailer */ mailer->send($issued);
+    }
+
+    public function lineBreaksBetweenTheParts(IssuedInvitation $issued): void
+    {
+        $this
+            ->
+            mailer
+                ->send($issued);
+    }
+
+    public function lineCommentsAroundTheNullsafeOperator(IssuedInvitation $issued): void
+    {
+        $this // the controller
+            ?-> // its mailer
+            mailer->send($issued);
+    }
+
+    public function commentsAndALineBreakAroundTheStaticOperator(IssuedInvitation $issued): void
+    {
+        self /* the class */
+            :: /* its spare */ $spare?->send($issued);
+    }
+
+    public function aNameThatIsAVariableAfterALineBreakAndAComment(IssuedInvitation $issued, string $which): void
+    {
+        $this
+            -> /* whichever */ $which->send($issued);
+    }
+
+    public function aNameThatIsALiteralAfterAComment(IssuedInvitation $issued): void
+    {
+        $this-> /* the mailer */ {'mailer'}->send($issued);
+    }
+
+    public function aStaticNameThatIsAVariableAfterAComment(IssuedInvitation $issued, string $which): void
+    {
+        self:: /* whichever */ $$which?->send($issued);
+    }
+
+    public function asAnArgument(IssuedInvitation $issued): void
+    {
+        tap($this->mailer, static fn (object $sender) => $sender->send($issued));
+    }
+
     public function throughALocal(IssuedInvitation $issued): void
     {
         $mailer = $this->mailer;

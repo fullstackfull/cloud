@@ -6,6 +6,7 @@ namespace Tests\Feature\Security;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Env;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
@@ -403,6 +404,49 @@ final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
         $this->resend($owner, $customer, $offer)->assertStatus(409);
 
         $this->travelTo($mailedAt->addMinute());
+        $this->resend($owner, $customer, $offer)->assertOk();
+
+        Mail::assertQueuedCount(1);
+    }
+
+    /**
+     * The wait as shipped: ten minutes, which config/teams.php and
+     * docs/teams.md both say.
+     *
+     * Every other test here sets the wait itself, so without this one the
+     * default could fall to the one-minute floor with the suite still green.
+     * It reads the default from the config file rather than from the booted
+     * configuration, which setUp() has already overwritten, and refuses to
+     * measure an environment that overrides it.
+     */
+    #[Test]
+    public function the_wait_as_shipped_is_ten_minutes(): void
+    {
+        $this->assertNull(
+            Env::get('TEAM_INVITATION_COOLDOWN_MINUTES'),
+            'TEAM_INVITATION_COOLDOWN_MINUTES is set in this environment, so the value read below would be the '
+            .'override and not the default this test is about.',
+        );
+
+        /** @var array<string, mixed> $shipped */
+        $shipped = require config_path('teams.php');
+        config(['teams.invitation_cooldown_minutes' => $shipped['invitation_cooldown_minutes']]);
+
+        [$customer, $owner] = $this->accountWithOwner();
+        $mailedAt = CarbonImmutable::now();
+
+        $offer = CustomerInvitation::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'email' => self::VICTIM,
+            'last_sent_at' => $mailedAt,
+        ]);
+
+        $this->travelTo($mailedAt->addMinutes(10)->subSecond());
+        $this->resend($owner, $customer, $offer)
+            ->assertStatus(409)
+            ->assertJsonPath('error.details.retry_at', $mailedAt->addMinutes(10)->toAtomString());
+
+        $this->travelTo($mailedAt->addMinutes(10));
         $this->resend($owner, $customer, $offer)->assertOk();
 
         Mail::assertQueuedCount(1);

@@ -75,11 +75,16 @@ use Tests\Feature\Team\TeamApiTestCase;
  *   property.
  *
  * The body is read as PHP tokens; only the search for the class's name in a
- * string reads it as text.
+ * string reads it as text. That search reads the whole of the method's text,
+ * so the name in a comment, or inside an identifier such as
+ * `$invitationMailer`, makes the route a road as well. That over-counts, and
+ * over-counting can only add a road to check, never let one through.
  * the_scan_recognises_every_way_of_using_the_mailer_it_claims_to holds the
  * scan to this list with a fixture that uses the mailer each of these ways —
- * bar a qualified or fully qualified class name, which Pint rewrites into the
- * import in a file that has one — and two near misses it must not count.
+ * every layout above around `->`, `?->` and `::`, for a declared name and for
+ * one that is an expression, included — bar a qualified or fully qualified
+ * class name, which Pint rewrites into the import in a file that has one, and
+ * with two near misses it must not count.
  *
  * A list of two route names would say nothing about the third road added next
  * to them; this rule does. The two names below are a floor under the
@@ -207,6 +212,14 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
         $expected = [
             'theOrdinarySpelling' => true,
             'theCallOnTheNextLine' => true,
+            'commentsBetweenTheParts' => true,
+            'lineBreaksBetweenTheParts' => true,
+            'lineCommentsAroundTheNullsafeOperator' => true,
+            'commentsAndALineBreakAroundTheStaticOperator' => true,
+            'aNameThatIsAVariableAfterALineBreakAndAComment' => true,
+            'aNameThatIsALiteralAfterAComment' => true,
+            'aStaticNameThatIsAVariableAfterAComment' => true,
+            'asAnArgument' => true,
             'throughALocal' => true,
             'nullsafeAfterTheProperty' => true,
             'nullsafeBeforeTheProperty' => true,

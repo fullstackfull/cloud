@@ -101,8 +101,11 @@ final class MembershipRefusedException extends DomainException
 
     /**
      * Refused before anything was written or sent: no new token, no new
-     * expiry, no count, no mail. `retry_at` is when the same request would
-     * be accepted.
+     * expiry, no count, no mail. `retry_at` is when the wait on this address
+     * ends, as configured at the moment of refusal: when the cooldown stops
+     * refusing the same request, not a promise that it will then succeed.
+     * The account's hourly budget, a full account, or another
+     * administrator's act in the meantime can still refuse it.
      */
     public static function becauseTheAddressWasMailedTooRecently(DateTimeInterface $retryAt): self
     {

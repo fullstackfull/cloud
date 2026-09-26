@@ -76,8 +76,11 @@ by one account. The hourly budget bounds how much an account sends and not
 where, so without the wait one offer resent in a loop put the whole budget
 into one inbox. A resend inside the wait is refused before it mints anything,
 and withdrawing the offer and inviting the address again is held to the same
-clock; both answer `membership.invitation_sent_too_recently` with the moment
-the same request would succeed. The wait is per account on purpose: a wait
+clock; both answer `membership.invitation_sent_too_recently` with
+`retry_at`, the moment the wait ends. That is when the cooldown stops
+refusing the same request, not a promise that it will then succeed: the
+hourly budget, a full account or another administrator's act in the
+meantime can still refuse it. The wait is per account on purpose: a wait
 shared across accounts would tell one customer that another had just invited
 the address. It is also per address, not per inbox: `victim+1@` and
 `victim+2@` each have a wait of their own even when both deliver to one
