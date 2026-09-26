@@ -78,3 +78,16 @@ round two and are already in the tree.
 | after F-41 — **the re-audit candidate**, all 36 findings | 36 findings | 5,170 / 5,170 passed, 167,817 assertions | JSON `tests == passed`; junit 624 testsuites, all `skipped="0"`; exit 0 |
 
 Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
+
+## Final re-audit and adjudication
+
+`docs/final-independent-re-audit-after-round-2.md`, at the candidate `462382f`:
+**36 of 47 findings do not reproduce; eleven do** — F-42 reproduces, and F-01,
+F-02, F-05, F-07, F-09, F-16, F-20, F-23, F-26 and F-38 partially reproduce,
+each confirmed by an independent skeptic. Six of the eleven (F-01, F-02, F-05,
+F-07, F-09, F-16) were closed before round two and had not been measured again
+until now. Round two itself introduced 28 recorded defects. All five products
+remain `No`.
+
+**`SOFTWARE_CODE_COMPLETE = NO`.** `30B.0-E = NOT READY`; every `REAL_*` and
+`READY_TO_SELL` = `NONE`.

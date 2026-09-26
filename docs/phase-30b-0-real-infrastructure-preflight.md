@@ -1,5 +1,14 @@
 # Phase 30B.0 — real-infrastructure preflight and safe discovery
 
+> **SUPERSEDED ON ONE POINT — READ THIS FIRST.** §II.2 below reads
+> `SOFTWARE_CODE_COMPLETE = YES`. **That is not the repository's answer.**
+> `docs/final-independent-multi-agent-audit-round-1.md` reopened software
+> closure on 47 findings, and the round-two re-audit
+> (`docs/final-independent-re-audit-after-round-2.md`, at `462382f`) adjudicated
+> **`SOFTWARE_CODE_COMPLETE = NO`**: eleven findings still reproduce, confirmed
+> by independent skeptics. Everything below is kept verbatim as the record of
+> what was concluded then.
+
 **Status: BLOCKED.**
 
 This document records what was observed on 2026-09-16 from the environment this

@@ -8,9 +8,9 @@
 > code gaps. That audit was read-only by design and changed no status, so this
 > document was left standing; this banner is the correction it could not make.
 >
-> **The current status is `SOFTWARE_CODE_COMPLETE = NO`**, and remains so until
-> the round-2 re-audit (`docs/final-independent-re-audit-after-round-2.md`)
-> says otherwise on its own evidence. The remediation in flight is tracked in
+> **The current status is `SOFTWARE_CODE_COMPLETE = NO`**, and the round-two
+> re-audit (`docs/final-independent-re-audit-after-round-2.md`, at `462382f`)
+> kept it there on its own evidence: eleven findings still reproduce. The remediation in flight is tracked in
 > `docs/round-2-remediation-ledger.md`.
 >
 > Everything below is kept verbatim as the record of what was concluded then.

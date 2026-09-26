@@ -1,5 +1,14 @@
 # Phase 30B.0-E — trusted runner and private inventory bootstrap
 
+> **SUPERSEDED ON ONE POINT — READ THIS FIRST.** The "Software baseline" row below reads
+> `SOFTWARE_CODE_COMPLETE = YES`. **That is not the repository's answer.**
+> `docs/final-independent-multi-agent-audit-round-1.md` reopened software
+> closure on 47 findings, and the round-two re-audit
+> (`docs/final-independent-re-audit-after-round-2.md`, at `462382f`) adjudicated
+> **`SOFTWARE_CODE_COMPLETE = NO`**: eleven findings still reproduce, confirmed
+> by independent skeptics. Everything below is kept verbatim as the record of
+> what was concluded then.
+
 **Status: NOT READY.**
 
 The purpose of this phase is to prepare the environment in which a future
