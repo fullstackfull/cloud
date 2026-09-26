@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Architecture;
 
+use PhpToken;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use ReflectionMethod;
 use SplFileInfo;
 
 /**
@@ -57,13 +59,179 @@ final class LayeringTest extends TestCase
     }
 
     /**
+     * The names a file imports, as every import rule here sees them.
+     *
+     * That is the `use` statements read() reads, in the forms it lists, and
+     * nothing else. A class named in a docblock, written inline by its
+     * fully-qualified name, or held in a string never reaches this list, so no
+     * rule built on it can see such a reference.
+     * The agent instructions say so, and
+     * the_agent_instructions_say_only_what_the_import_rules_can_see() probes
+     * this method to keep them saying so.
+     *
      * @return list<string>
      */
-    private function importsIn(string $source): array
+    private static function importsIn(string $source): array
     {
-        preg_match_all('/^use\s+([^\s;]+)/m', $source, $matches);
+        return array_column(self::read($source)['imports'], 'name');
+    }
 
-        return $matches[1];
+    /**
+     * A file read for the names in it: what its `use` statements import, the
+     * namespaces it declares, and every other token.
+     *
+     * These are the imports it reads: `use A\B`, `use A\B as C`, the list
+     * `use A, B`, the group `use A\{B, C\D}`, `use function` and `use const`,
+     * with or without a leading backslash, over any number of lines, at the
+     * top level of a file or of a braced namespace block. Each is recorded by
+     * the full name it brings in and by the name the file knows it by: its
+     * alias, or else its last part. A trait's `use` inside a class and a
+     * closure's `use (...)` are not imports and stay with the other tokens,
+     * and so does a comment written inside a `use` statement.
+     *
+     * A `use` or `namespace` statement is read where one begins: at the start
+     * of the file, or after `;`, `{`, `}`, an opening or closing tag, or a
+     * label's colon. It ends at a semicolon or at a closing tag, which PHP
+     * reads as one. A reader that stopped only at the semicolon swallowed the
+     * code after `use Lynomia\Modules ?>` into the import's name, where no
+     * rule read it; and after a namespace declaration ended that way, it took
+     * the next class's brace for a namespace's, and the trait `use` inside for
+     * an import. One that did not know a label is a statement of its own never
+     * read `billing: use Lynomia\Modules\Billing;` at all.
+     *
+     * That is a list, not a boundary. It is what reading PHP's grammar and
+     * attacking this reader produced, and both of those entries were found by
+     * attack after the list had been called complete. A form it does not list
+     * is not read, and no rule built on it claims one.
+     *
+     * It is read through PHP's own tokenizer, because a hand-rolled reader
+     * gets strings wrong - apostrophes in prose are enough - and a reader that
+     * fails reports the clean tree one was hoping for.
+     *
+     * @return array{imports: list<array{name: string, as: string, line: int}>, namespaces: list<array{name: string, line: int}>, rest: list<PhpToken>}
+     */
+    private static function read(string $source): array
+    {
+        $tokens = PhpToken::tokenize($source);
+        $count = count($tokens);
+        $imports = [];
+        $namespaces = [];
+        $rest = [];
+
+        // One entry per brace still open: whether it opened a namespace block.
+        $braces = [];
+        $opensANamespace = false;
+
+        // The last two tokens that are neither whitespace nor a comment.
+        $previous = null;
+        $beforePrevious = null;
+
+        for ($i = 0; $i < $count; $i++) {
+            $token = $tokens[$i];
+            $startsAStatement = $previous === null
+                || $previous->is([';', '{', '}', T_OPEN_TAG, T_CLOSE_TAG])
+                // A label is an identifier and a colon, and a statement of its own.
+                || ($previous->is(':') && $beforePrevious !== null && $beforePrevious->is(T_STRING));
+
+            if ($token->is(T_USE) && $startsAStatement && ! in_array(false, $braces, true)) {
+                $prefix = '';
+                $name = '';
+                $line = $token->line;
+                $alias = false;
+                $as = null;
+
+                for ($i++; $i < $count; $i++) {
+                    $part = $tokens[$i];
+
+                    if ($part->is([T_COMMENT, T_DOC_COMMENT])) {
+                        $rest[] = $part;
+                    } elseif ($part->is(T_AS)) {
+                        $alias = true;
+                    } elseif ($part->is([',', '}', ';', T_CLOSE_TAG])) {
+                        if ($name !== '') {
+                            $full = ltrim($prefix.$name, '\\');
+                            $imports[] = ['name' => $full, 'as' => $as ?? substr((string) strrchr('\\'.$full, '\\'), 1), 'line' => $line];
+                        }
+
+                        $name = '';
+                        $as = null;
+                        $prefix = $part->is('}') ? '' : $prefix;
+
+                        if ($part->is([';', T_CLOSE_TAG])) {
+                            break;
+                        }
+                    } elseif ($part->is('{')) {
+                        $prefix = $name;
+                        $name = '';
+                    } elseif ($part->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NS_SEPARATOR])) {
+                        if ($alias) {
+                            $as = $part->text;
+                            $alias = false;
+                        } else {
+                            $line = $name === '' ? $part->line : $line;
+                            $name .= $part->text;
+                        }
+                    }
+                }
+
+                $previous = $tokens[$i] ?? null;
+                $beforePrevious = null;
+
+                continue;
+            }
+
+            if ($token->is(T_NAMESPACE) && $startsAStatement) {
+                $opensANamespace = true;
+
+                for ($j = $i + 1; $j < $count && $tokens[$j]->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT]); $j++);
+
+                if ($j < $count && $tokens[$j]->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED])) {
+                    $namespaces[] = ['name' => ltrim($tokens[$j]->text, '\\'), 'line' => $tokens[$j]->line];
+                }
+            } elseif ($token->is(['{', T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES])) {
+                $braces[] = $opensANamespace;
+                $opensANamespace = false;
+            } elseif ($token->is('}')) {
+                array_pop($braces);
+            } elseif ($token->is([';', T_CLOSE_TAG])) {
+                $opensANamespace = false;
+            }
+
+            $rest[] = $token;
+
+            if (! $token->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                $beforePrevious = $previous;
+                $previous = $token;
+            }
+        }
+
+        return ['imports' => $imports, 'namespaces' => $namespaces, 'rest' => $rest];
+    }
+
+    /**
+     * How $name - something a file imports, or a namespace it declares -
+     * reaches another module's $layer: 'inside' when it is in that layer,
+     * 'above' when it is a namespace that layer is in (`Lynomia`,
+     * `Lynomia\Modules`, the other module's namespace, or the layer's own), and
+     * null when it does neither. Through a name above a layer, every class in
+     * the layer can be named without its name appearing anywhere.
+     *
+     * PHP resolves names without regard to letter case, and so does this.
+     */
+    private static function reach(string $name, string $own, string $layer): ?string
+    {
+        $layer = preg_quote($layer, '/');
+        $name = ltrim($name, '\\');
+
+        if (preg_match('/^Lynomia\\\\Modules\\\\(\w+)\\\\'.$layer.'\\\\/i', $name, $m) === 1) {
+            return strcasecmp($m[1], $own) !== 0 ? 'inside' : null;
+        }
+
+        if (preg_match('/^Lynomia(?:\\\\Modules(?:\\\\(\w+)(?:\\\\'.$layer.')?)?)?$/i', $name, $m) === 1) {
+            return ! isset($m[1]) || strcasecmp($m[1], $own) !== 0 ? 'above' : null;
+        }
+
+        return null;
     }
 
     #[Test]
@@ -417,28 +585,1164 @@ final class LayeringTest extends TestCase
          * request look like", not "how do I get an invoice"; calling one from
          * another module couples two features to a URL shape and drags request
          * parsing into the middle of a domain operation.
+         *
+         * This reads `use` statements through importsIn(), in the forms and
+         * places read() lists, and refuses each import it reads that reaches
+         * another module's Http: one naming something in it, and one naming a
+         * namespace at or above it - the layer's own, the module's,
+         * `Lynomia\Modules` or `Lynomia` - aliased or not, because every
+         * controller can be named through the latter without its name
+         * appearing anywhere. Before it reads the tree it is shown one file per
+         * form and place read() lists, through the same function the tree is
+         * read through: importsTheHttpRuleMustRefuse(). A form read() does not
+         * list is not claimed. A module that wants another's Domain imports the
+         * Domain class it wants, not the module.
+         *
+         * A controller named in full anywhere but a `use` statement - in a
+         * docblock, inline, or in a string - or through a namespace the file
+         * declares at or above the layer is not an import. What
+         * no_module_names_another_modules_infrastructure_or_http_out_of_sight()
+         * reads of those, it holds at zero.
          */
+        $unseen = array_keys(array_filter(self::importsTheHttpRuleMustRefuse(), static fn (string $source): bool => self::whatTheHttpRuleFindsIn(self::asAFileOfOrders($source)) === []));
+
+        $this->assertSame([], $unseen, "The Http rule cannot see these, so a clean result from it would mean nothing:\n  ".implode("\n  ", $unseen));
+
+        $refused = array_keys(array_filter(self::importsTheHttpRuleMustAllow(), static fn (string $source): bool => self::whatTheHttpRuleFindsIn(self::asAFileOfOrders($source)) !== []));
+
+        $this->assertSame([], $refused, "The Http rule refuses these, which reach no other module's Http:\n  ".implode("\n  ", $refused));
+
+        $violations = self::whatTheHttpRuleFindsIn($this->phpFiles(self::SRC.'/Modules'));
+
+        $this->assertSame([], $violations, "Cross-module reach into an HTTP layer:\n  ".implode("\n  ", $violations));
+    }
+
+    /**
+     * $source as the one file of a list the rules here read, placed in the
+     * Orders module, where every self-check's sources are written to stand.
+     *
+     * @return list<array{relative: string, source: string}>
+     */
+    private static function asAFileOfOrders(string $source): array
+    {
+        return [['relative' => 'Modules/Orders/Application/Actions/Planted.php', 'source' => $source]];
+    }
+
+    /**
+     * What the Http rule reports in $files, each given by its path under src/
+     * and its source, whose module is the directory under src/Modules. The
+     * rule reads the tree through this and its self-checks read their sources
+     * through it, so a change to how the tree is read is a change to what the
+     * self-checks are shown.
+     *
+     * @param  list<array{relative: string, source: string, ...}>  $files
+     * @return list<string>
+     */
+    private static function whatTheHttpRuleFindsIn(array $files): array
+    {
         $violations = [];
 
-        foreach ($this->phpFiles(self::SRC.'/Modules') as $file) {
-            $parts = explode('/', $file['relative']);
-            $own = $parts[1] ?? '';
+        foreach ($files as $file) {
+            $own = explode('/', $file['relative'])[1] ?? '';
 
             if ($own === '') {
                 continue;
             }
 
-            foreach ($this->importsIn($file['source']) as $import) {
-                if (preg_match('/^Lynomia\\\\Modules\\\\(\w+)\\\\Http\\\\/', $import, $m) !== 1) {
-                    continue;
-                }
+            foreach (self::importsReachingAnotherModulesHttp($file['source'], $own) as $import) {
+                $violations[] = $own.' -> '.$import.' ('.$file['relative'].')';
+            }
+        }
 
-                if ($m[1] !== $own) {
-                    $violations[] = $own.' -> '.$import.' ('.$file['relative'].')';
+        return $violations;
+    }
+
+    /**
+     * The imports of $source, a file of module $own, that reach another
+     * module's Http: one that names something in it, and one that names a
+     * namespace at or above it.
+     *
+     * @return list<string>
+     */
+    private static function importsReachingAnotherModulesHttp(string $source, string $own): array
+    {
+        $found = [];
+
+        foreach (self::importsIn($source) as $import) {
+            $reach = self::reach($import, $own, 'Http');
+
+            if ($reach !== null) {
+                $found[] = $reach === 'inside' ? $import : $import.", a namespace at or above another module's Http";
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * One file of the Orders module per way a `use` statement can reach
+     * Billing's Http, one per form and place read() lists: what is imported -
+     * a class, a function or a constant, or a namespace at each level from
+     * the layer's own up to `Lynomia` - and how: by its full name, with a
+     * leading backslash, under an alias, in another letter case, as a later
+     * name of a list whether or not an earlier one is aliased, or in a group -
+     * plain, typed or mixed, with the crossing in its first name or a later
+     * one. Then where the statement stands - after `<?php`, after another
+     * statement, after a comment, after a class, after a label, or inside a
+     * braced namespace block - and how it ends: at a semicolon, or at a
+     * closing tag, which PHP reads as one. That is read()'s list, not PHP's
+     * grammar shown whole; the label was missing from both until attack
+     * found it.
+     *
+     * @return array<string, string>
+     */
+    private static function importsTheHttpRuleMustRefuse(): array
+    {
+        $file = static fn (string $imports, string $uses): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$imports."\n\nfinal class Planted\n{\n    public function run(): mixed\n    {\n        return ".$uses.";\n    }\n}\n";
+
+        return [
+            // What is imported.
+            'an import of a controller' => $file('use Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'an import of a function' => $file('use function Lynomia\\Modules\\Billing\\Http\\helper;', 'helper()'),
+            'an import of a constant' => $file('use const Lynomia\\Modules\\Billing\\Http\\VERSION;', 'VERSION'),
+            'an import of the layer itself' => $file('use Lynomia\\Modules\\Billing\\Http;', 'Http\\Controllers\\InvoiceController::class'),
+            'an import of the module' => $file('use Lynomia\\Modules\\Billing;', 'Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import of every module' => $file('use Lynomia\\Modules;', 'Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import of the root namespace' => $file('use Lynomia;', 'Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+
+            // How.
+            'an import with a leading backslash' => $file('use \\Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'an aliased import of a controller' => $file('use Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController as Invoices;', 'Invoices::class'),
+            'an aliased import of the layer' => $file('use Lynomia\\Modules\\Billing\\Http as BillingHttp;', 'BillingHttp\\Controllers\\InvoiceController::class'),
+            'an aliased import of the module' => $file('use Lynomia\\Modules\\Billing as BillingModule;', 'BillingModule\\Http\\Controllers\\InvoiceController::class'),
+            'an aliased import of the root namespace' => $file('use Lynomia as L;', 'L\\Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import of a controller in another letter case' => $file('use lynomia\\modules\\billing\\http\\controllers\\InvoiceController;', 'InvoiceController::class'),
+            'an import of the layer in another letter case' => $file('use lynomia\\modules\\billing\\http;', 'http\\Controllers\\InvoiceController::class'),
+            'the second import of a list' => $file('use Lynomia\\Modules\\Catalog\\Domain\\Enums\\ProductKind,Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'the second import of a list, after an alias' => $file('use Lynomia\\Modules\\Catalog\\Domain\\Enums\\ProductKind as Kind, Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;', 'InvoiceController::class'),
+            'a group import' => $file('use Lynomia\\Modules\\Billing\\{Http\\Controllers\\InvoiceController};', 'InvoiceController::class'),
+            'the second name of a group' => $file('use Lynomia\\Modules\\Billing\\{Domain\\ValueObjects\\PricedOrder, Http\\Controllers\\InvoiceController};', 'InvoiceController::class'),
+            'a group import across lines' => $file("use Lynomia\\Modules\\{\n    Billing\\Http,\n};", 'Http\\Controllers\\InvoiceController::class'),
+            'a typed group import' => $file('use function Lynomia\\Modules\\Billing\\Http\\{helper};', 'helper()'),
+            'the second name of a mixed group' => $file('use Lynomia\\Modules\\Billing\\{Domain\\ValueObjects\\PricedOrder, function Http\\helper};', 'helper()'),
+
+            // Where it stands, and how it ends.
+            'an import in a file that declares no namespace' => <<<'PHP'
+                <?php
+
+                use Lynomia\Modules\Billing\Http\Controllers\InvoiceController;
+
+                return [InvoiceController::class, 'show'];
+                PHP,
+            'an import after a comment and a docblock' => $file("// The invoice this order produces.\n/** @see InvoiceController */\nuse Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController;", 'InvoiceController::class'),
+            'an import after a label' => $file('billing: use Lynomia\\Modules\\Billing;', 'Billing\\Http\\Controllers\\InvoiceController::class'),
+            'an import after a class' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions;
+
+                final class Earlier {}
+
+                use Lynomia\Modules\Billing\Http\Controllers\InvoiceController;
+
+                final class Planted
+                {
+                    public function run(): string
+                    {
+                        return InvoiceController::class;
+                    }
+                }
+                PHP,
+            'an import inside a braced namespace block' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions {
+                    use Lynomia\Modules\Billing\Http\Controllers\InvoiceController;
+
+                    final class Planted
+                    {
+                        public function run(): string
+                        {
+                            return InvoiceController::class;
+                        }
+                    }
+                }
+                PHP,
+            'an import ended by a closing tag' => $file("use Lynomia\\Modules ?>\n<?php", 'Modules\\Billing\\Http\\Controllers\\InvoiceController::class'),
+        ];
+    }
+
+    /**
+     * Imports in a file of the Orders module that reach no other module's
+     * Http, however close they come.
+     *
+     * @return array<string, string>
+     */
+    private static function importsTheHttpRuleMustAllow(): array
+    {
+        $file = static fn (string $imports): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$imports."\n\nfinal class Planted {}\n";
+
+        return [
+            "the file's own module's Http" => $file('use Lynomia\\Modules\\Orders\\Http\\Controllers\\OrderController;'),
+            "the file's own module's Http in another letter case" => $file('use lynomia\\modules\\orders\\http\\controllers\\OrderController;'),
+            "the file's own module" => $file('use Lynomia\\Modules\\Orders;'),
+            "the file's own module in another letter case" => $file('use lynomia\\modules\\orders;'),
+            "another module's Domain" => $file('use Lynomia\\Modules\\Catalog\\Domain;'),
+            'a namespace outside the modules' => $file('use Lynomia\\Http\\Concerns\\BoundsPageSize;'),
+        ];
+    }
+
+    /**
+     * The file an agent reads before it touches anything here. `CLAUDE.md` is
+     * the same text, and TheAgentInstructionsDescribeThisRepositoryTest keeps
+     * it so, which is why only one of the two is read below.
+     */
+    private const string AGENT_INSTRUCTIONS = __DIR__.'/../../AGENTS.md';
+
+    /**
+     * The two layers the instructions' module-boundary paragraph is about.
+     * `Domain` and `Application` are where cross-module work is meant to go,
+     * so they are not boundaries the paragraph can claim or disclaim.
+     */
+    private const array THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS = ['Http', 'Infrastructure'];
+
+    /**
+     * Every sentence the instructions may use about what the import rules
+     * see, mapped to the answers from probing importsIn() that make it true.
+     *
+     * The second is the sentence the paragraph used to carry. It is here so
+     * that restoring it is red for the reason it was false, rather than
+     * merely unrecognised.
+     *
+     * @var array<string, array<string, bool>>
+     */
+    private const array WHAT_THE_INSTRUCTIONS_MAY_SAY_THE_IMPORT_RULES_SEE = [
+        'read `use` statements and nothing else' => [
+            'a use statement' => true,
+            'a docblock' => false,
+            'an inline fully-qualified name' => false,
+            'a string' => false,
+            'a name through an import above its layer' => false,
+        ],
+        'including references in docblocks' => [
+            'a docblock' => true,
+        ],
+    ];
+
+    #[Test]
+    public function a_layer_the_agent_instructions_call_a_boundary_is_one_no_module_crosses(): void
+    {
+        /*
+         * AGENTS.md said a module never reaches into another module's
+         * Infrastructure or Http, and that this test enforced it. Only the Http
+         * half was ever asserted - deliberately, for the reason
+         * no_module_calls_another_modules_http_layer() gives - while hundreds
+         * of `use` statements crossed the other half. An agent reads that file
+         * first and has no reason to doubt it.
+         *
+         * So the document's claims are measured rather than trusted. For each
+         * layer the paragraph covers it must say exactly one of two things the
+         * gate recognises: that no module reaches into it, or that reaching
+         * into it is not asserted. Silence, both, or a rewording nobody taught
+         * this test is red for that layer on its own - an unrecognised
+         * sentence is no claim, and a gate that finds no claim passes, so a
+         * check that only asked for "some claim somewhere" would let the
+         * Infrastructure sentence be reworded into a lie while the Http one
+         * kept it green.
+         *
+         * Then every layer it calls a boundary must measure zero crossings of
+         * the two kinds the rules here read: a `use` statement naming something
+         * in the layer, and whatever crossingsOutOfSight() reports, which
+         * includes an import or a declared namespace at or above it. The count
+         * is shown one crossing of each kind in each layer first, so neither
+         * half of it can go missing while the tree stays clean. No count is
+         * pinned: a layer is either a boundary, and then nothing the rules read
+         * crosses it, or it is disclosed as not asserted.
+         */
+        $uncounted = [];
+
+        foreach (self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS as $layer) {
+            $crossings = [
+                'a `use` statement naming a class in it' => "<?php\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\nuse Lynomia\\Modules\\Billing\\{$layer}\\Planted;\n",
+                'a class in it named in a docblock' => "<?php\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n/** {@see \\Lynomia\\Modules\\Billing\\{$layer}\\Planted} */\nfinal class Planted {}\n",
+            ];
+
+            foreach ($crossings as $way => $source) {
+                if (self::crossingsInto($layer, self::asAFileOfOrders($source)) === []) {
+                    $uncounted[] = sprintf('`%s`: %s', $layer, $way);
                 }
             }
         }
 
-        $this->assertSame([], $violations, "Cross-module reach into an HTTP layer:\n  ".implode("\n  ", $violations));
+        $this->assertSame([], $uncounted, "The count of crossings misses these, so a count of zero from it would mean nothing:\n  ".implode("\n  ", $uncounted));
+
+        $said = self::whatTheInstructionsSayAboutEachLayer(self::agentInstructions());
+
+        $unclear = [];
+
+        foreach (self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS as $layer) {
+            $statements = (int) in_array($layer, $said['boundary'], true) + (int) in_array($layer, $said['not asserted'], true);
+
+            if ($statements !== 1) {
+                $unclear[] = sprintf('`%s`: %d recognised statements', $layer, $statements);
+            }
+        }
+
+        $this->assertSame([], $unclear, "AGENTS.md must say, for each layer, either \"A module never reaches into another module's `<Layer>`\" or \"Reaching into another module's `<Layer>` is not asserted\" - exactly one:\n  ".implode("\n  ", $unclear));
+
+        $crossed = [];
+        $files = $this->phpFiles(self::SRC.'/Modules');
+
+        foreach ($said['boundary'] as $layer) {
+            $crossings = self::crossingsInto($layer, $files);
+
+            if ($crossings !== []) {
+                $crossed[] = sprintf('`%s` is crossed %d times, first %s', $layer, count($crossings), $crossings[0]);
+            }
+        }
+
+        $this->assertSame([], $crossed, "AGENTS.md calls these layers a boundary between modules, and modules cross them. Either the code or the sentence is wrong; LayeringTest's Http rule explains why the Infrastructure one is not asserted:\n  ".implode("\n  ", $crossed));
+    }
+
+    #[Test]
+    public function every_rule_the_agent_instructions_name_is_a_test_that_runs(): void
+    {
+        /*
+         * "LayeringTest enforces this" named a file, not a rule, and half of
+         * the rule it implied did not exist. A document that names its
+         * enforcement by method can be checked, so it must, and each method it
+         * names must be one PHPUnit runs. method_exists() alone would accept a
+         * rule demoted to a private helper: the suite shrinks by one, every
+         * remaining test stays green, and the document still points at it.
+         */
+        preg_match_all('/`(\w+Test)::(\w+)`/', self::agentInstructions(), $named, PREG_SET_ORDER);
+
+        $this->assertNotSame([], $named, 'AGENTS.md names no rule as `Class::method`, so nothing it says is enforced can be checked.');
+
+        $notRules = [];
+
+        foreach ($named as [, $class, $method]) {
+            $problem = self::whyItIsNotATestThatRuns($class, $method);
+
+            if ($problem !== null) {
+                $notRules[] = $problem;
+            }
+        }
+
+        $this->assertSame([], $notRules, "AGENTS.md names enforcement that does not run:\n  ".implode("\n  ", $notRules));
+    }
+
+    /**
+     * The rules in this file that hold each layer the agent instructions may
+     * call a boundary between modules: the import rule, and the rule for
+     * what it reads of the other ways of naming the layer. A layer with no
+     * entry is not held as a boundary, although part of it may be held:
+     * `Infrastructure` has none, because its `use` statements are allowed,
+     * while no_module_names_another_modules_infrastructure_or_http_out_of_sight()
+     * holds what it reads of the other ways of naming it. A layer with an
+     * entry is asserted.
+     *
+     * @var array<string, list<string>>
+     */
+    private const array THE_RULES_HOLDING_EACH_BOUNDARY = [
+        'Http' => [
+            'no_module_calls_another_modules_http_layer',
+            'no_module_names_another_modules_infrastructure_or_http_out_of_sight',
+        ],
+    ];
+
+    #[Test]
+    public function each_layer_the_agent_instructions_speak_of_is_tied_to_the_rules_that_hold_it(): void
+    {
+        /*
+         * Naming one rule somewhere in the document is not naming the rule
+         * behind each claim. With the Http sentence cut back to "`LayeringTest`
+         * enforces that", the document still named a rule - the out-of-sight
+         * one - and every gate stayed green. And the Http sentence could be
+         * rewritten to say that reaching another module's Http "is not
+         * asserted" with every gate green, although two rules assert it: a
+         * disclosure was accepted without being checked, and a disclosure that
+         * understates a boundary tells an agent it may cross it.
+         *
+         * So each layer the paragraph calls a boundary must name, as
+         * `LayeringTest::<method>`, every rule that holds it; a layer no rule
+         * holds cannot be called one; a layer a rule holds cannot be disclosed
+         * as not asserted; and each rule listed must be a test PHPUnit runs.
+         */
+        $text = self::agentInstructions();
+        $said = self::whatTheInstructionsSayAboutEachLayer($text);
+        $wrong = [];
+
+        foreach (self::THE_RULES_HOLDING_EACH_BOUNDARY as $rules) {
+            foreach ($rules as $rule) {
+                $problem = self::whyItIsNotATestThatRuns('LayeringTest', $rule);
+
+                if ($problem !== null) {
+                    $wrong[] = $problem;
+                }
+            }
+        }
+
+        foreach ($said['boundary'] as $layer) {
+            $rules = self::THE_RULES_HOLDING_EACH_BOUNDARY[$layer] ?? [];
+
+            if ($rules === []) {
+                $wrong[] = sprintf('`%s` is called a boundary, and no rule holds it', $layer);
+            }
+
+            foreach ($rules as $rule) {
+                if (! str_contains($text, '`LayeringTest::'.$rule.'`')) {
+                    $wrong[] = sprintf('`%s` is called a boundary without naming `LayeringTest::%s`, which holds it', $layer, $rule);
+                }
+            }
+        }
+
+        foreach ($said['not asserted'] as $layer) {
+            foreach (self::THE_RULES_HOLDING_EACH_BOUNDARY[$layer] ?? [] as $rule) {
+                $wrong[] = sprintf('reaching into `%s` is said not to be asserted, and LayeringTest::%s asserts it', $layer, $rule);
+            }
+        }
+
+        $this->assertSame([], $wrong, "AGENTS.md does not tie what it says about a layer to the rules that hold it:\n  ".implode("\n  ", $wrong));
+    }
+
+    /**
+     * Why $class::$method, in this namespace, is not a test PHPUnit runs, or
+     * null when it is one. method_exists() alone would accept a rule demoted
+     * to a private helper: the suite shrinks by one, every remaining test
+     * stays green, and whatever names it still points at it.
+     */
+    private static function whyItIsNotATestThatRuns(string $class, string $method): ?string
+    {
+        $fqcn = __NAMESPACE__.'\\'.$class;
+
+        if (! class_exists($fqcn) || ! method_exists($fqcn, $method)) {
+            return $class.'::'.$method.' does not exist in '.__NAMESPACE__;
+        }
+
+        $rule = new ReflectionMethod($fqcn, $method);
+        $runs = $rule->isPublic() && ($rule->getAttributes(Test::class) !== [] || str_starts_with($method, 'test'));
+
+        return $runs ? null : $class.'::'.$method.' is not a test PHPUnit runs';
+    }
+
+    #[Test]
+    public function the_agent_instructions_say_only_what_the_import_rules_can_see(): void
+    {
+        /*
+         * The same paragraph said the rule held "including references in
+         * docblocks". importsIn() reads `use` statements and nothing else, so a
+         * docblock naming another module's controller left the Http rule
+         * green. That was the clause that mattered most: a reference no rule
+         * can see is exactly how a boundary gets crossed without anybody
+         * noticing.
+         *
+         * So importsIn() is probed live, once per way of naming a class, and
+         * each sentence the document may use about what the rules see must
+         * agree with the probe. Teach importsIn() to read docblocks and the
+         * current sentence goes red until it is corrected; restore the old
+         * sentence without doing so and it goes red for the reason it was
+         * false.
+         */
+        $controller = 'Lynomia\\Modules\\Billing\\Http\\Controllers\\InvoiceController';
+
+        $probes = [
+            'a use statement' => "<?php\n\nuse {$controller};\n",
+            'a docblock' => "<?php\n\n/**\n * {@see \\{$controller}}\n */\nfinal class Probe {}\n",
+            'an inline fully-qualified name' => "<?php\n\nfinal class Probe\n{\n    public const string C = \\{$controller}::class;\n}\n",
+            'a string' => "<?php\n\nfinal class Probe\n{\n    public const string C = '{$controller}';\n}\n",
+            'a name through an import above its layer' => "<?php\n\nuse Lynomia\\Modules\\Billing\\Http;\n\nfinal class Probe\n{\n    public const string C = Http\\Controllers\\InvoiceController::class;\n}\n",
+        ];
+
+        $sees = [];
+
+        foreach ($probes as $way => $source) {
+            $sees[$way] = in_array($controller, $this->importsIn($source), true);
+        }
+
+        $text = self::agentInstructions();
+        $recognised = 0;
+        $false = [];
+
+        foreach (self::WHAT_THE_INSTRUCTIONS_MAY_SAY_THE_IMPORT_RULES_SEE as $sentence => $requires) {
+            if (! str_contains($text, $sentence)) {
+                continue;
+            }
+
+            $recognised++;
+
+            foreach ($requires as $way => $seen) {
+                if ($sees[$way] !== $seen) {
+                    $false[] = sprintf('"%s" needs importsIn() %s %s, and it does%s', $sentence, $seen ? 'to see' : 'not to see', $way, $seen ? ' not' : '');
+                }
+            }
+        }
+
+        $this->assertNotSame(0, $recognised, 'AGENTS.md no longer says what the import rules can see in any sentence this gate recognises.');
+        $this->assertSame([], $false, "AGENTS.md says something about the import rules that importsIn() does not do:\n  ".implode("\n  ", $false));
+    }
+
+    #[Test]
+    public function no_module_names_another_modules_infrastructure_or_http_out_of_sight(): void
+    {
+        /*
+         * The import rules read `use` statements, so the crossing they are
+         * blind to is the one nobody can see: another module's class named in
+         * a docblock, written inline, held in a string, finished at runtime
+         * from a namespace prefix, or named through an import or a declared
+         * namespace, where the import rules see the namespace and never the
+         * class. The runtime prefix is the shape ReferenceTopologyValidator
+         * uses to reach Monitoring's collectors; that reach is into
+         * Application, which this rule does not cover, and it is named in the
+         * agent instructions instead.
+         *
+         * Reaching another module's Infrastructure is allowed and reaching its
+         * Http is not. This holds at zero, for both layers, what
+         * crossingsOutOfSight() reads. Its docblock says exactly what that is,
+         * and names the ways attack has found past it, each with the command
+         * that measures it in the tree and what that found when it was
+         * written. It is a property rather than a list of exemptions: nothing
+         * it reads is exempt, and there is no count to keep up to date.
+         *
+         * The scanner is shown one source per shape its docblock says it reads
+         * first, through the same function the tree is read through - with
+         * each token read() must leave to it rather than take for an import -
+         * and a few it must not report. A scan that fails to parse a file does
+         * not go red; it reports the clean tree one was hoping for.
+         */
+        $unseen = array_keys(array_filter(self::outOfSightCrossingsTheScanMustFind(), static fn (string $source): bool => self::whatTheOutOfSightRuleFindsIn(self::asAFileOfOrders($source)) === []));
+
+        $this->assertSame([], $unseen, "The scan cannot see these, so a clean result from it would mean nothing:\n  ".implode("\n  ", $unseen));
+
+        $reported = array_keys(array_filter(self::referencesTheScanMustNotReport(), static fn (string $source): bool => self::whatTheOutOfSightRuleFindsIn(self::asAFileOfOrders($source)) !== []));
+
+        $this->assertSame([], $reported, "The scan reports these, which are not crossings it exists to find:\n  ".implode("\n  ", $reported));
+
+        $violations = self::whatTheOutOfSightRuleFindsIn($this->phpFiles(self::SRC.'/Modules'));
+
+        $this->assertSame([], $violations, "Another module's Infrastructure or Http named where no import rule can see it. Import it with `use` (Infrastructure only) or do not name it:\n  ".implode("\n  ", $violations));
+    }
+
+    /**
+     * What the out-of-sight rule reports in $files, each given by its path
+     * under src/ and its source, whose module is the directory under
+     * src/Modules. The rule reads the tree through this and its self-checks
+     * read their sources through it, as the Http rule does.
+     *
+     * @param  list<array{relative: string, source: string, ...}>  $files
+     * @return list<string>
+     */
+    private static function whatTheOutOfSightRuleFindsIn(array $files): array
+    {
+        $violations = [];
+
+        foreach ($files as $file) {
+            $own = explode('/', $file['relative'])[1] ?? '';
+
+            foreach (self::crossingsOutOfSight($file['source'], $own, self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) as $reference) {
+                $violations[] = $file['relative'].':'.$reference;
+            }
+        }
+
+        return $violations;
+    }
+
+    /**
+     * The agent instructions with every run of whitespace collapsed to one
+     * space. The file is hard-wrapped at 80 columns and a sentence straddles a
+     * line break more often than not; matched against the raw file, such a
+     * claim is not recognised at all, and an unrecognised claim is a pass.
+     */
+    private static function agentInstructions(): string
+    {
+        return (string) preg_replace('/\s+/', ' ', (string) file_get_contents(self::AGENT_INSTRUCTIONS));
+    }
+
+    /**
+     * The layers the instructions call a boundary between modules, and the
+     * layers they say crossing into is not asserted.
+     *
+     * @return array{boundary: list<string>, 'not asserted': list<string>}
+     */
+    private static function whatTheInstructionsSayAboutEachLayer(string $text): array
+    {
+        $boundary = [];
+
+        preg_match_all("/never reach(?:es)? into another module's ((?:`\\w+`(?:,? (?:or|and|nor) |, )?)+)/", $text, $claims);
+
+        foreach ($claims[1] as $list) {
+            preg_match_all('/`(\w+)`/', $list, $layers);
+            array_push($boundary, ...$layers[1]);
+        }
+
+        preg_match_all("/Reaching into another module's `(\\w+)` is not asserted/", $text, $disclosed);
+
+        return [
+            'boundary' => array_values(array_unique($boundary)),
+            'not asserted' => array_values(array_unique($disclosed[1])),
+        ];
+    }
+
+    /**
+     * The crossings into another module's $layer that the rules here read, in
+     * $files: each import importsIn() reads that names something in the
+     * layer, and each name crossingsOutOfSight() reports.
+     *
+     * @param  list<array{relative: string, source: string, ...}>  $files
+     * @return list<string>
+     */
+    private static function crossingsInto(string $layer, array $files): array
+    {
+        $found = [];
+
+        foreach ($files as $file) {
+            $own = explode('/', $file['relative'])[1] ?? '';
+
+            foreach (self::importsIn($file['source']) as $import) {
+                if (self::reach($import, $own, $layer) === 'inside') {
+                    $found[] = $file['relative'].' -> '.$import;
+                }
+            }
+
+            // An import above the layer is counted there, with everything
+            // else nobody can see.
+            foreach (self::crossingsOutOfSight($file['source'], $own, [$layer]) as $reference) {
+                $found[] = $file['relative'].':'.$reference;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * The names of another module's class in one of $layers that this reads
+     * and importsIn() does not, as "line: name".
+     *
+     * The file is read by read(), and what importsIn() takes from it is left
+     * out, so a `use` statement naming a class is not reported. This is what
+     * it reads, and all it reads:
+     *
+     * - each import and declared namespace read() finds that is at or above
+     *   one of the layers. It names no class, but every class in the layer
+     *   can be named through it, and none of those names is seen by anything.
+     * - in comments, docblocks, inline names and string literals, a name
+     *   written out from `Lynomia` through `Modules` and a module to the
+     *   layer, with one or two backslashes between each part. An inline name
+     *   is qualified, fully qualified, or relative to the namespace, since in
+     *   a file that declares none `Lynomia\...` and `namespace\Lynomia\...`
+     *   name the class `\Lynomia\...` does.
+     * - in code, a qualified name whose first part is the name one of the
+     *   file's imports is known by. PHP reads it as that import followed by
+     *   the rest, and so does this. A namespace declaration's own name is not
+     *   read that way, because PHP does not read it that way.
+     * - in string literals, a name that stops at `Lynomia\`, at
+     *   `Lynomia\Modules` or at another module's namespace, with or without a
+     *   trailing separator, leaving the module or the layer to runtime. It is
+     *   reported whatever the layer: no reading of the source can tell what
+     *   it reaches.
+     *
+     * A name is matched without regard to letter case, as PHP resolves it.
+     * The module named `Infrastructure` is a module, not a layer:
+     * `Lynomia\Modules\Infrastructure\Domain\...` crosses into nobody's
+     * Infrastructure layer, and is not reported.
+     *
+     * That is a reading, not a boundary around every way of naming a class,
+     * and a name built any other way is not read. Attack has found two such
+     * ways that stand, named here because attack found them, not because
+     * they are the edge of what this misses. From apps/control-plane, when
+     * this was written:
+     *
+     * - A backslash spelled as an escape sequence in a string,
+     *   "Lynomia\x5cModules\x5c...". `grep -rnE --include=*.php
+     *   '\\(x5[cC]|134|u\{0*5[cC]\})' src/Modules` finds no line.
+     * - A name split at any other point: mid-word, or right after `Lynomia`
+     *   with the separator in the next piece. `grep -rniE --include=*.php
+     *   "['\"][^'\"]*\\\\(modules|http|infrastructure)\\b" src/Modules`, a
+     *   quoted string holding a backslash before one of those words, finds
+     *   two lines: ReferenceTopologyValidator's prefix, which reaches into
+     *   Application and is named in the agent instructions, and a sentence
+     *   in RequestLocale's docblock.
+     *
+     * @param  list<string>  $layers
+     * @return list<string>
+     */
+    private static function crossingsOutOfSight(string $source, string $own, array $layers): array
+    {
+        $named = '/Lynomia\\\\{1,2}Modules\\\\{1,2}(\w+)\\\\{1,2}(?:'.implode('|', $layers).')(?!\w)/i';
+        $spliced = '/Lynomia\\\\{1,2}(?:Modules(?:\\\\{1,2}(?:(\w+)(?:\\\\{1,2})?)?)?)?(?![\w\\\\])/i';
+
+        $read = self::read($source);
+        $found = [];
+        $knownAs = [];
+
+        foreach ([...$read['imports'], ...$read['namespaces']] as ['name' => $name, 'line' => $line]) {
+            foreach ($layers as $layer) {
+                if (self::reach($name, $own, $layer) === 'above') {
+                    $found[] = $line.': '.$name.", a namespace at or above another module's ".$layer.', through which its classes are named unseen';
+
+                    break;
+                }
+            }
+        }
+
+        foreach ($read['imports'] as ['name' => $name, 'as' => $as]) {
+            $knownAs[strtolower($as)] = $name;
+        }
+
+        $previous = null;
+
+        foreach ($read['rest'] as $token) {
+            $through = $token->is(T_NAME_QUALIFIED) && ($previous === null || ! $previous->is(T_NAMESPACE))
+                ? $knownAs[strtolower((string) strstr($token->text, '\\', true))] ?? null
+                : null;
+
+            if ($through !== null) {
+                $resolved = $through.strstr($token->text, '\\');
+
+                foreach ($layers as $layer) {
+                    if (self::reach($resolved, $own, $layer) === 'inside') {
+                        $found[] = $token->line.': '.$token->text.', which is '.$resolved;
+
+                        break;
+                    }
+                }
+            }
+
+            if (! $token->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                $previous = $token;
+            }
+
+            $isString = $token->is([T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE]);
+
+            if (! $isString && ! $token->is([T_COMMENT, T_DOC_COMMENT, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED, T_NAME_RELATIVE])) {
+                continue;
+            }
+
+            if (preg_match_all($named, $token->text, $hits, PREG_SET_ORDER | PREG_OFFSET_CAPTURE) > 0) {
+                foreach ($hits as $hit) {
+                    if (strcasecmp($hit[1][0], $own) !== 0) {
+                        $found[] = ($token->line + substr_count($token->text, "\n", 0, $hit[0][1])).': '.$hit[0][0];
+                    }
+                }
+            }
+
+            if ($isString && preg_match_all($spliced, $token->text, $hits, PREG_SET_ORDER) > 0) {
+                foreach ($hits as $hit) {
+                    if (($hit[1] ?? '') === '') {
+                        $found[] = $token->line.': '.$hit[0].' followed by a module name chosen at runtime';
+                    } elseif (strcasecmp($hit[1], $own) !== 0) {
+                        $found[] = $token->line.': '.$hit[0].' followed by a layer chosen at runtime';
+                    }
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * One source per shape crossingsOutOfSight()'s docblock says it reads -
+     * per shape, not per combination of shapes - and per token read() must
+     * leave to it rather than take for an import - a comment inside a `use`
+     * statement, the code after one ended by a closing tag, a closure's
+     * `use`, a trait's `use` wherever the braces around it put it - each as
+     * it would appear in a file of the Orders module.
+     *
+     * @return array<string, string>
+     */
+    private static function outOfSightCrossingsTheScanMustFind(): array
+    {
+        $file = static fn (string $body): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$body;
+
+        return [
+            'a docblock' => $file(<<<'PHP'
+                /**
+                 * Hands the result to {@see \Lynomia\Modules\Billing\Http\Controllers\InvoiceController}.
+                 */
+                final class Planted {}
+                PHP),
+            'a comment in prose, among apostrophes' => $file(<<<'PHP'
+                final class Planted
+                {
+                    // It's Billing's row and it isn't ours: 'Lynomia\Modules\Billing\Infrastructure\Models\Invoice'.
+                    public function run(): void {}
+                }
+                PHP),
+            'an inline fully-qualified name' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(): int
+                    {
+                        return \Lynomia\Modules\Catalog\Infrastructure\Models\Plan::query()->count();
+                    }
+                }
+                PHP),
+            'an inline qualified name in a file that declares no namespace' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                return [Lynomia\Modules\Billing\Http\Controllers\InvoiceController::class, 'show'];
+                PHP,
+            'an inline relative name in a file that declares no namespace' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                return [namespace\Lynomia\Modules\Billing\Http\Controllers\InvoiceController::class, 'show'];
+                PHP,
+            'a class name in a string' => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string MODEL = 'Lynomia\\Modules\\Catalog\\Infrastructure\\Models\\Plan';
+                }
+                PHP),
+            'a class name in a string with single backslashes' => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string MODEL = 'Lynomia\Modules\Catalog\Infrastructure\Models\Plan';
+                }
+                PHP),
+            'a namespace prefix finished at runtime' => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string ADAPTERS = 'Lynomia\\Modules\\Compute\\Infrastructure\\Providers\\';
+
+                    public function run(string $driver): bool
+                    {
+                        return class_exists(self::ADAPTERS.$driver);
+                    }
+                }
+                PHP),
+            'an interpolated string' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $name): string
+                    {
+                        return "Lynomia\\Modules\\Billing\\Http\\Controllers\\{$name}";
+                    }
+                }
+                PHP),
+            'a module name chosen at runtime' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $module): string
+                    {
+                        return 'Lynomia\\Modules\\'.$module.'\\Infrastructure\\Models\\Plan';
+                    }
+                }
+                PHP),
+            'a module name chosen at runtime, in another letter case' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $module): string
+                    {
+                        return 'lynomia\\modules\\'.$module.'\\Http\\Controllers\\InvoiceController';
+                    }
+                }
+                PHP),
+            'a layer chosen at runtime' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return 'Lynomia\\Modules\\Billing\\'.$layer.'\\Controllers\\InvoiceController';
+                    }
+                }
+                PHP),
+            'a layer chosen at runtime, with single backslashes' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return <<<'NS'
+                            Lynomia\Modules\Billing\
+                            NS.$layer.'\Controllers\InvoiceController';
+                    }
+                }
+                PHP),
+            'a name split after `Lynomia\Modules`' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public const string C = 'Lynomia\\Modules'.'\\Billing\\Http\\Controllers\\InvoiceController';
+                }
+                PHP),
+            'a name split after another module' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public const string C = 'Lynomia\\Modules\\Billing'.'\\Http\\Controllers\\InvoiceController';
+                }
+                PHP),
+            'a name split after `Lynomia\`' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public const string C = 'Lynomia\\'.'Modules\\Billing\\Http\\Controllers\\InvoiceController';
+                }
+                PHP),
+            'a name in another letter case' => $file(<<<'PHP'
+                /**
+                 * Hands the result to {@see \lynomia\modules\billing\http\controllers\InvoiceController}.
+                 */
+                final class Planted {}
+                PHP),
+            'a class named through an import of its layer' => $file(<<<'PHP'
+                use Lynomia\Modules\Billing\Http;
+
+                final class Planted
+                {
+                    public const string C = Http\Controllers\InvoiceController::class;
+                }
+                PHP),
+            'a class named through an aliased import of its module' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog as CatalogModule;
+
+                final class Planted
+                {
+                    public const string C = CatalogModule\Infrastructure\Models\Plan::class;
+                }
+                PHP),
+            'a class named through a group import of its layer' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\{Infrastructure};
+
+                final class Planted
+                {
+                    public const string C = Infrastructure\Models\Plan::class;
+                }
+                PHP),
+            'a class named through an import of a namespace inside its layer' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Infrastructure\Models;
+
+                final class Planted
+                {
+                    public const string C = Models\Plan::class;
+                }
+                PHP),
+            'a class named through an aliased import of a namespace inside its layer, in another letter case' => $file(<<<'PHP'
+                use Lynomia\Modules\Billing\Infrastructure\Models as BillingModels;
+
+                final class Planted
+                {
+                    public const string C = billingmodels\Invoice::class;
+                }
+                PHP),
+            'a class named through a namespace declared above it' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules;
+
+                final class Planted
+                {
+                    public const string C = Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a class named through the root namespace declared' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia;
+
+                final class Planted
+                {
+                    public const string C = Modules\Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a class named through a namespace declared behind comments' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace /* every module */ /** at once */ Lynomia\Modules;
+
+                final class Planted
+                {
+                    public const string C = Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a class named through a namespace declared after a label' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions;
+
+                final class Earlier {}
+
+                modules: namespace Lynomia\Modules;
+
+                final class Planted
+                {
+                    public const string C = Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP,
+            'a name after an import ended by a closing tag' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Domain\Enums\ProductKind ?>
+                <?php
+
+                final class Planted
+                {
+                    public const string C = \Lynomia\Modules\Billing\Http\Controllers\InvoiceController::class;
+                }
+                PHP),
+            'a comment inside a `use` statement' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Domain\Enums\ProductKind /* {@see \Lynomia\Modules\Billing\Http\Controllers\InvoiceController} */;
+
+                final class Planted {}
+                PHP),
+            'a string in a closure that captures a variable' => $file(<<<'PHP'
+                $name = 'InvoiceController';
+
+                return static function () use ($name): string {
+                    return 'Lynomia\\Modules\\Billing\\Http\\Controllers\\'.$name;
+                };
+                PHP),
+            'a trait named in full inside a class' => $file(<<<'PHP'
+                final class Planted
+                {
+                    use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                }
+                PHP),
+            'a trait named in full after interpolated strings' => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $a, string $b): string
+                    {
+                        return "{$a} ${b}";
+                    }
+
+                    use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                }
+                PHP),
+            'a trait named in full inside a class in a braced namespace block' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions {
+                    final class Planted
+                    {
+                        use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                    }
+                }
+                PHP,
+            'a trait named in full in a namespace ended by a closing tag' => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions ?>
+                <?php
+
+                final class Planted
+                {
+                    use \Lynomia\Modules\Catalog\Infrastructure\Concerns\Priced;
+                }
+                PHP,
+        ];
+    }
+
+    /**
+     * References the scan must leave alone, in a file of the Orders module.
+     *
+     * @return array<string, string>
+     */
+    private static function referencesTheScanMustNotReport(): array
+    {
+        $file = static fn (string $body): string => "<?php\n\ndeclare(strict_types=1);\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n".$body;
+
+        return [
+            'a use statement, which the import rules do see' => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+
+                final class Planted {}
+                PHP),
+            "the file's own module" => $file(<<<'PHP'
+                /**
+                 * Answers {@see \Lynomia\Modules\Orders\Http\Controllers\OrderController}.
+                 */
+                final class Planted {}
+                PHP),
+            "the file's own module in another letter case" => $file(<<<'PHP'
+                /**
+                 * Answers {@see \lynomia\modules\orders\http\controllers\OrderController}.
+                 */
+                final class Planted {}
+                PHP),
+            "another module's Domain" => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string KIND = \Lynomia\Modules\Catalog\Domain\Enums\ProductKind::class;
+                }
+                PHP),
+            'the Domain layer of the module named Infrastructure' => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string VALUES = 'Lynomia\\Modules\\Infrastructure\\Domain\\Reference\\ReferenceValues';
+                }
+                PHP),
+            "a class named through an import of another module's Domain" => $file(<<<'PHP'
+                use Lynomia\Modules\Catalog\Domain;
+
+                final class Planted
+                {
+                    public const string C = Domain\Enums\ProductKind::class;
+                }
+                PHP),
+            "a namespace declared by a name that begins with an import's alias, which PHP does not resolve" => <<<'PHP'
+                <?php
+
+                declare(strict_types=1);
+
+                namespace Lynomia\Modules\Orders\Application\Actions;
+
+                use Lynomia\Modules\Catalog\Infrastructure\Models\Plan as Lynomia;
+
+                namespace Lynomia\Modules\Orders\Application\Services;
+
+                final class Planted {}
+                PHP,
+            'a namespace outside the modules, and the name in prose' => $file(<<<'PHP'
+                final class Planted
+                {
+                    private const string CONCERN = 'Lynomia\\Http\\Concerns\\BoundsPageSize';
+
+                    private const string PRODUCT = 'Lynomia Cloud';
+                }
+                PHP),
+            "a layer of the file's own module chosen at runtime" => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return 'Lynomia\\Modules\\Orders\\'.$layer.'\\Models\\Order';
+                    }
+                }
+                PHP),
+            "a layer of the file's own module chosen at runtime, in another letter case" => $file(<<<'PHP'
+                final class Planted
+                {
+                    public function run(string $layer): string
+                    {
+                        return 'lynomia\\modules\\orders\\'.$layer.'\\Models\\Order';
+                    }
+                }
+                PHP),
+            'a namespace that only begins like a layer' => $file(<<<'PHP'
+                /**
+                 * Not {@see \Lynomia\Modules\Billing\HttpClients\Gateway}, which is no layer.
+                 */
+                final class Planted {}
+                PHP),
+            "the modules' namespace named in prose" => $file(<<<'PHP'
+                // Every module has a namespace of its own under Lynomia\Modules.
+                final class Planted {}
+                PHP),
+        ];
     }
 }
