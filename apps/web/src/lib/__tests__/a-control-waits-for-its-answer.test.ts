@@ -1242,7 +1242,38 @@ function findingGatesNotJudgedShut(result: Report): string[] {
   }).map(({ file, control }) => `${file} (${control})`)
 }
 
-describe('a control that waits on an answer is not live before the answer', () => {
+/**
+ * This file's own time budget: 60,000 ms per test, where the rest of the
+ * suite has 30,000 (vitest.config.ts).
+ *
+ * It is the one test file whose work is the TypeScript compiler over the
+ * whole portal: every `.tsx` under `src` (142 at 81a56af) parsed and bound,
+ * then every gate evaluated. The first test to ask for the tree pays for all
+ * of it. Measured at 81a56af on the shared four-core box:
+ *
+ *   - alone, at a load average of 6.0: 2,443 ms for that first test, the
+ *     other 114 together about 1,150 ms (their trees are mostly cached by
+ *     file text in `READINGS`);
+ *   - in two full runs side by side, load average 5.3 rising to 16.2: 7,872
+ *     and 10,528 ms, both past vitest's then-default 5,000 ms, which is how
+ *     round two's gate made the required suite red under load (F-42);
+ *   - with the round-three config (two forks per run), two runs side by
+ *     side at 5.1-14.4: 6,841 and 11,137 ms; and without the fork cap, at
+ *     11.3-16.2: 19,932 and 20,707 ms.
+ *
+ * In a standalone node process the compiler work alone (parse, program,
+ * binder; no evaluation) is 1.3 s cold and 0.6 s warm, so there is no
+ * accidental cost here to remove short of reading fewer files, which would
+ * narrow what the gate asserts. Sixty seconds is about five times the worst
+ * time measured under the config it runs with, and three times the worst
+ * measured without the fork cap; a gate that loops still fails in a minute. The
+ * budget is set on each of the three `describe`s below rather than
+ * globally, so no other test inherits it, and each of the three carries a
+ * row that fails if its own budget is taken off.
+ */
+const GATE_BUDGET_MS = 60_000
+
+describe('a control that waits on an answer is not live before the answer', { timeout: GATE_BUDGET_MS }, () => {
   // Built inside the tests rather than while collecting them, so a gate that
   // throws fails a named test instead of taking the whole file down unnamed.
   let built: Report | undefined
@@ -1300,6 +1331,10 @@ describe('a control that waits on an answer is not live before the answer', () =
     expect(stale, 'GUARDED entries whose gate no longer exists, or now judges cleanly and needs no excuse.').toEqual([])
   })
 
+  it('runs on the budget written for it, not the suite default', ({ task }) => {
+    expect(task.timeout).toBe(GATE_BUDGET_MS)
+  })
+
   it('gives every GUARDED entry a reason somebody wrote', () => {
     const thin = Object.entries(GUARDED).filter(([, reason]) => reason.trim().length < 40).map(([key]) => key)
 
@@ -1311,7 +1346,11 @@ describe('a control that waits on an answer is not live before the answer', () =
  * Drift, measured on the real tree: the pre-fix lines put back into the real
  * source text, in memory, and the gate run unmodified over the result.
  */
-describe('the gate reddens on the defect it exists for', () => {
+describe('the gate reddens on the defect it exists for', { timeout: GATE_BUDGET_MS }, () => {
+  it('runs on the budget written for it, not the suite default', ({ task }) => {
+    expect(task.timeout).toBe(GATE_BUDGET_MS)
+  })
+
   const REGISTER = 'features/auth/RegisterPage.tsx'
   const PLANS = 'features/controlCenter/PlansPage.tsx'
   const REGISTER_FIXED = 'disabled={!registrationPermitted}'
@@ -1603,7 +1642,11 @@ describe('the gate reddens on the defect it exists for', () => {
  * property whose loss would turn a live gate into a blessed one, or a
  * diagnosis into a crash.
  */
-describe('the gate itself', () => {
+describe('the gate itself', { timeout: GATE_BUDGET_MS }, () => {
+  it('runs on the budget written for it, not the suite default', ({ task }) => {
+    expect(task.timeout).toBe(GATE_BUDGET_MS)
+  })
+
   it('uses probes that are not in the tree', () => {
     expect(readSources().filter((source) => source.text.includes('useProbeAnswer'))).toEqual([])
   })

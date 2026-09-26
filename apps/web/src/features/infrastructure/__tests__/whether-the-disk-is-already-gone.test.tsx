@@ -34,6 +34,18 @@ import en from '@/i18n/locales/en.json'
  * the state. These tests render the real pages against a stubbed API, in both
  * languages, rather than grepping the source for the key.
  *
+ * ## And the state beside it is not allowed to contradict it
+ *
+ * Round two added the sentence and left the label: a rebuild settled `failed`
+ * after the disk was replaced still read "The rebuild did not run", next to a
+ * red sentence saying it had erased the disk — two statements, one false —
+ * and on /vps the label was all there was. The state is now named from the
+ * pair `(state, data_destroyed)`: `failed` with the disk gone reads "The
+ * rebuild stopped after erasing the disk", on the page and on the list, in
+ * both languages, and "did not run" is kept for the `failed` that never
+ * touched it. Only that one pair is renamed; every other state's own label
+ * already agrees with the fact (see `rebuildStateLabel.ts`).
+ *
  * ## What the fixtures cover, and what they cannot
  *
  * The guard is meant to follow `data_destroyed` and nothing else. The only
@@ -73,6 +85,9 @@ import en from '@/i18n/locales/en.json'
  * is the singular of: the disks become the disk, and "on them" becomes "on it".
  */
 
+/** The state a rebuild settled `failed` after erasing the disk is named by. */
+const ENGLISH_STOPPED_AFTER_ERASING = 'The rebuild stopped after erasing the disk'
+
 /** The VPS sentence, singular: a VPS has one disk. Dedicated's is plural. */
 const ENGLISH_SENTENCE =
   'This rebuild has already erased the disk. Whatever was on it is gone, whether or not the installation finished.'
@@ -98,6 +113,15 @@ function arabicSentence(): string {
   expect(sentence, 'ar.json has no vps.rebuildDataDestroyed').toBeTypeOf('string')
 
   return sentence ?? ''
+}
+
+/** The Arabic state for the same pair, read from the catalogue the page reads. */
+function arabicStoppedAfterErasing(): string {
+  const label = lookup(ar, 'vps.rebuildStoppedAfterErasing')
+
+  expect(label, 'ar.json has no vps.rebuildStoppedAfterErasing').toBeTypeOf('string')
+
+  return label ?? ''
 }
 
 /**
@@ -298,14 +322,16 @@ describe('a VPS whose rebuild erased the disk, on its own page', () => {
     await i18n.changeLanguage('en')
   })
 
-  it('says the disk is gone, next to the state that says the rebuild did not run', async () => {
+  it('says the disk is gone, and does not say the rebuild did not run', async () => {
     await renderMachinePage(rebuild('failed', true))
 
     const card = rebuildCard()
 
     // The finding's own case: settled as `failed`, no longer waiting for
-    // anyone, and the disk already replaced.
-    expect(within(card).getByText(en.vps.reinstallState.failed)).toBeInTheDocument()
+    // anyone, and the disk already replaced. The state says it stopped after
+    // erasing the disk; "did not run" would be false, and is not said.
+    expect(within(card).getByText(ENGLISH_STOPPED_AFTER_ERASING)).toBeInTheDocument()
+    expect(within(card).queryByText(en.vps.reinstallState.failed)).not.toBeInTheDocument()
     expect(within(card).getByText(ENGLISH_SENTENCE)).toBeInTheDocument()
 
     // The VPS sentence, not the Dedicated one borrowed: a chassis has disks,
@@ -319,7 +345,8 @@ describe('a VPS whose rebuild erased the disk, on its own page', () => {
 
     const card = rebuildCard(ar.vps.rebuild)
 
-    expect(within(card).getByText(ar.vps.reinstallState.failed)).toBeInTheDocument()
+    expect(within(card).getByText(arabicStoppedAfterErasing())).toBeInTheDocument()
+    expect(within(card).queryByText(ar.vps.reinstallState.failed)).not.toBeInTheDocument()
     expect(within(card).getByText(arabicSentence())).toBeInTheDocument()
 
     // Measured, not reasoned: with the key wired and no catalogue carrying
@@ -335,6 +362,7 @@ describe('a VPS whose rebuild erased the disk, on its own page', () => {
     // Here "The rebuild did not run" is the whole truth, and it is the only
     // thing said.
     expect(screen.getByText(en.vps.reinstallState.failed)).toBeInTheDocument()
+    expect(screen.queryByText(ENGLISH_STOPPED_AFTER_ERASING)).not.toBeInTheDocument()
     expect(screen.queryByText(ENGLISH_SENTENCE)).not.toBeInTheDocument()
   })
 
@@ -342,6 +370,18 @@ describe('a VPS whose rebuild erased the disk, on its own page', () => {
     await renderMachinePage(rebuild('failed', true))
 
     expect(screen.getByText(ENGLISH_SENTENCE).className).toContain('--danger-text')
+  })
+
+  it('presents the state that erased the disk as harm too, and not the one that did not', async () => {
+    await renderMachinePage(rebuild('failed', true))
+
+    expect(screen.getByText(ENGLISH_STOPPED_AFTER_ERASING).className).toContain('--danger-text')
+
+    cleanup()
+    vi.unstubAllGlobals()
+    await renderMachinePage(rebuild('failed', false))
+
+    expect(screen.getByText(en.vps.reinstallState.failed).className).not.toContain('--danger-text')
   })
 
   it('puts the sentence on the screen, not merely in the document', async () => {
@@ -412,6 +452,28 @@ describe('the catalogues', () => {
     expect(lookup(ar, 'vps.rebuildDataDestroyed')).toBeTypeOf('string')
   })
 
+  it('carry the truthful state for a rebuild that stopped after erasing, in both languages', () => {
+    expect(lookup(en, 'vps.rebuildStoppedAfterErasing')).toBe(ENGLISH_STOPPED_AFTER_ERASING)
+    expect(lookup(en, 'dedicated.rebuildStoppedAfterErasing')).toBe(
+      'The rebuild stopped after erasing the disks',
+    )
+    // The Arabic pair differs as the English does: a chassis has disks
+    // (الأقراص), a VPS one disk (القرص). Asserted by text, not by difference
+    // alone, so the VPS sentence pasted into the Dedicated key fails here.
+    expect(lookup(ar, 'vps.rebuildStoppedAfterErasing')).toBe('توقفت إعادة البناء بعد أن مسحت القرص')
+    expect(lookup(ar, 'dedicated.rebuildStoppedAfterErasing')).toBe('توقفت إعادة البناء بعد أن مسحت الأقراص')
+
+    for (const key of ['vps.rebuildStoppedAfterErasing', 'dedicated.rebuildStoppedAfterErasing']) {
+      const arabic = lookup(ar, key)
+
+      expect(arabic, `ar.json has no ${key}`).toBeTypeOf('string')
+      expect(arabic).toMatch(/\p{Script=Arabic}/u)
+      expect(arabic).not.toMatch(/[A-Za-z]/)
+      // Not the label it replaces.
+      expect(arabic).not.toBe(ar.vps.reinstallState.failed)
+    }
+  })
+
   it('write the Arabic one in Arabic, and not as the English pasted across', () => {
     const sentence = arabicSentence()
 
@@ -453,49 +515,105 @@ describe('the Dedicated twin, which already said it', () => {
 
     expect(screen.getByText(ar.dedicated.rebuildDataDestroyed)).toBeInTheDocument()
   })
+
+  /*
+   * The same false label the audit quoted, on the twin: the Dedicated page
+   * said the disks were gone and, beside it, that the rebuild did not run.
+   * Looked up through `lookup()` so that, on a tree without the key, this row
+   * fails on its assertion rather than on a type error.
+   */
+  it('no longer says the rebuild did not run beside it, in either language', async () => {
+    await renderServerPage()
+
+    const english = screen.getByText(lookup(en, 'dedicated.rebuildStoppedAfterErasing') ?? '<missing>')
+
+    // Presented as harm, as on the VPS page.
+    expect(english.className).toContain('--danger-text')
+    expect(screen.queryByText(en.dedicated.reinstallState.failed)).not.toBeInTheDocument()
+
+    cleanup()
+    vi.unstubAllGlobals()
+    await i18n.changeLanguage('ar')
+    await renderServerPage()
+
+    const arabic = screen.getByText(lookup(ar, 'dedicated.rebuildStoppedAfterErasing') ?? '<missing>')
+
+    expect(arabic.className).toContain('--danger-text')
+    // The plural, not the VPS sentence: a chassis has disks.
+    expect(arabic.textContent).toContain('الأقراص')
+    expect(screen.queryByText(ar.dedicated.reinstallState.failed)).not.toBeInTheDocument()
+  })
 })
 
 /*
- * The list, left as it was, deliberately.
+ * The list.
  *
- * On /vps a rebuild that erased the disk and one that did not, both settled as
- * `failed`, render the same cell: "The rebuild did not run", in muted grey. That
- * is F-20's own sentence still reproducible on a VPS screen, and it is recorded
- * here rather than fixed, on the three grounds F-20's closure ruled on: the
- * list's sentence is incomplete rather than false; the Dedicated list carries
- * no rebuild information at all, so there is no twin to match; and the
- * machine's own page, which does say it, is one click away. A marker is not impossible — one conditioned on
- * `data_destroyed` alone would fire on every machine ever rebuilt, but one
- * conditioned on the fact and a state other than `completed` would not — it
- * was simply not what F-20 closed with.
- *
- * What this row holds is the third ground: the row is a way to the page that
- * answers.
+ * Round two left /vps as it was, on the ground that its sentence was
+ * "incomplete rather than false". It was false: a rebuild that erased the disk
+ * and was settled `failed` read "The rebuild did not run", in muted grey, and
+ * that was the only thing the list said about it — F-20's own sentence, on a
+ * VPS screen. The cell now names the state from the same pair the page does,
+ * so the erased one reads "The rebuild stopped after erasing the disk", in the
+ * danger colour, and the one that never touched the disk still reads "did not
+ * run". A marker on `data_destroyed` alone would have fired on every machine
+ * ever rebuilt; this fires only where the state's own label would have lied.
  */
 describe('the VPS list', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals()
     cleanup()
+    await i18n.changeLanguage('en')
   })
 
-  it('leads from a rebuild that erased the disk to the page that says so', async () => {
-    const destroyed = machine(rebuild('failed', true))
-
+  function renderListOf(...machines: Array<ReturnType<typeof machine>>) {
     vi.stubGlobal(
       'fetch',
       stubApi({
         '/vps': {
-          data: [destroyed],
-          meta: { page: 1, per_page: 25, total: 1, last_page: 1, max_per_page: 100 },
+          data: machines,
+          meta: { page: 1, per_page: 25, total: machines.length, last_page: 1, max_per_page: 100 },
         },
       }),
     )
 
     renderAt('/vps', <Route path="/vps" element={<VpsPage />} />)
+  }
+
+  it('does not say a rebuild that erased the disk did not run', async () => {
+    renderListOf(machine(rebuild('failed', true)))
 
     const row = await screen.findByRole('row', { name: /web-kw-01/ })
-    expect(within(row).getByText(en.vps.reinstallState.failed)).toBeInTheDocument()
+
+    expect(within(row).getByText(ENGLISH_STOPPED_AFTER_ERASING).className).toContain('--danger-text')
+    expect(within(row).queryByText(en.vps.reinstallState.failed)).not.toBeInTheDocument()
     expect(within(row).getByRole('link', { name: 'web-kw-01' })).toHaveAttribute('href', '/vps/01JVM')
+  })
+
+  it('does not say it in Arabic either', async () => {
+    await i18n.changeLanguage('ar')
+    renderListOf(machine(rebuild('failed', true)))
+
+    const row = await screen.findByRole('row', { name: /web-kw-01/ })
+
+    expect(within(row).getByText(arabicStoppedAfterErasing())).toBeInTheDocument()
+    expect(within(row).queryByText(ar.vps.reinstallState.failed)).not.toBeInTheDocument()
+  })
+
+  it('still says "did not run" for a rebuild that failed before touching the disk', async () => {
+    renderListOf(machine(rebuild('failed', false)))
+
+    const row = await screen.findByRole('row', { name: /web-kw-01/ })
+
+    expect(within(row).getByText(en.vps.reinstallState.failed)).toBeInTheDocument()
+    expect(within(row).queryByText(ENGLISH_STOPPED_AFTER_ERASING)).not.toBeInTheDocument()
+  })
+
+  it('leaves a completed rebuild reading "Rebuilt", though it replaced the disk too', async () => {
+    renderListOf(machine(rebuild('completed', true)))
+
+    const row = await screen.findByRole('row', { name: /web-kw-01/ })
+
+    expect(within(row).getByText(en.vps.reinstallState.completed)).toBeInTheDocument()
   })
 })
 
