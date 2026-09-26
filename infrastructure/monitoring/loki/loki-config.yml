@@ -114,10 +114,15 @@ compactor:
 #     inhibit rules with no `equal:` key already — but somebody would have to
 #     write and maintain that pair by hand, for a stream nothing writes.
 #
-# validate-monitoring.py refuses a ruler wired to an Alertmanager with no rule
-# files mounted at its rules directory. To add log-derived alerts: ship the log
-# first, then put rule files in this repository, mount them at the ruler's
-# directory, and wire the ruler back.
+# validate-monitoring.py refuses a ruler wired to an Alertmanager, by
+# `ruler.alertmanager_url` here or by the loki service's
+# -ruler.alertmanager-url flag in docker-compose.monitoring.yml, with no rule
+# files bind-mounted where its local store reads them; loki_ruler_problems
+# says what else it does and does not read. To add log-derived alerts:
+# ship the log first, then put rule files in this repository, mount them at
+# the ruler's directory one tenant directory down (<directory>/fake/*.yml
+# while auth_enabled is false; a file directly in the directory is never
+# read), and wire the ruler back.
 
 # Anonymous usage reporting is off. This is infrastructure for a business whose
 # stream names disclose its customers and its scale.

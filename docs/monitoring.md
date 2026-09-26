@@ -152,8 +152,8 @@ advance — which is to say, before the outage.
 | Certificate expiring | Predictable, preventable, and takes the portal down |
 | Hosting node unavailable | Every account on it is offline |
 | IP pool below runway threshold | Orders will start failing after payment |
-| Critical drift unresolved (`ResourceDriftOpen`) | A customer is paying for a machine the hypervisor does not have, or a suspended service is still running. Pages; acknowledging does not clear it, resolving does |
-| Drift unreviewed for a day (`DriftQueueUnworked`) | Disagreements with a provider are piling up unreviewed. Warning; acknowledging clears it |
+| Critical drift unresolved (`ResourceDriftOpen`) | The platform and a provider disagree in a way that costs a customer or the business now — for example a customer paying for a machine the hypervisor does not have, or a suspended service still running. Pages; acknowledging does not clear it, resolving does |
+| Drift queue not empty for a day (`DriftQueueUnworked`) | Disagreements with a provider are piling up unreviewed: every evaluation for a day has found at least one open. Warning; acknowledging clears it |
 | Dedicated power request indeterminate (`DedicatedPowerOperationIndeterminate`) | A customer's physical machine may be mid-reset, off or untouched, and nothing will try again. Pages |
 | Dedicated power claims abandoned (`DedicatedPowerClaimsAbandoned`) | Claims are outliving their lease: the settling sweep has stopped, or requests keep dying mid-call. Warning |
 

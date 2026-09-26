@@ -61,14 +61,15 @@ return [
          * cannot leak a credential by logging a raw exception or request body.
          *
          * SHIPPER-STATUS: not deployed. infrastructure/monitoring/alloy/config.alloy
-         * reads this file at its deployed location (the control_plane role's
-         * release directory, then storage/logs/lynomia.json), and nothing in
-         * this repository installs Alloy on a control-plane host, so today the
-         * file stays on the host. See lynomia_log_shipper_deployed in
-         * infrastructure/ansible/group_vars/all.yml. Keep the path under
-         * storage/: it is the one directory a deploy makes writable by the
-         * application user, and CriticalDriftReachesAnOperatorTest holds it and
-         * Alloy's path together.
+         * reads this file at its deployed location (the release directory the
+         * control_plane role declares, then storage/logs/lynomia.json), and
+         * nothing in this repository installs Alloy on a control-plane host,
+         * so today the file stays on the host. See lynomia_log_shipper_deployed
+         * in infrastructure/ansible/group_vars/all.yml. Keep the path under
+         * storage/: it is where Laravel expects to write, unlike a root-owned
+         * path such as /var/log that the application user cannot create, and
+         * CriticalDriftReachesAnOperatorTest holds it and Alloy's path
+         * together.
          */
         'structured' => [
             'driver' => 'custom',

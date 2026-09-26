@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the alert rules pointed at metrics that exist.
+r"""Keep the alert rules pointed at metrics that exist.
 
 An alert on a metric nobody emits never fires. It looks like coverage in a
 review and is silence in an incident, which is the worst of both.
@@ -19,18 +19,91 @@ It also checks that every rule says where the operator should look — a
 pointing outside it, which is taken on trust — because "page somebody at 4am
 with no instructions" is not monitoring.
 
-It walks Alertmanager's route tree for every alert, the way Alertmanager walks
-it, and requires each walk to end at a receiver the file defines. A few alerts
-are pinned further, in PINNED_ROUTES: their destination is itself the fix for a
-finding, so the receiver they reach and the series they read are asserted
-rather than merely resolved. A series in NEVER_PAGES may not be read by a
-critical rule. This is here, over PyYAML, rather than in a PHP test over a
-hand-written YAML reader: a second model of a file can be wrong in ways the
-file never is, and Alertmanager's config is parsed by a real YAML parser.
+It walks Alertmanager's route tree for every alerting rule in
+prometheus/rules/*.yml (the glob prometheus.yml's rule_files names), with the
+labels that rule sets, and requires each walk to end at a receiver the file
+defines. A few alerts are pinned further, in PINNED_ROUTES: their destination
+is itself the fix for a finding, so the receiver the walk selects for them,
+the series they read and how long they wait are asserted rather than merely
+resolved. A series in NEVER_PAGES may not be read by a critical rule. This is
+here, over PyYAML, rather than in a PHP test over a hand-written YAML reader:
+a second model of a file can be wrong in ways the file never is, and
+Alertmanager's config is parsed by a real YAML parser.
 
-It refuses a Loki ruler wired to an Alertmanager with no rule files mounted at
-its rules directory. A ruler pointed at an empty directory looks configured and
-evaluates nothing, which is worse than no ruler.
+The walk is itself a model -- of Alertmanager's route tree, and of how
+Prometheus labels an alert -- and it is only worth what that model is. What
+follows says exactly what it reads and what it refuses rather than guess. It
+does not say the model is complete, and nothing here shows that it is.
+
+  * The rule files, through _RuleFileLoader: PyYAML, refusing a key written
+    twice, as Prometheus's rulefmt (yaml.v3) refuses it. Of each rule it
+    reads `alert` or `record`, `expr`, `for`, `labels` and the runbook
+    annotations. It does not read a group's own `labels:`, which Prometheus
+    v3.6 adds to each rule's, the rule's own value winning (rules.FromMaps).
+  * alertmanager.yml, through _StrictLoader: PyYAML, refusing a key written
+    twice, as go-yaml's UnmarshalStrict does, and any merge key (MergeKey). A
+    text go-yaml parses differently from PyYAML is not examined. Of each
+    route it reads `receiver`, `continue`, `matchers`, `match`, `match_re`
+    and `routes`. It refuses a key outside ROUTE_KEYS, a non-string receiver
+    or legacy match value, a legacy match label name Alertmanager refuses, a
+    non-boolean `continue`, and matchers or `continue: true` on the root.
+  * Each `matchers:` line, through a port of Alertmanager v0.28.1's classic
+    parser (pkg/labels/parse.go), which v0.28 with no --enable-feature flag
+    uses whenever that parser accepts the line (matcher/compat/parse.go). A
+    line the port refuses is refused, not modelled. The self-test holds the
+    port to answers recorded from Alertmanager itself.
+  * Each regex matcher, against portable_regex_problem's grammar: the subset
+    on which testing has found no disagreement between Go's RE2 and Python's
+    re. Outside it, the regex is refused.
+  * The compose file's alertmanager service. Its `image` must match
+    MODELLED_ALERTMANAGER, and its `command` must not carry the one flag that
+    changes which parser wins.
+  * For a pinned alert, only the labels its rule sets to a literal, non-empty
+    string with no `{{`, plus alertname. A route whose match turns on any
+    other label is refused for it. That covers a label the series supplies,
+    one from Prometheus's external labels, and one from a group's `labels:`.
+    It also covers a label the rule sets to '': Prometheus deletes that
+    label, and an external label of the same name then takes its place.
+    `alert_relabel_configs` in prometheus.yml, under `alerting:` or under
+    one of its `alertmanagers`, would change the labels Alertmanager is
+    given. It is refused.
+
+Within those inputs the walk follows dispatch.Route.Match (receivers_for). It
+does not check everything Alertmanager checks at load. For one, it does not
+refuse time intervals on the root route, or a route naming a time interval
+nobody defined. So its answer holds only for a file that Alertmanager loads
+and this accepts. Nor does it decide whether a notification is sent at a
+given moment: inhibition, silences and time intervals act after the route
+tree has chosen a receiver, and none of them is modelled here.
+
+Each disagreement with Alertmanager or Prometheus below was found by attacking
+the walk, one round at a time. The list shows where those attacks stopped, not
+the edge of what the walk can get wrong. What can be measured is how often
+each shape occurs in the tree today. Every count below is from the repository
+root, and every one was 0 when this was written.
+
+  Now read or refused:
+    a backslash kept in a matcher value
+        grep -cF '\' infrastructure/monitoring/alertmanager/alertmanager.yml
+    a single quote read as quoting
+        grep -cE "^ *- [^#]*=.*'" infrastructure/monitoring/alertmanager/alertmanager.yml
+    a POSIX class in a regex matcher
+        grep -cF '[[:' infrastructure/monitoring/alertmanager/alertmanager.yml
+    a YAML merge key in alertmanager.yml
+        grep -cF '<<' infrastructure/monitoring/alertmanager/alertmanager.yml
+    a rule label set to ''
+        grep -rE ": *(''|\"\") *$" infrastructure/monitoring/prometheus/rules | wc -l
+    a rule-file key written twice (the only measure is this script: it
+    exits 0 on the tree, and it refuses one)
+  Not read (Alertmanager refuses the file; this does not):
+    a time interval on the root route, or one nobody defined
+        grep -c 'time_intervals' infrastructure/monitoring/alertmanager/alertmanager.yml
+
+It refuses a Loki ruler that is wired to an Alertmanager while no rule files
+are mounted where Loki's local store reads them, because a ruler pointed at an
+empty directory looks configured and evaluates nothing, which is worse than no
+ruler. loki_ruler_problems says what it reads, and which escapes attack has
+found.
 
 Finally it checks that the directories infrastructure/README.md claims exist
 actually do. That check lives here because the first thing it caught was a
@@ -43,8 +116,11 @@ Exit status 0 when the configuration is consistent, 1 otherwise.
 from __future__ import annotations
 
 import re
+import shlex
+import string
 import sys
-from pathlib import Path
+import warnings
+from pathlib import Path, PurePosixPath
 
 try:
     import yaml
@@ -60,13 +136,22 @@ METRIC_IN_EXPR = re.compile(r"lynomia_[a-z0-9_]+")
 # `component: backups` still reaches a receiver that exists -- the storage
 # team's -- and every generic check here would pass while the on-call never
 # hears about a customer paying for a machine the hypervisor does not have.
+#
+# `expr` is compared whole, whitespace collapsed, rather than parsed: each
+# expression is a decision, and changing it is meant to mean changing the pin
+# in the same commit, knowingly. `for` is compared as written, for the same
+# reason: the runbook tells the responder how long each condition has held.
 PINNED_ROUTES: dict[str, dict[str, str]] = {
     # F-22. Critical drift pages the on-call. It reads the series that counts
     # `open` AND `acknowledged` rows, so acknowledging a drift in the operator
-    # screen does not silence the page; only resolving it does.
+    # screen does not silence the page; only resolving it does. Critical only:
+    # the severities exist so that an orphan on a node an operator also uses
+    # by hand does not page anybody at night.
     "ResourceDriftOpen": {
         "receiver": "pagerduty-critical",
         "reads": "lynomia_resource_drift_open",
+        "expr": 'lynomia_resource_drift_open{severity="critical"} > 0',
+        "for": "15m",
     },
     # F-22. Drift nobody has looked at, of any severity, reaches the platform
     # channel. This is the one acknowledging clears, by design: it asks for a
@@ -74,6 +159,8 @@ PINNED_ROUTES: dict[str, dict[str, str]] = {
     "DriftQueueUnworked": {
         "receiver": "platform-team",
         "reads": "lynomia_open_drift_total",
+        "expr": "sum(lynomia_open_drift_total) > 0",
+        "for": "24h",
     },
 }
 
@@ -94,82 +181,487 @@ ROUTE_KEYS = frozenset({
     "mute_time_intervals", "active_time_intervals", "routes",
 })
 
-MATCHER = re.compile(
-    r"""^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=~|!~|!=|=)\s*"""
-    r"""(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([^,"'{}]*?))\s*$"""
+# The Alertmanager the matcher port below was taken from. Another version may
+# parse a matcher differently, so the compose file is held to this one; a bump
+# means re-reading matcher/compat/parse.go and pkg/labels/parse.go at the new
+# tag, correcting the port if they changed, and then widening this.
+MODELLED_ALERTMANAGER = re.compile(r"^prom/alertmanager:v0\.28\.[0-9]+$")
+
+# The one feature flag that changes how v0.28 reads a matcher: with it, only
+# the UTF-8 parser runs, and the classic port below stops describing it.
+# (`classic-mode` runs only the classic parser, which the port is.)
+UNMODELLED_ALERTMANAGER_FEATURE = "utf8-strict-mode"
+
+# Go's regexp `\s`, which is narrower than Python's.
+_GO_RE_SPACE = "[\t\n\f\r ]"
+
+# Go's unicode.IsSpace, which strings.TrimSpace uses. Narrower than what
+# str.strip() removes, which also takes U+001C..U+001F.
+_GO_UNICODE_SPACE = "\t\n\v\f\r \x85\xa0" + "".join(
+    chr(code) for code in (0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029, 0x202F, 0x205F, 0x3000)
 )
+
+# pkg/labels/parse.go's `re`, with its `\s` spelled out and its `$` (end of
+# text, in Go) written as Python's `\Z`.
+_CLASSIC_MATCHER = re.compile(
+    rf"^{_GO_RE_SPACE}*([a-zA-Z_:][a-zA-Z0-9_:]*){_GO_RE_SPACE}*(=~|=|!=|!~)"
+    rf"{_GO_RE_SPACE}*(.*?){_GO_RE_SPACE}*\Z",
+    re.DOTALL,
+)
+
+# model.LabelNameRE, which a legacy `match:` or `match_re:` key must satisfy.
+_LABEL_NAME = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*\Z")
+
+# What may follow a backslash in a portable regex. ASCII punctuation is itself
+# in both engines; d, D, w and W are the same classes in both once Python is
+# told re.ASCII. Every other escape is refused: \s differs on \v, \b means
+# backspace inside a class in Python and is an error in Go, \pL, \z, \Q...\E
+# and \x{..} exist only in Go, \Z, \u and backreferences only in Python.
+_REGEX_PUNCTUATION = frozenset(string.punctuation)
+_REGEX_CLASS_ESCAPES = frozenset("dDwW")
+_REGEX_COUNT = re.compile(r"\{(0|[1-9][0-9]{0,3})(?:(,)(0|[1-9][0-9]{0,3})?)?\}")
+
+# Go refuses a repeat count over 1000, including the product of nested
+# counted repeats (regexp/syntax repeatIsValid). The length cap keeps a
+# pattern well inside Go's program-size limit, which Python does not have.
+_GO_MAX_REPEAT = 1000
+_PORTABLE_REGEX_MAX_LENGTH = 1000
+_PORTABLE_REGEX_MAX_DEPTH = 50
 
 
 class RouteError(ValueError):
     """A route tree this walk cannot read, and so cannot vouch for."""
 
 
-def split_matchers(text: str) -> list[str]:
-    """One `matchers:` entry into its matchers: braces off, commas outside quotes."""
-    text = text.strip()
-    if text.startswith("{") and text.endswith("}"):
-        text = text[1:-1]
-    parts: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
+class UnknownLabel(RouteError):
+    """A route whose match depends on a label the walk was not given."""
+
+
+class RefusedYaml(yaml.constructor.ConstructorError):
+    """YAML that Alertmanager does not turn into the mapping PyYAML builds."""
+
+    consequence = "the routing of every alert is unverified"
+
+
+class DuplicateKey(RefusedYaml):
+    """A mapping key written twice, which go-yaml refuses and PyYAML does not."""
+
+    consequence = "Alertmanager refuses the file, so the routing of every alert is unverified"
+
+
+class MergeKey(RefusedYaml):
+    """A YAML merge key, which Alertmanager applies differently from PyYAML."""
+
+    consequence = (
+        "write the mapping out in full. Alertmanager decodes a route field by "
+        "field: it applies a merge where it stands, so a key written before "
+        "`<<` is overwritten by the merged one, and it adds explicit `matchers:` "
+        "and `match:` entries to merged ones instead of replacing them. "
+        "PyYAML's flattened mapping is not the route Alertmanager reads, so the "
+        "routing of every alert is unverified"
+    )
+
+
+_YAML_MERGE_TAG = "tag:yaml.org,2002:merge"
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """PyYAML, refusing a mapping key written twice, and a merge key.
+
+    Alertmanager loads its file with go-yaml's UnmarshalStrict, which refuses a
+    duplicated key; PyYAML keeps the last one. Walking the last one would be a
+    model of a file Alertmanager will not load.
+
+    A merge key (`<<`) parses the same in go-yaml and PyYAML; what differs is
+    what Alertmanager builds from it (MergeKey). The check runs on each mapping
+    before PyYAML flattens it, and nothing is flattened except by a mapping
+    that holds a merge key, so no merge reaches the walk.
+    """
+
+    def construct_mapping(self, node, deep=False):
+        seen: set[tuple[str, str]] = set()
+        for key_node, _ in node.value:
+            spelled = isinstance(key_node, yaml.ScalarNode) and key_node.value == "<<"
+            if spelled or key_node.tag == _YAML_MERGE_TAG:
+                # PyYAML merges on the !!merge tag, whatever the key's text.
+                # go-yaml v2 merges a key whose text is `<<` and that is plain
+                # or tagged !!merge (isMerge); a quoted "<<" is an ordinary key
+                # there, which Alertmanager refuses as unknown. Refusing every
+                # key reading `<<` and every key tagged !!merge refuses each
+                # merge either parser makes, and some keys neither merges.
+                raise MergeKey(
+                    None, None,
+                    "a merge key `<<`" if spelled
+                    else f"the key {key_node.value!r}, tagged !!merge, which PyYAML merges",
+                    key_node.start_mark,
+                )
+            if not isinstance(key_node, yaml.ScalarNode):
+                continue
+            key = (key_node.tag, key_node.value)
+            if key in seen:
+                raise DuplicateKey(
+                    None, None, f"the key {key_node.value!r} is written twice",
+                    key_node.start_mark,
+                )
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
+class DuplicateRuleKey(yaml.constructor.ConstructorError):
+    """A key written twice in a Prometheus rule file."""
+
+
+class _RuleFileLoader(yaml.SafeLoader):
+    """PyYAML, refusing a mapping key written twice, as Prometheus's rulefmt does.
+
+    rulefmt.Parse (Prometheus v3.6.0) decodes with yaml.v3, whose decoder
+    refuses a mapping that repeats a key, comparing keys by kind and text
+    (decoder.uniqueKeys): `component` and `"component"` are the same key there.
+    PyYAML keeps the last value, so without this a label written twice -- a
+    typical merge-conflict leftover -- reads here as a rule that routes, in a
+    file Prometheus will not load. Only duplicates are refused; merge keys are
+    left to PyYAML, which none of the rule files uses.
+    """
+
+    def construct_mapping(self, node, deep=False):
+        seen: set[tuple[str, str]] = set()
+        for key_node, _ in node.value:
+            # yaml.v3's Value is the scalar's text, and empty for a collection.
+            text = key_node.value if isinstance(key_node, yaml.ScalarNode) else ""
+            if (key_node.id, text) in seen:
+                raise DuplicateRuleKey(
+                    None, None, f"the key {text or key_node.id!r} is written twice",
+                    key_node.start_mark,
+                )
+            seen.add((key_node.id, text))
+        return super().construct_mapping(node, deep=deep)
+
+
+def portable_regex_problem(pattern: str) -> str | None:
+    """Why Go's RE2 and Python's re might read this regex differently, or None.
+
+    Alertmanager compiles a regex matcher with Go's regexp as ^(?:pattern)$;
+    the walk matches it with re.fullmatch under re.ASCII. The grammar accepted
+    here is literals, `.`, the escapes above, bracket classes of single
+    characters and ranges, groups and non-capturing groups, alternation, and
+    `* + ?` or `{n}` `{n,}` `{n,m}` repeats, each optionally lazy. Over it, no
+    disagreement between the two engines has been found: 20,342 regexes it
+    accepts, over about 638,000 strings, measured against Go's regexp when
+    this grammar was written (F-22, e80c0ab), and the recorded verdicts in the
+    self-test. That is a measurement, not a proof that none exists.
+
+    Some of what is refused, and why: `[[:alpha:]]` is a POSIX class in Go
+    and a set followed by a literal `]` in Python; `{,3}` and `{01}` are
+    literal in Go and repeats in Python; `^`, `$` and flags carry different
+    defaults; an unbalanced `)` re-anchors Go's wrapped pattern and is an
+    error in Python; lookaround, backreferences and possessive repeats exist
+    in Python only.
+    """
+    if len(pattern) > _PORTABLE_REGEX_MAX_LENGTH:
+        return f"longer than {_PORTABLE_REGEX_MAX_LENGTH} characters"
+
+    # Each open group holds the largest repeat product inside it so far; the
+    # bottom frame is the whole pattern.
+    frames: list[int] = [1]
+    previous: int | None = None  # the repeat product of the atom a repeat may follow
+    index = 0
+    length = len(pattern)
+
+    def escape(at: int) -> tuple[str | None, int] | str:
+        if at + 1 >= length:
+            return "a trailing backslash"
+        char = pattern[at + 1]
+        if char in _REGEX_CLASS_ESCAPES:
+            return None, at + 2
+        if char in _REGEX_PUNCTUATION:
+            return char, at + 2
+        return f"the escape \\{char}"
+
+    while index < length:
+        char = pattern[index]
+        if char == "\\":
+            read = escape(index)
+            if isinstance(read, str):
+                return read
+            index = read[1]
+            previous = 1
+        elif char == "[":
+            index += 1
+            if index < length and pattern[index] == "^":
+                index += 1
+            items = 0
+            while True:
+                if index >= length:
+                    return "an unterminated character class"
+                char = pattern[index]
+                if char == "]":
+                    if not items:
+                        return "an empty class, or a `]` that is not escaped"
+                    index += 1
+                    break
+                low, index, problem = _class_member(pattern, index, escape, first=not items)
+                if problem:
+                    return problem
+                if index + 1 < length and pattern[index] == "-" and pattern[index + 1] != "]":
+                    if pattern[index + 1] == "-":
+                        return "`--` inside a class"
+                    high, index, problem = _class_member(pattern, index + 1, escape, first=False)
+                    if problem:
+                        return problem
+                    if low is None or high is None:
+                        return "a range with a class escape at one end"
+                    if high < low:
+                        return f"the backwards range {low}-{high}"
+                items += 1
+            previous = 1
+        elif char == "(":
+            if pattern.startswith("(?:", index):
+                index += 3
+            elif pattern.startswith("(?", index):
+                return "a flag or group extension; only `(` and `(?:` are read"
+            else:
+                index += 1
+            frames.append(1)
+            if len(frames) > _PORTABLE_REGEX_MAX_DEPTH:
+                return f"groups nested deeper than {_PORTABLE_REGEX_MAX_DEPTH}"
+            previous = None
+        elif char == ")":
+            if len(frames) == 1:
+                return "an unbalanced `)`"
+            inner = frames.pop()
+            frames[-1] = max(frames[-1], inner)
+            previous = inner
+            index += 1
+        elif char == "|":
+            previous = None
+            index += 1
+        elif char in "*+?":
+            if previous is None:
+                return f"a `{char}` with nothing to repeat"
+            index += 1
+            if index < length and pattern[index] == "?":
+                index += 1
+            previous = None
+        elif char == "{":
+            count = _REGEX_COUNT.match(pattern, index)
+            if not count:
+                return "a `{` that is not a counted repeat"
+            if previous is None:
+                return "a counted repeat with nothing to repeat"
+            low = int(count.group(1))
+            high = low if count.group(2) is None else (
+                int(count.group(3)) if count.group(3) is not None else None
+            )
+            if high is not None and high < low:
+                return f"the backwards repeat {count.group(0)}"
+            times = high if high is not None else low
+            if times > _GO_MAX_REPEAT or (times and previous * times > _GO_MAX_REPEAT):
+                return f"repeats nested past Go's limit of {_GO_MAX_REPEAT}"
+            frames[-1] = max(frames[-1], previous * max(times, 1))
+            index = count.end()
+            if index < length and pattern[index] == "?":
+                index += 1
+            previous = None
+        elif char in "}]^$":
+            return f"an unescaped `{char}`"
+        else:
+            index += 1
+            previous = 1
+    if len(frames) != 1:
+        return "an unbalanced `(`"
+    # Belt and braces: whatever the grammar above let through, Python must
+    # compile without complaint. A FutureWarning is Python saying the pattern's
+    # meaning is due to change, which is a disagreement waiting to happen.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        try:
+            re.compile(pattern, re.ASCII)
+        except (re.error, Warning) as error:
+            return f"Python's re objects: {error}"
+    return None
+
+
+def _class_member(
+    pattern: str, index: int, escape, *, first: bool
+) -> tuple[str | None, int, str | None]:
+    """One member of a bracket class: a character, or None for \\d \\D \\w \\W.
+
+    An unescaped `-` is read only first or last in the class, where both
+    engines take it literally.
+    """
+    char = pattern[index]
+    if char == "\\":
+        read = escape(index)
+        if isinstance(read, str):
+            return None, index, read
+        return read[0], read[1], None
+    if char == "[":
+        return None, index, "an unescaped `[` inside a class"
+    if char == "-" and not first and pattern[index + 1:index + 2] != "]":
+        return None, index, "an unescaped `-` inside a class that is not first or last"
+    if char in "&~|-" and pattern[index + 1:index + 2] == char:
+        # Python warns that each of these may become a set operation.
+        return None, index, f"`{char}{char}` inside a class"
+    return char, index + 1, None
+
+
+def parse_classic_matchers(text: str) -> list[tuple[str, str, str]]:
+    """pkg/labels.ParseMatchers, Alertmanager v0.28.1, ported line for line."""
+    if text.startswith("{"):
+        text = text[1:]
+    if text.endswith("}"):
+        text = text[:-1]
+    inside_quotes = False
     escaped = False
+    token: list[str] = []
+    tokens: list[str] = []
     for char in text:
+        if char == ",":
+            if not inside_quotes:
+                tokens.append("".join(token))
+                token = []
+                continue
+        elif char == '"':
+            if not escaped:
+                inside_quotes = not inside_quotes
+            else:
+                escaped = False
+        elif char == "\\":
+            escaped = not escaped
+        else:
+            escaped = False
+        token.append(char)
+    last = "".join(token).strip(_GO_UNICODE_SPACE)
+    if last:
+        tokens.append(last)
+    return [parse_classic_matcher(token) for token in tokens]
+
+
+def parse_classic_matcher(text: str) -> tuple[str, str, str]:
+    """pkg/labels.ParseMatcher, Alertmanager v0.28.1, ported line for line.
+
+    Note what it does NOT do, because each is a way a hand-written reader
+    goes wrong: a single quote is an ordinary character, so `'critical'` is a
+    value with quotes in it; and a backslash before anything but `"`, `\\` or
+    `n` is kept, so `prov\\w+` is a regex with a word class in it.
+    """
+    found = _CLASSIC_MATCHER.match(text)
+    if not found:
+        raise RouteError(f"a matcher this walk cannot read: {text!r} is not a classic matcher")
+    name, op, raw = found.groups()
+    expect_trailing_quote = raw.startswith('"')
+    if expect_trailing_quote:
+        raw = raw[1:]
+    value: list[str] = []
+    escaped = False
+    for index, char in enumerate(raw):
         if escaped:
             escaped = False
-        elif char == "\\" and quote == '"':
-            escaped = True
-        elif quote:
-            if char == quote:
-                quote = None
-        elif char in "\"'":
-            quote = char
-        elif char == ",":
-            parts.append("".join(current))
-            current = []
+            if char == "n":
+                value.append("\n")
+            elif char in '"\\':
+                value.append(char)
+            else:
+                # A spurious escape: Alertmanager keeps the backslash.
+                value.append("\\" + char)
             continue
-        current.append(char)
-    parts.append("".join(current))
-    return [part for part in parts if part.strip()]
+        if char == "\\":
+            if index < len(raw) - 1:
+                escaped = True
+                continue
+            value.append("\\")
+        elif char == '"':
+            if not expect_trailing_quote or index < len(raw) - 1:
+                raise RouteError(
+                    f"a matcher this walk cannot read: {text!r} has an unescaped double quote"
+                )
+            expect_trailing_quote = False
+        else:
+            value.append(char)
+    if expect_trailing_quote:
+        raise RouteError(f"a matcher this walk cannot read: {text!r} has an unescaped double quote")
+    return name, op, "".join(value)
+
+
+def _refuse_invalid_utf8(text: str) -> None:
+    # A YAML escape can produce a lone surrogate, which has no UTF-8 form;
+    # Alertmanager refuses a value that is not valid UTF-8.
+    if any("\ud800" <= char <= "\udfff" for char in text):
+        raise RouteError(f"a matcher this walk cannot read: {text!r} is not valid UTF-8")
+
+
+def _regex_checked(name: str, op: str, value: str, where: str) -> tuple[str, str, str]:
+    if op in ("=~", "!~"):
+        problem = portable_regex_problem(value)
+        if problem:
+            raise RouteError(
+                f"a matcher this walk cannot read: {where} {name}{op}{value!r} is a regex "
+                f"Go's RE2 and Python's re might not read alike ({problem})"
+            )
+    return name, op, value
 
 
 def parse_matchers(route: dict) -> list[tuple[str, str, str]]:
     """Every matcher on a route, legacy forms included, as (label, op, value)."""
     parsed: list[tuple[str, str, str]] = []
-    for entry in route.get("matchers") or []:
+    entries = route.get("matchers")
+    if entries is not None and not isinstance(entries, list):
+        raise RouteError(f"`matchers` is not a list: {entries!r}")
+    for entry in entries or []:
         if not isinstance(entry, str):
             raise RouteError(f"a matcher that is not a string: {entry!r}")
-        for text in split_matchers(entry):
-            match = MATCHER.match(text)
-            if not match:
-                raise RouteError(f"a matcher this walk cannot read: {text!r}")
-            name, op, double, single, bare = match.groups()
-            if double is not None:
-                value = re.sub(r"\\(.)", r"\1", double)
-            else:
-                value = single if single is not None else (bare or "")
-            parsed.append((name, op, value))
+        _refuse_invalid_utf8(entry)
+        for name, op, value in parse_classic_matchers(entry):
+            parsed.append(_regex_checked(name, op, value, "`matchers:`"))
     for key, op in (("match", "="), ("match_re", "=~")):
-        legacy = route.get(key) or {}
+        legacy = route.get(key)
+        if legacy is None:
+            continue
         if not isinstance(legacy, dict):
             raise RouteError(f"`{key}` is not a mapping: {legacy!r}")
-        parsed.extend((str(name), op, str(value)) for name, value in legacy.items())
+        for name, value in legacy.items():
+            # go-yaml hands Alertmanager a scalar's source text, and PyYAML a
+            # typed value: `yes` is "yes" there and True here. Only a string
+            # reads the same in both.
+            if not isinstance(name, str) or not _LABEL_NAME.match(name):
+                raise RouteError(f"`{key}` names a label Alertmanager refuses: {name!r}")
+            if not isinstance(value, str):
+                raise RouteError(
+                    f"`{key}` gives {name} the non-string {value!r}; quote it, so "
+                    f"Alertmanager and this walk read the same value"
+                )
+            _refuse_invalid_utf8(value)
+            parsed.append(_regex_checked(name, op, value, f"`{key}:`"))
     return parsed
 
 
-def matches(matchers: list[tuple[str, str, str]], labels: dict[str, str]) -> bool:
+def matches(
+    matchers: list[tuple[str, str, str]],
+    labels: dict[str, str],
+    known: set[str] | None = None,
+) -> bool | None:
+    """Whether a route's matchers all match, as Alertmanager's Matchers.Matches.
+
+    With `known`, a label outside it has a value the walk does not know, and a
+    route whose answer depends on one returns None rather than a guess.
+    """
+    undetermined = False
     for name, op, value in matchers:
+        if known is not None and name not in known:
+            undetermined = True
+            continue
         actual = labels.get(name, "")
         if op == "=":
             ok = actual == value
         elif op == "!=":
             ok = actual != value
         else:
-            ok = re.fullmatch(value, actual) is not None
+            ok = re.fullmatch(value, actual, re.ASCII) is not None
             if op == "!~":
                 ok = not ok
         if not ok:
             return False
-    return True
+    return None if undetermined else True
 
 
 def check_route(route: object, where: str, is_root: bool = False) -> None:
@@ -180,7 +672,18 @@ def check_route(route: object, where: str, is_root: bool = False) -> None:
         raise RouteError(f"{where} has keys Alertmanager does not accept: {', '.join(unknown)}")
     if is_root and not route.get("receiver"):
         raise RouteError("the root route has no receiver, so an unmatched alert goes nowhere")
-    parse_matchers(route)
+    if route.get("receiver") is not None and not isinstance(route["receiver"], str):
+        raise RouteError(f"{where}.receiver is not a string: {route['receiver']!r}")
+    if route.get("continue") is not None and not isinstance(route["continue"], bool):
+        raise RouteError(
+            f"{where}.continue is not a boolean: {route['continue']!r}. go-yaml and "
+            f"PyYAML disagree on which words are booleans; write true or false"
+        )
+    matchers = parse_matchers(route)
+    if is_root and matchers:
+        raise RouteError("the root route has matchers, which Alertmanager refuses at load")
+    if is_root and route.get("continue"):
+        raise RouteError("the root route has `continue: true`, which Alertmanager refuses at load")
     children = route.get("routes") or []
     if not isinstance(children, list):
         raise RouteError(f"{where}.routes is not a list")
@@ -188,69 +691,240 @@ def check_route(route: object, where: str, is_root: bool = False) -> None:
         check_route(child, f"{where}.routes[{index}]")
 
 
-def receivers_for(route: dict, labels: dict[str, str], inherited: str | None = None) -> list[str]:
-    """Where Alertmanager delivers an alert with these labels.
+def receivers_for(
+    route: dict,
+    labels: dict[str, str],
+    inherited: str | None = None,
+    known: set[str] | None = None,
+) -> list[str]:
+    """The receivers this walk selects for these labels, following Alertmanager.
 
-    Depth first, children in order; a matching child without `continue: true`
-    stops the search among its siblings; a route no child matched delivers to
-    its own receiver, inherited from its parent when it names none. The root
-    matches everything.
+    It implements dispatch.Route.Match (v0.28) as read: depth first, children
+    in order; a matching child without `continue: true` stops the search among
+    its siblings; a route no child matched delivers to its own receiver,
+    inherited from its parent when it names none. The root matches
+    everything. Matchers are read by parse_matchers(); the tree must have
+    been loaded by _StrictLoader and accepted by check_route().
+
+    Given `known`, labels outside it are ones the walk cannot know the value
+    of, and UnknownLabel is raised when the choice turns on one. Without it, a
+    label not in `labels` is absent, as Alertmanager treats one.
+
+    This is where the walk says the route tree sends the alert, not whether a
+    notification goes out at a given moment: inhibition, silences and time
+    intervals come after, and are not modelled.
     """
     receiver = route.get("receiver") or inherited
     found: list[str] = []
     for child in route.get("routes") or []:
-        if not matches(parse_matchers(child), labels):
+        outcome = matches(parse_matchers(child), labels, known)
+        if outcome is None:
+            undecided = sorted(
+                {name for name, _, _ in parse_matchers(child)} - (known or set())
+            )
+            raise UnknownLabel(
+                f"a route matching on {', '.join(undecided)} decides where it goes, and "
+                f"its rule does not set {'that label' if len(undecided) == 1 else 'those labels'} "
+                f"to a literal, non-empty string"
+            )
+        if not outcome:
             continue
-        found.extend(receivers_for(child, labels, receiver))
+        found.extend(receivers_for(child, labels, receiver, known))
         if not child.get("continue", False):
             break
     return found or [receiver]
 
 
+def alertmanager_model_problems(monitoring: Path) -> list[str]:
+    """The Alertmanager that loads alertmanager.yml must be the one modelled.
+
+    Read from the compose file that runs it. With no compose file, or no
+    alertmanager service in it, there is nothing to hold the model to.
+    """
+    compose_path = monitoring / "docker-compose.monitoring.yml"
+    if not compose_path.exists():
+        return []
+    try:
+        compose = yaml.safe_load(compose_path.read_text()) or {}
+    except yaml.YAMLError:
+        return []  # reported with every other file that does not parse
+    service = ((compose or {}).get("services") or {}).get("alertmanager")
+    if not isinstance(service, dict):
+        return []
+    problems: list[str] = []
+    image = service.get("image")
+    if not isinstance(image, str) or not MODELLED_ALERTMANAGER.match(image):
+        problems.append(
+            f"docker-compose.monitoring.yml runs Alertmanager {image!r}, and the "
+            f"route walk models {MODELLED_ALERTMANAGER.pattern}. Check the new "
+            f"version's matcher parsers against the port in validate-monitoring.py "
+            f"before widening MODELLED_ALERTMANAGER"
+        )
+    command = service.get("command") or []
+    arguments = command if isinstance(command, list) else [command]
+    if any(UNMODELLED_ALERTMANAGER_FEATURE in str(argument) for argument in arguments):
+        problems.append(
+            f"docker-compose.monitoring.yml starts Alertmanager with "
+            f"{UNMODELLED_ALERTMANAGER_FEATURE}, under which only its UTF-8 matcher "
+            f"parser runs; the route walk ports the classic parser and would "
+            f"misread the file"
+        )
+    return problems
+
+
+def alert_relabelling(monitoring: Path) -> bool:
+    """Whether prometheus.yml rewrites alert labels before Alertmanager sees them."""
+    path = monitoring / "prometheus" / "prometheus.yml"
+    if not path.exists():
+        return False
+    try:
+        config = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError:
+        return False  # reported with every other file that does not parse
+    alerting = (config or {}).get("alerting") or {}
+    if not isinstance(alerting, dict):
+        return False
+    if alerting.get("alert_relabel_configs"):
+        return True
+    return any(
+        isinstance(manager, dict) and manager.get("alert_relabel_configs")
+        for manager in alerting.get("alertmanagers") or []
+    )
+
+
+def _yaml_mapping(path: Path) -> dict:
+    """A YAML file's top-level mapping, or {} when it is absent, unparsable or not one.
+
+    An unparsable file is reported with every other file that does not parse.
+    """
+    if not path.exists():
+        return {}
+    try:
+        document = yaml.safe_load(path.read_text())
+    except yaml.YAMLError:
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+# Go's flag package, which Loki's command line goes through: one dash or two,
+# the value after `=` or as the next argument.
+_LOKI_ALERTMANAGER_FLAG = re.compile(r"--?ruler\.alertmanager-url(?:=(.*))?", re.DOTALL)
+
+
+def _loki_flag_alertmanager_url(service: dict) -> str | None:
+    """The last -ruler.alertmanager-url in a compose service's `command`, or None.
+
+    A list is read as the arguments it is; a string is split as Compose splits
+    one, like a shell. Every argument is read, including any after the point
+    where Go's flag parsing would stop, which can only make the check stricter.
+    """
+    command = service.get("command")
+    if isinstance(command, list):
+        arguments = [str(argument) for argument in command]
+    elif isinstance(command, str):
+        try:
+            arguments = shlex.split(command)
+        except ValueError:
+            arguments = command.split()
+    else:
+        return None
+    url: str | None = None
+    for index, argument in enumerate(arguments):
+        found = _LOKI_ALERTMANAGER_FLAG.fullmatch(argument)
+        if not found:
+            continue
+        if found.group(1) is not None:
+            url = found.group(1)
+        elif index + 1 < len(arguments):
+            url = arguments[index + 1]
+    return url
+
+
 def loki_ruler_problems(monitoring: Path) -> list[str]:
     """A Loki ruler wired to Alertmanager must have rule files to evaluate.
 
-    Rule files reach Loki one way in this tree: a bind mount from the
-    repository at the ruler's local storage directory. `enable_api` would let
-    rules be pushed at runtime, but nothing here pushes any, and a ruler that
-    depends on an undocumented manual push is the configured-looking empty
-    ruler this refuses.
+    What this reads, exactly:
+
+      * Whether the ruler is wired: `ruler.alertmanager_url` in
+        loki/loki-config.yml, or a -ruler.alertmanager-url argument in the
+        `command` of the compose service named `loki`
+        (_loki_flag_alertmanager_url). Loki applies its flags after its
+        config file (pkg/util/cfg DynamicUnmarshal), so either wires it.
+      * Where the rules must be: `ruler.storage.local.directory` in
+        loki/loki-config.yml.
+      * What is there: the `loki` service's short-form bind mounts
+        (`./source:/target[:mode]`) at or under that directory, and in each
+        the rules of the `*.yml` and `*.yaml` files that land at
+        `<directory>/<tenant>/<file>`, read with PyYAML. That depth is what
+        Loki 3.5's local rule store (pkg/ruler/rulestore/local) reads: a file
+        directly in the directory is not a tenant, and a directory inside a
+        tenant is skipped. The tenant is `fake` while `auth_enabled` is false.
+
+    A named volume starts empty and a long-form mount is not read, so neither
+    supplies a rule; that can only make the check stricter. `enable_api` would
+    let rules be pushed at runtime, but nothing here pushes any, and a ruler
+    that depends on an undocumented manual push is the configured-looking
+    empty ruler this refuses.
+
+    Attack has found two escapes, and both are read now: a ruler wired by its
+    flag rather than in the config file, and rule files mounted at a depth
+    Loki never reads. That is where the attacks stopped, not the boundary.
+    Two forms this does not read, with their occupancy today from the
+    repository root, both 0 when this was written:
+
+      another ruler flag, such as -ruler.storage.local.directory
+          grep -cF -- '-ruler.' infrastructure/monitoring/docker-compose.monitoring.yml
+      a Loki rule file Loki itself refuses (it would still be counted)
+          find infrastructure/monitoring/loki -name '*.y*ml' ! -name loki-config.yml | wc -l
     """
-    config_path = monitoring / "loki" / "loki-config.yml"
-    if not config_path.exists():
-        return []
-    config = yaml.safe_load(config_path.read_text()) or {}
-    ruler = config.get("ruler")
-    if not isinstance(ruler, dict) or not ruler.get("alertmanager_url"):
+    config = _yaml_mapping(monitoring / "loki" / "loki-config.yml")
+    ruler = config.get("ruler") if isinstance(config.get("ruler"), dict) else {}
+    compose_path = monitoring / "docker-compose.monitoring.yml"
+    services = _yaml_mapping(compose_path).get("services")
+    loki = (services.get("loki") if isinstance(services, dict) else None) or {}
+    loki = loki if isinstance(loki, dict) else {}
+
+    # Loki applies its flags after its config file, so either wires the ruler.
+    # A flag set to empty over a configured URL unwires it; this reads it as
+    # wired, which can only make the check stricter than Loki.
+    flagged = _loki_flag_alertmanager_url(loki)
+    if flagged:
+        wired = f"the loki service's -ruler.alertmanager-url flag wires the ruler to {flagged}"
+    elif ruler.get("alertmanager_url"):
+        wired = f"loki/loki-config.yml wires the ruler to {ruler['alertmanager_url']}"
+    else:
         return []
 
-    directory = ((ruler.get("storage") or {}).get("local") or {}).get("directory")
-    wired = f"loki/loki-config.yml wires the ruler to {ruler['alertmanager_url']}"
-    if not directory:
+    storage = ruler.get("storage") if isinstance(ruler.get("storage"), dict) else {}
+    local = storage.get("local") if isinstance(storage.get("local"), dict) else {}
+    directory = local.get("directory")
+    if not directory or not isinstance(directory, str):
         return [f"{wired} with no local rules directory; it has nothing to evaluate"]
 
-    compose_path = monitoring / "docker-compose.monitoring.yml"
-    compose = yaml.safe_load(compose_path.read_text()) if compose_path.exists() else {}
-    loki = ((compose or {}).get("services") or {}).get("loki") or {}
     for volume in loki.get("volumes") or []:
         if not isinstance(volume, str):
             continue
         parts = volume.split(":")
         if len(parts) < 2 or not parts[0].startswith((".", "/")):
             continue  # a named volume starts empty; it is not a source of rules
-        target = parts[1].rstrip("/")
-        if target != directory.rstrip("/") and not target.startswith(directory.rstrip("/") + "/"):
+        root = PurePosixPath(directory.rstrip("/") or "/")
+        target = PurePosixPath(parts[1].rstrip("/") or "/")
+        if target != root and root not in target.parents:
             continue
         source = (compose_path.parent / parts[0]).resolve()
         rules = 0
         for path in sorted(source.rglob("*.y*ml")) if source.is_dir() else []:
+            inside = target.joinpath(*path.relative_to(source).parts)
+            if len(inside.relative_to(root).parts) != 2:
+                continue  # not <directory>/<tenant>/<file>, so Loki never reads it
             document = yaml.safe_load(path.read_text()) or {}
             for group in document.get("groups", []) if isinstance(document, dict) else []:
                 rules += len(group.get("rules") or [])
         if rules:
             return []
     return [
-        f"{wired} and mounts no rule files at {directory}. A ruler pointed at an "
+        f"{wired} and mounts no rule files at {directory.rstrip('/')}/<tenant>/, "
+        f"the only place Loki's local store reads them. A ruler pointed at an "
         f"empty directory looks configured and evaluates nothing: ship rule "
         f"files and mount them there, or remove the ruler's wiring."
     ]
@@ -340,9 +1014,19 @@ def main(
         return 1
 
     total_rules = 0
-    alerts: dict[str, list[tuple[str, dict, str]]] = {}
+    alerts: dict[str, list[tuple[str, dict, str, object]]] = {}
     for path in rule_files:
-        document = yaml.safe_load(path.read_text()) or {}
+        try:
+            document = yaml.load(path.read_text(), Loader=_RuleFileLoader) or {}
+        except DuplicateRuleKey as error:
+            mark = error.problem_mark
+            problems.append(
+                f"{path.name} line {mark.line + 1}, column {mark.column + 1}: "
+                f"{error.problem}. Prometheus refuses the file (rulefmt decodes it "
+                f"with yaml.v3), so none of its rules load; PyYAML would have kept "
+                f"the last value and checked a file that never runs"
+            )
+            continue
         for group in document.get("groups", []):
             for rule in group.get("rules", []):
                 name = rule.get("alert") or rule.get("record") or "<unnamed>"
@@ -364,7 +1048,7 @@ def main(
                     continue
 
                 alerts.setdefault(name, []).append(
-                    (path.name, dict(rule.get("labels") or {}), expr)
+                    (path.name, dict(rule.get("labels") or {}), expr, rule.get("for"))
                 )
 
                 annotations = rule.get("annotations") or {}
@@ -384,7 +1068,7 @@ def main(
 
     # A critical rule on a series that must never page.
     for name, definitions in alerts.items():
-        for file_name, labels, expr in definitions:
+        for file_name, labels, expr, _ in definitions:
             if labels.get("severity") != "critical":
                 continue
             for metric in sorted(set(METRIC_IN_EXPR.findall(expr)) & set(never_pages)):
@@ -392,14 +1076,22 @@ def main(
                     f"{file_name}: {name} pages on {metric}, which {never_pages[metric]}"
                 )
 
-    # Where each alert goes, walked the way Alertmanager walks it.
-    alertmanager_path = infra_root / "monitoring" / "alertmanager" / "alertmanager.yml"
+    # Where each alert goes: the receivers the walk selects, with the labels
+    # its rule sets (the module docstring says what the walk reads).
+    monitoring = infra_root / "monitoring"
+    alertmanager_path = monitoring / "alertmanager" / "alertmanager.yml"
     route: dict | None = None
     if alertmanager_path.exists():
         try:
-            config = yaml.safe_load(alertmanager_path.read_text()) or {}
+            config = yaml.load(alertmanager_path.read_text(), Loader=_StrictLoader) or {}
             check_route(config.get("route"), "route", is_root=True)
             route = config["route"]
+        except RefusedYaml as error:
+            mark = error.problem_mark
+            problems.append(
+                f"alertmanager.yml line {mark.line + 1}, column {mark.column + 1}: "
+                f"{error.problem}; {error.consequence}"
+            )
         except yaml.YAMLError:
             pass  # reported below, with every other file that does not parse
         except RouteError as error:
@@ -411,7 +1103,7 @@ def main(
                 if isinstance(receiver, dict)
             }
             for name, definitions in sorted(alerts.items()):
-                for file_name, labels, _ in definitions:
+                for file_name, labels, _, _ in definitions:
                     walk_labels = {str(k): str(v) for k, v in labels.items()}
                     walk_labels["alertname"] = name
                     for receiver in receivers_for(route, walk_labels):
@@ -420,9 +1112,16 @@ def main(
                                 f"{file_name}: {name} routes to receiver {receiver!r}, "
                                 f"which alertmanager.yml does not define"
                             )
+        problems.extend(alertmanager_model_problems(monitoring))
 
-    # The pinned alerts: present, reading the series they must, and delivered
+    # The pinned alerts: present, reading the series they must, and routed
     # where the pin says.
+    if pinned and alert_relabelling(monitoring):
+        problems.append(
+            "prometheus.yml relabels alerts before Alertmanager receives them, so "
+            "the labels a rule sets are not the labels Alertmanager routes on, and "
+            "no pinned route can be checked from the rule files"
+        )
     for name, pin in sorted(pinned.items()):
         definitions = alerts.get(name)
         if not definitions:
@@ -430,11 +1129,25 @@ def main(
                 f"{name} is pinned in PINNED_ROUTES and no rule file defines it"
             )
             continue
-        for file_name, labels, expr in definitions:
+        for file_name, labels, expr, held_for in definitions:
             if pin["reads"] not in METRIC_IN_EXPR.findall(expr):
                 problems.append(
                     f"{file_name}: {name} must read {pin['reads']}, and its "
                     f"expression does not"
+                )
+            if "expr" in pin and " ".join(expr.split()) != " ".join(pin["expr"].split()):
+                problems.append(
+                    f"{file_name}: {name}'s expression is {expr!r}, and PINNED_ROUTES "
+                    f"pins it to {pin['expr']!r}. The expression is the decision the "
+                    f"pin records; if the change is meant, change the pin with it"
+                )
+            if "for" in pin and held_for != pin["for"]:
+                waits = "has no `for:`" if held_for is None else f"waits `for: {held_for}`"
+                problems.append(
+                    f"{file_name}: {name} {waits}, and PINNED_ROUTES "
+                    f"pins it to `for: {pin['for']}`. The runbook tells the responder "
+                    f"how long the condition has held; if the change is meant, change "
+                    f"the pin and the runbook with it"
                 )
             if route is None:
                 problems.append(
@@ -443,16 +1156,34 @@ def main(
                     f"cannot be checked"
                 )
                 continue
+            # The alert Alertmanager receives also carries the series' labels
+            # and Prometheus's external labels, which no rule file fixes. Only
+            # a label the rule sets to a literal, non-empty string is known;
+            # the walk refuses a route whose match turns on any other. An
+            # empty value is not known: Prometheus deletes the label
+            # (labels.Builder.Set) and then adds any external label the alert
+            # lacks (notifier relabelAlerts), so `cluster: ''` reaches
+            # Alertmanager as whatever external_labels say.
             walk_labels = {str(k): str(v) for k, v in labels.items()}
             walk_labels["alertname"] = name
-            delivered = receivers_for(route, walk_labels)
+            known = {
+                str(k) for k, v in labels.items() if isinstance(v, str) and v and "{{" not in v
+            } | {"alertname"}
+            try:
+                delivered = receivers_for(route, walk_labels, known=known)
+            except UnknownLabel as error:
+                problems.append(
+                    f"{file_name}: {name} is pinned to {pin['receiver']!r}, and {error}, "
+                    f"so where it goes depends on the series and cannot be checked here"
+                )
+                continue
             if pin["receiver"] not in delivered:
                 problems.append(
-                    f"{file_name}: {name} is delivered to {', '.join(delivered)}, "
+                    f"{file_name}: {name} is routed to {', '.join(delivered)}, "
                     f"and is pinned to {pin['receiver']!r}"
                 )
 
-    problems.extend(loki_ruler_problems(infra_root / "monitoring"))
+    problems.extend(loki_ruler_problems(monitoring))
 
     # Every config file must parse, and none may carry an inline secret.
     secretish = re.compile(
