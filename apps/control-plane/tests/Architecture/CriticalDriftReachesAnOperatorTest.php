@@ -31,16 +31,21 @@ use Tests\TestCase;
  * WHO HOLDS WHICH HOP
  * ===========================================================================
  *
- * Every assertion about the Prometheus, Alertmanager and Loki files — that the
- * drift rules exist, exactly what they evaluate, that Alertmanager's route
- * tree selects `pagerduty-critical` for the page, and that a Loki ruler is not
- * wired without rule files — lives in `infrastructure/scripts/validate-monitoring.py`,
- * which parses those files with PyYAML and runs in CI's infrastructure job
- * with its own self-test. It is deliberately not here: a hand-written YAML
- * reader in PHP is a second, weaker model of the same files, and a model of a
- * file can be wrong in ways the file never is. The route walk there is itself
- * a model of Alertmanager, and its docstring says how it is bounded: what it
- * cannot read the way Alertmanager v0.28 reads it, it refuses.
+ * The assertions this finding makes about the Prometheus, Alertmanager and
+ * Loki files live in `infrastructure/scripts/validate-monitoring.py`, which
+ * parses those files with PyYAML and runs in CI's infrastructure job with its
+ * own self-test. (Other tests read these files for other reasons.) Those
+ * assertions are: that the drift rules exist; exactly what they evaluate; that
+ * the script's walk of Alertmanager's route tree, over the labels the rule
+ * sets, selects `pagerduty-critical` for the page; and that a Loki ruler wired
+ * in loki-config.yml, or by the loki service's -ruler.alertmanager-url flag,
+ * has rule files mounted where Loki's local store reads them. They are
+ * deliberately not here: a hand-written YAML reader in PHP is a second, weaker
+ * model of the same files, and a model of a file can be wrong in ways the file
+ * never is. The route walk there is itself a model, of Alertmanager and of how
+ * Prometheus labels an alert. Its docstring says exactly what it reads, which
+ * disagreements attack has found, and how often each occurs in the tree. It
+ * does not claim that list is complete.
  *
  * What stays here is what only the application can answer — where Laravel
  * actually writes the structured log, measured from a booted config rather

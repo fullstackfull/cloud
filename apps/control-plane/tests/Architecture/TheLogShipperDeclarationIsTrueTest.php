@@ -34,14 +34,23 @@ use Tests\TestCase;
  * ===========================================================================
  *
  * The fact is declared once, as a variable: `lynomia_log_shipper_deployed` in
- * `group_vars/all.yml`. Every file that talks about shipping carries a
- * `SHIPPER-STATUS:` marker, and the markers must agree with the variable. The
- * variable itself is checked in the one direction the tree can check: while it
- * says `false`, nothing under `infrastructure/ansible` may install or run a
- * shipper. `true` with nothing here installing one is legitimate — that is the
- * likely shape of the fix, an agent installed out-of-band — so that direction
- * is not asserted. When the gap closes, flip the variable and the markers
- * together; nothing in this file asks to be deleted.
+ * `group_vars/all.yml`. The files listed in MARKED — the five that talked
+ * about shipping when this was written — each carry one `SHIPPER-STATUS:`
+ * marker, and the markers must agree with the variable. This reads those five
+ * and no others: a file that starts talking about shipping later is not found
+ * here, and belongs in MARKED. Measured when this was written, the files that
+ * carry a marker are exactly MARKED:
+ *
+ *   grep -rlE 'SHIPPER-STATUS:\s*(not deployed|deployed)' \
+ *     apps/control-plane/config apps/control-plane/src docs infrastructure \
+ *     | grep -v docs/round-2
+ *
+ * The variable itself is checked in the one direction the tree can check:
+ * while it says `false`, nothing under `infrastructure/ansible` may install
+ * or run a shipper. `true` with nothing here installing one is legitimate —
+ * that is the likely shape of the fix, an agent installed out-of-band — so
+ * that direction is not asserted. When the gap closes, flip the variable and
+ * the markers together; nothing in this file asks to be deleted.
  *
  * ===========================================================================
  * WHERE ITS EDGES ARE
@@ -61,6 +70,13 @@ use Tests\TestCase;
  * (false negatives), and it is built not to fire on prose. It reads one line
  * at a time, so a module argument naming the package fires whatever the
  * task's `state:` says: a task removing Alloy is flagged too.
+ *
+ * The four shapes are the ones that were needed, not a boundary. Measured when
+ * this was written, the word `alloy` occurs on one line under
+ * `infrastructure/ansible`, and that line is a comment
+ * (`grep -rniI alloy infrastructure/ansible`), so no line the shapes might
+ * miss names Alloy there today. A deployment that never names it (a variable,
+ * a generic role) is invisible to both this check and that count.
  */
 final class TheLogShipperDeclarationIsTrueTest extends TestCase
 {
@@ -69,7 +85,8 @@ final class TheLogShipperDeclarationIsTrueTest extends TestCase
     private const string ANSIBLE = '/infrastructure/ansible';
 
     /**
-     * Every file that says something about whether the application log ships.
+     * The files that said something about whether the application log ships
+     * when this was written. Not discovered: a new one is added by hand.
      *
      * @var list<string>
      */
@@ -103,7 +120,7 @@ final class TheLogShipperDeclarationIsTrueTest extends TestCase
     }
 
     #[Test]
-    public function every_file_that_talks_about_shipping_agrees_with_the_declaration(): void
+    public function each_marked_file_agrees_with_the_declaration(): void
     {
         $expected = $this->declared() ? 'deployed' : 'not deployed';
 

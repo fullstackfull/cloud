@@ -48,9 +48,10 @@ lynomia_base_dir: /opt/lynomia
 # So the gap is declared here rather than papered over.
 #
 # Read, not by any play, but by the control plane's test suite
-# (TheLogShipperDeclarationIsTrueTest): every file carrying a SHIPPER-STATUS
-# marker must agree with this value, and while it is false nothing under
-# infrastructure/ansible may install or run a shipper. When an agent is
+# (TheLogShipperDeclarationIsTrueTest): each file that test lists (MARKED)
+# carries a SHIPPER-STATUS marker that must agree with this value, and while
+# it is false no line under infrastructure/ansible may match one of the four
+# install-or-run shapes that test reads. When an agent is
 # deployed — by a role here or out-of-band — set it to true and change every
 # marker in the same commit.
 lynomia_log_shipper_deployed: false

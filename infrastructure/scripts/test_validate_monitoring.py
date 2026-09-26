@@ -39,6 +39,15 @@ the route field by field and builds a different one from it; the merge-key
 cases record two such routes, measured against Alertmanager v0.28.1, that sent
 the page somewhere the walk did not say.
 
+The walk also stands in for Prometheus, which decides the labels Alertmanager is
+given, and the Loki check for Loki's reading of its own command line. A rule
+label set to '' is deleted by Prometheus v3.6.0, which then lets an external
+label of that name through. A rule file with a key written twice is one
+Prometheus refuses to load. A ruler wired by -ruler.alertmanager-url is wired as
+surely as one wired in loki-config.yml. Each of those passed the gate once, and
+each has a case here. None of these tables is complete: they record what attack
+has found so far.
+
 Run: python3 infrastructure/scripts/test_validate_monitoring.py
 Exit 0 when every case behaves, 1 otherwise.
 """
@@ -684,6 +693,25 @@ groups:
         "the root route has matchers",
     ),
     (
+        "`continue: true` on the root route is refused, as Alertmanager refuses it",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "route:\n  receiver: platform-team\n",
+            "route:\n  receiver: platform-team\n  continue: true\n",
+        )),
+        "the root route has `continue: true`",
+    ),
+    (
+        # model.LabelNameRE: Alertmanager refuses the file at load. Read as a
+        # matcher instead, the walk would report a label the rule does not
+        # set, which is a different and wrong reason.
+        "a legacy `match:` naming a label Alertmanager refuses is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n",
+            "        - match:\n            component-name: backups\n",
+        )),
+        "`match` names a label Alertmanager refuses: 'component-name'",
+    ),
+    (
         "a route on a label the pinned rule does not set cannot pin the page",
         drift(alertmanager=ALERTMANAGER.replace(
             "            - component = backups\n", '            - instance =~ "pve-.*"\n',
@@ -699,6 +727,49 @@ groups:
             ),
         ),
         "a route matching on component decides where it goes",
+    ),
+    (
+        # Prometheus deletes a label whose value is empty (labels.Builder.Set)
+        # and then adds each external label the alert lacks, so `cluster: ''`
+        # reaches Alertmanager as whatever prometheus.yml's external_labels
+        # say. Read as a known empty value, the route below never matches and
+        # the page looks pinned; Prometheus v3.6.0 sends it to the storage team.
+        "an empty-valued label on a pinned rule is not a label the walk knows",
+        drift(
+            rules=DRIFT_RULES.replace(
+                "severity: critical\n          component: provisioning",
+                "severity: critical\n          component: provisioning\n          cluster: ''",
+            ),
+            alertmanager=ALERTMANAGER.replace(
+                "      receiver: pagerduty-critical\n      routes:\n",
+                "      receiver: pagerduty-critical\n      routes:\n"
+                "        - matchers:\n            - cluster = lynomia\n"
+                "          receiver: pagerduty-critical-backups\n",
+            ),
+        ),
+        "a route matching on cluster decides where it goes",
+    ),
+    (
+        # rulefmt decodes with yaml.v3, which refuses a key written twice;
+        # PyYAML keeps the last one. A merge-conflict leftover like this one
+        # reads, to PyYAML, as the page routed to the on-call, and Prometheus
+        # loads none of the file's rules.
+        "a rule label written twice is refused, as Prometheus refuses the file",
+        drift(rules=DRIFT_RULES.replace(
+            "severity: critical\n          component: provisioning",
+            "severity: critical\n          component: backups\n          component: provisioning",
+        )),
+        "the key 'component' is written twice",
+    ),
+    (
+        # yaml.v3 compares a key by its text, so quoting one spelling does not
+        # make it a second key.
+        "a rule label written twice, once quoted, is refused",
+        drift(rules=DRIFT_RULES.replace(
+            "severity: critical\n          component: provisioning",
+            "severity: critical\n          component: backups\n          \"component\": provisioning",
+        )),
+        "the key 'component' is written twice",
     ),
     (
         "alert relabelling in prometheus.yml leaves no pin checkable",
@@ -830,6 +901,49 @@ groups:
                        "docker-compose.monitoring.yml": COMPOSE_LOKI}},
         None,
     ),
+    (
+        # Loki applies its command-line flags after its config file
+        # (pkg/util/cfg DynamicUnmarshal), so the flag wires the ruler as
+        # surely as `ruler.alertmanager_url` does.
+        "a Loki ruler wired by its command-line flag with no rules is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "    volumes:\n",
+                '    command: ["-config.file=/etc/loki/loki-config.yml", '
+                '"-ruler.alertmanager-url=http://alertmanager:9093"]\n    volumes:\n'),
+        }},
+        "the loki service's -ruler.alertmanager-url flag wires the ruler to http://alertmanager:9093",
+    ),
+    (
+        # Go's flag package takes one dash or two, and a value after `=` or
+        # as the next argument; Compose splits a string command like a shell.
+        "the same flag with two dashes and its value as the next argument is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": LOKI_WITH_RULER.replace(
+                "  alertmanager_url: http://alertmanager:9093\n", ""),
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "    volumes:\n",
+                "    command: -config.file=/etc/loki/loki-config.yml --ruler.alertmanager-url http://am:9093\n"
+                "    volumes:\n"),
+        }},
+        "flag wires the ruler to http://am:9093 and mounts no rule files at /loki/rules/<tenant>/",
+    ),
+    (
+        "a ruler wired by its flag, with rule files mounted at its directory, passes",
+        {"extra_yml": {
+            "loki/loki-config.yml": LOKI_WITH_RULER.replace(
+                "  alertmanager_url: http://alertmanager:9093\n", ""),
+            "loki/rules/fake/drift.yml": LOKI_RULE_FILE,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "      - loki-data:/loki\n",
+                "      - loki-data:/loki\n      - ./loki/rules:/loki/rules:ro\n",
+            ).replace(
+                "    volumes:\n",
+                '    command: ["-ruler.alertmanager-url=http://alertmanager:9093"]\n    volumes:\n'),
+        }},
+        None,
+    ),
 ]
 
 
@@ -933,7 +1047,7 @@ def golden_failures() -> list[tuple[str, list[str]]]:
             got = f"refused: {error}"
         if got != expected:
             wrong.append(f"{line!r}: Alertmanager reads {expected!r}, the walk {got!r}")
-    checks.append(("every matcher Alertmanager reads, the walk reads the same", wrong))
+    checks.append(("each recorded matcher Alertmanager reads, the walk reads the same", wrong))
 
     wrong = []
     for line in MATCHERS_REFUSED:
@@ -942,7 +1056,7 @@ def golden_failures() -> list[tuple[str, list[str]]]:
             wrong.append(f"{line!r}: read as {got!r}")
         except validator.RouteError:
             pass
-    checks.append(("every matcher the walk cannot read as Alertmanager does, it refuses", wrong))
+    checks.append(("each recorded matcher the walk cannot read as Alertmanager does, it refuses", wrong))
 
     wrong = []
     for pattern, verdicts in REGEX_VERDICTS:
@@ -957,7 +1071,7 @@ def golden_failures() -> list[tuple[str, list[str]]]:
         for text, go in verdicts.items():
             if validator.matches(parsed, {"x": text}) != go:
                 wrong.append(f"{pattern!r} on {text!r}: Go says {go}")
-    checks.append(("every portable regex matches as Go's regexp matches", wrong))
+    checks.append(("each recorded portable regex matches as Go's regexp matches", wrong))
 
     wrong = []
     for pattern in REGEXES_REFUSED:
@@ -966,7 +1080,7 @@ def golden_failures() -> list[tuple[str, list[str]]]:
             wrong.append(f"{pattern!r}: read as {got!r}")
         except validator.RouteError:
             pass
-    checks.append(("every regex the two engines read differently is refused", wrong))
+    checks.append(("each recorded regex the two engines read differently is refused", wrong))
 
     return checks
 

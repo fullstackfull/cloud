@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the alert rules pointed at metrics that exist.
+r"""Keep the alert rules pointed at metrics that exist.
 
 An alert on a metric nobody emits never fires. It looks like coverage in a
 review and is silence in an incident, which is the worst of both.
@@ -19,57 +19,91 @@ It also checks that every rule says where the operator should look — a
 pointing outside it, which is taken on trust — because "page somebody at 4am
 with no instructions" is not monitoring.
 
-It walks Alertmanager's route tree for every alert and requires each walk to
-end at a receiver the file defines. A few alerts are pinned further, in
-PINNED_ROUTES: their destination is itself the fix for a finding, so the
-receiver the route tree selects for them, the series they read and how long
-they wait are asserted rather than merely resolved. A series in NEVER_PAGES
-may not be read by a critical rule. This is here, over PyYAML, rather than in
-a PHP test over a hand-written YAML reader: a second model of a file can be
-wrong in ways the file never is, and Alertmanager's config is parsed by a real
-YAML parser.
+It walks Alertmanager's route tree for every alerting rule in
+prometheus/rules/*.yml (the glob prometheus.yml's rule_files names), with the
+labels that rule sets, and requires each walk to end at a receiver the file
+defines. A few alerts are pinned further, in PINNED_ROUTES: their destination
+is itself the fix for a finding, so the receiver the walk selects for them,
+the series they read and how long they wait are asserted rather than merely
+resolved. A series in NEVER_PAGES may not be read by a critical rule. This is
+here, over PyYAML, rather than in a PHP test over a hand-written YAML reader:
+a second model of a file can be wrong in ways the file never is, and
+Alertmanager's config is parsed by a real YAML parser.
 
-A walk of the route tree is itself a model of Alertmanager, and it is only
-worth what that model is. So it is bounded, and each bound is enforced rather
-than assumed. Given the YAML as PyYAML parses it -- a text go-yaml's parser
-reads differently is outside this bound; what Alertmanager then decodes from
-the parsed document is not, and is ported or refused below -- and for an alert
-carrying exactly the labels the walk is given, the receivers the walk returns
-are the ones Alertmanager v0.28's route tree selects (dispatch.Route.Match),
-for every file this accepts, because everything the walk would otherwise have
-to guess is refused instead:
+The walk is itself a model -- of Alertmanager's route tree, and of how
+Prometheus labels an alert -- and it is only worth what that model is. What
+follows says exactly what it reads and what it refuses rather than guess. It
+does not say the model is complete, and nothing here shows that it is.
 
-  * Matchers are read by a line-for-line port of Alertmanager's classic parser
-    (pkg/labels/parse.go). With no --enable-feature flag, v0.28 runs both of
-    its parsers and uses the classic one's result whenever that parser accepts
-    the line (matcher/compat/parse.go). A line only the newer UTF-8 parser
-    accepts is refused, not modelled.
-  * A regex matcher is compiled by Go's RE2 and walked by Python's re. It is
-    refused unless it stays inside the subset on which the two read the same
-    language (portable_regex_problem).
-  * A key written twice, and a non-string where Alertmanager reads a string or
-    a non-boolean where it reads a boolean, are refused: go-yaml refuses the
-    first and types the others differently from PyYAML.
-  * A YAML merge key (`<<`) is refused. go-yaml parses it as PyYAML does, but
-    Alertmanager decodes a route field by field, applying the merge where it
-    stands and adding an explicit `matchers:` or `match:` to the merged one,
-    where PyYAML's flattened mapping lets the explicit key replace it
-    (MergeKey).
-  * The compose file must run the Alertmanager this models, without the flag
-    that changes which parser wins (MODELLED_ALERTMANAGER).
-  * A pinned alert is walked with only the labels its rule fixes. A route
-    whose match depends on any other label -- one the series or Prometheus's
-    external labels supply -- is refused for it, and so is alert relabelling
-    in prometheus.yml, which would change the labels Alertmanager is given.
+  * The rule files, through _RuleFileLoader: PyYAML, refusing a key written
+    twice, as Prometheus's rulefmt (yaml.v3) refuses it. Of each rule it
+    reads `alert` or `record`, `expr`, `for`, `labels` and the runbook
+    annotations. It does not read a group's own `labels:`, which Prometheus
+    v3.6 adds to each rule's, the rule's own value winning (rules.FromMaps).
+  * alertmanager.yml, through _StrictLoader: PyYAML, refusing a key written
+    twice, as go-yaml's UnmarshalStrict does, and any merge key (MergeKey). A
+    text go-yaml parses differently from PyYAML is not examined. Of each
+    route it reads `receiver`, `continue`, `matchers`, `match`, `match_re`
+    and `routes`. It refuses a key outside ROUTE_KEYS, a non-string receiver
+    or legacy match value, a legacy match label name Alertmanager refuses, a
+    non-boolean `continue`, and matchers or `continue: true` on the root.
+  * Each `matchers:` line, through a port of Alertmanager v0.28.1's classic
+    parser (pkg/labels/parse.go), which v0.28 with no --enable-feature flag
+    uses whenever that parser accepts the line (matcher/compat/parse.go). A
+    line the port refuses is refused, not modelled. The self-test holds the
+    port to answers recorded from Alertmanager itself.
+  * Each regex matcher, against portable_regex_problem's grammar: the subset
+    on which testing has found no disagreement between Go's RE2 and Python's
+    re. Outside it, the regex is refused.
+  * The compose file's alertmanager service. Its `image` must match
+    MODELLED_ALERTMANAGER, and its `command` must not carry the one flag that
+    changes which parser wins.
+  * For a pinned alert, only the labels its rule sets to a literal, non-empty
+    string with no `{{`, plus alertname. A route whose match turns on any
+    other label is refused for it. That covers a label the series supplies,
+    one from Prometheus's external labels, and one from a group's `labels:`.
+    It also covers a label the rule sets to '': Prometheus deletes that
+    label, and an external label of the same name then takes its place.
+    `alert_relabel_configs` in prometheus.yml, under `alerting:` or under
+    one of its `alertmanagers`, would change the labels Alertmanager is
+    given. It is refused.
 
-What the walk does not decide is whether a notification is sent at a given
-moment: inhibition, silences and time intervals act after the route tree has
-chosen a receiver, and none of them is modelled here.
+Within those inputs the walk follows dispatch.Route.Match (receivers_for). It
+does not check everything Alertmanager checks at load. For one, it does not
+refuse time intervals on the root route, or a route naming a time interval
+nobody defined. So its answer holds only for a file that Alertmanager loads
+and this accepts. Nor does it decide whether a notification is sent at a
+given moment: inhibition, silences and time intervals act after the route
+tree has chosen a receiver, and none of them is modelled here.
 
-It refuses a Loki ruler wired to an Alertmanager with no rule files mounted
-where its local store reads them: in a tenant directory under its rules
-directory. A ruler pointed at an empty directory looks configured and
-evaluates nothing, which is worse than no ruler.
+Each disagreement with Alertmanager or Prometheus below was found by attacking
+the walk, one round at a time. The list shows where those attacks stopped, not
+the edge of what the walk can get wrong. What can be measured is how often
+each shape occurs in the tree today. Every count below is from the repository
+root, and every one was 0 when this was written.
+
+  Now read or refused:
+    a backslash kept in a matcher value
+        grep -cF '\' infrastructure/monitoring/alertmanager/alertmanager.yml
+    a single quote read as quoting
+        grep -cE "^ *- [^#]*=.*'" infrastructure/monitoring/alertmanager/alertmanager.yml
+    a POSIX class in a regex matcher
+        grep -cF '[[:' infrastructure/monitoring/alertmanager/alertmanager.yml
+    a YAML merge key in alertmanager.yml
+        grep -cF '<<' infrastructure/monitoring/alertmanager/alertmanager.yml
+    a rule label set to ''
+        grep -rE ": *(''|\"\") *$" infrastructure/monitoring/prometheus/rules | wc -l
+    a rule-file key written twice (the only measure is this script: it
+    exits 0 on the tree, and it refuses one)
+  Not read (Alertmanager refuses the file; this does not):
+    a time interval on the root route, or one nobody defined
+        grep -c 'time_intervals' infrastructure/monitoring/alertmanager/alertmanager.yml
+
+It refuses a Loki ruler that is wired to an Alertmanager while no rule files
+are mounted where Loki's local store reads them, because a ruler pointed at an
+empty directory looks configured and evaluates nothing, which is worse than no
+ruler. loki_ruler_problems says what it reads, and which escapes attack has
+found.
 
 Finally it checks that the directories infrastructure/README.md claims exist
 actually do. That check lives here because the first thing it caught was a
@@ -82,6 +116,7 @@ Exit status 0 when the configuration is consistent, 1 otherwise.
 from __future__ import annotations
 
 import re
+import shlex
 import string
 import sys
 import warnings
@@ -248,8 +283,12 @@ class _StrictLoader(yaml.SafeLoader):
         for key_node, _ in node.value:
             spelled = isinstance(key_node, yaml.ScalarNode) and key_node.value == "<<"
             if spelled or key_node.tag == _YAML_MERGE_TAG:
-                # PyYAML decides a merge by the tag, go-yaml by the text `<<`;
-                # refusing either refuses every merge each of them makes.
+                # PyYAML merges on the !!merge tag, whatever the key's text.
+                # go-yaml v2 merges a key whose text is `<<` and that is plain
+                # or tagged !!merge (isMerge); a quoted "<<" is an ordinary key
+                # there, which Alertmanager refuses as unknown. Refusing every
+                # key reading `<<` and every key tagged !!merge refuses each
+                # merge either parser makes, and some keys neither merges.
                 raise MergeKey(
                     None, None,
                     "a merge key `<<`" if spelled
@@ -268,20 +307,55 @@ class _StrictLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
+class DuplicateRuleKey(yaml.constructor.ConstructorError):
+    """A key written twice in a Prometheus rule file."""
+
+
+class _RuleFileLoader(yaml.SafeLoader):
+    """PyYAML, refusing a mapping key written twice, as Prometheus's rulefmt does.
+
+    rulefmt.Parse (Prometheus v3.6.0) decodes with yaml.v3, whose decoder
+    refuses a mapping that repeats a key, comparing keys by kind and text
+    (decoder.uniqueKeys): `component` and `"component"` are the same key there.
+    PyYAML keeps the last value, so without this a label written twice -- a
+    typical merge-conflict leftover -- reads here as a rule that routes, in a
+    file Prometheus will not load. Only duplicates are refused; merge keys are
+    left to PyYAML, which none of the rule files uses.
+    """
+
+    def construct_mapping(self, node, deep=False):
+        seen: set[tuple[str, str]] = set()
+        for key_node, _ in node.value:
+            # yaml.v3's Value is the scalar's text, and empty for a collection.
+            text = key_node.value if isinstance(key_node, yaml.ScalarNode) else ""
+            if (key_node.id, text) in seen:
+                raise DuplicateRuleKey(
+                    None, None, f"the key {text or key_node.id!r} is written twice",
+                    key_node.start_mark,
+                )
+            seen.add((key_node.id, text))
+        return super().construct_mapping(node, deep=deep)
+
+
 def portable_regex_problem(pattern: str) -> str | None:
     """Why Go's RE2 and Python's re might read this regex differently, or None.
 
     Alertmanager compiles a regex matcher with Go's regexp as ^(?:pattern)$;
-    the walk matches it with re.fullmatch under re.ASCII. The two read the
-    same language over the grammar accepted here -- literals, `.`, the escapes
-    above, bracket classes of single characters and ranges, groups and
-    non-capturing groups, alternation, and `* + ?` or `{n}` `{n,}` `{n,m}`
-    repeats, each optionally lazy -- and not beyond it. Some of what is
-    refused, and why: `[[:alpha:]]` is a POSIX class in Go and a set followed
-    by a literal `]` in Python; `{,3}` and `{01}` are literal in Go and repeats
-    in Python; `^`, `$` and flags carry different defaults; an unbalanced `)`
-    re-anchors Go's wrapped pattern and is an error in Python; lookaround,
-    backreferences and possessive repeats exist in Python only.
+    the walk matches it with re.fullmatch under re.ASCII. The grammar accepted
+    here is literals, `.`, the escapes above, bracket classes of single
+    characters and ranges, groups and non-capturing groups, alternation, and
+    `* + ?` or `{n}` `{n,}` `{n,m}` repeats, each optionally lazy. Over it, no
+    disagreement between the two engines has been found: 20,342 regexes it
+    accepts, over about 638,000 strings, measured against Go's regexp when
+    this grammar was written (F-22, e80c0ab), and the recorded verdicts in the
+    self-test. That is a measurement, not a proof that none exists.
+
+    Some of what is refused, and why: `[[:alpha:]]` is a POSIX class in Go
+    and a set followed by a literal `]` in Python; `{,3}` and `{01}` are
+    literal in Go and repeats in Python; `^`, `$` and flags carry different
+    defaults; an unbalanced `)` re-anchors Go's wrapped pattern and is an
+    error in Python; lookaround, backreferences and possessive repeats exist
+    in Python only.
     """
     if len(pattern) > _PORTABLE_REGEX_MAX_LENGTH:
         return f"longer than {_PORTABLE_REGEX_MAX_LENGTH} characters"
@@ -623,22 +697,22 @@ def receivers_for(
     inherited: str | None = None,
     known: set[str] | None = None,
 ) -> list[str]:
-    """The receivers Alertmanager's route tree selects for these labels.
+    """The receivers this walk selects for these labels, following Alertmanager.
 
-    dispatch.Route.Match, v0.28: depth first, children in order; a matching
-    child without `continue: true` stops the search among its siblings; a
-    route no child matched delivers to its own receiver, inherited from its
-    parent when it names none. The root matches everything. Matchers are read
-    by parse_matchers(); the tree must have been loaded by _StrictLoader and
-    accepted by check_route().
+    It implements dispatch.Route.Match (v0.28) as read: depth first, children
+    in order; a matching child without `continue: true` stops the search among
+    its siblings; a route no child matched delivers to its own receiver,
+    inherited from its parent when it names none. The root matches
+    everything. Matchers are read by parse_matchers(); the tree must have
+    been loaded by _StrictLoader and accepted by check_route().
 
     Given `known`, labels outside it are ones the walk cannot know the value
     of, and UnknownLabel is raised when the choice turns on one. Without it, a
     label not in `labels` is absent, as Alertmanager treats one.
 
-    This is where the route tree sends the alert, not whether a notification
-    goes out at a given moment: inhibition, silences and time intervals come
-    after, and are not modelled.
+    This is where the walk says the route tree sends the alert, not whether a
+    notification goes out at a given moment: inhibition, silences and time
+    intervals come after, and are not modelled.
     """
     receiver = route.get("receiver") or inherited
     found: list[str] = []
@@ -650,7 +724,8 @@ def receivers_for(
             )
             raise UnknownLabel(
                 f"a route matching on {', '.join(undecided)} decides where it goes, and "
-                f"its rule does not set {'that label' if len(undecided) == 1 else 'those labels'}"
+                f"its rule does not set {'that label' if len(undecided) == 1 else 'those labels'} "
+                f"to a literal, non-empty string"
             )
         if not outcome:
             continue
@@ -717,37 +792,115 @@ def alert_relabelling(monitoring: Path) -> bool:
     )
 
 
+def _yaml_mapping(path: Path) -> dict:
+    """A YAML file's top-level mapping, or {} when it is absent, unparsable or not one.
+
+    An unparsable file is reported with every other file that does not parse.
+    """
+    if not path.exists():
+        return {}
+    try:
+        document = yaml.safe_load(path.read_text())
+    except yaml.YAMLError:
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+# Go's flag package, which Loki's command line goes through: one dash or two,
+# the value after `=` or as the next argument.
+_LOKI_ALERTMANAGER_FLAG = re.compile(r"--?ruler\.alertmanager-url(?:=(.*))?", re.DOTALL)
+
+
+def _loki_flag_alertmanager_url(service: dict) -> str | None:
+    """The last -ruler.alertmanager-url in a compose service's `command`, or None.
+
+    A list is read as the arguments it is; a string is split as Compose splits
+    one, like a shell. Every argument is read, including any after the point
+    where Go's flag parsing would stop, which can only make the check stricter.
+    """
+    command = service.get("command")
+    if isinstance(command, list):
+        arguments = [str(argument) for argument in command]
+    elif isinstance(command, str):
+        try:
+            arguments = shlex.split(command)
+        except ValueError:
+            arguments = command.split()
+    else:
+        return None
+    url: str | None = None
+    for index, argument in enumerate(arguments):
+        found = _LOKI_ALERTMANAGER_FLAG.fullmatch(argument)
+        if not found:
+            continue
+        if found.group(1) is not None:
+            url = found.group(1)
+        elif index + 1 < len(arguments):
+            url = arguments[index + 1]
+    return url
+
+
 def loki_ruler_problems(monitoring: Path) -> list[str]:
     """A Loki ruler wired to Alertmanager must have rule files to evaluate.
 
-    Rule files reach Loki one way in this tree: a bind mount from the
-    repository at the ruler's local storage directory. `enable_api` would let
-    rules be pushed at runtime, but nothing here pushes any, and a ruler that
-    depends on an undocumented manual push is the configured-looking empty
-    ruler this refuses.
+    What this reads, exactly:
 
-    Loki's local rule store (pkg/ruler/rulestore/local, as of the 3.5 line the
-    compose file runs) reads `<directory>/<tenant>/<file>` and nothing else:
-    a file directly in the directory is not a tenant, and a directory inside a
-    tenant is skipped. Only a rule in a file at that depth is counted. The
-    tenant is `fake` while `auth_enabled` is false.
+      * Whether the ruler is wired: `ruler.alertmanager_url` in
+        loki/loki-config.yml, or a -ruler.alertmanager-url argument in the
+        `command` of the compose service named `loki`
+        (_loki_flag_alertmanager_url). Loki applies its flags after its
+        config file (pkg/util/cfg DynamicUnmarshal), so either wires it.
+      * Where the rules must be: `ruler.storage.local.directory` in
+        loki/loki-config.yml.
+      * What is there: the `loki` service's short-form bind mounts
+        (`./source:/target[:mode]`) at or under that directory, and in each
+        the rules of the `*.yml` and `*.yaml` files that land at
+        `<directory>/<tenant>/<file>`, read with PyYAML. That depth is what
+        Loki 3.5's local rule store (pkg/ruler/rulestore/local) reads: a file
+        directly in the directory is not a tenant, and a directory inside a
+        tenant is skipped. The tenant is `fake` while `auth_enabled` is false.
+
+    A named volume starts empty and a long-form mount is not read, so neither
+    supplies a rule; that can only make the check stricter. `enable_api` would
+    let rules be pushed at runtime, but nothing here pushes any, and a ruler
+    that depends on an undocumented manual push is the configured-looking
+    empty ruler this refuses.
+
+    Attack has found two escapes, and both are read now: a ruler wired by its
+    flag rather than in the config file, and rule files mounted at a depth
+    Loki never reads. That is where the attacks stopped, not the boundary.
+    Two forms this does not read, with their occupancy today from the
+    repository root, both 0 when this was written:
+
+      another ruler flag, such as -ruler.storage.local.directory
+          grep -cF -- '-ruler.' infrastructure/monitoring/docker-compose.monitoring.yml
+      a Loki rule file Loki itself refuses (it would still be counted)
+          find infrastructure/monitoring/loki -name '*.y*ml' ! -name loki-config.yml | wc -l
     """
-    config_path = monitoring / "loki" / "loki-config.yml"
-    if not config_path.exists():
-        return []
-    config = yaml.safe_load(config_path.read_text()) or {}
-    ruler = config.get("ruler")
-    if not isinstance(ruler, dict) or not ruler.get("alertmanager_url"):
+    config = _yaml_mapping(monitoring / "loki" / "loki-config.yml")
+    ruler = config.get("ruler") if isinstance(config.get("ruler"), dict) else {}
+    compose_path = monitoring / "docker-compose.monitoring.yml"
+    services = _yaml_mapping(compose_path).get("services")
+    loki = (services.get("loki") if isinstance(services, dict) else None) or {}
+    loki = loki if isinstance(loki, dict) else {}
+
+    # Loki applies its flags after its config file, so either wires the ruler.
+    # A flag set to empty over a configured URL unwires it; this reads it as
+    # wired, which can only make the check stricter than Loki.
+    flagged = _loki_flag_alertmanager_url(loki)
+    if flagged:
+        wired = f"the loki service's -ruler.alertmanager-url flag wires the ruler to {flagged}"
+    elif ruler.get("alertmanager_url"):
+        wired = f"loki/loki-config.yml wires the ruler to {ruler['alertmanager_url']}"
+    else:
         return []
 
-    directory = ((ruler.get("storage") or {}).get("local") or {}).get("directory")
-    wired = f"loki/loki-config.yml wires the ruler to {ruler['alertmanager_url']}"
-    if not directory:
+    storage = ruler.get("storage") if isinstance(ruler.get("storage"), dict) else {}
+    local = storage.get("local") if isinstance(storage.get("local"), dict) else {}
+    directory = local.get("directory")
+    if not directory or not isinstance(directory, str):
         return [f"{wired} with no local rules directory; it has nothing to evaluate"]
 
-    compose_path = monitoring / "docker-compose.monitoring.yml"
-    compose = yaml.safe_load(compose_path.read_text()) if compose_path.exists() else {}
-    loki = ((compose or {}).get("services") or {}).get("loki") or {}
     for volume in loki.get("volumes") or []:
         if not isinstance(volume, str):
             continue
@@ -863,7 +1016,17 @@ def main(
     total_rules = 0
     alerts: dict[str, list[tuple[str, dict, str, object]]] = {}
     for path in rule_files:
-        document = yaml.safe_load(path.read_text()) or {}
+        try:
+            document = yaml.load(path.read_text(), Loader=_RuleFileLoader) or {}
+        except DuplicateRuleKey as error:
+            mark = error.problem_mark
+            problems.append(
+                f"{path.name} line {mark.line + 1}, column {mark.column + 1}: "
+                f"{error.problem}. Prometheus refuses the file (rulefmt decodes it "
+                f"with yaml.v3), so none of its rules load; PyYAML would have kept "
+                f"the last value and checked a file that never runs"
+            )
+            continue
         for group in document.get("groups", []):
             for rule in group.get("rules", []):
                 name = rule.get("alert") or rule.get("record") or "<unnamed>"
@@ -913,7 +1076,8 @@ def main(
                     f"{file_name}: {name} pages on {metric}, which {never_pages[metric]}"
                 )
 
-    # Where each alert goes: the receivers Alertmanager's route tree selects.
+    # Where each alert goes: the receivers the walk selects, with the labels
+    # its rule sets (the module docstring says what the walk reads).
     monitoring = infra_root / "monitoring"
     alertmanager_path = monitoring / "alertmanager" / "alertmanager.yml"
     route: dict | None = None
@@ -994,12 +1158,16 @@ def main(
                 continue
             # The alert Alertmanager receives also carries the series' labels
             # and Prometheus's external labels, which no rule file fixes. Only
-            # the labels the rule sets literally are known; the walk refuses a
-            # route whose match turns on any other.
+            # a label the rule sets to a literal, non-empty string is known;
+            # the walk refuses a route whose match turns on any other. An
+            # empty value is not known: Prometheus deletes the label
+            # (labels.Builder.Set) and then adds any external label the alert
+            # lacks (notifier relabelAlerts), so `cluster: ''` reaches
+            # Alertmanager as whatever external_labels say.
             walk_labels = {str(k): str(v) for k, v in labels.items()}
             walk_labels["alertname"] = name
             known = {
-                str(k) for k, v in labels.items() if isinstance(v, str) and "{{" not in v
+                str(k) for k, v in labels.items() if isinstance(v, str) and v and "{{" not in v
             } | {"alertname"}
             try:
                 delivered = receivers_for(route, walk_labels, known=known)
