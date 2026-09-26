@@ -22,6 +22,11 @@ use Illuminate\Support\Facades\Schema;
  *    wallet, and the credit is capped at what the period actually collected
  *    less what earlier changes already returned. `wallet_credit_minor` is
  *    that second figure, per change, as it was posted.
+ *  - **What the subscription was billed before.** An upgrade moves the
+ *    recurring amount at once, but the plan it moves onto is not paid for
+ *    until its invoice is. `from_recurring_amount_minor` is what a voided
+ *    upgrade puts back, and what a renewal bills while the upgrade's invoice
+ *    is still unpaid. Nullable only for rows written before it existed.
  *
  * Written only by ApplyPlanChange, in the same transaction that moves the
  * plan and writes the invoice or the credit, so a row exists exactly when the
@@ -44,6 +49,8 @@ return new class extends Migration
             // The balance actually posted to the wallet by this change; zero
             // for an upgrade or a like-for-like move.
             $table->bigInteger('wallet_credit_minor');
+            // The recurring amount the subscription carried before the move.
+            $table->bigInteger('from_recurring_amount_minor')->nullable();
 
             // The invoice an upgrade left behind, when it left one.
             $table->foreignUlid('proration_invoice_id')->nullable()->unique()->constrained('invoices')->nullOnDelete();

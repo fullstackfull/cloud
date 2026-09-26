@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Billing\Application\Actions;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Exceptions\PaidInvoiceCannotBeVoidedException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 
@@ -57,7 +59,26 @@ final readonly class VoidInvoice
                 $locked->save();
             }
 
-            return $this->transitionInvoice->execute($locked, InvoiceStatus::Void)->refresh();
+            $voided = $this->transitionInvoice->execute($locked, InvoiceStatus::Void)->refresh();
+
+            /*
+             * Announced after the outermost commit, as InvoicePaid is: a
+             * plan-change invoice being voided puts the subscription back on
+             * the plan it was paid for, and that must not happen for a void
+             * that then rolls back.
+             */
+            $event = new InvoiceVoided(
+                invoiceId: (string) $voided->getKey(),
+                customerId: (string) $voided->customer_id,
+                subscriptionId: $voided->subscription_id === null ? null : (string) $voided->subscription_id,
+                voidedAt: CarbonImmutable::now(),
+            );
+
+            DB::afterCommit(static function () use ($event): void {
+                event($event);
+            });
+
+            return $voided;
         });
     }
 }

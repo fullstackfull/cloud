@@ -9,13 +9,17 @@ use DateTimeImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\BillableLine;
 use Lynomia\Modules\Subscriptions\Application\DTOs\RenewalPlan;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\SubscriptionNotRenewableException;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Subscriptions\Infrastructure\Repositories\CouponTermsRepository;
 
@@ -165,21 +169,70 @@ final readonly class RenewSubscription
         });
     }
 
+    /**
+     * The renewal bills the plan the subscription has paid for.
+     *
+     * That is the plan it is on, except while the plan change that moved it
+     * there is still waiting on its invoice. An upgrade moves the recurring
+     * amount the moment it is confirmed and hands over nothing until its
+     * invoice settles; renewing at the new amount before then billed a whole
+     * period of the bigger plan for a machine still running the smaller one,
+     * and left the customer two open invoices for one upgrade. Until that
+     * invoice is paid the renewal bills what the subscription carried before
+     * the change. Once it is paid, the next renewal bills the new plan.
+     */
     private function renewalLine(Subscription $subscription): BillableLine
     {
-        $description = $subscription->plan?->nameFor(app()->getLocale()) ?? 'Subscription renewal';
+        $unpaid = $this->unpaidUpgradeOnto($subscription);
+
+        $billed = $unpaid === null
+            ? $subscription->plan
+            : Plan::query()->find($unpaid->from_plan_id);
+
+        $description = $billed?->nameFor(app()->getLocale()) ?? 'Subscription renewal';
 
         return new BillableLine(
             InvoiceItemKind::Plan,
             new PricingLine(
                 description: $description,
                 quantity: 1,
-                unitPrice: $subscription->recurringAmount(),
+                unitPrice: $unpaid === null
+                    ? $subscription->recurringAmount()
+                    : Money::ofMinor((int) $unpaid->from_recurring_amount_minor, $subscription->currency),
                 // Never on a renewal: standing the service up was a one-off
                 // charged with the first order.
                 setupFee: Money::zero($subscription->currency),
             ),
         );
+    }
+
+    /**
+     * The plan change that moved this subscription onto its current plan, if
+     * that change's invoice has not been paid.
+     *
+     * Only the latest change is read: while a plan-change invoice is open no
+     * further change can be made, so an unpaid one is always the latest.
+     */
+    private function unpaidUpgradeOnto(Subscription $subscription): ?PlanChange
+    {
+        /** @var PlanChange|null $latest */
+        $latest = PlanChange::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->orderByDesc('changed_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($latest === null
+            || $latest->proration_invoice_id === null
+            || $latest->from_recurring_amount_minor === null
+            || $latest->to_plan_id !== $subscription->plan_id) {
+            return null;
+        }
+
+        $status = Invoice::query()->whereKey($latest->proration_invoice_id)->value('status');
+        $status = $status instanceof InvoiceStatus ? $status : InvoiceStatus::tryFrom((string) $status);
+
+        return $status === InvoiceStatus::Paid ? null : $latest;
     }
 
     /**

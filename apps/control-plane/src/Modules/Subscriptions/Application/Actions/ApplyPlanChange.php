@@ -21,6 +21,7 @@ use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeOutcome;
 use Lynomia\Modules\Subscriptions\Application\DTOs\ProrationPlan;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Listeners\RestorePlanOnVoidedUpgrade;
 use Lynomia\Modules\Subscriptions\Application\Queries\MoneyCollectedForThePeriod;
 use Lynomia\Modules\Subscriptions\Domain\Enums\PlanChangeRefusal;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\PlanChangeRefusedException;
@@ -64,6 +65,12 @@ use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
  * all. What the listener builds is what the paid invoice bought - the shape
  * recorded on this change's {@see PlanChange} row - not whatever plan the
  * subscription has moved on to by the time the money arrives.
+ *
+ * The plan and recurring amount do move at once, and the record keeps the
+ * amount they replaced. Until the invoice is paid a renewal bills that amount
+ * ({@see RenewSubscription}), and if the invoice is voided the subscription is
+ * put back on the plan it came from ({@see RestorePlanOnVoidedUpgrade}), so an
+ * upgrade nobody paid for is never billed or credited as though it had been.
  *
  * ---------------------------------------------------------------------------
  * No money moves that was not collected
@@ -159,6 +166,7 @@ final readonly class ApplyPlanChange
             $this->claimTheUnit($locked, $plan, $quote->units);
 
             $fromPlanId = $locked->plan_id;
+            $fromRecurring = $locked->recurring_amount_minor;
 
             /*
              * Priced at the instant the quote used, and at the unit count the
@@ -202,6 +210,7 @@ final readonly class ApplyPlanChange
                 'credit_minor' => $proration->credit->minorUnits(),
                 'charge_minor' => $proration->charge->minorUnits(),
                 'wallet_credit_minor' => $walletCredit,
+                'from_recurring_amount_minor' => $fromRecurring,
                 'proration_invoice_id' => $invoice === null ? null : (string) $invoice->getKey(),
                 'resources' => $quote->newResources->toArray(),
                 'changed_by_user_id' => $actor === null ? null : (string) $actor->getKey(),

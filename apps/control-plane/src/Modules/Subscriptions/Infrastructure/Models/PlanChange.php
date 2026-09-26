@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property int $credit_minor
  * @property int $charge_minor
  * @property int $wallet_credit_minor
+ * @property ?int $from_recurring_amount_minor
  * @property ?string $proration_invoice_id
  * @property array<string, mixed> $resources
  * @property ?string $changed_by_user_id
@@ -50,6 +51,7 @@ final class PlanChange extends Model
             'credit_minor' => 'integer',
             'charge_minor' => 'integer',
             'wallet_credit_minor' => 'integer',
+            'from_recurring_amount_minor' => 'integer',
             'resources' => 'array',
             'changed_at' => 'immutable_datetime',
         ];

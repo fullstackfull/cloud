@@ -19,6 +19,7 @@ use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Application\Listeners\RecordFailedPaymentOnTheOrder;
 use Lynomia\Modules\Orders\Application\Listeners\RecordRefundOnTheOrder;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
+use Lynomia\Modules\Subscriptions\Application\Listeners\RestorePlanOnVoidedUpgrade;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
 use Lynomia\Modules\Subscriptions\Application\Listeners\StartDunningOnFailedPayment;
 use PHPUnit\Framework\Attributes\Test;
@@ -58,7 +59,7 @@ final class EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest extends TestCas
     use PlantsAQueuedClassInARealRoot;
 
     /**
-     * The nine listeners on the money queue, as the dispatcher routes them.
+     * The ten listeners on the money queue, as the dispatcher routes them.
      *
      * The last two are F-19's: they record a declined first payment and a
      * full refund on the order. Neither moves money, but both hear money's
@@ -75,6 +76,7 @@ final class EveryRetriedPaymentsListenerWaitsBetweenAttemptsTest extends TestCas
         StartDunningOnFailedPayment::class,
         RecordFailedPaymentOnTheOrder::class,
         RecordRefundOnTheOrder::class,
+        RestorePlanOnVoidedUpgrade::class,
     ];
 
     private ThePayloadTheWorkerWillRead $probe;

@@ -12,7 +12,6 @@ use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Application\Actions\RecordInvoiceRefund;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
-use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
@@ -137,7 +136,7 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
     }
 
     #[Test]
-    public function a_downgrade_from_a_plan_whose_invoice_was_voided_credits_no_more_than_was_collected(): void
+    public function a_downgrade_from_a_plan_whose_invoice_was_refunded_credits_no_more_than_was_collected(): void
     {
         [$customer, $user] = $this->accountWithOwner();
         $subscription = $this->paidSubscriptionOn($customer, $this->small);
@@ -148,14 +147,16 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $upgrade = Invoice::query()->where('subscription_id', $subscription->getKey())
             ->whereHas('items', fn ($q) => $q->where('kind', InvoiceItemKind::Proration->value))
             ->sole();
-        app(VoidInvoice::class)->execute($upgrade, 'forgiven by an operator');
+        $this->paidThenRefunded($upgrade, $customer);
 
         $body = $this->changePlan($user, $subscription, $this->small, 'void-down-1')->assertOk()->json('data');
 
         /*
-         * The large plan's remainder (30.000) was never paid for. The period
-         * collected 9.000, so 9.000 is the most that can come back as spendable
-         * balance, however the arithmetic of the two plans falls out.
+         * The large plan's remainder (30.000) was paid for and then handed
+         * back. The period kept 9.000, so 9.000 is the most that can come back
+         * as spendable balance, however the arithmetic of the two plans falls
+         * out. (A voided upgrade no longer reaches this: the void puts the
+         * subscription back on the plan it came from.)
          */
         $this->assertLessThanOrEqual(9_000, $this->walletOf($customer));
         $this->assertSame(
@@ -369,9 +370,9 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->changePlan($user, $subscription, $this->small, 'period-down-1')->assertOk();
         $this->assertSame(27_000, $this->walletOf($customer));
 
-        // Up again, and that invoice is voided rather than paid.
+        // Up again, and that invoice is paid and then refunded in full.
         $this->changePlan($user, $subscription, $this->large, 'period-up-2')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($subscription), $customer);
 
         $this->changePlan($user, $subscription, $this->small, 'period-down-2')->assertOk();
 
@@ -412,12 +413,12 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $subscription = $this->boughtSubscription($customer, $unit, quantity: 2, setupPerUnit: 500);
 
         $this->changePlan($user, $subscription, $dear, 'setup-up-1')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($subscription), $customer);
 
         $this->changePlan($user, $subscription, $cheap, 'setup-down-1')->assertOk();
 
         /*
-         * The dear plan was never paid for, so the ceiling bites: what comes
+         * The dear plan's money was handed back, so the ceiling bites: what comes
          * back is the period's recurring money, 20.000, and not a fils of the
          * setup fee.
          */
@@ -460,7 +461,7 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         ]);
 
         $this->changePlan($user, $subscription, $dear, 'renewed-up-1')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($subscription), $customer);
         $this->changePlan($user, $subscription, $cheap, 'renewed-down-1')->assertOk();
 
         // May collected 10.000; April's order money bought April, not May.
@@ -505,7 +506,7 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $siblingCredit = -$this->changePlan($user, $sibling, $unit, 'own-down-1')->assertOk()->json('data.net.minor_units');
 
         $this->changePlan($user, $mine, $dear, 'mine-up-1')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($mine), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($mine), $customer);
         $this->changePlan($user, $mine, $cheap, 'mine-down-1')->assertOk();
 
         // This subscription's 10.000 of the order is still all there.
@@ -525,7 +526,7 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         [$discounted] = $this->oneOrderOfTwoLines($customer, $unit, 5_000, $unit, 10_000);
 
         $this->changePlan($user, $discounted, $dear, 'discount-up-1')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($discounted), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($discounted), $customer);
         $this->changePlan($user, $discounted, $cheap, 'discount-down-1')->assertOk();
 
         // 5.000 bought this subscription's period; the list price never arrived.
@@ -557,7 +558,7 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->renewalPaid($subscription, 5_000);
 
         $this->changePlan($user, $subscription, $dear, 'window-up-1')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($subscription), $customer);
         $this->changePlan($user, $subscription, $cheap, 'window-down-2')->assertOk();
 
         /*
@@ -658,7 +659,7 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->serviceWithMachine($customer, $subscription);
 
         $this->changePlan($user, $subscription, $this->large, 'quote-up-1')->assertOk();
-        app(VoidInvoice::class)->execute($this->openProrationInvoice($subscription), 'forgiven by an operator');
+        $this->paidThenRefunded($this->openProrationInvoice($subscription), $customer);
 
         $quoted = collect((array) $this->actingAs($user)
             ->getJson("/api/v1/subscriptions/{$subscription->id}/plan-options")
@@ -800,6 +801,18 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         ]);
 
         return [$subscriptions[0], $subscriptions[1], $invoice];
+    }
+
+    /**
+     * An upgrade invoice paid and then refunded in full: the plan it bought
+     * stays on the subscription, and none of its money stays with the platform.
+     */
+    private function paidThenRefunded(Invoice $invoice, Customer $customer): void
+    {
+        $this->settle($invoice, $customer);
+        $this->finishEveryProvisioningJob();
+
+        app(RecordInvoiceRefund::class)->execute($invoice->fresh(), Money::ofMinor($invoice->total_minor, $invoice->currency));
     }
 
     private function openProrationInvoice(Subscription $subscription): Invoice
