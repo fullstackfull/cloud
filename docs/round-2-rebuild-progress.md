@@ -101,7 +101,7 @@ independent re-audit follows. The specification is
 
 | Group | Scope | Status | Commit |
 |---|---|---|---|
-| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | upheld with reservations after four repairs (trial merge onto 4d900d9 clean and green); merged `88c4dd8`; full suite running | `727a403` |
+| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | upheld with reservations after four repairs (trial merge onto 4d900d9 clean and green); merged `88c4dd8`; full suite 5,507/5,507, 674 suites `skipped="0"`, exit 0; vitest 642/642, tsc, eslint | `727a403` |
 | 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | upheld with reservations; follow-up `f10e588` checked; merged `2325458` | `f10e588` |
 | 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | upheld after four repairs (last delta checked); merged `2325458` | `dc0d06c` |
 | 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | upheld with reservations; merged `2325458` | `a087707` |
