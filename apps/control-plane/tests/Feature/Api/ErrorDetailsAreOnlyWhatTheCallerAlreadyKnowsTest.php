@@ -91,6 +91,8 @@ final class ErrorDetailsAreOnlyWhatTheCallerAlreadyKnowsTest extends TestCase
         'Lynomia\Modules\Dns\Domain\Exceptions\DnsRefusedException' => ['zone'],
         'Lynomia\Modules\Dns\Domain\Exceptions\InvalidDnsRecordException' => ['value'],
         'Lynomia\Modules\Identity\Domain\Exceptions\EmailAddressNotVerifiedException' => ['email', 'resend_endpoint'],
+        // When this account's own wait on an address ends (F-17 x F-27).
+        'Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException' => ['retry_at'],
         'Lynomia\Modules\Identity\Domain\Exceptions\TwoFactorRequiredException' => ['challenge_token'],
         'Lynomia\Modules\Ipam\Domain\Exceptions\InvalidHostnameException' => ['reason'],
         'Lynomia\Modules\Orders\Domain\Exceptions\CheckoutRejectedException' => ['idempotency_key', 'plan_id'],

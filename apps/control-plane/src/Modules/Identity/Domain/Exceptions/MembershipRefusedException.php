@@ -111,7 +111,12 @@ final class MembershipRefusedException extends DomainException
     {
         return (new self('An invitation was sent to that address too recently. Wait before sending another.'))
             ->as('membership.invitation_sent_too_recently')
-            ->withContext(['retry_at' => $retryAt->format(DateTimeInterface::ATOM)]);
+            ->withContext(['retry_at' => $retryAt->format(DateTimeInterface::ATOM)])
+            // Published (F-27's rule): the wait is kept per account, so
+            // `retry_at` is read from this account's own mail to the address
+            // — the state of the caller's own resource, telling them nothing
+            // about another account's.
+            ->publishing('retry_at');
     }
 
     public static function becauseTheAddressIsNotVerified(): self
