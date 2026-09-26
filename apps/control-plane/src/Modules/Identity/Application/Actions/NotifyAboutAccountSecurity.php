@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Identity\Application\Actions;
 
+use Closure;
 use DateTimeInterface;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Identity\Domain\Enums\LoginOutcome;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
 use Lynomia\Modules\Identity\Infrastructure\Models\LoginActivity;
@@ -42,9 +44,27 @@ use Throwable;
  * A person who belongs to no account — an operator, an invitee who has not
  * accepted yet — is told nothing, because there is no account to hold the
  * row: `notifications.customer_id` is required. That is the boundary this
- * repair did not cross, and it is stated rather than implied. Nothing here
- * refuses or throws: the change the person made has already happened, and
- * failing to announce it must not undo or block it.
+ * repair did not cross, and it is stated rather than implied.
+ *
+ * ---------------------------------------------------------------------------
+ * Never at the expense of the change
+ * ---------------------------------------------------------------------------
+ *
+ * Nothing here refuses or throws: the change the person made has already
+ * happened, and failing to announce it must not undo or block it. Both halves
+ * are held by one method, onceCommitted(), which every public method hands
+ * its whole body to — the membership lookup, the sign-in history reads and
+ * the notification's own rows alike, not only the final write:
+ *
+ *  - **Not block.** Whatever the announcement throws is caught there and
+ *    reported, never thrown into the sign-in, the password change or the
+ *    second factor that asked for it.
+ *  - **Not undo.** It never runs inside a transaction the caller has open:
+ *    it runs once the outermost one commits, or straight away when there is
+ *    none. So a statement the database refuses cannot abort the transaction
+ *    holding the change, and a change that is rolled back is never announced
+ *    — an email about a password that was not changed is its own false
+ *    alarm.
  *
  * ---------------------------------------------------------------------------
  * What "somewhere new" means
@@ -68,11 +88,13 @@ final readonly class NotifyAboutAccountSecurity
 
     public function passwordChanged(User $user): void
     {
-        $this->tell(
-            $user,
-            NotificationType::PasswordChanged,
-            'password-changed:'.$user->id.':'.$this->instant($user->password_changed_at),
-        );
+        $this->onceCommitted(function () use ($user): void {
+            $this->tell(
+                $user,
+                NotificationType::PasswordChanged,
+                'password-changed:'.$user->id.':'.$this->instant($user->password_changed_at),
+            );
+        });
     }
 
     /**
@@ -81,15 +103,17 @@ final readonly class NotifyAboutAccountSecurity
      */
     public function twoFactorEnabled(User $user): void
     {
-        if (! $user->hasTwoFactorEnabled()) {
-            return;
-        }
+        $this->onceCommitted(function () use ($user): void {
+            if (! $user->hasTwoFactorEnabled()) {
+                return;
+            }
 
-        $this->tell(
-            $user,
-            NotificationType::TwoFactorEnabled,
-            'two-factor-enabled:'.$user->id.':'.$this->instant($user->two_factor_confirmed_at),
-        );
+            $this->tell(
+                $user,
+                NotificationType::TwoFactorEnabled,
+                'two-factor-enabled:'.$user->id.':'.$this->instant($user->two_factor_confirmed_at),
+            );
+        });
     }
 
     /**
@@ -98,46 +122,81 @@ final readonly class NotifyAboutAccountSecurity
      */
     public function twoFactorDisabled(User $user, DateTimeInterface $enrolledAt): void
     {
-        $this->tell(
-            $user,
-            NotificationType::TwoFactorDisabled,
-            'two-factor-disabled:'.$user->id.':'.$this->instant($enrolledAt),
-        );
+        $this->onceCommitted(function () use ($user, $enrolledAt): void {
+            $this->tell(
+                $user,
+                NotificationType::TwoFactorDisabled,
+                'two-factor-disabled:'.$user->id.':'.$this->instant($enrolledAt),
+            );
+        });
     }
 
     public function signedIn(User $user, LoginActivity $signIn): void
     {
-        if ($signIn->outcome !== LoginOutcome::Success) {
-            return;
-        }
+        $this->onceCommitted(function () use ($user, $signIn): void {
+            if ($signIn->outcome !== LoginOutcome::Success) {
+                return;
+            }
 
-        $earlier = LoginActivity::query()
-            ->where('user_id', $user->id)
-            ->where('outcome', LoginOutcome::Success->value)
-            ->whereKeyNot($signIn->getKey());
+            $earlier = LoginActivity::query()
+                ->where('user_id', $user->id)
+                ->where('outcome', LoginOutcome::Success->value)
+                ->whereKeyNot($signIn->getKey());
 
-        if (! (clone $earlier)->exists()) {
-            return;
-        }
+            if (! (clone $earlier)->exists()) {
+                return;
+            }
 
-        $seenBefore = (clone $earlier)
-            ->where('ip_address', $signIn->ip_address)
-            ->where('user_agent', $signIn->user_agent)
-            ->exists();
+            $seenBefore = (clone $earlier)
+                ->where('ip_address', $signIn->ip_address)
+                ->where('user_agent', $signIn->user_agent)
+                ->exists();
 
-        if ($seenBefore) {
-            return;
-        }
+            if ($seenBefore) {
+                return;
+            }
 
-        $this->tell(
-            $user,
-            NotificationType::NewSignIn,
-            'new-sign-in:'.$signIn->getKey(),
-            ['location' => (string) $signIn->ip_address],
-        );
+            $this->tell(
+                $user,
+                NotificationType::NewSignIn,
+                'new-sign-in:'.$signIn->getKey(),
+                ['location' => (string) $signIn->ip_address],
+            );
+        });
     }
 
     /**
+     * The one way anything in this class runs; see "Never at the expense of
+     * the change" in the class docblock.
+     *
+     * @param  Closure(): void  $announcement
+     */
+    private function onceCommitted(Closure $announcement): void
+    {
+        $quietly = static function () use ($announcement): void {
+            try {
+                $announcement();
+            } catch (Throwable $e) {
+                // Reported, never thrown into the sign-in or the password
+                // change that has already happened.
+                report($e);
+            }
+        };
+
+        try {
+            // Runs $quietly now when no transaction is open, and after the
+            // outermost one commits when one is; discarded if it rolls back.
+            DB::afterCommit($quietly);
+        } catch (Throwable $e) {
+            // Not even registered: the announcement is lost, and the change
+            // it was about still stands.
+            report($e);
+        }
+    }
+
+    /**
+     * Only ever called from inside onceCommitted().
+     *
      * @param  array<string, scalar>  $data
      */
     private function tell(User $user, NotificationType $type, string $idempotencyKey, array $data = []): void
@@ -153,20 +212,14 @@ final readonly class NotifyAboutAccountSecurity
             return;
         }
 
-        try {
-            $this->notify->execute(
-                customerId: $customerId,
-                type: $type,
-                idempotencyKey: $idempotencyKey,
-                data: $data,
-                link: '/security',
-                userId: (string) $user->id,
-            );
-        } catch (Throwable $e) {
-            // Reported, never thrown into the sign-in or the password change
-            // that has already happened; see the class docblock.
-            report($e);
-        }
+        $this->notify->execute(
+            customerId: $customerId,
+            type: $type,
+            idempotencyKey: $idempotencyKey,
+            data: $data,
+            link: '/security',
+            userId: (string) $user->id,
+        );
     }
 
     private function instant(?DateTimeInterface $at): string

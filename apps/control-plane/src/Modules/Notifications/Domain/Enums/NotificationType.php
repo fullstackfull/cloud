@@ -24,8 +24,11 @@ namespace Lynomia\Modules\Notifications\Domain\Enums;
  * and raised by nothing — a list of things the platform said it told customers
  * and did not. Five were wired where their moment happens; eight were deleted
  * with their copy, each for the reason written beside where it stood. A type
- * with no producer now fails `EveryNotificationTypeHasAProducerTest`, so a
- * new case arrives with the code that raises it or not at all.
+ * that no production code names in a producing position now fails
+ * `EveryNotificationTypeHasAProducerTest`, so a new case arrives with a
+ * producing reference to it or not at all. That test reads references, not
+ * call paths: whether anything reaches the reference is not asked there, as
+ * its own docblock says.
  */
 enum NotificationType: string
 {

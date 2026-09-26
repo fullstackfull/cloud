@@ -185,25 +185,25 @@ final readonly class IssueInvoice
      * To the account's billing address, not to a person: nobody's user id is
      * named. And never at the expense of the invoice: it has committed by the
      * time this runs, and a notification that could not be raised is reported
-     * rather than thrown into the checkout or the sweep that issued it.
+     * rather than thrown into the checkout or the sweep that issued it. That
+     * includes building what it says — the amount is formatted inside the
+     * catch, after commit, so nothing about the message runs inside the
+     * transaction that holds the invoice.
      */
     private function announceOnceCommitted(Invoice $invoice): void
     {
-        $customerId = (string) $invoice->customer_id;
-        $data = [
-            'number' => (string) $invoice->number,
-            'amount' => Money::ofMinor((int) $invoice->total_minor, (string) $invoice->currency)->format(),
-            'due_date' => $invoice->due_at?->toDateString() ?? '',
-        ];
-
-        DB::afterCommit(function () use ($invoice, $customerId, $data): void {
+        DB::afterCommit(function () use ($invoice): void {
             try {
                 $this->notify->execute(
-                    customerId: $customerId,
+                    customerId: (string) $invoice->customer_id,
                     type: NotificationType::InvoiceIssued,
                     idempotencyKey: 'invoice-issued:'.$invoice->getKey(),
                     subject: $invoice,
-                    data: $data,
+                    data: [
+                        'number' => (string) $invoice->number,
+                        'amount' => Money::ofMinor((int) $invoice->total_minor, (string) $invoice->currency)->format(),
+                        'due_date' => $invoice->due_at?->toDateString() ?? '',
+                    ],
                     link: '/invoices',
                 );
             } catch (Throwable $e) {
