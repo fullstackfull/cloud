@@ -173,13 +173,25 @@ $app = Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
+            /*
+             * On the customer API a code with no catalogue entry is answered
+             * with the catalogue's generic sentence, never the exception's
+             * own: that sentence is the engineer's and may name a node, a job
+             * or a provider. Everywhere else — the operator API, whose readers
+             * are staff — it stays the fallback. Whether a customer route can
+             * reach a class declaring an uncatalogued code is checked,
+             * for the literal spellings it reads, by
+             * NoCustomerRouteReachesAnUncataloguedCodeTest.
+             */
+            $customer = $request->is('api/v1', 'api/v1/*');
+
             $error = match (true) {
                 /*
                  * The code is the exception's; the sentence is the catalogue's,
                  * in the language the request asked for. The exception's own
                  * message is the engineer's and is only ever sent for a code
-                 * the customer catalogue has no entry for — which the parity
-                 * test keeps to the operator modules.
+                 * the customer catalogue has no entry for, and never on the
+                 * customer API (see `$customer` above).
                  *
                  * The sentence is filled from the whole context; `details` is
                  * only the part the exception's class declared the caller
@@ -190,7 +202,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
                  */
                 $e instanceof DomainException => ApiError::make(
                     $e->errorCode(),
-                    ErrorCatalogue::message($e->errorCode(), $e->context(), $e->getMessage()),
+                    ErrorCatalogue::message($e->errorCode(), $e->context(), $customer ? '' : $e->getMessage()),
                     $e->httpStatus(),
                     $e->publishedContext(),
                 ),
@@ -258,7 +270,7 @@ $app = Application::configure(basePath: dirname(__DIR__))
 
                 $e instanceof HttpExceptionInterface => ApiError::make(
                     'http.'.$e->getStatusCode(),
-                    ErrorCatalogue::message('http.'.$e->getStatusCode(), [], $e->getMessage() ?: 'Request failed.'),
+                    ErrorCatalogue::message('http.'.$e->getStatusCode(), [], $customer ? '' : ($e->getMessage() ?: 'Request failed.')),
                     $e->getStatusCode(),
                 ),
 

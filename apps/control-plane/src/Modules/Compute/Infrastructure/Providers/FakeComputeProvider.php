@@ -209,6 +209,32 @@ final class FakeComputeProvider implements ComputeProvider
 
         $providerId = (string) $request->vmId;
 
+        $occupiedOn = $this->nodeHolding($providerId);
+
+        if ($occupiedOn !== null) {
+            /*
+             * Refused, and the machine there left exactly as it was. This
+             * used to put the new machine on top of the old one, so a create
+             * at a stranger's id reported success and quietly replaced the
+             * stranger's machine — and a platform that retried a create into
+             * a second build could not be seen doing it through the fleet
+             * (F-15's test had to count creates at the door instead).
+             *
+             * Cluster-wide, because a Proxmox VMID names one guest in the
+             * whole cluster, whichever node holds it. Determinate: the
+             * cluster answered, and nothing was built. The words and the
+             * status a real cluster uses for this are not established here
+             * (ACreateAtAnOccupiedIdContractTestCase); this is the simulator's
+             * own sentence, surfaced the way the real adapter surfaces any
+             * refusal it can read — requestFailed, not indeterminate.
+             */
+            throw ComputeProviderException::requestFailed(self::NAME, 'create_vm', [
+                'node' => $request->nodeName,
+                'vmid' => $request->vmId,
+                'provider_message' => sprintf('a machine already exists at id %s (on node %s)', $providerId, $occupiedOn),
+            ]);
+        }
+
         $this->machines[$request->nodeName][$providerId] = new RemoteVmState(
             providerId: $providerId,
             nodeName: $request->nodeName,
@@ -653,6 +679,19 @@ final class FakeComputeProvider implements ComputeProvider
                 continue;
             }
 
+            $storages = self::storagesFrom(is_array($node['storages'] ?? null) ? $node['storages'] : []);
+
+            /*
+             * A node's disk is the sum of the pools it can see, as the real
+             * adapter computes it (ProxmoxComputeProvider::withStorageTotals:
+             * active pools only, a shared pool counted once per node), unless
+             * a configuration states the figure outright. The default fleet
+             * used to list its pools and report no total, so every node synced
+             * from it was recorded at 0 GiB and could hold nothing — a gap an
+             * end-to-end estate test had to configure its way around.
+             */
+            [$derivedTotal, $derivedAvailable] = self::storageTotalsOf($storages);
+
             $nodes[] = new RemoteNodeState(
                 name: $name,
                 online: (bool) ($node['online'] ?? true),
@@ -660,9 +699,9 @@ final class FakeComputeProvider implements ComputeProvider
                 memoryTotalMib: (int) ($node['memory_total_mib'] ?? 0),
                 memoryUsedMib: isset($node['memory_used_mib']) ? (int) $node['memory_used_mib'] : null,
                 cpuUsage: isset($node['cpu_usage']) ? (float) $node['cpu_usage'] : null,
-                storageTotalGib: isset($node['storage_total_gib']) ? (int) $node['storage_total_gib'] : null,
-                storageAvailableGib: isset($node['storage_available_gib']) ? (int) $node['storage_available_gib'] : null,
-                storages: self::storagesFrom(is_array($node['storages'] ?? null) ? $node['storages'] : []),
+                storageTotalGib: isset($node['storage_total_gib']) ? (int) $node['storage_total_gib'] : $derivedTotal,
+                storageAvailableGib: isset($node['storage_available_gib']) ? (int) $node['storage_available_gib'] : $derivedAvailable,
+                storages: $storages,
                 capabilities: ['fake' => true],
             );
         }
@@ -716,6 +755,20 @@ final class FakeComputeProvider implements ComputeProvider
             providerId: $providerId,
             operation: $action.'_vm',
         );
+    }
+
+    /**
+     * The node a machine at this id lives on, anywhere in the fleet, or null.
+     */
+    private function nodeHolding(string $providerId): ?string
+    {
+        foreach ($this->machines as $nodeName => $machines) {
+            if (isset($machines[$providerId])) {
+                return (string) $nodeName;
+            }
+        }
+
+        return null;
     }
 
     private function machine(string $nodeName, string $providerId): ?RemoteVmState
@@ -823,6 +876,34 @@ final class FakeComputeProvider implements ComputeProvider
         $requested = $machine->raw['requested_hostname'] ?? null;
 
         return is_string($requested) ? $requested : ($machine->name ?? '');
+    }
+
+    /**
+     * A node's storage total and free space, by the real adapter's rule: the
+     * active pools summed, or null for both when the node lists no pool.
+     *
+     * @param  list<RemoteStorageState>  $storages
+     * @return array{0: int|null, 1: int|null}
+     */
+    private static function storageTotalsOf(array $storages): array
+    {
+        if ($storages === []) {
+            return [null, null];
+        }
+
+        $total = 0;
+        $available = 0;
+
+        foreach ($storages as $storage) {
+            if (! $storage->active) {
+                continue;
+            }
+
+            $total += $storage->totalGib ?? 0;
+            $available += $storage->availableGib ?? 0;
+        }
+
+        return [$total, $available];
     }
 
     /**

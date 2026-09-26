@@ -45,12 +45,14 @@ final class HostingNodeHealthSyncTest extends TestCase
             'last_synced_at' => null,
         ]);
 
-        // The fake answers from the row, which is what makes it a fake and not
-        // a fiction: this test sets what the "node" will say.
+        // The fake answers its disk from the row, which is what makes it a
+        // fake and not a fiction: this test sets what the "node" will say.
+        // Its licence is the panel's own answer, never the row's (see
+        // TheControlledPanelAnswersItsLicenceFromThePanelTest), so the row's
+        // `false` above is what the sync must overwrite.
         $node->forceFill([
             'disk_total_mib' => 1_000_000,
             'disk_used_mib' => 400_000,
-            'panel_licensed' => true,
         ])->save();
 
         $this->assertTrue(app(SyncHostingNodeHealth::class)->execute($node));

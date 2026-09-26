@@ -159,9 +159,11 @@ enum ControlledDriver: string
      *
      * False for every case, including hosting, whose real drivers do need one.
      * A controlled driver is not a licensed product — there is nothing to buy
-     * and nobody to buy it from. The licence path is still rehearsed, on the
-     * node row: the hosting simulator reads `hosting_nodes.panel_licensed` and
-     * reports an expired licence when the row says so.
+     * and nobody to buy it from. The licence path is still rehearsed: the
+     * hosting simulator answers its licence as a panel would, from its own
+     * side and never from `hosting_nodes.panel_licensed`, and reports it
+     * expired for a node whose hostname carries
+     * `FakeHostingProvider::LICENCE_LAPSED_MARKER`.
      */
     public function needsLicence(): bool
     {
