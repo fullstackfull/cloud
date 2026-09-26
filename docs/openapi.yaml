@@ -8749,7 +8749,7 @@ paths:
         - "Operator"
       summary: "Jobs waiting for a person"
       description: |-
-        Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the last attempt's finding (`error_code`, `error_reason`) and, for a VPS create, the provider identity it reserved and every node and name a create under it was sent with.
+        Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job's current finding (`error_code`, `error_reason`) — its last attempt's, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with.
 
         Requires the `provisioning.view` permission.
       parameters:
@@ -20382,7 +20382,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "The last attempt's finding, e.g. `vps.create_identity_taken`."
+          description: "The job's current finding, e.g. `vps.create_identity_taken`: its last attempt's, and about the provider identity it holds now. Null when there is no current finding — after a repoint, for one."
         error_reason:
           type:
             - "string"
@@ -20405,7 +20405,7 @@ components:
           type: "array"
           items:
             type: "string"
-          description: "Every node a create under the reserved id was sent to."
+          description: "Every node an attempt under the reserved id was placed on: every node a create under it was sent to, and any node an attempt was placed on that ended before sending one."
         reserved_provider_hostnames:
           type: "array"
           items:

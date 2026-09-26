@@ -81,7 +81,12 @@ final readonly class AdoptOrphanResource
                 'adopted_at' => now()->toIso8601String(),
                 'previous_status' => $locked->status->value,
                 'evidence' => $evidence,
+                // The finding this adoption resolved, kept here rather than
+                // left as the job's: the adoption is recorded as an attempt,
+                // and a job's finding is only ever its last attempt's (F-15).
+                'finding' => $result['error'] ?? null,
             ];
+            unset($result['error']);
 
             $locked->status = ProvisioningJobStatus::Succeeded;
             $locked->remote_job_id = $remoteJobId ?? $locked->remote_job_id;

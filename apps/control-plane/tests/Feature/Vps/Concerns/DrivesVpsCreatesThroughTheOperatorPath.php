@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteVmState;
+use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\StorageClass;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
@@ -233,6 +234,16 @@ trait DrivesVpsCreatesThroughTheOperatorPath
             diskGib: 160,
             storageName: 'local-nvme',
         ));
+    }
+
+    /**
+     * Put a machine at an id that nothing about it contradicts: named as
+     * given, and with the vCPU and memory every job here is created with.
+     */
+    protected function aMachineShapedAsThisBuildAt(string $providerId, string $name, string $node = 'pve-01'): void
+    {
+        $this->aStrangerAt($providerId, name: $name, node: $node);
+        $this->hypervisor->fleet->resizeVm($node, $providerId, new ResizeVmRequest(vcpu: 2, memoryMib: 4096));
     }
 
     /**

@@ -494,30 +494,45 @@ final class RunProvisioningJob implements ShouldQueue
 
         /*
          * The finding: what this attempt found, stamped with the attempt that
-         * found it. Written by every failed attempt — the ones that settle and
-         * the ones scheduleRetry() puts back in the queue — and by
-         * DetectStaleJobs for an attempt that never answered, so it is always
-         * the LAST attempt's finding and never an older one left behind.
+         * found it. Every attempt this engine makes rewrites it — a failed one
+         * (settled, or put back in the queue by scheduleRetry()) writes its
+         * own, and a successful one removes whatever is there, because what
+         * the last attempt found is then nothing. So the finding this leaves
+         * is always the LAST attempt's, or none, and never an older one left
+         * behind.
+         *
+         * The other doors a job's status goes through keep to the same rule,
+         * each in its own class: DetectStaleJobs and PollProviderTasks write
+         * their own finding when they move a job to review, and an adoption —
+         * recorded as an attempt — moves the finding it resolved into its own
+         * record. An operator's verdict on a rebuild makes no attempt and
+         * leaves the last attempt's finding where it is.
          *
          * The attempt number, the handler's `reason` and the provider identity
-         * the finding is about are carried because an operator action reads
-         * them as a licence (F-15: `RepointReservedIdentity` acts only on a
-         * finding that is about the identity the job holds now, from the
-         * attempt the job last made). A finding that cannot say which attempt
-         * or which identity it is about cannot be told apart from a stale one.
+         * the finding is about are carried because what reads the finding
+         * treats it as current only when it can say so (F-15: the review list
+         * publishes a finding, and `RepointReservedIdentity` acts on one, only
+         * when it is stamped with the job's last attempt and is not about an
+         * identity the job no longer holds). A finding that cannot say which
+         * attempt or which identity it is about cannot be told apart from a
+         * stale one.
          */
-        if ($result->isFailure()) {
-            $reason = $result->metadata['reason'] ?? null;
-            $identity = $result->metadata['reserved_provider_id'] ?? null;
+        if (! $result->isFailure()) {
+            unset($existing['error']);
 
-            $existing['error'] = [
-                'code' => $result->errorCode,
-                'class' => $result->failureClass?->value,
-                'attempt' => $job->attempts,
-                'reason' => is_string($reason) ? $reason : null,
-                'reserved_provider_id' => is_scalar($identity) ? (string) $identity : null,
-            ];
+            return $existing;
         }
+
+        $reason = $result->metadata['reason'] ?? null;
+        $identity = $result->metadata['reserved_provider_id'] ?? null;
+
+        $existing['error'] = [
+            'code' => $result->errorCode,
+            'class' => $result->failureClass?->value,
+            'attempt' => $job->attempts,
+            'reason' => is_string($reason) ? $reason : null,
+            'reserved_provider_id' => is_scalar($identity) ? (string) $identity : null,
+        ];
 
         return $existing;
     }

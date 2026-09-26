@@ -930,9 +930,12 @@ final class ProxmoxComputeProvider implements ComputeProvider
              * Null, not 0, when the figure is present but unparseable. A
              * machine's shape is evidence in the VPS create's ownership check,
              * where a null is the absence of an observation and 0 is an
-             * observation — of a machine with no memory, which a caller would
-             * then compare against the plan and call a stranger. `cpus` and
-             * `name` already behave this way; these two did not.
+             * observation — of a machine with no memory, which the check would
+             * compare against the plan and find shaped otherwise: the create's
+             * own machine, named as it was called, would stop at review as one
+             * whose ownership cannot be established (`shape_differs`) instead
+             * of being recognised. `cpus` and `name` already behave this way;
+             * these two did not.
              */
             memoryMib: isset($row['maxmem']) && is_numeric($row['maxmem']) ? $this->toMib($row['maxmem']) : null,
             diskGib: isset($row['maxdisk']) && is_numeric($row['maxdisk']) ? $this->toGib($row['maxdisk']) : null,

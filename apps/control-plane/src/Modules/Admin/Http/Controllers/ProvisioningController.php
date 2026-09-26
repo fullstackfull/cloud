@@ -77,8 +77,25 @@ final class ProvisioningController
      * not use to (F-15): the finding's code and its `reason` — the runbook's
      * rows for a taken identity are keyed on the reason, and the only other
      * place the reason appeared was `last_error`, which the screen truncates —
-     * and the provider identity a create reserved, with every node and name a
-     * create under it was sent with, because that is where to look.
+     * and the provider identity a create reserved, with every node an attempt
+     * under it was placed on and every name a create under it was sent with,
+     * because that is where to look.
+     *
+     * The finding is published only while it is current, in both of the
+     * senses `RepointReservedIdentity` requires before it acts on one: it is
+     * stamped with the job's last attempt, and, where it is about a provider
+     * identity, about the one the job holds now. Otherwise the row carries no
+     * finding. The engine's settle, the stale sweep and the task poller each
+     * write their own finding as they move a job here, and a successful
+     * attempt or an adoption removes the one before it. One door writes none:
+     * an operator's verdict on a rebuild (`OperationsController`) moves a
+     * reinstall's job to failed and leaves its finding as it was, so the row
+     * shows what that job's last attempt found, if it found anything, and
+     * nothing older. That is this reader's half: a finding left behind by an
+     * earlier attempt — past a door that writes none, that one or one added
+     * later — or about an identity a repoint has since moved the job off is
+     * shown as "no current finding", rather than as one the job is no longer
+     * about, which would send the operator to the wrong runbook row.
      */
     public function needingReview(Request $request): JsonResponse
     {
@@ -89,7 +106,7 @@ final class ProvisioningController
             ->paginate($this->perPage($request));
 
         return $this->paginated($jobs, static function (ProvisioningJob $job): array {
-            $finding = is_array($job->result['error'] ?? null) ? $job->result['error'] : [];
+            $finding = self::currentFinding($job);
             $reference = $job->result['provider_reference'] ?? null;
 
             return [
@@ -279,6 +296,25 @@ final class ProvisioningController
                 'service_id' => $adopted->service_id,
             ],
         ]);
+    }
+
+    /**
+     * The job's finding if it is current, or an empty array. See
+     * needingReview() for what current means and why.
+     *
+     * @return array<string, mixed>
+     */
+    private static function currentFinding(ProvisioningJob $job): array
+    {
+        $finding = is_array($job->result['error'] ?? null) ? $job->result['error'] : [];
+
+        if (($finding['attempt'] ?? null) !== $job->attempts) {
+            return [];
+        }
+
+        $identity = $finding['reserved_provider_id'] ?? null;
+
+        return $identity === null || $identity === $job->reserved_provider_id ? $finding : [];
     }
 
     /**

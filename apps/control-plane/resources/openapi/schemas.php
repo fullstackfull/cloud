@@ -2186,12 +2186,12 @@ return [
             'last_error' => ['type' => ['string', 'null']],
             // The fields below are published by the needs-review list, which
             // is where the runbook sends the operator (F-15).
-            'error_code' => ['type' => ['string', 'null'], 'description' => 'The last attempt\'s finding, e.g. `vps.create_identity_taken`.'],
+            'error_code' => ['type' => ['string', 'null'], 'description' => 'The job\'s current finding, e.g. `vps.create_identity_taken`: its last attempt\'s, and about the provider identity it holds now. Null when there is no current finding — after a repoint, for one.'],
             'error_reason' => ['type' => ['string', 'null'], 'description' => 'Why, where the finding has a reason: for a taken identity `named_otherwise`, `unnamed` or `shape_differs`. The runbook\'s rows are keyed on it.'],
             'provider_reference' => ['type' => ['string', 'null']],
             'reserved_provider_id' => ['type' => ['string', 'null'], 'description' => 'The hypervisor id a VPS create reserved before calling; where to look for what it built.'],
             'reserved_cluster_id' => ['type' => ['string', 'null']],
-            'reserved_provider_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every node a create under the reserved id was sent to.'],
+            'reserved_provider_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every node an attempt under the reserved id was placed on: every node a create under it was sent to, and any node an attempt was placed on that ended before sending one.'],
             'reserved_provider_hostnames' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every name a create under the reserved id was sent with.'],
             'correlation_id' => ['type' => ['string', 'null']],
             'started_at' => ['$ref' => '#/components/schemas/Timestamp'],

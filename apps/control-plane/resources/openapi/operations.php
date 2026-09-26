@@ -610,7 +610,7 @@ return [
     'api.admin.provisioning.needs_review' => [
         'tag' => 'Operator',
         'summary' => 'Jobs waiting for a person',
-        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the last attempt\'s finding (`error_code`, `error_reason`) and, for a VPS create, the provider identity it reserved and every node and name a create under it was sent with.',
+        'description' => 'Where an indeterminate provider call goes. Nothing here is retried automatically, which is the point of the state. Each row carries the job\'s current finding (`error_code`, `error_reason`) — its last attempt\'s, about the identity it holds now, or none — and, for a VPS create, the provider identity it reserved, every node an attempt under it was placed on, and every name a create under it was sent with.',
         'permission' => 'provisioning.view',
         'response' => $many('AdminProvisioningJob'),
     ],
