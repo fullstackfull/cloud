@@ -184,6 +184,28 @@ export function VpsOverviewSection() {
               },
             ]}
           />
+
+          {/*
+            * Whether the disk is already gone, answered from the fact the API
+            * publishes rather than from the state above it. The two are
+            * independent: `failed` is published both for a rebuild that never
+            * touched the disk and for one an operator settled after the disk
+            * was replaced, and until this line the second read "The rebuild
+            * did not run" and nothing else. `data_destroyed` is true from the
+            * moment the machine was told to replace its disk, whatever
+            * happened after — including a rebuild that completed — so it is
+            * read before anything reassuring is said, as the Dedicated page
+            * reads it.
+            *
+            * whether-the-disk-is-already-gone.test.tsx holds this to the fact
+            * on every (state, data_destroyed) pair the API can publish today;
+            * it cannot see a state the API does not yet publish.
+            */}
+          {vm.reinstall.data_destroyed ? (
+            <p className="mt-4 text-sm text-[var(--danger-text)]">
+              {t('vps.rebuildDataDestroyed')}
+            </p>
+          ) : null}
         </Card>
       )}
     </div>

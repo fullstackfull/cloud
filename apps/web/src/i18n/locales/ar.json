@@ -759,7 +759,8 @@
     "primaryAddress": "العنوان الرئيسي",
     "noAddresses": "لا عناوين مخصّصة لهذا الجهاز بعد.",
     "rebuildBody": "آخر إعادة بناء لهذا الجهاز.",
-    "rebuildRequested": "طُلبت في"
+    "rebuildRequested": "طُلبت في",
+    "rebuildDataDestroyed": "أفرغت هذه الإعادة القرص فعلاً. ما كان عليه زال، سواء اكتمل التثبيت أم لا."
   },
   "dedicated": {
     "subtitle": "أجهزتك الفيزيائية.",

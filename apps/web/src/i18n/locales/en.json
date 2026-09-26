@@ -755,7 +755,8 @@
     "primaryAddress": "Main address",
     "noAddresses": "No addresses assigned to this machine yet.",
     "rebuildBody": "The last rebuild of this machine.",
-    "rebuildRequested": "Requested"
+    "rebuildRequested": "Requested",
+    "rebuildDataDestroyed": "This rebuild has already erased the disk. Whatever was on it is gone, whether or not the installation finished."
   },
   "dedicated": {
     "subtitle": "Your physical machines.",
