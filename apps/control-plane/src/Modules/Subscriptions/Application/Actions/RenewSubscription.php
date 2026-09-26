@@ -67,15 +67,14 @@ final readonly class RenewSubscription
 
             $this->assertRenewable($locked);
 
-            $undelivered = $this->undeliveredService($locked);
+            $unbillable = $this->serviceNothingIsOwedFor($locked);
 
-            if ($undelivered !== null) {
+            if ($unbillable !== null) {
                 /*
                  * Skipped rather than refused. The subscription is perfectly
                  * renewable in its own terms — active, auto-renewing, due —
                  * and what is wrong is on the other side of it: the service it
-                 * pays for never left PENDING because the platform could not
-                 * place it.
+                 * pays for was never delivered, or has ended.
                  *
                  * Returning null puts this in the sweep's `skipped` count,
                  * which is where "nothing to do here" belongs. Throwing would
@@ -83,12 +82,18 @@ final readonly class RenewSubscription
                  * machinery, when the machinery is working and the service is
                  * the problem.
                  */
-                Log::info('A renewal was skipped: the service it pays for was never delivered.', [
-                    'subscription_id' => (string) $locked->getKey(),
-                    'customer_id' => (string) $locked->customer_id,
-                    'service_id' => (string) $undelivered->getKey(),
-                    'reason' => ((array) $undelivered->resources)['placement_blocked_reason'] ?? null,
-                ]);
+                Log::info(
+                    $unbillable->status === ServiceStatus::Terminated
+                        ? 'A renewal was skipped: the service it pays for has ended.'
+                        : 'A renewal was skipped: the service it pays for was never delivered.',
+                    [
+                        'subscription_id' => (string) $locked->getKey(),
+                        'customer_id' => (string) $locked->customer_id,
+                        'service_id' => (string) $unbillable->getKey(),
+                        'status' => $unbillable->status->value,
+                        'reason' => ((array) $unbillable->resources)['placement_blocked_reason'] ?? null,
+                    ],
+                );
 
                 return null;
             }
@@ -200,28 +205,48 @@ final readonly class RenewSubscription
     }
 
     /**
-     * The service this subscription pays for, when it never arrived.
+     * The service this subscription pays for, when no further period is owed
+     * for it.
      *
-     * Deliberately one narrow condition rather than a rule about service
-     * states in general: PENDING *and* carrying a placement-blocked reason.
-     * That pair means the platform never got as far as asking a provider for
-     * anything — `ServiceStatus::holdsResources()` is false for PENDING, so
-     * nothing is being held on the customer's behalf — and billing a second
-     * period for it would charge rent on an empty room.
+     * Three cases, each a service that holds nothing on the customer's behalf
+     * (`ServiceStatus::holdsResources()` is false for all three), so billing a
+     * second period for it would charge rent on an empty room:
      *
-     * Every other state is left alone, because each has a reason to keep
-     * billing that this method has no business overriding. PROVISIONING and
-     * ACTIVE and SUSPENDED all hold real resources. FAILED does not, but a
-     * failed build is a different question with a different answer — it may
-     * be retried, refunded or terminated by an operator — and inventing a
-     * renewal policy for it here would be inventing product.
+     *  - PENDING *and* carrying a placement-blocked reason: the platform never
+     *    got as far as asking a provider for anything.
+     *  - FAILED: the build was asked for and did not succeed. The state
+     *    machine reaches FAILED only from PROVISIONING, never from ACTIVE, so
+     *    a FAILED service was never delivered. This used to renew, on the
+     *    reasoning that an operator might retry, refund or end it — true, and
+     *    beside the point: none of those makes the period just ended one the
+     *    customer received (F-07, as the re-audit after round two measured
+     *    it: `considered=1 renewed=1` for a FAILED, never-activated service).
+     *    A retried build that succeeds makes the service ACTIVE, and the next
+     *    sweep bills as usual.
+     *  - TERMINATED: the service has ended. Ending it ends the subscription
+     *    too (EndTheSubscriptionWithItsService); this is the backstop for a
+     *    row ended before that listener existed, or one it could not move
+     *    (I-1).
+     *
+     * PENDING *without* a blocked reason is left alone: it is a build a
+     * worker has not reached yet, and a queue a few seconds behind is not a
+     * delivery failure. PROVISIONING, ACTIVE, SUSPENDED and REACTIVATING all
+     * hold real resources and keep billing.
      */
-    private function undeliveredService(Subscription $subscription): ?Service
+    private function serviceNothingIsOwedFor(Subscription $subscription): ?Service
     {
         /** @var Service|null $service */
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
 
-        if ($service === null || $service->status !== ServiceStatus::Pending) {
+        if ($service === null) {
+            return null;
+        }
+
+        if (in_array($service->status, [ServiceStatus::Failed, ServiceStatus::Terminated], true)) {
+            return $service;
+        }
+
+        if ($service->status !== ServiceStatus::Pending) {
             return null;
         }
 

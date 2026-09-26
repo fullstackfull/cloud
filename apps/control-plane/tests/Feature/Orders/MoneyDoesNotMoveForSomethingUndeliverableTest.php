@@ -22,6 +22,9 @@ use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Payments\Application\Actions\StartInvoicePayment;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingNodeStatus;
+use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
+use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingNode;
 use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use PHPUnit\Framework\Attributes\Test;
@@ -89,6 +92,56 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         $this->assertNotNull(Invoice::query()->where('order_id', $order->getKey())->first());
     }
 
+    #[Test]
+    public function a_hosting_plan_no_hosting_node_can_take_is_not_orderable(): void
+    {
+        /*
+         * F-07 as the re-audit after round two measured it: a package and zero
+         * hosting nodes was accepted, paid, built into a FAILED service with a
+         * `needs_review` job saying "No hosting node can take an account on
+         * package ...", and renewed. That sentence is a fact about this
+         * platform's own rows, knowable before the money moves.
+         *
+         * A fleet with nodes that the scheduler would exclude is the same
+         * fact: a node that is offline, draining, closed to new accounts or
+         * unlicensed takes nobody.
+         */
+        $fleets = [
+            'no node at all' => static fn (): null => null,
+            'an offline node' => static fn (): HostingNode => HostingNode::factory()->status(HostingNodeStatus::Offline)->create(),
+            'a draining node' => static fn (): HostingNode => HostingNode::factory()->draining()->create(),
+            'a node closed to new accounts' => static fn (): HostingNode => HostingNode::factory()->create(['accepts_new_accounts' => false]),
+            'an unlicensed node' => static fn (): HostingNode => HostingNode::factory()->panel(HostingPanel::Cpanel)->unlicensed()->create(),
+        ];
+
+        foreach ($fleets as $fleet => $build) {
+            HostingNode::query()->delete();
+            $build();
+
+            [$customer] = $this->accountWithOwner();
+            $plan = $this->hostingPlan(withPackage: true, withNode: false);
+
+            try {
+                $this->place($customer, $plan);
+                $this->fail('A hosting order was accepted with '.$fleet.' to put it on.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $fleet);
+            }
+
+            $this->assertSame(0, Order::query()->where('customer_id', $customer->getKey())->count(), $fleet);
+        }
+
+        // The positive control: one node that can take the package, and the
+        // same plan is sold.
+        HostingNode::query()->delete();
+        HostingNode::factory()->create();
+
+        [$customer] = $this->accountWithOwner();
+        $this->place($customer, $this->hostingPlan(withPackage: true, withNode: false));
+
+        $this->assertSame(1, Order::query()->where('customer_id', $customer->getKey())->count());
+    }
+
     // ---- vps --------------------------------------------------------------
 
     #[Test]
@@ -109,6 +162,60 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         $plan = $this->vpsPlan(withPlacement: true);
 
         $this->place($customer, $plan);
+
+        $this->assertSame(1, Order::query()->count());
+    }
+
+    #[Test]
+    public function a_vps_plan_that_names_a_cluster_or_pool_that_cannot_take_it_is_not_orderable(): void
+    {
+        /*
+         * A declared target used to be trusted as given: the re-audit sold a
+         * plan whose constraints named an offline cluster and an inactive
+         * pool. The estate below has exactly one active cluster and one
+         * active customer pool, so every refusal here is about the plan's own
+         * declaration and not about ambiguity.
+         */
+        [$activeCluster, $activePool] = $this->oneOfEverything();
+
+        $offline = ComputeCluster::factory()->create(['status' => 'offline']);
+        VmTemplate::factory()->create(['cluster_id' => $offline->getKey()]);
+
+        $inactivePool = IpPool::factory()->create(['is_active' => false, 'ip_version' => 4]);
+        $managementPool = IpPool::factory()->management()->create(['is_active' => true, 'ip_version' => 4]);
+
+        $declarations = [
+            'an offline cluster' => ['cluster_id' => (string) $offline->getKey(), 'ip_pool_id' => (string) $activePool->getKey()],
+            'a cluster that does not exist' => ['cluster_id' => '01jzzzzzzzzzzzzzzzzzzzzzzz', 'ip_pool_id' => (string) $activePool->getKey()],
+            'an inactive pool' => ['cluster_id' => (string) $activeCluster->getKey(), 'ip_pool_id' => (string) $inactivePool->getKey()],
+            'a pool that does not exist' => ['cluster_id' => (string) $activeCluster->getKey(), 'ip_pool_id' => '01jzzzzzzzzzzzzzzzzzzzzzzz'],
+            'a management pool' => ['cluster_id' => (string) $activeCluster->getKey(), 'ip_pool_id' => (string) $managementPool->getKey()],
+        ];
+
+        foreach ($declarations as $what => $constraints) {
+            [$customer] = $this->accountWithOwner();
+            $plan = $this->planFor(ProductKind::Vps);
+            $plan->forceFill(['placement_constraints' => $constraints])->save();
+
+            try {
+                $this->place($customer, $plan->fresh(['prices', 'product']));
+                $this->fail('A VPS order was accepted for a plan that names '.$what.'.');
+            } catch (CheckoutRejectedException $e) {
+                $this->assertSame('checkout.not_deliverable', $e->errorCode(), $what);
+            }
+        }
+
+        $this->assertSame(0, Order::query()->count());
+
+        // The positive control: the same plan naming the active pair sells.
+        [$customer] = $this->accountWithOwner();
+        $plan = $this->planFor(ProductKind::Vps);
+        $plan->forceFill(['placement_constraints' => [
+            'cluster_id' => (string) $activeCluster->getKey(),
+            'ip_pool_id' => (string) $activePool->getKey(),
+        ]])->save();
+
+        $this->place($customer, $plan->fresh(['prices', 'product']));
 
         $this->assertSame(1, Order::query()->count());
     }
@@ -347,12 +454,17 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         ));
     }
 
-    private function hostingPlan(bool $withPackage, int $monthlyMinor = 9_000): Plan
+    private function hostingPlan(bool $withPackage, int $monthlyMinor = 9_000, bool $withNode = true): Plan
     {
         $plan = $this->planFor(ProductKind::SharedHosting, $monthlyMinor);
 
         if ($withPackage) {
             HostingPackage::factory()->create(['plan_id' => $plan->getKey()]);
+        }
+
+        // A package is not enough: something has to be able to host it.
+        if ($withNode && ! HostingNode::query()->exists()) {
+            HostingNode::factory()->create();
         }
 
         return $plan->fresh(['prices', 'product']);
@@ -369,6 +481,20 @@ final class MoneyDoesNotMoveForSomethingUndeliverableTest extends OrdersApiTestC
         }
 
         return $plan->fresh(['prices', 'product']);
+    }
+
+    /**
+     * One active cluster with one image, and one active customer pool.
+     *
+     * @return array{ComputeCluster, IpPool}
+     */
+    private function oneOfEverything(): array
+    {
+        $cluster = ComputeCluster::factory()->create(['status' => 'active']);
+        VmTemplate::factory()->create(['cluster_id' => $cluster->getKey()]);
+        $pool = IpPool::factory()->create(['is_active' => true, 'ip_version' => 4]);
+
+        return [$cluster, $pool];
     }
 
     private function planFor(ProductKind $kind, int $monthlyMinor = 9_000): Plan

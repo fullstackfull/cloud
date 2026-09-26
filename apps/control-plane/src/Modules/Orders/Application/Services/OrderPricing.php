@@ -252,10 +252,12 @@ final readonly class OrderPricing
     /**
      * Refuses what this platform already knows it cannot place.
      *
-     * Local configuration only — a hosting package, a cluster, an IP pool, an
-     * OS image — and every one of those answers is a row already held, so it
-     * can be asked before a customer is charged. Nothing here contacts a
-     * provider or claims a machine can actually be built.
+     * Local configuration only — a hosting package and a hosting node that
+     * could take it, an active cluster, an active customer IP pool, an OS
+     * image — and every one of those answers is a row already held, so it can
+     * be asked before a customer is charged. Nothing here contacts a provider
+     * or claims a machine can actually be built. The exact list is
+     * LocalPlacementFeasibility's docblock, which is the code that asks it.
      *
      * The rule is {@see LocalPlacementFeasibility}, which is also what the
      * provisioning path resolves through. That is the point of it being one

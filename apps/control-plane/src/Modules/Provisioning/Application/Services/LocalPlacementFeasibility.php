@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Provisioning\Application\Services;
 use Illuminate\Database\Eloquent\Builder;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\Enums\ClusterStatus;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\VmTemplate;
 use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
@@ -14,6 +15,9 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Provisioning\Application\DTOs\PlacementResolution;
 use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
+use Lynomia\Modules\SharedHosting\Domain\DTOs\HostingPlacementRequest;
+use Lynomia\Modules\SharedHosting\Domain\Exceptions\NoHostingCapacityException;
+use Lynomia\Modules\SharedHosting\Domain\Services\HostingNodeScheduler;
 
 /**
  * Where a plan would be placed, decided from this platform's own rows.
@@ -42,8 +46,30 @@ use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
  * Every question asked here is answered by a row this platform already holds.
  * Nothing contacts a hypervisor, a panel or a registrar, and nothing here
  * claims a machine can actually be built — only that the configuration needed
- * to ask for one exists. Whether a node has room is a provider's answer and a
- * different phase's problem.
+ * to ask for one exists, and names things that can take it.
+ *
+ * What is checked, exactly (F-07, as the re-audit after round two found it
+ * short of this):
+ *
+ *  - Shared Hosting: the plan resolves to exactly one package on sale
+ *    ({@see HostingPackageForPlan}), AND the hosting fleet has a node the
+ *    scheduler would place that package on. That second question is asked of
+ *    {@see HostingNodeScheduler} itself, from the node rows it keeps
+ *    (status, licence, openness, disk, account count, load, package fit), so
+ *    checkout and the build refuse the same fleet for the same reasons. It
+ *    used to be unasked: a package with zero nodes was sold, paid, built into
+ *    a FAILED service and renewed.
+ *  - VPS: a cluster, a customer IP pool and an OS image. A cluster or pool the
+ *    plan declares by id must exist and be one the platform would itself pick
+ *    — an ACTIVE cluster, an ACTIVE pool in a customer-allocatable scope. A
+ *    declared id used to be trusted as given, so a plan naming an offline
+ *    cluster and an inactive pool was sold. With nothing declared, exactly one
+ *    such cluster and one such IPv4 pool must exist.
+ *  - Dedicated: nothing (below).
+ *
+ * Whether a hypervisor node has room, and whether an IP pool has a free
+ * address, is not asked here: those are provider-side or allocation-time
+ * answers and a different phase's problem.
  *
  * A Dedicated plan is not gated. It reserves a chassis from inventory inside
  * its own handler and has no catalogue mapping to resolve up front, so there
@@ -54,6 +80,7 @@ final readonly class LocalPlacementFeasibility
 {
     public function __construct(
         private HostingPackageForPlan $packages,
+        private HostingNodeScheduler $scheduler,
     ) {}
 
     public function resolve(Plan $plan): PlacementResolution
@@ -94,6 +121,21 @@ final readonly class LocalPlacementFeasibility
             return PlacementResolution::blocked($choice->reason);
         }
 
+        /*
+         * And somewhere to put it. Asked of the scheduler the build uses,
+         * with the same request the build makes for a line that names no
+         * region or panel, so the two cannot disagree about the fleet. Only
+         * the answer is kept: the node is chosen again, under a lock, when the
+         * account is actually reserved.
+         */
+        try {
+            $this->scheduler->place(new HostingPlacementRequest(
+                packageId: (string) $choice->package->getKey(),
+            ));
+        } catch (NoHostingCapacityException $e) {
+            return PlacementResolution::blocked($e->getMessage());
+        }
+
         return PlacementResolution::ready(['hosting_package_id' => (string) $choice->package->getKey()]);
     }
 
@@ -102,34 +144,50 @@ final readonly class LocalPlacementFeasibility
      */
     private function compute(array $constraints): PlacementResolution
     {
+        $clusters = static fn (): Builder => ComputeCluster::query()->where('status', ClusterStatus::Active->value);
+
         $cluster = $this->soleTarget(
             $constraints['cluster_id'] ?? null,
-            static fn (): ?string => self::soleId(ComputeCluster::query()->where('status', 'active')),
+            $clusters,
+            static fn (): ?string => self::soleId($clusters()),
         );
+
+        if ($cluster === false) {
+            return PlacementResolution::blocked('the plan names a compute cluster that does not exist or is not active');
+        }
 
         if ($cluster === null) {
             return PlacementResolution::blocked('no single active compute cluster, and the plan names none');
         }
 
+        $pools = static fn (): Builder => IpPool::query()
+            ->where('is_active', true)
+            /*
+             * Management addresses reach the hypervisor and BMC control
+             * planes, and IpAllocator refuses to hand one to a customer
+             * service — so a management pool is not a candidate here, whether
+             * the plan names it or not. Counting it would do the damage twice
+             * over: with one customer pool beside it the estate would look
+             * ambiguous and a perfectly placeable plan would be refused, and
+             * alone it would resolve to a placement guaranteed to fail at the
+             * allocator.
+             */
+            ->whereIn('scope', self::customerAllocatableScopes());
+
         $pool = $this->soleTarget(
             $constraints['ip_pool_id'] ?? null,
+            $pools,
             static fn (): ?string => self::soleId(
-                IpPool::query()
-                    ->where('is_active', true)
+                $pools()
+                    // The estate's own answer is an IPv4 pool; a plan that
+                    // names a pool has chosen its family itself.
                     ->where('ip_version', 4)
-                    /*
-                     * Management addresses reach the hypervisor and BMC
-                     * control planes, and IpAllocator refuses to hand one to
-                     * a customer service — so a management pool is not a
-                     * candidate here either. Counting it would do the damage
-                     * twice over: with one customer pool beside it the estate
-                     * would look ambiguous and a perfectly placeable plan
-                     * would be refused, and alone it would resolve to a
-                     * placement guaranteed to fail at the allocator.
-                     */
-                    ->whereIn('scope', self::customerAllocatableScopes()),
             ),
         );
+
+        if ($pool === false) {
+            return PlacementResolution::blocked('the plan names an IP pool that does not exist, is not active or is not a customer pool');
+        }
 
         if ($pool === null) {
             return PlacementResolution::blocked('no single customer IP pool, and the plan names none');
@@ -187,12 +245,22 @@ final readonly class LocalPlacementFeasibility
     }
 
     /**
+     * The target the plan declares, when it is one of the candidates; the
+     * estate's sole candidate, when the plan declares nothing.
+     *
+     * A declared id is looked up among the same candidates the fallback
+     * counts, so naming a target is a choice between them and never a way
+     * round them.
+     *
+     * @param  callable(): Builder<*>  $candidates
      * @param  callable(): ?string  $fallback
+     * @return string|false|null the id; false when the plan names something that is not a
+     *                           candidate; null when it names nothing and there is no sole one
      */
-    private function soleTarget(mixed $declared, callable $fallback): ?string
+    private function soleTarget(mixed $declared, callable $candidates, callable $fallback): string|false|null
     {
         if (is_string($declared) && $declared !== '') {
-            return $declared;
+            return $candidates()->whereKey($declared)->exists() ? $declared : false;
         }
 
         return $fallback();
