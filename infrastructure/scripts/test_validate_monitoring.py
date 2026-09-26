@@ -33,6 +33,12 @@ from Go's regexp, for inputs chosen because a reader could get them wrong.
 They were recorded, not derived: rerun the recording if MODELLED_ALERTMANAGER
 moves.
 
+Nor is agreeing on the parse the same as agreeing on the route. A YAML merge
+key parses identically in go-yaml and PyYAML, and Alertmanager then decodes
+the route field by field and builds a different one from it; the merge-key
+cases record two such routes, measured against Alertmanager v0.28.1, that sent
+the page somewhere the walk did not say.
+
 Run: python3 infrastructure/scripts/test_validate_monitoring.py
 Exit 0 when every case behaves, 1 otherwise.
 """
@@ -194,11 +200,13 @@ DRIFT_PINS = {
         "receiver": "pagerduty-critical",
         "reads": "lynomia_resource_drift_open",
         "expr": 'lynomia_resource_drift_open{severity="critical"} > 0',
+        "for": "15m",
     },
     "DriftQueueUnworked": {
         "receiver": "platform-team",
         "reads": "lynomia_open_drift_total",
         "expr": "sum(lynomia_open_drift_total) > 0",
+        "for": "24h",
     },
 }
 
@@ -212,6 +220,11 @@ ruler:
       directory: /loki/rules
   alertmanager_url: http://alertmanager:9093
 """
+
+LOKI_RULE_FILE = (
+    "groups:\n  - name: logs\n    rules:\n      - alert: X\n"
+    "        expr: 'sum(count_over_time({job=\"a\"}[5m])) > 0'\n"
+)
 
 COMPOSE_LOKI = """
 services:
@@ -524,6 +537,132 @@ groups:
         "is written twice",
     ),
     (
+        # go-yaml parses this exactly as PyYAML does: the second route's
+        # matchers are `component = provisioning`. Alertmanager then decodes
+        # the route field by field and appends the explicit matchers to the
+        # merged ones, so the route needs backups AND provisioning, matches
+        # nothing, and the page falls to the next sibling -- here, the
+        # storage team's. Measured against Alertmanager v0.28.1.
+        "a route that merges another route's settings is refused, as Alertmanager adds the matchers",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n"
+            "          receiver: pagerduty-critical-backups\n          continue: false\n",
+            "        - &backups\n          matchers:\n            - component = backups\n"
+            "          receiver: pagerduty-critical-backups\n          continue: false\n"
+            "        - <<: *backups\n          matchers:\n            - component = provisioning\n"
+            "          receiver: pagerduty-critical\n"
+            "        - matchers:\n            - component =~ \"backups|provisioning\"\n"
+            "          receiver: pagerduty-critical-backups\n",
+        )),
+        "a merge key `<<`",
+    ),
+    (
+        # A key before the merge: Alertmanager applies the merge where it
+        # stands, so the merged receiver overwrites the one written above it,
+        # and the merged `severity = critical` joins `component = provisioning`.
+        # PyYAML keeps the written receiver. Alertmanager v0.28.1 sends the
+        # page to the storage team; the walk, reading PyYAML, to the on-call.
+        "a key written before a merge is refused, as Alertmanager overwrites it",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "      receiver: monitoring-team\n",
+            "      receiver: monitoring-team\n      routes:\n"
+            "        - &storage\n          matchers:\n            - severity = critical\n"
+            "          receiver: pagerduty-critical-backups\n",
+        ).replace(
+            "      receiver: pagerduty-critical\n      routes:\n",
+            "      receiver: pagerduty-critical\n      routes:\n"
+            "        - receiver: pagerduty-critical\n          <<: *storage\n"
+            "          matchers:\n            - component = provisioning\n",
+        )),
+        "a merge key `<<`",
+    ),
+    (
+        "a merge key spelled with an explicit !!merge tag is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n"
+            "          receiver: pagerduty-critical-backups\n          continue: false\n",
+            "        - &backups\n          matchers:\n            - component = backups\n"
+            "          receiver: pagerduty-critical-backups\n          continue: false\n"
+            "        - !!merge \"<<\": *backups\n          matchers:\n            - component = provisioning\n"
+            "          receiver: pagerduty-critical\n",
+        )),
+        "a merge key `<<`",
+    ),
+    (
+        # PyYAML merges on the tag whatever the key says; go-yaml merges only
+        # a key reading `<<`, so Alertmanager sees an unknown field and
+        # refuses the file the walk would otherwise have read.
+        "a !!merge tag on a key that is not `<<` is refused",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n"
+            "          receiver: pagerduty-critical-backups\n          continue: false\n",
+            "        - &backups\n          matchers:\n            - component = backups\n"
+            "          receiver: pagerduty-critical-backups\n          continue: false\n"
+            "        - !!merge settings: *backups\n          receiver: pagerduty-critical\n",
+        )),
+        "the key 'settings', tagged !!merge",
+    ),
+    (
+        # An anchor and an alias with no merge key are a copy, in go-yaml and
+        # in PyYAML alike; refusing merge keys must not refuse these.
+        "a route repeated by an alias, with no merge key, is read as a copy",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n",
+            "        - &backups\n          matchers:\n            - component = backups\n",
+        ).replace(
+            "          continue: false\n", "          continue: false\n        - *backups\n",
+        )),
+        None,
+    ),
+    (
+        # Tells a walk that stops at the first matching sibling from one that
+        # carries on: the second finds the on-call on the later sibling, and
+        # the pin, which asks whether the on-call is among the receivers,
+        # would pass.
+        "a diversion by the first matching sibling is not undone by a later one",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n          receiver: pagerduty-critical-backups\n          continue: false\n",
+            "            - component = provisioning\n          receiver: pagerduty-critical-backups\n"
+            "        - matchers:\n            - component = provisioning\n          receiver: pagerduty-critical\n",
+        )),
+        "is routed to pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+    ),
+    (
+        "a sub-route with no matchers catches everything under it, the page included",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "        - matchers:\n            - component = backups\n          receiver: pagerduty-critical-backups\n",
+            "        - receiver: pagerduty-critical-backups\n",
+        )),
+        "is routed to pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+    ),
+    (
+        "a sub-route that names no receiver delivers to its parent's",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n          receiver: pagerduty-critical-backups\n",
+            "            - component = provisioning\n",
+        )),
+        None,
+    ),
+    (
+        "a receiver inherited from the storage team's route takes the page away",
+        drift(alertmanager=ALERTMANAGER.replace(
+            "            - component = backups\n          receiver: pagerduty-critical-backups\n          continue: false\n",
+            "            - component =~ \"backups|provisioning\"\n          receiver: pagerduty-critical-backups\n"
+            "          routes:\n            - matchers:\n                - component = provisioning\n",
+        )),
+        "is routed to pagerduty-critical-backups, and is pinned to 'pagerduty-critical'",
+    ),
+    (
+        "a pinned alert that waits longer than its pin is refused",
+        drift(rules=DRIFT_RULES.replace("        for: 15m\n", "        for: 1h\n")),
+        "ResourceDriftOpen waits `for: 1h`, and PINNED_ROUTES pins it to `for: 15m`",
+    ),
+    (
+        "a pinned alert that no longer waits at all is refused",
+        drift(rules=DRIFT_RULES.replace("        for: 24h\n", "")),
+        "DriftQueueUnworked has no `for:`, and PINNED_ROUTES pins it to `for: 24h`",
+    ),
+    (
         "a `continue` go-yaml and PyYAML type differently is refused",
         drift(alertmanager=ALERTMANAGER.replace("          continue: false\n", "          continue: n\n", 1)),
         "is not a boolean",
@@ -650,6 +789,42 @@ groups:
         None,
     ),
     (
+        # Loki's local store reads <directory>/<tenant>/<file>: a file
+        # directly in the directory is not a tenant, and is never read.
+        "rule files directly in the ruler's directory, where Loki never reads them, are refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": LOKI_WITH_RULER,
+            "loki/rules/drift.yml": LOKI_RULE_FILE,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "      - loki-data:/loki\n",
+                "      - loki-data:/loki\n      - ./loki/rules:/loki/rules:ro\n"),
+        }},
+        "mounts no rule files at /loki/rules/<tenant>/",
+    ),
+    (
+        # ... and a directory inside a tenant's is skipped.
+        "rule files a directory below the tenant's are refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": LOKI_WITH_RULER,
+            "loki/rules/fake/logs/drift.yml": LOKI_RULE_FILE,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "      - loki-data:/loki\n",
+                "      - loki-data:/loki\n      - ./loki/rules:/loki/rules:ro\n"),
+        }},
+        "mounts no rule files at /loki/rules/<tenant>/",
+    ),
+    (
+        "one tenant's directory mounted at its place under the ruler's directory passes",
+        {"extra_yml": {
+            "loki/loki-config.yml": LOKI_WITH_RULER,
+            "loki/tenant-rules/drift.yml": LOKI_RULE_FILE,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "      - loki-data:/loki\n",
+                "      - loki-data:/loki\n      - ./loki/tenant-rules:/loki/rules/fake:ro\n"),
+        }},
+        None,
+    ),
+    (
         "a Loki config with no ruler passes",
         {"extra_yml": {"loki/loki-config.yml": "auth_enabled: false\n",
                        "docker-compose.monitoring.yml": COMPOSE_LOKI}},
@@ -690,13 +865,21 @@ MATCHERS_READ_ALIKE: list[tuple[str, list[tuple[str, str, str]]]] = [
     # A single quote is not a quote.
     ("severity='critical'", [("severity", "=", "'critical'")]),
     ("component =~ 'backups|provisioning'", [("component", "=~", "'backups|provisioning'")]),
+    # Go's regexp `\s` is [\t\n\f\r ], without the vertical tab Python's has.
+    ("severity = critical\v,team = x", [("severity", "=", "critical\v"), ("team", "=", "x")]),
+    ("severity =\vcritical", [("severity", "=", "\vcritical")]),
+    # strings.TrimSpace keeps U+001F, which str.strip() removes.
+    ("severity = critical\x1f", [("severity", "=", "critical\x1f")]),
 ]
 
 # Lines the walk must refuse: Alertmanager refuses the first group; it reads
 # the second only through its UTF-8 parser, which the walk does not port.
+# The lone surrogate is a value only a YAML escape (`\ud800`) can produce,
+# and go-yaml refuses that escape, so Alertmanager never loads the file.
 MATCHERS_REFUSED: list[str] = [
     "component backups", 'a = "unterminated', 'a = b"c', "a=b,,c=d", ",a=b", 'a =~ "(unbalanced"',
-    "1a = b", '"quoted name" = x', " {a=b}",
+    "a = \ud800",
+    "1a = b", '"quoted name" = x', " {a=b}", "severity\v= critical",
 ]
 
 # Regexes on which Go and Python agree, with Go's verdict on each string. The

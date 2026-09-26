@@ -242,8 +242,8 @@ groups:
         # `open` only: a page on the latter would be silenced by clicking
         # acknowledge, and acknowledging a critical drift is not fixing it.
         # Only resolving the row clears this. validate-monitoring.py pins this
-        # expression whole and the receiver Alertmanager's route tree selects
-        # for it (PINNED_ROUTES).
+        # expression whole, its `for`, and the receiver Alertmanager's route
+        # tree selects for it (PINNED_ROUTES).
         #
         # Critical only. The severities exist so that an orphan on a node an
         # operator also uses by hand does not page anybody at night.

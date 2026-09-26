@@ -22,19 +22,22 @@ with no instructions" is not monitoring.
 It walks Alertmanager's route tree for every alert and requires each walk to
 end at a receiver the file defines. A few alerts are pinned further, in
 PINNED_ROUTES: their destination is itself the fix for a finding, so the
-receiver the route tree selects for them and the series they read are asserted
-rather than merely resolved. A series in NEVER_PAGES may not be read by a
-critical rule. This is here, over PyYAML, rather than in a PHP test over a
-hand-written YAML reader: a second model of a file can be wrong in ways the
-file never is, and Alertmanager's config is parsed by a real YAML parser.
+receiver the route tree selects for them, the series they read and how long
+they wait are asserted rather than merely resolved. A series in NEVER_PAGES
+may not be read by a critical rule. This is here, over PyYAML, rather than in
+a PHP test over a hand-written YAML reader: a second model of a file can be
+wrong in ways the file never is, and Alertmanager's config is parsed by a real
+YAML parser.
 
 A walk of the route tree is itself a model of Alertmanager, and it is only
 worth what that model is. So it is bounded, and each bound is enforced rather
-than assumed. Given the YAML as PyYAML reads it, and for an alert carrying
-exactly the labels the walk is given, the receivers the walk returns are the
-ones Alertmanager v0.28's route tree selects (dispatch.Route.Match), for every
-file this accepts, because everything the walk would otherwise have to guess
-is refused instead:
+than assumed. Given the YAML as PyYAML parses it -- a text go-yaml's parser
+reads differently is outside this bound; what Alertmanager then decodes from
+the parsed document is not, and is ported or refused below -- and for an alert
+carrying exactly the labels the walk is given, the receivers the walk returns
+are the ones Alertmanager v0.28's route tree selects (dispatch.Route.Match),
+for every file this accepts, because everything the walk would otherwise have
+to guess is refused instead:
 
   * Matchers are read by a line-for-line port of Alertmanager's classic parser
     (pkg/labels/parse.go). With no --enable-feature flag, v0.28 runs both of
@@ -47,6 +50,11 @@ is refused instead:
   * A key written twice, and a non-string where Alertmanager reads a string or
     a non-boolean where it reads a boolean, are refused: go-yaml refuses the
     first and types the others differently from PyYAML.
+  * A YAML merge key (`<<`) is refused. go-yaml parses it as PyYAML does, but
+    Alertmanager decodes a route field by field, applying the merge where it
+    stands and adding an explicit `matchers:` or `match:` to the merged one,
+    where PyYAML's flattened mapping lets the explicit key replace it
+    (MergeKey).
   * The compose file must run the Alertmanager this models, without the flag
     that changes which parser wins (MODELLED_ALERTMANAGER).
   * A pinned alert is walked with only the labels its rule fixes. A route
@@ -58,8 +66,9 @@ What the walk does not decide is whether a notification is sent at a given
 moment: inhibition, silences and time intervals act after the route tree has
 chosen a receiver, and none of them is modelled here.
 
-It refuses a Loki ruler wired to an Alertmanager with no rule files mounted at
-its rules directory. A ruler pointed at an empty directory looks configured and
+It refuses a Loki ruler wired to an Alertmanager with no rule files mounted
+where its local store reads them: in a tenant directory under its rules
+directory. A ruler pointed at an empty directory looks configured and
 evaluates nothing, which is worse than no ruler.
 
 Finally it checks that the directories infrastructure/README.md claims exist
@@ -76,7 +85,7 @@ import re
 import string
 import sys
 import warnings
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 try:
     import yaml
@@ -95,7 +104,8 @@ METRIC_IN_EXPR = re.compile(r"lynomia_[a-z0-9_]+")
 #
 # `expr` is compared whole, whitespace collapsed, rather than parsed: each
 # expression is a decision, and changing it is meant to mean changing the pin
-# in the same commit, knowingly.
+# in the same commit, knowingly. `for` is compared as written, for the same
+# reason: the runbook tells the responder how long each condition has held.
 PINNED_ROUTES: dict[str, dict[str, str]] = {
     # F-22. Critical drift pages the on-call. It reads the series that counts
     # `open` AND `acknowledged` rows, so acknowledging a drift in the operator
@@ -106,6 +116,7 @@ PINNED_ROUTES: dict[str, dict[str, str]] = {
         "receiver": "pagerduty-critical",
         "reads": "lynomia_resource_drift_open",
         "expr": 'lynomia_resource_drift_open{severity="critical"} > 0',
+        "for": "15m",
     },
     # F-22. Drift nobody has looked at, of any severity, reaches the platform
     # channel. This is the one acknowledging clears, by design: it asks for a
@@ -114,6 +125,7 @@ PINNED_ROUTES: dict[str, dict[str, str]] = {
         "receiver": "platform-team",
         "reads": "lynomia_open_drift_total",
         "expr": "sum(lynomia_open_drift_total) > 0",
+        "for": "24h",
     },
 }
 
@@ -190,22 +202,61 @@ class UnknownLabel(RouteError):
     """A route whose match depends on a label the walk was not given."""
 
 
-class DuplicateKey(yaml.constructor.ConstructorError):
+class RefusedYaml(yaml.constructor.ConstructorError):
+    """YAML that Alertmanager does not turn into the mapping PyYAML builds."""
+
+    consequence = "the routing of every alert is unverified"
+
+
+class DuplicateKey(RefusedYaml):
     """A mapping key written twice, which go-yaml refuses and PyYAML does not."""
+
+    consequence = "Alertmanager refuses the file, so the routing of every alert is unverified"
+
+
+class MergeKey(RefusedYaml):
+    """A YAML merge key, which Alertmanager applies differently from PyYAML."""
+
+    consequence = (
+        "write the mapping out in full. Alertmanager decodes a route field by "
+        "field: it applies a merge where it stands, so a key written before "
+        "`<<` is overwritten by the merged one, and it adds explicit `matchers:` "
+        "and `match:` entries to merged ones instead of replacing them. "
+        "PyYAML's flattened mapping is not the route Alertmanager reads, so the "
+        "routing of every alert is unverified"
+    )
+
+
+_YAML_MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
 class _StrictLoader(yaml.SafeLoader):
-    """PyYAML, refusing a mapping key written twice.
+    """PyYAML, refusing a mapping key written twice, and a merge key.
 
     Alertmanager loads its file with go-yaml's UnmarshalStrict, which refuses a
     duplicated key; PyYAML keeps the last one. Walking the last one would be a
     model of a file Alertmanager will not load.
+
+    A merge key (`<<`) parses the same in go-yaml and PyYAML; what differs is
+    what Alertmanager builds from it (MergeKey). The check runs on each mapping
+    before PyYAML flattens it, and nothing is flattened except by a mapping
+    that holds a merge key, so no merge reaches the walk.
     """
 
     def construct_mapping(self, node, deep=False):
         seen: set[tuple[str, str]] = set()
         for key_node, _ in node.value:
-            if not isinstance(key_node, yaml.ScalarNode) or key_node.value == "<<":
+            spelled = isinstance(key_node, yaml.ScalarNode) and key_node.value == "<<"
+            if spelled or key_node.tag == _YAML_MERGE_TAG:
+                # PyYAML decides a merge by the tag, go-yaml by the text `<<`;
+                # refusing either refuses every merge each of them makes.
+                raise MergeKey(
+                    None, None,
+                    "a merge key `<<`" if spelled
+                    else f"the key {key_node.value!r}, tagged !!merge, which PyYAML merges",
+                    key_node.start_mark,
+                )
+            if not isinstance(key_node, yaml.ScalarNode):
                 continue
             key = (key_node.tag, key_node.value)
             if key in seen:
@@ -578,7 +629,8 @@ def receivers_for(
     child without `continue: true` stops the search among its siblings; a
     route no child matched delivers to its own receiver, inherited from its
     parent when it names none. The root matches everything. Matchers are read
-    by parse_matchers(), and check_route() must have accepted the tree.
+    by parse_matchers(); the tree must have been loaded by _StrictLoader and
+    accepted by check_route().
 
     Given `known`, labels outside it are ones the walk cannot know the value
     of, and UnknownLabel is raised when the choice turns on one. Without it, a
@@ -673,6 +725,12 @@ def loki_ruler_problems(monitoring: Path) -> list[str]:
     rules be pushed at runtime, but nothing here pushes any, and a ruler that
     depends on an undocumented manual push is the configured-looking empty
     ruler this refuses.
+
+    Loki's local rule store (pkg/ruler/rulestore/local, as of the 3.5 line the
+    compose file runs) reads `<directory>/<tenant>/<file>` and nothing else:
+    a file directly in the directory is not a tenant, and a directory inside a
+    tenant is skipped. Only a rule in a file at that depth is counted. The
+    tenant is `fake` while `auth_enabled` is false.
     """
     config_path = monitoring / "loki" / "loki-config.yml"
     if not config_path.exists():
@@ -696,19 +754,24 @@ def loki_ruler_problems(monitoring: Path) -> list[str]:
         parts = volume.split(":")
         if len(parts) < 2 or not parts[0].startswith((".", "/")):
             continue  # a named volume starts empty; it is not a source of rules
-        target = parts[1].rstrip("/")
-        if target != directory.rstrip("/") and not target.startswith(directory.rstrip("/") + "/"):
+        root = PurePosixPath(directory.rstrip("/") or "/")
+        target = PurePosixPath(parts[1].rstrip("/") or "/")
+        if target != root and root not in target.parents:
             continue
         source = (compose_path.parent / parts[0]).resolve()
         rules = 0
         for path in sorted(source.rglob("*.y*ml")) if source.is_dir() else []:
+            inside = target.joinpath(*path.relative_to(source).parts)
+            if len(inside.relative_to(root).parts) != 2:
+                continue  # not <directory>/<tenant>/<file>, so Loki never reads it
             document = yaml.safe_load(path.read_text()) or {}
             for group in document.get("groups", []) if isinstance(document, dict) else []:
                 rules += len(group.get("rules") or [])
         if rules:
             return []
     return [
-        f"{wired} and mounts no rule files at {directory}. A ruler pointed at an "
+        f"{wired} and mounts no rule files at {directory.rstrip('/')}/<tenant>/, "
+        f"the only place Loki's local store reads them. A ruler pointed at an "
         f"empty directory looks configured and evaluates nothing: ship rule "
         f"files and mount them there, or remove the ruler's wiring."
     ]
@@ -798,7 +861,7 @@ def main(
         return 1
 
     total_rules = 0
-    alerts: dict[str, list[tuple[str, dict, str]]] = {}
+    alerts: dict[str, list[tuple[str, dict, str, object]]] = {}
     for path in rule_files:
         document = yaml.safe_load(path.read_text()) or {}
         for group in document.get("groups", []):
@@ -822,7 +885,7 @@ def main(
                     continue
 
                 alerts.setdefault(name, []).append(
-                    (path.name, dict(rule.get("labels") or {}), expr)
+                    (path.name, dict(rule.get("labels") or {}), expr, rule.get("for"))
                 )
 
                 annotations = rule.get("annotations") or {}
@@ -842,7 +905,7 @@ def main(
 
     # A critical rule on a series that must never page.
     for name, definitions in alerts.items():
-        for file_name, labels, expr in definitions:
+        for file_name, labels, expr, _ in definitions:
             if labels.get("severity") != "critical":
                 continue
             for metric in sorted(set(METRIC_IN_EXPR.findall(expr)) & set(never_pages)):
@@ -859,10 +922,11 @@ def main(
             config = yaml.load(alertmanager_path.read_text(), Loader=_StrictLoader) or {}
             check_route(config.get("route"), "route", is_root=True)
             route = config["route"]
-        except DuplicateKey as error:
+        except RefusedYaml as error:
+            mark = error.problem_mark
             problems.append(
-                f"alertmanager.yml: {error.problem}{error.problem_mark}; Alertmanager "
-                f"refuses the file, so the routing of every alert is unverified"
+                f"alertmanager.yml line {mark.line + 1}, column {mark.column + 1}: "
+                f"{error.problem}; {error.consequence}"
             )
         except yaml.YAMLError:
             pass  # reported below, with every other file that does not parse
@@ -875,7 +939,7 @@ def main(
                 if isinstance(receiver, dict)
             }
             for name, definitions in sorted(alerts.items()):
-                for file_name, labels, _ in definitions:
+                for file_name, labels, _, _ in definitions:
                     walk_labels = {str(k): str(v) for k, v in labels.items()}
                     walk_labels["alertname"] = name
                     for receiver in receivers_for(route, walk_labels):
@@ -901,7 +965,7 @@ def main(
                 f"{name} is pinned in PINNED_ROUTES and no rule file defines it"
             )
             continue
-        for file_name, labels, expr in definitions:
+        for file_name, labels, expr, held_for in definitions:
             if pin["reads"] not in METRIC_IN_EXPR.findall(expr):
                 problems.append(
                     f"{file_name}: {name} must read {pin['reads']}, and its "
@@ -912,6 +976,14 @@ def main(
                     f"{file_name}: {name}'s expression is {expr!r}, and PINNED_ROUTES "
                     f"pins it to {pin['expr']!r}. The expression is the decision the "
                     f"pin records; if the change is meant, change the pin with it"
+                )
+            if "for" in pin and held_for != pin["for"]:
+                waits = "has no `for:`" if held_for is None else f"waits `for: {held_for}`"
+                problems.append(
+                    f"{file_name}: {name} {waits}, and PINNED_ROUTES "
+                    f"pins it to `for: {pin['for']}`. The runbook tells the responder "
+                    f"how long the condition has held; if the change is meant, change "
+                    f"the pin and the runbook with it"
                 )
             if route is None:
                 problems.append(
