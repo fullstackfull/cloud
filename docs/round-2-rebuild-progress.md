@@ -39,23 +39,23 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-41 | High | queued (last: changes the test harness) | |
 | F-46 | High | in progress (rebuild → independent verification) | |
 | F-25 | Medium | in progress (rebuild → independent verification) | |
-| F-26 | Medium | in progress (rebuild → independent verification) | |
-| F-27 | Medium | in progress (rebuild → independent verification) | |
-| F-28 | Medium | in progress (rebuild → independent verification) | |
-| F-29 | Medium | in progress (rebuild → independent verification) | |
-| F-30 | Medium | in progress (rebuild → independent verification) | |
-| F-31 | Medium | in progress (rebuild → independent verification) | |
-| F-32 | Medium | in progress (rebuild → independent verification) | |
-| F-33 | Medium | in progress (rebuild → independent verification) | |
+| F-26 | Medium | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected an IDN platform host left unreserved — now folded to its A-label); merged | `6b32e9b` |
+| F-27 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `7c75b98` |
+| F-28 | Medium | **UPHELD** outright (round 1, no reservations); merged | `47df427` |
+| F-29 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `62aac2d` |
+| F-30 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `d9dbf7c` |
+| F-31 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `07c8ed3` |
+| F-32 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `58dfc01` |
+| F-33 | Medium | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); merged | `b864728` |
 | F-34 | Medium | in progress (rebuild → independent verification) | |
-| F-35 | Medium | in progress (rebuild → independent verification) | |
-| F-36 | Medium | in progress (rebuild → independent verification) | |
-| F-37 | Medium | in progress (rebuild → independent verification) | |
+| F-35 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `68c33c0` |
+| F-36 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `eab4d6b` |
+| F-37 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `a922b43` |
 | F-38 | Medium | in progress (rebuild → independent verification) | |
 | F-39 | Medium | in progress (rebuild → independent verification) | |
 | F-40 | Medium | in progress (rebuild → independent verification) | |
 | F-42 | Medium | in progress (rebuild → independent verification) | |
-| F-43 | Medium | in progress (rebuild → independent verification) | |
+| F-43 | Medium | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); merged | `8799204` |
 | F-44 | Medium | in progress (rebuild → independent verification) | |
 | F-45 | Medium | in progress (rebuild → independent verification) | |
 | F-47 | Medium | in progress (rebuild → independent verification) | |
