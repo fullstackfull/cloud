@@ -33,7 +33,9 @@ use Lynomia\Modules\Dns\Domain\Exceptions\InvalidDomainNameException;
  * anyway; what it does not cover is a sibling, which is what
  * `DNS_RESERVED_ZONES` is for. {@see self::namesBeside()} says, host by host,
  * whether the siblings are held, and the estate preflight's verdict follows it:
- * a pass is not given while a name beside a platform host is claimable.
+ * a pass is not given while a name beside a platform host is claimable. In
+ * production that state — or an empty reservation — is also a refusal of every
+ * claim ({@see self::holdsTooLittle()}).
  *
  * ---------------------------------------------------------------------------
  * The form a host is held in
@@ -268,6 +270,31 @@ final readonly class ReservedZones
         }
 
         return $beside;
+    }
+
+    /**
+     * Whether this reservation leaves the platform's own names open: nothing
+     * reserved at all, or a platform host with claimable names beside it
+     * ({@see NamesBeside::Claimable}).
+     *
+     * The two states the estate preflight blocks a production estate on, and
+     * the state in which ClaimZone, in production, refuses every claim. One
+     * answer, read by both through {@see self::namesBeside()}, so the report
+     * and the guard cannot disagree about which estates they stop.
+     *
+     * A host listed exactly with nothing above it is not counted: it cannot be
+     * told apart from a listed registrable domain without a public-suffix
+     * list, and the preflight only warns about it.
+     *
+     * @throws InvalidDomainNameException when a listed entry is not a name — see the class docblock
+     */
+    public function holdsTooLittle(): bool
+    {
+        if ($this->configured === [] && $this->derived() === []) {
+            return true;
+        }
+
+        return in_array(NamesBeside::Claimable, $this->namesBeside(), true);
     }
 
     /**

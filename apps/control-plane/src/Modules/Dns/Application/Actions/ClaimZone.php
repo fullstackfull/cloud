@@ -134,6 +134,18 @@ final readonly class ClaimZone
      * disclosing nothing — and the operator is told here, at error level,
      * with counts and never the entries, and by the preflight's failure.
      *
+     * In production, a list that reads but holds too little is refused the
+     * same way: nothing reserved at all, or a host the platform answers on
+     * whose names beside it any account could claim
+     * ({@see ReservedZones::holdsTooLittle()} — exactly the states the estate
+     * preflight blocks a production estate on). The preflight used to be the
+     * only thing that knew, and nothing consumed its verdict: a production
+     * estate on the shipped empty list took `www.` and `mail.` beside its own
+     * control plane from any account (F-26). The log line names the
+     * variables the hosts came from and counts the entries; it never names a
+     * host or an entry. Outside production nothing changes — a rehearsal is
+     * warned by the preflight, not stopped.
+     *
      * @throws DnsRefusedException
      */
     private function assertNotReserved(DomainName $domain): void
@@ -149,6 +161,16 @@ final readonly class ClaimZone
             ]);
 
             throw DnsRefusedException::reservationUnreadable();
+        }
+
+        if (app()->isProduction() && $reserved->holdsTooLittle()) {
+            Log::error('A zone claim was refused because this production estate reserves too little of its own names (DNS_RESERVED_ZONES is empty, or a host the platform answers on has claimable names beside it); every claim by every account is refused until it is corrected.', [
+                'entries' => count($reserved->configured()),
+                'derived' => array_keys($reserved->derived()),
+                'preflight_finding' => 'dns.reserved_zones',
+            ]);
+
+            throw DnsRefusedException::reservationIncomplete();
         }
 
         if ($reserved->protects($domain)) {
