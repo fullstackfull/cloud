@@ -152,10 +152,17 @@ final readonly class ReconcileBackup
 
         if ($taskId === null) {
             /*
-             * A restore that was recorded and whose handle never arrived: the
-             * process died between the `Restoring` transition and the write of
+             * A restore that was recorded and whose handle has not arrived:
+             * the request is still inside its provider call, or its process
+             * died between the `Restoring` transition and the write of
              * `restore_task_id`, which are deliberately two saves so that a
              * crash still leaves evidence a restore was started.
+             *
+             * That transition clears any previous attempt's handle in the same
+             * compare-and-set ({@see RestoreServiceBackup}), so an archive
+             * restored before has no finished task left on it to be polled in
+             * this one's place — which is what used to write `Restored` over a
+             * second restore still writing the machine's disks.
              *
              * Left alone rather than quarantined on sight, because a sweep
              * running at that exact moment would otherwise race a request that
@@ -229,10 +236,11 @@ final readonly class ReconcileBackup
     /**
      * The handle of the task this row is actually waiting on.
      *
-     * Null only for a restore whose provider call never returned one, which is
-     * handled by the caller rather than here: there is no identifier to ask
-     * about and guessing at another one is how this went wrong in the first
-     * place.
+     * Null only for a restore whose provider call has not returned one — yet,
+     * or ever — which is handled by the caller rather than here: there is no
+     * identifier to ask about and guessing at another one is how this went
+     * wrong in the first place. `restore_task_id` is only ever this attempt's:
+     * the move to `Restoring` clears the previous restore's handle.
      */
     private function taskFor(Backup $backup): ?string
     {
@@ -301,9 +309,9 @@ final readonly class ReconcileBackup
      * index, and a key containing a timestamp would make every replay unique
      * and defeat it.
      *
-     * A restore's key carries the restore task as well, because one backup row
-     * can be restored more than once and the second attempt is a different
-     * event the customer is owed a word about. A backup row has exactly one
+     * A restore's key carries the attempt as well — its task and when it
+     * started — because one backup row can be restored more than once and the
+     * second attempt is a different event the customer is owed a word about. A backup row has exactly one
      * creation task, so its outcome needs no such qualifier — and must not
      * borrow `provider_task_id`, which is the backup's own creation task.
      */
