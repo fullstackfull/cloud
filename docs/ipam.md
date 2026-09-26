@@ -44,6 +44,14 @@ Released addresses therefore sit in `quarantined` for a configurable period befo
 returning to `available`. An address released because of abuse is quarantined for longer,
 and is flagged so an operator sees why.
 
+One kind of release waits for a person before that period starts. An address released off
+a decommissioned dedicated server is *held* — `quarantined` with no `quarantined_until` —
+because the machine is still in the rack with the address configured on its disks. Its
+clock starts only when an operator returns the machine to stock or retires it.
+`php artisan ipam:capacity` counts the held addresses in each pool and lists the
+longest-waiting of them with the machine each is waiting for. See
+`docs/runbooks/ip-exhaustion.md`.
+
 ## Allocation must be transactional
 
 The failure this design exists to prevent: two provisioning jobs for two different

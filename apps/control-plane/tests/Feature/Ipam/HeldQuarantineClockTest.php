@@ -163,6 +163,65 @@ final class HeldQuarantineClockTest extends TestCase
     }
 
     #[Test]
+    public function the_assignment_time_outranks_the_row_id(): void
+    {
+        /*
+         * "Latest" is `assigned_at` first and the ULID only after it. A later
+         * assignment can carry the lower id — a clock stepped back, or a row
+         * written by hand — and it is still the later holder.
+         */
+        [$lowId, $highId] = $this->twoUlidsInOrder();
+        $earlier = $this->chassis();
+        $later = $this->chassis();
+        $address = $this->freeAddress();
+
+        $this->historicAssignment($address, $earlier, now()->subHour(), now()->subMinutes(30), id: $highId);
+        $this->historicAssignment($address, $later, now()->subMinutes(10), now(), id: $lowId);
+        $this->holdByHand($address);
+
+        $this->assertSame(0, $this->allocator->startHeldQuarantines($earlier), 'The id outranked the assignment time.');
+        $this->assertNull($address->refresh()->quarantined_until);
+
+        $this->assertSame(1, $this->allocator->startHeldQuarantines($later));
+    }
+
+    #[Test]
+    public function an_address_already_back_in_the_pool_gets_no_clock(): void
+    {
+        /*
+         * One chassis, two lifecycles. The address from the first went round
+         * its quarantine and back to available, and nobody has taken it since,
+         * so its latest assignment still names this chassis. Ending the
+         * second lifecycle starts the clock on what the chassis holds now, and
+         * writes nothing onto an address that is already free.
+         */
+        $chassis = $this->chassis();
+
+        $first = $this->assign($chassis);
+        $this->allocator->holdAssignment($first, ReleaseReason::ServiceTerminated);
+        $this->assertSame(1, $this->allocator->startHeldQuarantines($chassis));
+
+        $this->travel(8)->days();
+
+        // The second lifecycle begins before the sweeper runs, so it is given
+        // a different address rather than the first one back.
+        $second = $this->assign($chassis);
+        $this->assertNotSame((string) $first->ip_address_id, (string) $second->ip_address_id);
+
+        $this->assertSame(1, app(ReleaseQuarantinedAddresses::class)->execute());
+        $this->assertSame(IpAddressStatus::Available, IpAddress::query()->findOrFail($first->ip_address_id)->status);
+
+        $this->allocator->holdAssignment($second, ReleaseReason::ServiceTerminated);
+
+        $this->assertSame(1, $this->allocator->startHeldQuarantines($chassis), 'A clock was started on a free address.');
+
+        $free = IpAddress::query()->findOrFail($first->ip_address_id);
+        $this->assertSame(IpAddressStatus::Available, $free->status);
+        $this->assertNull($free->quarantined_until, 'A free address was given a quarantine expiry.');
+        $this->assertNotNull(IpAddress::query()->findOrFail($second->ip_address_id)->quarantined_until);
+    }
+
+    #[Test]
     public function a_clock_already_running_is_not_restarted(): void
     {
         $chassis = $this->chassis();

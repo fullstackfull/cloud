@@ -11,6 +11,7 @@ use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
+use Lynomia\Modules\Dedicated\Application\Actions\ReserveDedicatedServer;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
@@ -298,6 +299,44 @@ final class DecommissioningGivesTheAddressBackTest extends TestCase
             ->assertJsonPath('error.code', 'dedicated.still_assigned');
 
         $this->assertSame(DedicatedServerStatus::Active, $this->server->refresh()->status);
+        $this->assertSame(0, AuditEntry::query()->where('action', AuditAction::DedicatedServerRetired)->count());
+    }
+
+    #[Test]
+    public function a_machine_held_for_a_customer_can_neither_be_retired_nor_shelved(): void
+    {
+        /*
+         * A hold writes the customer and leaves the service empty: the machine
+         * is promised and nothing is installed on it yet. It is still
+         * somebody's, and only the customer half of the still-assigned guard
+         * can see that — the service half is null on exactly this row. Either
+         * door opened here would take a promised machine out from under the
+         * order it was held for.
+         */
+        $spare = $this->chassisFor(null, 'SN-F12-0004', DedicatedServerStatus::Available);
+
+        $held = app(ReserveDedicatedServer::class)->execute(
+            hardwareProfile: (string) $spare->hardware_profile,
+            datacenterId: (string) $spare->datacenter_id,
+            customerId: (string) $this->customer->getKey(),
+            holdMinutes: 0,
+        );
+
+        $this->assertSame((string) $spare->getKey(), (string) $held->getKey());
+        $this->assertSame(DedicatedServerStatus::Reserved, $held->status);
+        $this->assertNull($held->service_id, 'The fixture is not the row only the customer half can see.');
+
+        $operator = $this->operator();
+
+        foreach (['retire', 'return-to-stock'] as $door) {
+            $this->actingAs($operator)
+                ->postJson('/api/admin/dedicated/'.$held->getKey().'/'.$door, ['evidence' => 'Looks free to me.'])
+                ->assertStatus(409)
+                ->assertJsonPath('error.code', 'dedicated.still_assigned');
+
+            $this->assertSame(DedicatedServerStatus::Reserved, $held->refresh()->status, "The {$door} door let a held machine go.");
+        }
+
         $this->assertSame(0, AuditEntry::query()->where('action', AuditAction::DedicatedServerRetired)->count());
     }
 

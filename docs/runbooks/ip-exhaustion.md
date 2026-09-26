@@ -74,13 +74,16 @@ Addresses quarantined **because of abuse** are held longer and flagged. Those ar
 candidates for early release at all.
 
 **One kind of quarantine does not drain on its own.** A row with `quarantined_until`
-null is *held*: it came off a dedicated server that was decommissioned and is still
-racked with the address configured on its disks. Its clock starts only when an
-operator returns that machine to stock (`POST /api/admin/dedicated/{server}/return-to-stock`)
+null is *held*. The designed way into that state is a dedicated server that was
+decommissioned and is still racked with the address configured on its disks. Its clock
+starts only when an operator returns that machine to stock (`POST /api/admin/dedicated/{server}/return-to-stock`)
 or retires it (`POST /api/admin/dedicated/{server}/retire`). `php artisan ipam:capacity`
-lists them per pool with the machine each is waiting for; a list that only grows is a
+counts them per pool and lists the longest-waiting with the machine each is waiting for
+(the count is the true total when the list is cut short); a count that only grows is a
 machine somebody forgot. Do not clear these by hand — erase or dispose of the machine,
-then use one of the two endpoints.
+then use one of the two endpoints. A row the report lists as `unattributed` got there
+some other way — a hand edit or a control-plane defect — and has no machine whose return
+would start its clock; investigate it rather than reaching for either endpoint.
 
 ## 3. Genuinely low `available` — you are out of addresses
 
