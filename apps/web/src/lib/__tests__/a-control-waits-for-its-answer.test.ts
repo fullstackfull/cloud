@@ -1267,8 +1267,9 @@ function findingGatesNotJudgedShut(result: Report): string[] {
  * narrow what the gate asserts. Sixty seconds is about five times the worst
  * time measured under the config it runs with, and three times the worst
  * measured without the fork cap; a gate that loops still fails in a minute. The
- * budget is set on each `describe` below rather than globally, so no other
- * test inherits it.
+ * budget is set on each of the three `describe`s below rather than
+ * globally, so no other test inherits it, and each of the three carries a
+ * row that fails if its own budget is taken off.
  */
 const GATE_BUDGET_MS = 60_000
 
@@ -1346,6 +1347,10 @@ describe('a control that waits on an answer is not live before the answer', { ti
  * source text, in memory, and the gate run unmodified over the result.
  */
 describe('the gate reddens on the defect it exists for', { timeout: GATE_BUDGET_MS }, () => {
+  it('runs on the budget written for it, not the suite default', ({ task }) => {
+    expect(task.timeout).toBe(GATE_BUDGET_MS)
+  })
+
   const REGISTER = 'features/auth/RegisterPage.tsx'
   const PLANS = 'features/controlCenter/PlansPage.tsx'
   const REGISTER_FIXED = 'disabled={!registrationPermitted}'
@@ -1638,6 +1643,10 @@ describe('the gate reddens on the defect it exists for', { timeout: GATE_BUDGET_
  * diagnosis into a crash.
  */
 describe('the gate itself', { timeout: GATE_BUDGET_MS }, () => {
+  it('runs on the budget written for it, not the suite default', ({ task }) => {
+    expect(task.timeout).toBe(GATE_BUDGET_MS)
+  })
+
   it('uses probes that are not in the tree', () => {
     expect(readSources().filter((source) => source.text.includes('useProbeAnswer'))).toEqual([])
   })

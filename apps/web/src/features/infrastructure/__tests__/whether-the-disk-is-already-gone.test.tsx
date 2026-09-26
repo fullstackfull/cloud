@@ -457,6 +457,11 @@ describe('the catalogues', () => {
     expect(lookup(en, 'dedicated.rebuildStoppedAfterErasing')).toBe(
       'The rebuild stopped after erasing the disks',
     )
+    // The Arabic pair differs as the English does: a chassis has disks
+    // (الأقراص), a VPS one disk (القرص). Asserted by text, not by difference
+    // alone, so the VPS sentence pasted into the Dedicated key fails here.
+    expect(lookup(ar, 'vps.rebuildStoppedAfterErasing')).toBe('توقفت إعادة البناء بعد أن مسحت القرص')
+    expect(lookup(ar, 'dedicated.rebuildStoppedAfterErasing')).toBe('توقفت إعادة البناء بعد أن مسحت الأقراص')
 
     for (const key of ['vps.rebuildStoppedAfterErasing', 'dedicated.rebuildStoppedAfterErasing']) {
       const arabic = lookup(ar, key)
@@ -520,7 +525,10 @@ describe('the Dedicated twin, which already said it', () => {
   it('no longer says the rebuild did not run beside it, in either language', async () => {
     await renderServerPage()
 
-    expect(screen.getByText(lookup(en, 'dedicated.rebuildStoppedAfterErasing') ?? '<missing>')).toBeInTheDocument()
+    const english = screen.getByText(lookup(en, 'dedicated.rebuildStoppedAfterErasing') ?? '<missing>')
+
+    // Presented as harm, as on the VPS page.
+    expect(english.className).toContain('--danger-text')
     expect(screen.queryByText(en.dedicated.reinstallState.failed)).not.toBeInTheDocument()
 
     cleanup()
@@ -528,7 +536,11 @@ describe('the Dedicated twin, which already said it', () => {
     await i18n.changeLanguage('ar')
     await renderServerPage()
 
-    expect(screen.getByText(lookup(ar, 'dedicated.rebuildStoppedAfterErasing') ?? '<missing>')).toBeInTheDocument()
+    const arabic = screen.getByText(lookup(ar, 'dedicated.rebuildStoppedAfterErasing') ?? '<missing>')
+
+    expect(arabic.className).toContain('--danger-text')
+    // The plural, not the VPS sentence: a chassis has disks.
+    expect(arabic.textContent).toContain('الأقراص')
     expect(screen.queryByText(ar.dedicated.reinstallState.failed)).not.toBeInTheDocument()
   })
 })

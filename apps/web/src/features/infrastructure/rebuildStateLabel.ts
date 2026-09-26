@@ -20,9 +20,13 @@ import { safeLabel } from '@/lib/safeLabel'
  * `indeterminate` say a person is looking, and the states before the
  * destructive call are never published destroyed. The dedicated states
  * `hardware_unavailable` ("nothing was changed") and `provisioning_timeout`
- * are not renamed: DedicatedReinstallStateMachine enters the first only from
- * states before the power cycle, so it is not published destroyed, and the
- * second does not say the disks are intact. whether-the-disk-is-already-gone.test.tsx
+ * are not renamed. The first is not published destroyed, but not because of
+ * the state machine, which allows `bmc_configuring → hardware_unavailable`
+ * after the destructive stamp is written: ReinstallDedicatedHandler writes
+ * `hardware_unavailable` before the stamp, or, after it, only through
+ * `refuse(…, nothingBooted: true)`, which retracts the stamp — the controller
+ * answered and refused, so the machine did not boot. The second does not say
+ * the disks are intact. whether-the-disk-is-already-gone.test.tsx
  * holds the VPS pairs and the dedicated `(failed, true)` pair; it cannot see
  * a pair the API does not yet publish.
  *
