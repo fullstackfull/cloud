@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Activity\Application\DTOs\ActivityItem;
 use Lynomia\Modules\Activity\Application\DTOs\AttentionItem;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Notifications\Application\Queries\NotificationsVisibleTo;
 use Lynomia\Modules\Provisioning\Infrastructure\Queries\ServiceIdentities;
 
 /**
@@ -62,9 +63,13 @@ final readonly class AccountOverview
         private AccountAttention $attention,
         private CustomerActivity $activity,
         private ServiceIdentities $services,
+        private NotificationsVisibleTo $notifications,
     ) {}
 
     /**
+     * @param  string|null  $viewerId  the person looking. The unread figure is the one their own
+     *                                 inbox shows, which leaves out a colleague's security notices
+     *                                 — the same query the inbox reads, so the two cannot disagree.
      * @return array{
      *     attention: list<AttentionItem>,
      *     services: array{total: int, by_state: array<string, int>},
@@ -74,7 +79,7 @@ final readonly class AccountOverview
      *     recent: array{services: list<array{kind: string, id: string, identity: ?string, state: string}>},
      * }
      */
-    public function for(Customer $customer): array
+    public function for(Customer $customer, ?string $viewerId = null): array
     {
         $customerId = (string) $customer->getKey();
 
@@ -96,7 +101,7 @@ final readonly class AccountOverview
             'services' => $this->serviceSummary($customerId),
             'billing' => ['due' => $this->dueByCurrency($customerId)],
             'renewals' => $this->upcomingRenewals($customerId),
-            'unread_notifications' => $this->unreadNotifications($customerId),
+            'unread_notifications' => $this->notifications->unreadCount($customerId, $viewerId),
             'recent' => ['services' => $this->recentServices($recentServiceRows, $handles)],
         ];
     }
@@ -256,14 +261,6 @@ final readonly class AccountOverview
         usort($all, static fn (array $a, array $b): int => [$a['at'], $a['resource_id']] <=> [$b['at'], $b['resource_id']]);
 
         return array_slice($all, 0, self::UPCOMING_RENEWALS);
-    }
-
-    private function unreadNotifications(string $customerId): int
-    {
-        return DB::table('notifications')
-            ->where('customer_id', $customerId)
-            ->whereNull('read_at')
-            ->count();
     }
 
     /**

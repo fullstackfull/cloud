@@ -219,7 +219,8 @@ asks the registrar only when the money has arrived.
 | Capability | UI | API | Action | Queue | Handler | Provider | E2E | State | Real provider |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Be told when a service is ready, fails, or needs review | `/notifications` | `GET /notifications` | `NotifyOnProvisioningOutcome` | `notifications` | `DeliverNotification` | SMTP | `portal.e2e.ts` | `RUNTIME_VERIFIED` | No — two worker processes, `AWorkerFinishesWhatTheCustomerStartedTest` |
-| Be told about invoices, payments and dunning | `/notifications` | `GET /notifications` | `NotifyOnBillingEvent` | `notifications` | `DeliverNotification` | SMTP | `portal.e2e.ts` | `TESTED` | No |
+| Be told about invoices, payments and dunning | `/notifications` | `GET /notifications` | `IssueInvoice`, `NotifyOnBillingEvent` | `notifications` | `DeliverNotification` | SMTP | `portal.e2e.ts` | `TESTED` | No |
+| Be told your password or second factor changed, or that you signed in from somewhere new — and be the only one on the account who sees it | `/notifications` | `GET /notifications` | `NotifyAboutAccountSecurity` | `notifications` | `DeliverNotification` | SMTP | — | `TESTED` | No |
 | Be told about suspension and restoration | `/notifications` | `GET /notifications` | `NotifyOnSubscriptionChange` | `notifications` | `DeliverNotification` | SMTP | — | `TESTED` | No |
 | Mark notifications read | `/notifications` | `POST /notifications/{id}/read`, `/read-all` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |
 | Switch off optional messages, and be refused for the rest | `/notifications` | `PUT /me/notification-preferences` | — | sync | — | — | `portal.e2e.ts` | `RUNTIME_VERIFIED` | n/a |

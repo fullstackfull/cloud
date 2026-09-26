@@ -39,10 +39,6 @@ return [
         ],
     ],
     'billing' => [
-        'order_placed' => [
-            'title' => 'استلمنا الطلب :number',
-            'body' => 'استلمنا طلبك وسنبدأ التنفيذ فور سداده.',
-        ],
         'country_currency_change_applied' => [
             'title' => 'أصبحت فوترة حسابك بعملة :currency',
             'body' => 'من الآن فصاعدًا تصدر الفواتير الجديدة لهذا الحساب بعملة :currency وبضريبة :country. الفواتير والمدفوعات والطلبات المسجّلة سابقًا لا تتغير.',
@@ -71,25 +67,13 @@ return [
             'title' => 'تم إصدار استرداد بمبلغ :amount',
             'body' => 'تم إصدار استرداد بمبلغ :amount إلى وسيلة الدفع الأصلية. قد يستغرق ظهوره عدة أيام عمل.',
         ],
-        'renewal_upcoming' => [
-            'title' => 'يتجدد اشتراكك في :date',
-            'body' => 'يتجدد :service في :date بمبلغ :amount. لا يلزمك أي إجراء إن كانت بيانات الدفع محدّثة.',
-        ],
         'renewal_succeeded' => [
             'title' => 'تم تجديد الاشتراك',
             'body' => 'تم تجديد :service لمدة جديدة. دفعتك القادمة تستحق في :date.',
         ],
-        'renewal_failed' => [
-            'title' => 'تعذّر تجديد اشتراكك',
-            'body' => 'لم نتمكن من تحصيل قيمة تجديد :service. يرجى تحديث بيانات الدفع قبل :grace_ends لتفادي انقطاع الخدمة.',
-        ],
         'grace_period_started' => [
             'title' => 'سداد :service متأخر',
             'body' => 'سداد :service متأخر. تستمر خدمتك حتى :grace_ends ثم تُعلَّق.',
-        ],
-        'suspension_warning' => [
-            'title' => 'سيتم تعليق :service في :date',
-            'body' => 'ما زال سداد :service مستحقًا. سيتم تعليقه في :date ما لم نستلم الدفعة.',
         ],
         'cancellation_scheduled' => [
             'title' => 'من المقرر إنهاء :service',
@@ -97,10 +81,6 @@ return [
         ],
     ],
     'service' => [
-        'provisioning' => [
-            'title' => 'جارٍ تجهيز :service',
-            'body' => 'بدأنا بناء :service. يستغرق ذلك عادةً بضع دقائق وسنخبرك عند الجاهزية.',
-        ],
         'ready' => [
             'title' => ':service جاهز',
             'body' => ':service يعمل الآن وجاهز للاستخدام. يمكنك إدارته من بوابتك.',
@@ -144,10 +124,6 @@ return [
         'plan_change_failed' => [
             'title' => 'تعذّر تغيير خطة :service',
             'body' => 'لم يكتمل تغيير خطة :service وبقي كما كان. لم تُحمَّل أي رسوم مقابل التغيير.',
-        ],
-        'reinstall_started' => [
-            'title' => 'جارٍ إعادة تثبيت :service',
-            'body' => 'بدأت إعادة تثبيت :service. سيكون غير متاح أثناء التنفيذ.',
         ],
         'reinstall_completed' => [
             'title' => 'تمت إعادة تثبيت :service',
@@ -248,16 +224,6 @@ return [
         'ticket_closed' => [
             'title' => 'أُغلقت :reference',
             'body' => 'أُغلق طلب الدعم ":subject". إن احتجت شيئًا آخر، افتح طلبًا جديدًا واذكر هذا الرقم.',
-        ],
-    ],
-    'operational' => [
-        'incident' => [
-            'title' => 'عطل يؤثر على :service',
-            'body' => 'نحن على علم بمشكلة تؤثر على :service ونعمل على حلها. سنخبرك عند المعالجة.',
-        ],
-        'maintenance_scheduled' => [
-            'title' => 'صيانة مجدولة في :date',
-            'body' => 'هناك صيانة مجدولة تؤثر على :service في :date. قد تلاحظ انقطاعًا قصيرًا.',
         ],
     ],
 

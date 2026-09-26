@@ -23656,7 +23656,7 @@ components:
           type:
             - "string"
             - "null"
-          description: "security and billing cannot be silenced; service and operational can be, by email only."
+          description: "security and billing cannot be silenced; service can be, by email only. A security notification names one person and is shown only to them."
         title:
           type:
             - "string"

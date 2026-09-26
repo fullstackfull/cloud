@@ -39,10 +39,6 @@ return [
         ],
     ],
     'billing' => [
-        'order_placed' => [
-            'title' => 'Order :number received',
-            'body' => 'We have your order and will start work as soon as it is paid.',
-        ],
         'country_currency_change_applied' => [
             'title' => 'Your account is now billed in :currency',
             'body' => 'From now on, new invoices for this account are issued in :currency with the tax for :country. Invoices, payments and orders already recorded are unchanged.',
@@ -71,25 +67,13 @@ return [
             'title' => 'Refund of :amount issued',
             'body' => 'A refund of :amount has been issued to your original payment method. It can take several working days to appear.',
         ],
-        'renewal_upcoming' => [
-            'title' => 'Your subscription renews on :date',
-            'body' => ':service renews on :date for :amount. No action is needed if your payment details are current.',
-        ],
         'renewal_succeeded' => [
             'title' => 'Subscription renewed',
             'body' => ':service has been renewed for another term. Your next payment is due on :date.',
         ],
-        'renewal_failed' => [
-            'title' => 'Could not renew your subscription',
-            'body' => 'We could not take payment to renew :service. Please update your payment details before :grace_ends to avoid interruption.',
-        ],
         'grace_period_started' => [
             'title' => 'Payment overdue for :service',
             'body' => 'Payment for :service is overdue. Your service continues until :grace_ends, after which it will be suspended.',
-        ],
-        'suspension_warning' => [
-            'title' => ':service will be suspended on :date',
-            'body' => 'Payment for :service is still outstanding. It will be suspended on :date unless payment is received.',
         ],
         'cancellation_scheduled' => [
             'title' => ':service is scheduled to end',
@@ -97,10 +81,6 @@ return [
         ],
     ],
     'service' => [
-        'provisioning' => [
-            'title' => 'Setting up :service',
-            'body' => 'We have started building :service. This usually takes a few minutes and we will tell you when it is ready.',
-        ],
         'ready' => [
             'title' => ':service is ready',
             'body' => ':service is now running and ready to use. You can manage it from your portal.',
@@ -144,10 +124,6 @@ return [
         'plan_change_failed' => [
             'title' => 'Could not change the plan for :service',
             'body' => 'The plan change for :service did not complete and has been left as it was. Nothing has been charged for the change.',
-        ],
-        'reinstall_started' => [
-            'title' => 'Reinstalling :service',
-            'body' => 'The reinstall of :service has started. It will be unavailable while this runs.',
         ],
         'reinstall_completed' => [
             'title' => ':service has been reinstalled',
@@ -248,16 +224,6 @@ return [
         'ticket_closed' => [
             'title' => ':reference is closed',
             'body' => 'Your support request ":subject" is closed. If you need anything else, open a new request and quote this reference.',
-        ],
-    ],
-    'operational' => [
-        'incident' => [
-            'title' => 'An incident is affecting :service',
-            'body' => 'We are aware of a problem affecting :service and are working on it. We will let you know when it is resolved.',
-        ],
-        'maintenance_scheduled' => [
-            'title' => 'Planned maintenance on :date',
-            'body' => 'Maintenance affecting :service is planned for :date. You may see a short interruption.',
         ],
     ],
 

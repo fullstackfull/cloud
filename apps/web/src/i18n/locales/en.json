@@ -1875,14 +1875,12 @@
     "category": {
       "security": "Security",
       "billing": "Billing",
-      "service": "Your services",
-      "operational": "Maintenance and incidents"
+      "service": "Your services"
     },
     "categoryHint": {
       "security": "Sign-ins, password changes and two-factor. Always sent.",
       "billing": "Invoices, payments and anything that could interrupt your service. Always sent.",
-      "service": "Servers being built, suspended, restored or reinstalled.",
-      "operational": "Planned maintenance and incidents affecting what you run."
+      "service": "Servers being built, suspended, restored or reinstalled."
     },
     "preferences": {
       "title": "What we email you",
