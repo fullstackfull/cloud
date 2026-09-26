@@ -70,12 +70,12 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
         $mapping = $this->preflightStatuses($report, 'mapping');
 
         /*
-         * Five checks, not six: `mapping.network` is emitted only when there
-         * is no address pool at all, which is the report's own way of naming
-         * an absence rather than reporting the presence of something. An
-         * estate with a pool has nothing for it to say, and a test that
-         * expected it would be asserting the shape of a failure it had not
-         * caused.
+         * Six checks, the address check among them. It used to be asked only
+         * when no template was installable, so this list held five and an
+         * estate with no address pool reported the same five passes. The
+         * estate here has an active pool with a seeded subnet, which is more
+         * than the check asks — it asks only that an active pool exists — and
+         * is what the build below actually draws an address from.
          */
         $this->assertSame([
             'mapping.cluster' => 'pass',
@@ -83,6 +83,7 @@ final class TheVpsGoldenPathTest extends GoldenPathHarness
             'mapping.storage' => 'pass',
             'mapping.capacity' => 'pass',
             'mapping.template' => 'pass',
+            'mapping.network' => 'pass',
         ], $mapping);
 
         $this->assertSame('SIMULATION', $report['mode_label']);
