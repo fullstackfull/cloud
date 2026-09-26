@@ -1245,7 +1245,7 @@ return [
     'api.admin.provisioning.hosting_domain' => [
         'tag' => 'Operator',
         'summary' => 'Correct the domain a stopped hosting build will serve',
-        'description' => 'The repair a retry cannot be. A hosting build refused because it names no domain (`hosting.domain_missing`) or one another live account serves (`hosting.domain_in_use`) is refused the same way on every retry; this writes the job\'s domain and nothing else, and the ordinary retry then builds under it. The name is validated and folded as the account row requires, and refused (409 `hosting.domain_in_use`) if another live account serves it - the job\'s own earlier rows excepted. Only a stopped hosting build can be corrected (409 `hosting.job_not_settled`, `hosting.job_not_a_hosting_build`). The evidence and the name before and after land in the audit trail.',
+        'description' => 'The repair a retry cannot be. A hosting build refused because it names no domain (`hosting.domain_missing`) or one another live account serves (`hosting.domain_in_use`) is refused the same way on every retry; this writes the job\'s domain and nothing else, and the ordinary retry then builds under it. The name is validated and folded as the account row requires, and refused (409 `hosting.domain_in_use`) if another live account serves it - the job\'s own earlier rows excepted. Only a hosting build that failed or is waiting for review - the two states a retry starts from - can be corrected (409 `hosting.job_not_settled`, `hosting.job_not_a_hosting_build`). The evidence and the name before and after land in the audit trail.',
         'permission' => 'provisioning.retry',
         'body' => ['domain', 'evidence'],
         'response' => $one('AdminNamedHostingDomain'),

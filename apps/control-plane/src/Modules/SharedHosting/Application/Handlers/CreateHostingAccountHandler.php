@@ -61,33 +61,35 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  * the three missing values instead of refusing, and the controlled panel —
  * which read none of them — reported the account created.
  *
- * Now each of the three has one source, and a missing one is a refusal:
+ * Now none of the three is defaulted:
  *
- *  - the DOMAIN is the one the customer named at checkout, carried on the job
- *    and folded where it enters the account row. A job without one — every
- *    order placed before checkout asked — fails Permanent with
- *    `hosting.domain_missing` before anything is placed or reserved, and an
- *    operator names it from the provisioning queue and retries. So does one
- *    another live account already serves (`hosting.domain_in_use`).
+ *  - the DOMAIN has one source, the one the customer named at checkout,
+ *    carried on the job and folded where it enters the account row. A job
+ *    without one — every order placed before checkout asked — fails
+ *    Permanent with `hosting.domain_missing` before anything is placed or
+ *    reserved, and an operator names it from the provisioning queue and
+ *    retries. So does one another live account already serves
+ *    (`hosting.domain_in_use`).
  *
- *  - the CONTACT ADDRESS is the one the order was billed to, carried on the
- *    job, falling back to the account's own billing address and then its
- *    owner's.
+ *  - the CONTACT ADDRESS is taken down a fixed chain: the one the order was
+ *    billed to, carried on the job; then the account's own billing address;
+ *    then its owner's. Only when every link is blank is the job refused, with
+ *    `hosting.contact_email_missing`, before anything is placed or reserved.
  *
- *  - the PASSWORD is minted here, per attempt, and read from nowhere. See
- *    PASSWORD_LENGTH.
+ *  - the PASSWORD is minted here, per attempt, and read from nowhere, so it
+ *    cannot be missing. See PASSWORD_LENGTH.
  */
 final readonly class CreateHostingAccountHandler implements ProvisioningHandler
 {
     /**
      * The length of the panel password minted for every attempt.
      *
-     * Letters and digits only. Both panels take the password in a form body —
-     * WHM as a query parameter, DirectAdmin url-encoded — and a symbol that one
-     * side encodes and the other decodes differently is a password the
-     * customer can never type back, set on an account nobody can then log in
-     * to. Thirty-two characters from sixty-two is past any strength rule
-     * either panel applies, without needing a symbol to get there.
+     * Letters and digits only. Both adapters send the password url-encoded in
+     * a form body, and a symbol that one side encodes and the other decodes
+     * differently is a password the customer can never type back, set on an
+     * account nobody can then log in to. Thirty-two characters from sixty-two
+     * is past any strength rule either panel applies, without needing a
+     * symbol to get there.
      *
      * Minted rather than read from the job. The job's payload column is cast
      * through the redactor, so a `password` written there is `[redacted]` by
@@ -180,10 +182,16 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
         $contactEmail = $this->contactEmailFor($payload, $job);
 
         if ($contactEmail === '') {
+            /*
+             * Refused before anything is placed or reserved, because every
+             * link of the chain is blank, and a build handed an empty
+             * contact address is the defect itself. Nothing is carried that
+             * would refuse a retry once an address exists.
+             */
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 'hosting.contact_email_missing',
-                'Neither the job nor the account carries an address the panel can write to about this account.',
+                'Neither the job, the account\'s billing address nor its owner carries an address the panel can write to about this account.',
             );
         }
 
@@ -439,18 +447,40 @@ final readonly class CreateHostingAccountHandler implements ProvisioningHandler
      * job created before fulfilment carried one, or by hand, still reaches
      * somebody who answers for the account.
      *
+     * Each is taken only if it holds something once trimmed. A blank one —
+     * null, empty, or spaces — is passed over for the next rather than
+     * answered with: `??` would fall through on null alone, and an empty
+     * billing address would then end the chain as "no address anywhere"
+     * while the owner had one. `''` comes back only when all three are blank.
+     *
      * @param  array<string, mixed>  $payload
      */
     private function contactEmailFor(array $payload, ProvisioningJob $job): string
     {
-        $carried = trim((string) ($payload['contact_email'] ?? ''));
+        $carried = self::addressIn($payload['contact_email'] ?? null);
 
-        if ($carried !== '') {
+        if ($carried !== null) {
             return $carried;
         }
 
         $customer = $job->customer_id === null ? null : Customer::query()->find($job->customer_id);
 
-        return trim((string) ($customer?->billing_email ?? $customer?->owner()?->email ?? ''));
+        if ($customer === null) {
+            return '';
+        }
+
+        return self::addressIn($customer->billing_email)
+            ?? self::addressIn($customer->owner()?->email)
+            ?? '';
+    }
+
+    /**
+     * The value as an address, or null when it holds none.
+     */
+    private static function addressIn(mixed $value): ?string
+    {
+        $address = is_string($value) ? trim($value) : '';
+
+        return $address === '' ? null : $address;
     }
 }

@@ -17,11 +17,12 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
 /**
  * The hosting-account operations only a person should make.
  *
- * Each action existed and none had a caller. An account could be suspended
+ * Two of the actions existed with no caller. An account could be suspended
  * for non-payment (once the dunning listener was wired) and nothing could put
- * it back by hand; an account could reach the end of its retention window
+ * it back by hand; and an account could reach the end of its retention window
  * and stay on the node for ever, holding a slot the node's capacity counted
- * as spent; and an account whose create answer was lost held a panel password
+ * as spent. The third action was written for a panel method in the same
+ * state: an account whose create answer was lost held a panel password
  * nobody had, with `changePassword` implemented by every adapter and called
  * by nothing.
  */

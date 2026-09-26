@@ -30,11 +30,13 @@ use Tests\TestCase;
 /**
  * The operator's way out of a hosting build that was refused over its name.
  *
- * Two refusals send a build here: the job names no domain at all (every order
- * placed before checkout asked for one), or it names one another live account
- * already serves. Both are refused before the panel is asked for anything, and
- * both would be refused identically on every retry — because a retry is not a
- * repair. It runs the same job again.
+ * Four refusals send a build here: the job names no domain at all (every order
+ * placed before checkout asked for one), names something that is not a host
+ * name, names one another live account already serves, or names one other
+ * than the name its own earlier attempt's row still serves. All four are
+ * refused before the panel is asked for anything, and each would be refused
+ * identically on every retry — because a retry is not a repair. It runs the
+ * same job again.
  *
  * So naming the domain is its own act, separate from retry: it writes the
  * job's payload and nothing else, it is audited, and it answers the same
@@ -187,6 +189,70 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
     }
 
     #[Test]
+    public function a_row_under_the_jobs_username_for_another_customer_is_somebody_else(): void
+    {
+        /*
+         * The own-row key is BOTH halves: this customer, and this job's
+         * username. Another customer's live account on another node can carry
+         * the same username — the name is unique per node, not per fleet —
+         * and it serves its own customer, not this job.
+         */
+        $otherNode = HostingNode::factory()->create(['panel' => HostingPanel::Fake]);
+        HostingAccount::factory()->create([
+            'hosting_node_id' => $otherNode->getKey(),
+            'username' => 'samename',
+            'primary_domain' => 'theirs.example.test',
+        ]);
+
+        $job = $this->failedJob(['primary_domain' => 'mine.example.test', 'username' => 'samename']);
+
+        $this->nameIt($job, 'theirs.example.test')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'hosting.domain_in_use');
+
+        $this->assertSame('mine.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
+    }
+
+    #[Test]
+    public function another_account_of_the_same_customer_is_not_the_jobs_own_row(): void
+    {
+        // The other half: the same customer's OTHER live account serves a
+        // different site, and a job may not be named onto it.
+        HostingAccount::factory()->create([
+            'hosting_node_id' => $this->node->getKey(),
+            'customer_id' => $this->customer->getKey(),
+            'username' => 'otheracct',
+            'primary_domain' => 'their-other-site.example.test',
+        ]);
+
+        $job = $this->failedJob(['primary_domain' => 'mine.example.test', 'username' => 'thisjob']);
+
+        $this->nameIt($job, 'their-other-site.example.test')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'hosting.domain_in_use');
+
+        $this->assertSame('mine.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
+    }
+
+    #[Test]
+    public function a_build_waiting_for_review_can_be_named(): void
+    {
+        /*
+         * The other state a retry starts from. A worker that died mid-build
+         * leaves the job in review (DetectStaleJobs), and the reservation's
+         * stale-name refusal sends an operator here from exactly that state.
+         */
+        $job = $this->failedJob(['primary_domain' => 'wrong.example.test']);
+        $job->forceFill(['status' => ProvisioningJobStatus::NeedsReview])->save();
+
+        $this->nameIt($job, 'right.example.test')
+            ->assertOk()
+            ->assertJsonPath('data.primary_domain', 'right.example.test');
+
+        $this->assertSame('right.example.test', $job->fresh()?->payload['primary_domain'] ?? null);
+    }
+
+    #[Test]
     public function a_name_another_live_account_serves_is_refused(): void
     {
         HostingAccount::factory()->create(['primary_domain' => 'taken.example.test']);
@@ -211,14 +277,29 @@ final class NamingTheDomainAHostingBuildWillServeTest extends TestCase
     }
 
     #[Test]
-    public function only_a_stopped_hosting_build_can_be_renamed(): void
+    public function only_a_hosting_build_that_failed_or_waits_for_review_can_be_renamed(): void
     {
-        $running = $this->failedJob(['primary_domain' => null]);
-        $running->forceFill(['status' => ProvisioningJobStatus::Running])->save();
+        $refused = [
+            ProvisioningJobStatus::Queued,
+            ProvisioningJobStatus::Running,
+            ProvisioningJobStatus::Succeeded,
+            ProvisioningJobStatus::Cancelled,
+        ];
 
-        $this->nameIt($running, 'shop.example.test')
-            ->assertStatus(409)
-            ->assertJsonPath('error.code', 'hosting.job_not_settled');
+        foreach ($refused as $status) {
+            $job = $this->failedJob(['primary_domain' => 'before.example.test']);
+            $job->forceFill(['status' => $status])->save();
+
+            $this->nameIt($job, 'shop.example.test')
+                ->assertStatus(409)
+                ->assertJsonPath('error.code', 'hosting.job_not_settled');
+
+            $this->assertSame(
+                'before.example.test',
+                $job->fresh()?->payload['primary_domain'] ?? null,
+                sprintf('a %s job was renamed', $status->value),
+            );
+        }
 
         $vps = ProvisioningJob::factory()->kind(ProvisioningJobKind::CreateVps)->create([
             'status' => ProvisioningJobStatus::Failed,

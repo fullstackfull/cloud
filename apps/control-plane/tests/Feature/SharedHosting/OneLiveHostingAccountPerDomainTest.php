@@ -224,6 +224,94 @@ final class OneLiveHostingAccountPerDomainTest extends TestCase
         );
     }
 
+    #[Test]
+    public function a_held_row_whose_name_equals_the_jobs_only_as_a_number_is_another_name(): void
+    {
+        /*
+         * `1.0` and `1.00` are both names the platform accepts, and PHP 8
+         * calls them equal as numeric strings. The stale-name refusal has to
+         * compare them as names, byte for byte, or a job renamed from one to
+         * the other is built under the row's old name on a job reporting
+         * success.
+         */
+        [$node, $panel] = $this->nodeWithARecordingPanel();
+        $job = $this->job('1.0');
+        $job->payload = [...$job->payload, 'username' => 'numeric'];
+        $job->save();
+
+        HostingAccount::factory()->status(HostingAccountStatus::Pending)->create([
+            'hosting_node_id' => $node->getKey(),
+            'customer_id' => $job->customer_id,
+            'username' => 'numeric',
+            'primary_domain' => '1.00',
+        ]);
+        $node->increment('account_count');
+
+        $result = app(CreateHostingAccountHandler::class)->execute($job);
+
+        $this->assertTrue($result->isFailure());
+        $this->assertSame('hosting.account_serves_another_domain', $result->errorCode);
+        $this->assertSame([], $panel->creates, 'the panel was handed the row\'s old name');
+    }
+
+    #[Test]
+    public function a_build_that_loses_the_name_to_a_build_on_another_node_is_refused_by_name(): void
+    {
+        /*
+         * The readable check runs under ONE node's lock, and the name is
+         * fleet-wide, so a build on another node can take the name after the
+         * check and before this build's own write. That is the case the
+         * partial unique index exists for, and its violation has to reach
+         * the job as the same readable refusal — Permanent, nothing handed
+         * to the panel — not as an unclassified database error.
+         *
+         * Made deterministic rather than raced: the other build's row is
+         * written at the last moment before this build's insert, after the
+         * check has passed.
+         */
+        [$node, $panel] = $this->nodeWithARecordingPanel();
+        $this->anotherBuildTakes('raced.example.test', 'creating');
+
+        $result = app(CreateHostingAccountHandler::class)->execute($this->job('raced.example.test'));
+
+        $this->assertTrue($result->isFailure());
+        $this->assertSame('hosting.domain_in_use', $result->errorCode);
+        $this->assertSame(FailureClass::Permanent, $result->failureClass);
+        $this->assertSame([], $panel->creates);
+        $this->assertSame(0, $node->fresh()?->account_count, 'the loser kept the slot it took');
+    }
+
+    #[Test]
+    public function a_retry_that_loses_the_name_while_re_arming_its_released_row_is_refused_by_name(): void
+    {
+        /*
+         * The same race on the other write: the job's earlier attempt left a
+         * released row, and the retry re-arms it under the name — which a
+         * build on another node takes between the check and the re-arm.
+         */
+        [$node, $panel] = $this->nodeWithARecordingPanel();
+        $job = $this->job('raced-again.example.test');
+        $job->payload = [...$job->payload, 'username' => 'rearmed'];
+        $job->save();
+
+        HostingAccount::factory()->status(HostingAccountStatus::Failed)->create([
+            'hosting_node_id' => $node->getKey(),
+            'customer_id' => $job->customer_id,
+            'username' => 'rearmed',
+            'primary_domain' => 'raced-again.example.test',
+        ]);
+
+        $this->anotherBuildTakes('raced-again.example.test', 'updating');
+
+        $result = app(CreateHostingAccountHandler::class)->execute($job);
+
+        $this->assertTrue($result->isFailure());
+        $this->assertSame('hosting.domain_in_use', $result->errorCode);
+        $this->assertSame(FailureClass::Permanent, $result->failureClass);
+        $this->assertSame([], $panel->creates);
+        $this->assertSame(0, $node->fresh()?->account_count, 'the loser kept the slot it took');
+    }
+
     // ---- the migration that made it a rule about names --------------------
 
     #[Test]
@@ -350,6 +438,35 @@ final class OneLiveHostingAccountPerDomainTest extends TestCase
         app(HostingProviderFactory::class)->swap($node, $panel);
 
         return [$node, $panel];
+    }
+
+    /**
+     * A live account for this name, written by "another build" on another
+     * node at the moment this build's own row is about to be written — once,
+     * so the other build's own write does not trigger it again.
+     *
+     * @param  'creating'|'updating'  $event
+     */
+    private function anotherBuildTakes(string $domain, string $event): void
+    {
+        $otherNode = HostingNode::factory()->create();
+        $done = false;
+
+        $takeIt = static function (HostingAccount $account) use (&$done, $otherNode, $domain): void {
+            if ($done || $account->primary_domain !== $domain) {
+                return;
+            }
+
+            $done = true;
+
+            HostingAccount::factory()->create([
+                'hosting_node_id' => $otherNode->getKey(),
+                'primary_domain' => $domain,
+                'status' => HostingAccountStatus::Active,
+            ]);
+        };
+
+        $event === 'creating' ? HostingAccount::creating($takeIt) : HostingAccount::updating($takeIt);
     }
 
     private function job(string $domain): ProvisioningJob
