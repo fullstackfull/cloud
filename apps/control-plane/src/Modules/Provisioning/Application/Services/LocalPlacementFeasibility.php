@@ -13,7 +13,7 @@ use Lynomia\Modules\Ipam\Domain\Enums\IpPoolScope;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpPool;
 use Lynomia\Modules\Provisioning\Application\Actions\ProvisionOrderedService;
 use Lynomia\Modules\Provisioning\Application\DTOs\PlacementResolution;
-use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
+use Lynomia\Modules\SharedHosting\Application\Queries\HostingPackageForPlan;
 
 /**
  * Where a plan would be placed, decided from this platform's own rows.
@@ -52,6 +52,10 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingPackage;
  */
 final readonly class LocalPlacementFeasibility
 {
+    public function __construct(
+        private HostingPackageForPlan $packages,
+    ) {}
+
     public function resolve(Plan $plan): PlacementResolution
     {
         /** @var array<string, mixed> $constraints */
@@ -74,18 +78,23 @@ final readonly class LocalPlacementFeasibility
      *
      * The handler refuses a job that does not name one, so a plan without it
      * is a purchase that cannot be delivered however healthy the panel is.
+     *
+     * Asked of {@see HostingPackageForPlan} rather than of the table. This
+     * used to take the first row naming the plan, withdrawn or not, in
+     * whatever order the heap held them — so a plan whose package had been
+     * replaced could be bought, paid for and built on the one withdrawn
+     * (F-32). The resolver takes the package on sale when there is exactly
+     * one and refuses otherwise, and its reason is the one blocked here.
      */
     private function hosting(Plan $plan): PlacementResolution
     {
-        $package = HostingPackage::query()->where('plan_id', $plan->getKey())->first();
+        $choice = $this->packages->resolve((string) $plan->getKey());
 
-        if ($package === null) {
-            return PlacementResolution::blocked(
-                'the plan names no hosting package, so no panel quota can be applied',
-            );
+        if ($choice->package === null) {
+            return PlacementResolution::blocked($choice->reason);
         }
 
-        return PlacementResolution::ready(['hosting_package_id' => (string) $package->getKey()]);
+        return PlacementResolution::ready(['hosting_package_id' => (string) $choice->package->getKey()]);
     }
 
     /**
