@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 use Lynomia\Modules\Vps\Application\Services\ConsoleSessionStore;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Queue\WorkerHarness;
+use Tests\Support\RedisIndexForThisRun;
 use Tests\TestCase;
 
 /**
@@ -41,14 +42,18 @@ final class ConsolePermitConcurrencyTest extends TestCase
      * overridable, so two checkouts running this at once cannot disturb each
      * other's. The default matches {@see WorkerHarness}
      * and `REDIS_DB` is the variable `config/database.php` already reads.
+     *
+     * The default is for a runner that names no index; this repository's
+     * `phpunit.xml` always names one (0 unless a run exports its own). A value
+     * that cannot be read as an index is refused by
+     * {@see RedisIndexForThisRun} rather than folded into 15, which is what
+     * the line here used to do.
      */
     private const int REDIS_DATABASE = 15;
 
     private static function redisDatabase(): int
     {
-        $configured = env('REDIS_DB');
-
-        return is_numeric($configured) ? (int) $configured : self::REDIS_DATABASE;
+        return RedisIndexForThisRun::resolve(self::REDIS_DATABASE);
     }
 
     /**

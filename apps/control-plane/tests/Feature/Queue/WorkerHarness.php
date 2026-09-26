@@ -27,6 +27,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Simulation\ControlledSimulationStore;
 use RuntimeException;
 use Symfony\Component\Process\Process;
+use Tests\Support\RedisIndexForThisRun;
 use Tests\TestCase;
 
 /**
@@ -39,9 +40,10 @@ use Tests\TestCase;
  *    another process, so a worker started against it would find no job at all.
  *    Fixtures go in through {@see committed()} and come out again in the
  *    teardown.
- *  - The queue is **Redis**, on database 15, emptied before each test. Jobs
- *    pin their own queue names — that is the behaviour under test — so
- *    isolation is by database index and not by inventing a queue name.
+ *  - The queue is **Redis**, on the database index this run owns (see
+ *    {@see redisDatabase()}), emptied before each test. Jobs pin their own
+ *    queue names — that is the behaviour under test — so isolation is by
+ *    database index and not by inventing a queue name.
  *  - The worker is **`php artisan queue:work` in its own process**. It shares
  *    no memory, no container and no transaction with the test; the only things
  *    it is handed are the queue to read and the database to write.
@@ -56,7 +58,17 @@ abstract class WorkerHarness extends TestCase
     /** A second connection to the same database, outside the test transaction. */
     protected const string CONNECTION = 'queue_test';
 
-    /** Reserved for these suites, and emptied before every test in them. */
+    /**
+     * The index for a runner that names none.
+     *
+     * Not reached under this repository's `phpunit.xml`, which gives
+     * `REDIS_DB` a default of its own (0) that an exported value overrides —
+     * so inside `php artisan test` this constant is never the answer. It is
+     * still the answer for a runner that does not use that file's entry, such
+     * as `vendor/bin/phpunit -c <a copy without it>`, and deleting it would
+     * leave that runner with nothing. An unreadable `REDIS_DB` does not reach
+     * it either: {@see RedisIndexForThisRun} refuses one.
+     */
     protected const int REDIS_DATABASE = 15;
 
     /**
@@ -77,12 +89,17 @@ abstract class WorkerHarness extends TestCase
      * variable `config/database.php` reads and already the one this harness
      * hands its worker subprocesses, so a checkout that wants its own
      * keyspace sets that and everything downstream follows.
+     *
+     * A value that is set and cannot be read as an index is refused rather
+     * than folded into the fallback: the old `is_numeric` line put `foo`, `''`
+     * and `3a` on the same index as every run that forgot the variable, while
+     * the run believed it was isolated, and read `4.5` as 4. The rule is in
+     * {@see RedisIndexForThisRun}, shared with the console permit concurrency
+     * proof, which carried a byte-identical copy of that line.
      */
     protected static function redisDatabase(): int
     {
-        $configured = env('REDIS_DB');
-
-        return is_numeric($configured) ? (int) $configured : self::REDIS_DATABASE;
+        return RedisIndexForThisRun::resolve(self::REDIS_DATABASE);
     }
 
     /** Where the fake hypervisor keeps its fleet for this test. */
