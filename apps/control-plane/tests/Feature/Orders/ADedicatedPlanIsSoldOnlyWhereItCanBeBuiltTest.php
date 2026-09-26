@@ -138,6 +138,22 @@ final class ADedicatedPlanIsSoldOnlyWhereItCanBeBuiltTest extends TestCase
     }
 
     #[Test]
+    public function an_inactive_subnet_without_a_gateway_does_not_refuse_the_plan(): void
+    {
+        // The allocator does not draw from an inactive subnet, so it cannot
+        // hand the build a gateway-less address.
+        Subnet::factory()->forBlock('198.51.100.16/29')->create([
+            'ip_pool_id' => $this->pool->getKey(),
+            'gateway' => null,
+            'is_active' => false,
+        ]);
+
+        $resolution = $this->resolve();
+
+        $this->assertTrue($resolution->isFeasible(), (string) $resolution->blockedReason);
+    }
+
+    #[Test]
     public function checkout_refuses_a_plan_naming_a_management_pool_and_no_order_exists(): void
     {
         $management = IpPool::factory()->create([

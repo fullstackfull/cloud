@@ -263,7 +263,17 @@ final readonly class ProvisionDedicatedHandler implements ProvisioningHandler
         } catch (InstallProfileNotRenderableException $e) {
             $released = $this->giveBackUntouched($server, $heldBefore);
 
-            if (($released['released_to_stock'] ?? false) === true) {
+            /*
+             * The addresses go back whenever the machine was never armed,
+             * which is exactly when it is not in `provisioning`: returned to
+             * stock, or still only `reserved` under a hold the order had
+             * before this attempt (the hold stays; its addresses are this
+             * job's and the job has failed). A machine already in
+             * `provisioning` from an earlier attempt may have booted with
+             * them, so they are left to compensation and the review the
+             * machine is held for.
+             */
+            if ($server->refresh()->status !== DedicatedServerStatus::Provisioning) {
                 foreach ($reservations as $reservation) {
                     $this->ipAllocator->release($reservation, ReleaseReason::JobFailed);
                 }

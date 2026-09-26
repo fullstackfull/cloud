@@ -61,7 +61,8 @@ final readonly class InstallProfileRenderer
 
     /**
      * @param  array<string, scalar|null>  $variables  The caller's values, which win over the profile's
-     *                                                 defaults.
+     *                                                 defaults. A null is no value: it never replaces a
+     *                                                 default.
      * @return array<string, mixed> The rendered configuration, ready to be handed to the boot server.
      *
      * @throws InstallProfileNotRenderableException
@@ -77,7 +78,17 @@ final readonly class InstallProfileRenderer
         /** @var array<string, scalar|null> $defaults */
         $defaults = $profile->defaults ?? [];
 
-        $values = [...$defaults, ...$variables];
+        /*
+         * A caller's null is no value, and it does not replace one. Both
+         * install handlers always pass `ipv4_gateway`, which is null for an
+         * address from a subnet registered without a gateway; merged as it
+         * stood, that null overwrote the profile's own default gateway, the
+         * placeholder came out unfilled, and a plan checkout had accepted —
+         * because the default covers it — failed at the build (B2). With the
+         * nulls dropped, a default fills the gap, and a placeholder neither
+         * covers is still refused as missing below.
+         */
+        $values = [...$defaults, ...array_filter($variables, static fn (mixed $value): bool => $value !== null)];
 
         $missing = $this->unresolvedKeys($profile->template, $values);
 

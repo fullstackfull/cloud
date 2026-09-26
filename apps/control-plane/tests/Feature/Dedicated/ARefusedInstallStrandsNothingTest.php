@@ -115,6 +115,56 @@ final class ARefusedInstallStrandsNothingTest extends TestCase
         $this->assertNothingHeld($result);
     }
 
+    #[Test]
+    public function a_hold_the_order_already_had_is_kept_and_its_addresses_go_back(): void
+    {
+        // Held for the order before this attempt, e.g. by an operator. Never
+        // armed: the hold stays, and the job's addresses are released.
+        $pool = $this->pool(gateway: null);
+        $job = $this->job($pool, OsInstallProfile::factory()->create());
+
+        $this->server->forceFill([
+            'status' => DedicatedServerStatus::Reserved,
+            'reserved_by_order_id' => $job->order_id,
+        ])->save();
+
+        $result = app(ProvisionDedicatedHandler::class)->execute($job);
+
+        $this->assertSame('dedicated.install_profile_not_renderable', $result->errorCode);
+
+        $server = $this->server->refresh();
+        $this->assertSame(DedicatedServerStatus::Reserved, $server->status);
+        $this->assertSame((string) $job->order_id, (string) $server->reserved_by_order_id);
+
+        $this->assertSame(0, IpReservation::query()->whereNull('released_at')->count(), 'A never-armed build kept its address.');
+        $this->assertSame(0, IpAddress::query()->where('status', IpAddressStatus::Reserved->value)->count());
+    }
+
+    #[Test]
+    public function a_machine_already_provisioning_keeps_its_addresses_for_review(): void
+    {
+        /*
+         * An earlier attempt of this order's build moved the machine to
+         * `provisioning`, so a boot may have been armed with the address. The
+         * refused render holds the machine for review and leaves the job's
+         * reservations live for compensation to decide, rather than handing
+         * out an address a machine may be booting with.
+         */
+        $pool = $this->pool(gateway: null);
+        $job = $this->job($pool, OsInstallProfile::factory()->create());
+
+        $this->server->forceFill([
+            'status' => DedicatedServerStatus::Provisioning,
+            'reserved_by_order_id' => $job->order_id,
+        ])->save();
+
+        $result = app(ProvisionDedicatedHandler::class)->execute($job);
+
+        $this->assertSame('dedicated.install_profile_not_renderable', $result->errorCode);
+        $this->assertSame(DedicatedServerStatus::Provisioning, $this->server->refresh()->status);
+        $this->assertSame(1, IpReservation::query()->whereNull('released_at')->count());
+    }
+
     private function assertNothingHeld(ProvisioningResult $result): void
     {
         $server = $this->server->refresh();
