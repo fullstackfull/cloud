@@ -58,6 +58,18 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
  * database at the moment of the attempt. A stored "bootstrap completed" flag
  * would be a second source of truth that can disagree with the first, and the
  * disagreement is a way to mint a second super admin from the console.
+ *
+ * ---------------------------------------------------------------------------
+ * A new account, never somebody else's
+ * ---------------------------------------------------------------------------
+ *
+ * The address must not already belong to a login, soft-deleted ones included.
+ * This used firstOrNew, so on a deployment with no super admin it would have
+ * taken an existing customer login with that address, made it super admin and
+ * replaced its password: the top authority handed to whoever reads that
+ * customer's mailbox, and the customer locked out. The first operator is
+ * created under an address of its own; once it exists, an existing login is
+ * promoted deliberately, through the Control Center's invitation.
  */
 final class BootstrapFirstOperator extends Command
 {
@@ -101,10 +113,20 @@ final class BootstrapFirstOperator extends Command
             return self::FAILURE;
         }
 
+        if (User::query()->withTrashed()->where('email', $email)->exists()) {
+            $this->error(
+                'That address already belongs to an account on this deployment. The first operator is created '
+                .'as a new account: use an address of its own. An existing account can be given a role through '
+                .'the Control Center once the first operator exists.'
+            );
+
+            return self::FAILURE;
+        }
+
         $operator = $record->execute(
             act: function () use ($email, $name): User {
-                /** @var User $user */
-                $user = User::query()->firstOrNew(['email' => $email]);
+                $user = new User;
+                $user->forceFill(['email' => $email]);
 
                 $user->forceFill([
                     'name' => $name,
@@ -121,7 +143,7 @@ final class BootstrapFirstOperator extends Command
                      * are behind `verified`, and a first operator who cannot
                      * reach them is another dead end.
                      */
-                    'email_verified_at' => $user->email_verified_at ?? now(),
+                    'email_verified_at' => now(),
                     'password_changed_at' => null,
                 ])->save();
 
