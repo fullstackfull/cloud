@@ -97,13 +97,24 @@ final class DirectAdminReadsMustAnswerTheCommandTest extends TestCase
     }
 
     #[Test]
-    public function an_empty_listing_that_says_so_is_an_empty_node(): void
+    public function a_bare_verdict_is_not_read_as_an_empty_node(): void
     {
-        // The panel's own "no accounts": a verdict, which is not the case the
-        // check is about, and must still read as empty.
+        // What a real panel sends for a node with no accounts has not been
+        // established. A bare `error=0` names no field of the listing, so it is
+        // not read as one: an empty listing is what raises MissingAtProvider
+        // drift for every live account, so the safe reading is "did not answer"
+        // (ABareVerdictIsNotAnAccountListTest measures the sweep's side).
         $this->fakeBodies(['CMD_API_SHOW_USERS' => 'error=0']);
 
-        $this->assertSame([], (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node()));
+        try {
+            $result = (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node());
+        } catch (HostingProviderException $refusal) {
+            $this->assertStringContainsString('none of the fields this command returns', $refusal->getMessage());
+
+            return;
+        }
+
+        $this->fail('A bare verdict was read as an account listing: '.json_encode($result));
     }
 
     #[Test]
