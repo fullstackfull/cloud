@@ -36,7 +36,7 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-22 | High | **UPHELD WITH RESERVATIONS** (round 4, under the occupancy precedent; rounds 1–3 rejected only the route-walk gate's model of Alertmanager/Prometheus/Loki — empty-label, Loki-flag and duplicate-key gaps fixed, sentences narrowed); merged | `42b1d71` |
 | F-23 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged; nine F-19 excuses retired at F-19's merge | `5ae2e58` |
 | F-24 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking; built on F-04, F-11, F-15 and F-45 — no longer red by design); the verifier was cut short before its green runs, which the coordinator ran after merging: 1,165/1,165 across Compute, SharedHosting, Simulation, Vps, Dns and Architecture | `0586031` |
-| F-41 | High | rebuild + verification running (last: it changes the test harness's own environment handling) | |
+| F-41 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected two missing oracles — guard-before-trait ordering, and a trait list read from the constant under test — both fixed); a deliberately exported DB_DATABASE / REDIS_DB still selects the run's database and index, so the rebuild's isolation is unchanged; merged | `e65d8e5` |
 | F-46 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); census rebuilt first; merged | `3fa4d48` |
 | F-25 | Medium | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking); merged | `272d8a3` |
 | F-26 | Medium | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected an IDN platform host left unreserved — now folded to its A-label); merged | `6b32e9b` |
@@ -75,5 +75,6 @@ round two and are already in the tree.
 | after F-13, F-15, F-22 final repairs | 25 findings | 5,020 / 5,020 passed, 166,820 assertions | JSON `tests == passed`; junit 600 testsuites, all `skipped="0"`; exit 0 |
 | after workflow B's eight upheld findings | 34 findings | 5,094 / 5,094 passed, 167,461 assertions | JSON `tests == passed`; junit 609 testsuites, all `skipped="0"`; exit 0; frontend vitest 495/495, tsc + eslint clean |
 | after F-21, F-24, F-38, F-39, F-40 | 35 findings | 5,117 / 5,117 passed, 167,555 assertions | JSON `tests == passed`; junit 615 testsuites, all `skipped="0"`; exit 0; frontend vitest 627/627, tsc + eslint clean; every validator and self-test green (safety-gate 10/10 with ansible-core on PATH — it is 5/10 without, identically on `main`) |
+| after F-41 — **the re-audit candidate**, all 36 findings | 36 findings | 5,170 / 5,170 passed, 167,817 assertions | JSON `tests == passed`; junit 624 testsuites, all `skipped="0"`; exit 0 |
 
 Baseline before any rebuild: 3,905 / 3,905. Frontend baseline: vitest 471 / 471.
