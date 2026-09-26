@@ -67,8 +67,9 @@ final class TheSimulatorsOwnLostAnswerIsNotRetriedIntoASecondMachineTest extends
 
         $this->assertCount(1, $this->hypervisor->everyMachine(), 'The retry built a second machine beside the first.');
 
-        // Counted at the door too: the simulator puts a second create under
-        // the same id on top of the first, so the fleet alone cannot see one.
+        // Counted at the door too. The simulator now refuses a second create
+        // at an occupied id, so the fleet would show one machine even if a
+        // second create had been sent; the count is what sees the attempt.
         $this->assertCount(1, $this->hypervisor->creates, 'The retry sent a second create.');
         $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->refresh()->status);
     }

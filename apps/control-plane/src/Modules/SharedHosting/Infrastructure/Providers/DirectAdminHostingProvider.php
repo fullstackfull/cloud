@@ -42,8 +42,9 @@ use Throwable;
  *    the verdict. Every response in this class goes through one reader, and
  *    that reader refuses a MUTATION that comes back with no error field at all
  *    — because a create whose success cannot be established is not a success —
- *    and refuses a READ with no error field unless the body names a field the
- *    command it answers is known to return. Reads were once returned as
+ *    and refuses a READ, whatever its error field says, unless the body names
+ *    a field the command it answers is known to return: `error=0` alone is a
+ *    verdict, not an account list. Reads were once returned as
  *    whatever `parse_str` made of the body, and `licenceStatus()` then read
  *    any body at all as a valid licence: an unreadable node was recorded
  *    licensed and scheduled for paid orders (F-14).
@@ -91,8 +92,8 @@ final class DirectAdminHostingProvider implements HostingProvider
     /**
      * For each read command, the fields its answer is known to carry.
      *
-     * A read that comes back without an `error` field must name at least one
-     * of these, or it is not an answer to the command that was asked: an
+     * A read must name at least one of these, with or without an `error=0`
+     * beside it, or it is not an answer to the command that was asked: an
      * unrelated url-encoded page, a proxy's form, or a panel build that
      * answers a different question. A read command with no entry here is not
      * understood, and its answer is refused rather than returned.
@@ -863,7 +864,21 @@ final class DirectAdminHostingProvider implements HostingProvider
                 ]);
             }
 
-            return $fields;
+            /*
+             * `error=0` is a verdict on a mutation, and on a mutation it is
+             * the answer. On a READ it says only that nothing went wrong, not
+             * what was read — and this used to return it as it stood, skipping
+             * the check below. `error=0` alone for CMD_API_SHOW_USERS was then
+             * an empty account list, and ReconcileHostingNodes recorded
+             * Critical MissingAtProvider drift for every live account on the
+             * node. So a read is held to the same question whatever its error
+             * field says: does the body name something the command returns?
+             */
+            if ($mutation) {
+                return $fields;
+            }
+
+            return $this->answerToTheRead($fields, $command, $operation, $context, 'says error=0 and names');
         }
 
         if ($mutation) {
@@ -885,9 +900,24 @@ final class DirectAdminHostingProvider implements HostingProvider
          * No error field on a READ. This used to return whatever parse_str
          * made of the body, and every reader then treated "no error" as an
          * answer — the licence reader as a valid licence. A read is accepted
-         * without a verdict only when the body names a field the command is
-         * known to return, and one that identifies it.
+         * only when the body names a field the command is known to return,
+         * and one that identifies it — with or without a verdict (above).
          */
+        return $this->answerToTheRead($fields, $command, $operation, $context, 'carries no error field and');
+    }
+
+    /**
+     * The read's fields, if they name one that identifies the command's
+     * answer; otherwise a refusal to read them as one.
+     *
+     * @param  array<string, mixed>  $fields
+     * @param  array<string, scalar|null>  $context
+     * @return array<string, mixed>
+     *
+     * @throws HostingProviderException
+     */
+    private function answerToTheRead(array $fields, string $command, string $operation, array $context, string $verdict): array
+    {
         $identifying = array_diff(self::READ_FIELDS[$command] ?? [], self::GENERIC_READ_FIELDS[$command] ?? []);
         $named = array_map(static fn (int|string $key): string => (string) $key, array_keys($fields));
 
@@ -895,7 +925,7 @@ final class DirectAdminHostingProvider implements HostingProvider
             throw HostingProviderException::unexpectedResponse(
                 self::NAME,
                 $operation,
-                'the response carries no error field and none of the fields this command returns, so it is not an answer to it',
+                sprintf('the response %s none of the fields this command returns, so it is not an answer to it', $verdict),
                 $context,
             );
         }
