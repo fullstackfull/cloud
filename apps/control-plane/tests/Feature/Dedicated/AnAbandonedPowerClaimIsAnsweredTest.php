@@ -133,19 +133,20 @@ final class AnAbandonedPowerClaimIsAnsweredTest extends DedicatedApiTestCase
         try {
             app(ChangeDedicatedServerPower::class)->execute($server, DedicatedPowerAction::Cycle, 'crashed-cycle');
 
-            $this->fail('An abandoned claim was answered with success.');
+            $answer = 'accepted';
         } catch (PowerOperationIndeterminateException $e) {
-            $this->assertSame(504, $e->httpStatus());
+            $answer = $e->httpStatus();
         }
 
         /*
-         * The call count is the assertion that matters. Deleting the lapsed
-         * row and claiming the key afresh would also stop the refusal — and it
-         * would send a second reset to a chassis the first one may still be
-         * acting on.
+         * The call count is the assertion that matters, so it is made first.
+         * Deleting the lapsed row and claiming the key afresh would also stop
+         * the refusal — and it would send a second reset to a chassis the
+         * first one may still be acting on.
          */
         $this->assertSame(1, $controller->mutations, 'the retry reached the chassis');
         $this->assertSame(1, DedicatedPowerOperation::query()->count(), 'the key was claimed a second time');
+        $this->assertSame(504, $answer);
 
         $row = $this->onlyOperation();
         $this->assertSame(PowerOperationOutcome::Indeterminate, $row->outcome);
