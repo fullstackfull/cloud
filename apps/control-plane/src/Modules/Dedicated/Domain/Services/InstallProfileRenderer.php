@@ -36,13 +36,14 @@ final readonly class InstallProfileRenderer
      * The values both install handlers pass for every build — the machine's
      * name and its IPv4 address, prefix length and gateway — before anything
      * a job's own `install_variables` adds. ProvisionDedicatedHandler and
-     * ReinstallDedicatedHandler each write these four keys; a placeholder
+     * ReinstallDedicatedHandler each write these keys (the gateway only when
+     * the subnet has one); a placeholder
      * outside them has to be covered by the profile's own defaults, or the
      * profile cannot be rendered by an order-driven build, which names no
      * extras. RecordOsInstallProfile refuses such a profile when it is
      * written. A key being passed is not the same as it having a value:
-     * ProvisionDedicatedHandler omits the gateway for a subnet registered
-     * without one, so a profile default can supply it. The address, prefix
+     * both install handlers omit the gateway for a subnet registered without
+     * one, so a profile default can supply it. The address, prefix
      * length and hostname are the platform's alone, and a profile may not
      * default them (RecordOsInstallProfile).
      *
@@ -101,8 +102,8 @@ final readonly class InstallProfileRenderer
          * what stops a rebuild of a machine with no address being installed
          * onto one a profile default names (ReinstallDedicatedHandler passes
          * the machine's own address, null when it has none). A caller that
-         * wants a default to apply omits the key — as ProvisionDedicatedHandler
-         * does for the gateway of a subnet registered without one.
+         * wants a default to apply omits the key — as both install handlers
+         * do for the gateway of a subnet registered without one.
          */
         $values = [...$defaults, ...$variables];
 

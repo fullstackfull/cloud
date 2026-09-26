@@ -261,6 +261,47 @@ final class ReinstallDedicatedHandlerTest extends TestCase
     }
 
     #[Test]
+    public function a_machine_on_a_subnet_without_a_gateway_is_rebuilt_with_the_profile_default_gateway(): void
+    {
+        /*
+         * B4 (round three). A machine built on a subnet registered without a
+         * gateway gets the profile's default gateway (ProvisionDedicatedHandler
+         * omits the subnet's null). A rebuild passed the null and was refused
+         * for ever; it now omits it the same way, so the default applies.
+         */
+        IpAssignment::query()->delete();
+
+        $subnet = Subnet::factory()->forBlock('198.51.100.16/29')->create(['gateway' => null]);
+        app(SeedSubnetAddresses::class)->execute($subnet);
+
+        IpAssignment::factory()->create([
+            'ip_address_id' => IpAddress::query()->where('address', '198.51.100.18')->firstOrFail()->getKey(),
+            'customer_id' => $this->customer->id,
+            'service_id' => $this->service->getKey(),
+            'assignable_type' => DedicatedServer::class,
+            'assignable_id' => $this->server->getKey(),
+            'is_primary' => true,
+            'assigned_at' => now(),
+            'released_at' => null,
+        ]);
+
+        $this->osProfile->forceFill([
+            'template' => "addr {{ ipv4_address }}/{{ ipv4_prefix_length }} gw {{ ipv4_gateway }}\nh {{ hostname }}",
+            'defaults' => ['ipv4_gateway' => '198.51.100.22'],
+        ])->save();
+
+        $this->completeTheInstallOnFirstPoll();
+
+        $result = $this->reinstall();
+
+        $this->assertTrue($result->successful, (string) $result->errorMessage);
+        $this->assertStringContainsString(
+            'addr 198.51.100.18/29 gw 198.51.100.22',
+            (string) (PxeBootAuthorisation::query()->sole()->rendered_config['template'] ?? ''),
+        );
+    }
+
+    #[Test]
     public function a_withdrawn_install_profile_is_refused_rather_than_substituted(): void
     {
         $this->osProfile->update(['is_active' => false]);

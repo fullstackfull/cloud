@@ -669,7 +669,15 @@ final readonly class ReinstallDedicatedHandler implements ProvisioningHandler
             'hostname' => $this->hostnameFor($server),
             'ipv4_address' => $address?->address,
             'ipv4_prefix_length' => $subnet?->prefix_length,
-            'ipv4_gateway' => $subnet?->gateway,
+            /*
+             * Omitted when the subnet has no gateway, as the build does, so a
+             * profile's default gateway applies to the rebuild too; the
+             * subnet's own gateway wins whenever there is one. The address
+             * and prefix length are passed even when null: they are the
+             * platform's alone, and a machine with no address is refused
+             * rather than installed onto one a default names.
+             */
+            ...($subnet?->gateway !== null ? ['ipv4_gateway' => $subnet->gateway] : []),
         ];
     }
 
