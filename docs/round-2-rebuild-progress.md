@@ -27,8 +27,8 @@ immediately, so a stoppage loses at most the finding in flight.
 | F-08 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected one blocking item — fixed); merged | `6f605da` |
 | F-11 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 6 reservations); merged; closes F-24 DNS limb | `d69856a` |
 | F-12 | High | **UPHELD WITH RESERVATIONS** (round 2; round 1 rejected two docblock-held ordering keys — now held); merged | `db4bcc6` |
-| F-15 | High | rebuilt + merged; verification rounds 1–3 REJECTED (2, 1, 1 blocking — stale finding on the operator screen, census blind spots, a rewritten test that lost its oracle), each repaired; round 4 (repair + re-verify) running, incl. a coordinator ruling that a first-attempt stranger must not be claimed | `8e15efa` |
-| F-17 | High | rebuilt + merged; verification rounds 1–3 REJECTED on sentence-vs-test reach; repairs built the per-address invitation cooldown the audit clause asks for; round 4 running | `171142b` |
+| F-15 | High | **UPHELD WITH RESERVATIONS** (round 6; rounds 1–5 each rejected one or two items — a stale finding on the operator screen, census blind spots, a rewritten test that lost its capacity oracle, a first-attempt stranger claimed as this build's own (coordinator ruling), a pinned-id carve-out on a first attempt — all fixed); merged with F-04 × F-15 | `e0dbb9d` |
+| F-17 | High | rebuilt + merged; rounds 1–6 REJECTED (sentence reach, then the attachment scan's spellings, a new one each round, none in the tree); the per-address cooldown the audit clause asks for was built in round 2; final round under the occupancy precedent running | `de7dc76` |
 | F-18 | High | **UPHELD WITH RESERVATIONS** (round 1, 0 blocking, 7 reservations); merged | `a327f44` |
 | F-19 | High | **UPHELD WITH RESERVATIONS** by independent verification (round 1, 0 blocking, 7 reservations); merged | `45d53af` |
 | F-20 | High | in progress (rebuild → independent verification) | |
