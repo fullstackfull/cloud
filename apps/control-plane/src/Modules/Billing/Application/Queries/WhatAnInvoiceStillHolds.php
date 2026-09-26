@@ -27,6 +27,8 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *    ended, which it then voids);
  *  - CompensateUncollectableCapture credits a capture that landed on a
  *    withdrawn invoice, no more than the invoice still holds of it;
+ *  - ApplyPlanChange credits a downgrade's unused time to the wallet, drawn on
+ *    the invoices that paid for it (MoneyCollectedForThePeriod::drawnFrom());
  *  - IssueRefund returns part of a capture to the card (or to the wallet it was
  *    spent from);
  *  - RecordInvoiceRefund books a refund against the document.
@@ -44,7 +46,9 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *   − stored value already credited to the wallet against it (a top-up carrying
  *     the invoice's id: SettleInvoice's overpayment surplus, a compensation for
  *     a capture that landed on a withdrawn invoice, a cancelled order's, a
- *     lapsed upgrade's or an ended subscription's return)
+ *     lapsed upgrade's or an ended subscription's return; and a credit
+ *     adjustment carrying it: a downgrade's credit, drawn on the invoice that
+ *     paid for the time it returns - O-2)
  *   − what has gone back by refund: the larger of the invoice's
  *     `amount_refunded_minor` and the refund rows still holding funds against
  *     its captures (a pending card refund is not on the invoice yet; a refund
@@ -79,7 +83,11 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * wallet); VoidInvoice (invoice, then the subscription through
  * RestorePlanOnVoidedUpgrade); RenewSubscription (the lapsing invoice, the
  * subscription, the wallet); an ended subscription's wind-up (its invoices,
- * the subscription, the wallet). Pinned by MoneyPathsTakeTheirLocksInOneOrderTest
+ * the subscription, the wallet); ApplyPlanChange (the subscription, its
+ * orders, then the paid invoices a credit draws on, then the wallet - the one
+ * invoice lock taken after a subscription, and safe because nothing holding a
+ * paid invoice's lock waits for a subscription or an order). Pinned by
+ * MoneyPathsTakeTheirLocksInOneOrderTest
  * and raced across two processes by ARefundAndASettlementDoNotDeadlockTest.
  *
  * What it does not do: claw back. A wallet credit the customer has already
@@ -98,7 +106,11 @@ final class WhatAnInvoiceStillHolds
     {
         return (int) WalletTransaction::query()
             ->where('invoice_id', $invoice->getKey())
-            ->where('kind', WalletTransactionKind::Topup->value)
+            ->where(static fn ($credit) => $credit
+                ->where('kind', WalletTransactionKind::Topup->value)
+                ->orWhere(static fn ($adjustment) => $adjustment
+                    ->where('kind', WalletTransactionKind::Adjustment->value)
+                    ->where('amount_minor', '>', 0)))
             ->sum('amount_minor');
     }
 

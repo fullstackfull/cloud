@@ -17,6 +17,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Orders\Infrastructure\Models\OrderItem;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
@@ -131,14 +132,14 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
         ];
 
         // Paid 180.000, then 150.000 refunded: the order kept 30.000.
-        Invoice::factory()->paid()->create([
+        self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $customer->getKey(),
             'order_id' => $order->getKey(),
             'subtotal_minor' => 180_000,
             'total_minor' => 180_000,
             'amount_paid_minor' => 180_000,
             'amount_refunded_minor' => 150_000,
-        ]);
+        ]));
 
         /*
          * Made deterministic rather than left to timing. Before the racers are
@@ -317,5 +318,26 @@ final class APlanChangeClaimsItsUnitUnderTheLockTest extends TestCase
         ]);
 
         return $subscription;
+    }
+
+    /**
+     * A paid invoice is paid by a capture: every payment applied to an invoice
+     * is a transactions row (SettleInvoice's invariant), and what a downgrade
+     * credit may draw on is read from those rows (WhatAnInvoiceStillHolds,
+     * O-2). A fixture that only states amount_paid_minor describes money that
+     * never arrived.
+     */
+    private static function captured(Invoice $invoice): Invoice
+    {
+        if ($invoice->amount_paid_minor > 0) {
+            Transaction::factory()->create([
+                'customer_id' => $invoice->customer_id,
+                'invoice_id' => $invoice->getKey(),
+                'amount_minor' => $invoice->amount_paid_minor,
+                'currency' => $invoice->currency,
+            ]);
+        }
+
+        return $invoice;
     }
 }

@@ -6,7 +6,10 @@ namespace Lynomia\Modules\Subscriptions\Application\Queries;
 
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
+use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\ChangeSubscriptionPlan;
@@ -57,6 +60,14 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  * Returned is the sum of `wallet_credit_minor` over the plan changes recorded
  * for this subscription inside the current period.
  *
+ * And the result is never more than the invoices a credit is drawn from still
+ * hold (WhatAnInvoiceStillHolds, over invoicesItDrawsOn()). The credit is
+ * recorded against those invoices (drawnFrom(): one wallet entry per invoice
+ * drawn, carrying its id), so a card refund or any other return of the same
+ * money afterwards sees it; posted against nothing, a 27.000 downgrade credit
+ * left the invoice looking untouched and a card refund of the full 90.000 was
+ * accepted - 117.000 back for 90.000 paid (O-2).
+ *
  * The figure is money, not time: it is not prorated. When every invoice was
  * paid it sits well above any remainder a downgrade can compute, so it never
  * bites on a customer who paid. When something was not paid it bounds the
@@ -82,7 +93,122 @@ final readonly class MoneyCollectedForThePeriod
             $collected += $this->collectedByTheOrder($subscription);
         }
 
-        return Money::ofMinor(max(0, $collected - $this->returned($id, $from, $until)), $subscription->currency);
+        $returnable = max(0, $collected - $this->returned($id, $from, $until));
+
+        /*
+         * And never more than the invoices it would be drawn from still hold
+         * (WhatAnInvoiceStillHolds): the document's paid-less-refunded does
+         * not see a card refund until the queue books it, nor money already
+         * credited to the wallet against the invoice by another route.
+         */
+        $held = 0;
+
+        foreach ($this->invoicesItDrawsOn($subscription) as $invoice) {
+            $held += max(0, WhatAnInvoiceStillHolds::minor($invoice));
+        }
+
+        return Money::ofMinor(min($returnable, $held), $subscription->currency);
+    }
+
+    /**
+     * The invoices whose money a downgrade credit is drawn from, in the order
+     * it draws on them: the invoices this subscription's own period was billed
+     * on (the renewal, earlier proration invoices), newest first, then - for
+     * the period an order bought - that order's invoices, newest first. Open
+     * invoices are not among them: a change is refused while one is open, and
+     * what an open invoice took is not the period's money yet.
+     *
+     * @return list<Invoice>
+     */
+    public function invoicesItDrawsOn(Subscription $subscription): array
+    {
+        $own = Invoice::query()
+            ->where('subscription_id', $subscription->getKey())
+            ->where('currency', $subscription->currency)
+            ->where('status', '!=', InvoiceStatus::Open->value)
+            ->whereExists(fn (Builder $lines): Builder => $lines
+                ->selectRaw('1')
+                ->from('invoice_items')
+                ->whereColumn('invoice_items.invoice_id', 'invoices.id')
+                ->where('invoice_items.period_start', '>=', $subscription->current_period_start)
+                ->where('invoice_items.period_start', '<', $subscription->current_period_end))
+            ->orderByDesc('id')
+            ->get()
+            ->all();
+
+        if ($this->periodWasRenewed($subscription)) {
+            return array_values($own);
+        }
+
+        $orderIds = DB::table('services')
+            ->join('order_items', 'order_items.id', '=', 'services.order_item_id')
+            ->where('services.subscription_id', $subscription->getKey())
+            ->distinct()
+            ->pluck('order_items.order_id');
+
+        $ordered = Invoice::query()
+            ->whereIn('order_id', $orderIds)
+            ->where('currency', $subscription->currency)
+            ->where('status', '!=', InvoiceStatus::Open->value)
+            ->orderByDesc('id')
+            ->get()
+            ->all();
+
+        return array_values([...$own, ...$ordered]);
+    }
+
+    /**
+     * Take `SELECT ... FOR UPDATE` on every invoice a credit would be drawn
+     * from, in ascending id order, so the credit is sized and recorded under
+     * the lock every other action that hands an invoice's money back takes
+     * (WhatAnInvoiceStillHolds). ApplyPlanChange calls it after the
+     * subscription and its orders: the one place an invoice is locked after
+     * a subscription, and only a paid-for one - nothing that holds a paid
+     * invoice's lock waits for a subscription or an order, so it cannot close
+     * a cycle (the lock order is written down in WhatAnInvoiceStillHolds).
+     */
+    public function lockTheInvoicesItDrawsOn(Subscription $subscription): void
+    {
+        $ids = array_map(static fn (Invoice $invoice): string => (string) $invoice->getKey(), $this->invoicesItDrawsOn($subscription));
+        sort($ids);
+
+        foreach ($ids as $id) {
+            Invoice::query()->whereKey($id)->lockForUpdate()->first();
+        }
+    }
+
+    /**
+     * Which invoices a credit of this size is drawn from, and how much from
+     * each: in the order invoicesItDrawsOn() gives, each up to what it still
+     * holds. Read under lockTheInvoicesItDrawsOn()'s locks. What no invoice
+     * holds (only reachable through figures written before this existed) is
+     * keyed on the empty string: credited, and recorded against nothing.
+     *
+     * @return array<string, int> invoice id => minor units
+     */
+    public function drawnFrom(Subscription $subscription, int $creditMinor): array
+    {
+        $drawn = [];
+        $left = $creditMinor;
+
+        foreach ($this->invoicesItDrawsOn($subscription) as $invoice) {
+            if ($left <= 0) {
+                break;
+            }
+
+            $take = min($left, max(0, WhatAnInvoiceStillHolds::minor($invoice)));
+
+            if ($take > 0) {
+                $drawn[(string) $invoice->getKey()] = $take;
+                $left -= $take;
+            }
+        }
+
+        if ($left > 0) {
+            $drawn[''] = $left;
+        }
+
+        return $drawn;
     }
 
     /**

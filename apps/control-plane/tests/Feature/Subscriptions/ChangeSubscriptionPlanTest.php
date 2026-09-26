@@ -12,6 +12,7 @@ use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Subscriptions\Application\Actions\ChangeSubscriptionPlan;
 use Lynomia\Modules\Subscriptions\Domain\Exceptions\IncompatibleBillingPeriodException;
@@ -261,13 +262,13 @@ final class ChangeSubscriptionPlanTest extends TestCase
      */
     private function paidFor(Subscription $subscription, InvoiceItemKind $kind, int $minor, string $from): void
     {
-        $invoice = Invoice::factory()->paid()->create([
+        $invoice = self::captured(Invoice::factory()->paid()->create([
             'customer_id' => $subscription->customer_id,
             'subscription_id' => $subscription->getKey(),
             'subtotal_minor' => $minor,
             'total_minor' => $minor,
             'amount_paid_minor' => $minor,
-        ]);
+        ]));
 
         InvoiceItem::query()->create([
             'invoice_id' => $invoice->getKey(),
@@ -288,5 +289,26 @@ final class ChangeSubscriptionPlanTest extends TestCase
             ->startingOn(CarbonImmutable::parse($periodStart))
             ->priced($recurringMinor)
             ->create(['plan_id' => $plan->id]);
+    }
+
+    /**
+     * A paid invoice is paid by a capture: every payment applied to an invoice
+     * is a transactions row (SettleInvoice's invariant), and what a downgrade
+     * credit may draw on is read from those rows (WhatAnInvoiceStillHolds,
+     * O-2). A fixture that only states amount_paid_minor describes money that
+     * never arrived.
+     */
+    private static function captured(Invoice $invoice): Invoice
+    {
+        if ($invoice->amount_paid_minor > 0) {
+            Transaction::factory()->create([
+                'customer_id' => $invoice->customer_id,
+                'invoice_id' => $invoice->getKey(),
+                'amount_minor' => $invoice->amount_paid_minor,
+                'currency' => $invoice->currency,
+            ]);
+        }
+
+        return $invoice;
     }
 }

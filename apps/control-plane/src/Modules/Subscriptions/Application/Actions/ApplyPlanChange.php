@@ -18,6 +18,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Orders\Application\Services\PlanCapacity;
+use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Subscriptions\Application\DTOs\PlanChangeOutcome;
 use Lynomia\Modules\Subscriptions\Application\DTOs\ProrationPlan;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
@@ -150,6 +151,13 @@ final readonly class ApplyPlanChange
              * both draw the same pool.
              */
             $this->collected->lockTheOrdersBehind($locked);
+
+            /*
+             * And the invoices a downgrade credit would be drawn from, so it
+             * is sized from, and recorded against, what they still hold under
+             * the lock every other return of their money takes (O-2).
+             */
+            $this->collected->lockTheInvoicesItDrawsOn($locked);
 
             $quote = $this->quotes->execute($locked, $plan, $price);
 
@@ -384,6 +392,13 @@ final readonly class ApplyPlanChange
      * two downgrades off the same plan within one second, and the second
      * credit was silently replayed as the first.
      *
+     * Recorded against the invoices whose money it is
+     * (MoneyCollectedForThePeriod::drawnFrom()): one entry per invoice drawn
+     * on, each carrying that invoice's id, which is what WhatAnInvoiceStillHolds
+     * reads - so a card refund of the same invoice afterwards is held to what
+     * is left (O-2). It used to be one entry against no invoice, and a card
+     * refund of the whole period after a downgrade returned the credit twice.
+     *
      * Posted as an Adjustment, which the ledger will not accept without a
      * named user behind it. That rule is right and is honoured rather than
      * worked around: the entry is the consequence of a person choosing a
@@ -404,25 +419,42 @@ final readonly class ApplyPlanChange
         $amount = $proration->net()->absolute();
         $wallet = $this->wallet->walletFor($customer, $proration->currency);
 
-        $entry = $this->wallet->credit(
-            wallet: $wallet,
-            amount: $amount,
-            kind: WalletTransactionKind::Adjustment,
-            description: 'Unused time after moving plan',
-            actor: $actor,
-            metadata: [
-                'subscription_id' => (string) $subscription->getKey(),
-                'credit_minor' => $proration->credit->minorUnits(),
-                'charge_minor' => $proration->charge->minorUnits(),
-            ],
-            idempotencyKey: 'plan-change-credit:'.$changeId,
-        );
+        $posted = 0;
+        $part = 0;
 
         /*
-         * What the ledger actually posted for this change. A replayed entry
-         * was posted by something else and is not this change's money; it is
-         * recorded as nothing rather than counted twice.
+         * One entry per invoice the credit draws on, carrying its id, so the
+         * money is recorded against the invoice it came from and every later
+         * return of that invoice's money sees it (O-2). The first entry keeps
+         * the change's own key; any further one is numbered after it.
          */
-        return $entry->wasRecentlyCreated ? $entry->amount_minor : 0;
+        foreach ($this->collected->drawnFrom($subscription, $amount->minorUnits()) as $invoiceId => $minor) {
+            $entry = $this->wallet->credit(
+                wallet: $wallet,
+                amount: Money::ofMinor($minor, $proration->currency),
+                kind: WalletTransactionKind::Adjustment,
+                description: 'Unused time after moving plan',
+                actor: $actor,
+                metadata: [
+                    'subscription_id' => (string) $subscription->getKey(),
+                    'plan_change_id' => $changeId,
+                    'credit_minor' => $proration->credit->minorUnits(),
+                    'charge_minor' => $proration->charge->minorUnits(),
+                ],
+                idempotencyKey: 'plan-change-credit:'.$changeId.($part === 0 ? '' : ':'.$part),
+                invoiceId: $invoiceId === '' ? null : (string) $invoiceId,
+            );
+
+            $part++;
+
+            /*
+             * What the ledger actually posted for this change. A replayed
+             * entry was posted by something else and is not this change's
+             * money; it is recorded as nothing rather than counted twice.
+             */
+            $posted += $entry->wasRecentlyCreated ? $entry->amount_minor : 0;
+        }
+
+        return $posted;
     }
 }
