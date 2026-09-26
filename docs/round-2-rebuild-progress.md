@@ -119,3 +119,11 @@ as `2325458`: backend 5,454 / 5,454, 669 testsuites `skipped="0"`, exit 0;
 PHPStan could not be run in this environment: its dependencies download from
 `api.github.com` and `codeload.github.com`, which the environment's network policy
 refuses (measured 2026-09-26). It runs in CI (`ci.yml`, "Static analysis").
+
+### Independent re-audit after round three
+
+Dispatched against `88c4dd8` (all ten groups merged; the three proofs above):
+five band re-auditors (A–E, the bands of `docs/round-2-briefs/final-re-audit.md`)
+and one for "what round three introduced", each in its own worktree, database
+and Redis index. Brief: the round-two master brief plus round-three overrides.
+Skeptics and the five-product matrix follow.
