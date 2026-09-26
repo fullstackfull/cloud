@@ -15,6 +15,7 @@ use Lynomia\Modules\Ipam\Domain\Enums\ReverseDnsStatus;
 use Lynomia\Modules\Ipam\Domain\Exceptions\AddressNotAllocatableException;
 use Lynomia\Modules\Ipam\Domain\Exceptions\InvalidIpAddressException;
 use Lynomia\Modules\Ipam\Domain\Exceptions\IpPoolExhaustedException;
+use Lynomia\Modules\Ipam\Domain\Exceptions\QuarantineNotClearableException;
 use Lynomia\Modules\Ipam\Domain\Exceptions\ReservationExpiredException;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAssignment;
@@ -436,6 +437,206 @@ final readonly class IpAllocator
 
             return $addresses->count();
         });
+    }
+
+    /**
+     * Clear a timeout quarantine by adopting the address: the machine the
+     * timed-out build made exists and is answering on it, so the address
+     * stays with the machine.
+     *
+     * One of the two outcomes ReleaseReason::requiresOperatorClearance()
+     * names, and the one that keeps the address. It records the assignment
+     * that has been true since the build — quarantined to assigned, as
+     * commit() would have left it had the platform heard back — for the
+     * customer the address was reserved for (customerWhoWasHolding()). The
+     * quarantine fields are cleared, as every other way out of quarantine
+     * clears them.
+     *
+     * The operator's word is the only evidence there is, so anything that is
+     * not a timeout quarantine is refused (lockForClearance()).
+     *
+     * $assignable names the machine wearing the address, as in commit(), and
+     * is written only if a caller passes one. The one caller today, the admin
+     * surface, passes none — for a timed-out VPS there is no machine row to
+     * name, AdoptOrphanResource creating none. What an assignment that names
+     * no machine costs is written down where the operator reaches it, in
+     * IpamQuarantineController.
+     *
+     * @throws QuarantineNotClearableException
+     * @throws InvalidIpAddressException
+     */
+    public function adoptQuarantinedAddress(
+        IpAddress $address,
+        ?string $serviceId = null,
+        ?string $macAddress = null,
+        ?Model $assignable = null,
+    ): IpAssignment {
+        $mac = $macAddress === null ? null : $this->normaliseMacAddress($macAddress);
+
+        return DB::transaction(function () use ($address, $serviceId, $mac, $assignable): IpAssignment {
+            $locked = $this->lockForClearance($address);
+
+            $assignment = IpAssignment::create([
+                'ip_address_id' => $locked->getKey(),
+                'customer_id' => $this->customerWhoWasHolding($locked),
+                'service_id' => $serviceId,
+                'assignable_type' => $assignable?->getMorphClass(),
+                'assignable_id' => $assignable?->getKey(),
+                // What commit() writes for the address a build was given.
+                'is_primary' => true,
+                'mac_address' => $mac,
+                'assigned_at' => now(),
+            ]);
+
+            $locked->forceFill([
+                'status' => IpAddressStatus::Assigned,
+                'quarantined_until' => null,
+                'quarantine_reason' => null,
+            ])->save();
+
+            return $assignment;
+        });
+    }
+
+    /**
+     * Clear a timeout quarantine by releasing the address by hand: the
+     * operator has looked, and the machine the timed-out build might have
+     * made demonstrably does not exist.
+     *
+     * The other outcome ReleaseReason::requiresOperatorClearance() names, and
+     * the one that gives the capacity back. The address leaves in exactly the
+     * state ReleaseQuarantinedAddresses leaves a row in — available, both
+     * quarantine fields cleared — so nothing downstream can tell a release by
+     * hand from a swept one.
+     *
+     * There is no column for the by-hand reason, on purpose.
+     * `ip_reservations.released_reason` already says provisioning_timed_out,
+     * which is true and is history; overwriting it would erase why the address
+     * was withdrawn. `quarantine_reason` is cleared on the way out for the
+     * sweep's reason: a stale reason on an available address reads as
+     * "tainted" to the next person to look. So the reason,
+     * ReleaseReason::CLEARED_BY_HAND, is recorded by the caller, in the audit
+     * entry for the act.
+     *
+     * @throws QuarantineNotClearableException
+     */
+    public function releaseQuarantinedAddress(IpAddress $address): IpAddress
+    {
+        return DB::transaction(function () use ($address): IpAddress {
+            $locked = $this->lockForClearance($address);
+
+            $locked->forceFill([
+                'status' => IpAddressStatus::Available,
+                'quarantined_until' => null,
+                'quarantine_reason' => null,
+            ])->save();
+
+            return $locked;
+        });
+    }
+
+    /**
+     * Lock an address an operator means to clear, or refuse it.
+     *
+     * Two refusals, both 409:
+     *
+     *  - An address that is not quarantined has nothing to clear. It was
+     *    never withdrawn, or it has already been cleared — and clearing it
+     *    again would write a second assignment, or hand back an address a
+     *    machine was adopted onto.
+     *  - A quarantine that is not a timeout's is not an operator's to end.
+     *    The one production writes every day is ServiceTerminated, from
+     *    DestroyVpsHandler: a destroyed machine's address sitting out the
+     *    pool's window so the next customer does not inherit its reputation.
+     *    A held one (holdAssignment()) waits for a physical machine that may
+     *    still be racked with the address on its disks to be declared empty.
+     *    And an Abuse quarantine, which nothing in production writes today, is
+     *    four times the pool's window because abuse reports arrive latest of
+     *    all. A door built to recover capacity after a timeout must not double
+     *    as a way to cut any of those short.
+     *
+     * @throws QuarantineNotClearableException
+     */
+    private function lockForClearance(IpAddress $address): IpAddress
+    {
+        /** @var IpAddress $locked */
+        $locked = IpAddress::query()->lockForUpdate()->findOrFail($address->getKey());
+
+        if ($locked->status !== IpAddressStatus::Quarantined) {
+            throw QuarantineNotClearableException::becauseItIsNotQuarantined($locked->address, $locked->status);
+        }
+
+        if ($locked->quarantine_reason?->requiresOperatorClearance() !== true) {
+            throw QuarantineNotClearableException::becauseItsQuarantineIsNotATimeout(
+                $locked->address,
+                $locked->quarantine_reason,
+            );
+        }
+
+        return $locked;
+    }
+
+    /**
+     * The customer a timed-out address was held for — or nobody.
+     *
+     * The newest reservation on the address, by `created_at` then `id`, and
+     * its customer, whatever that is. For a timeout quarantine that is the
+     * reservation the timeout closed: release() is the only writer of a
+     * ProvisioningTimedOut quarantine, it quarantines the address of the
+     * reservation it is closing, and a quarantined address cannot be reserved
+     * again. `created_at` is timestamp(0), so two reservations in one second
+     * tie, and the ULID, generated in order, says which came second.
+     *
+     * Unfiltered, on purpose. An address held for the platform itself — a job
+     * with no customer — belongs to no customer, and inventing one would put
+     * infrastructure addressing on somebody's account: an assignment carrying
+     * a customer_id is in that customer's /api/v1/ips, with its PTR theirs to
+     * set. Keeping only reservations that name a customer walks past the
+     * platform's reservation to an older cycle's and does exactly that. The
+     * customer-less shape is designed for, not accidental:
+     * `provisioning_jobs.customer_id` is nullable, ProvisioningJobRequest's
+     * `$customerId` defaults to null, CreateVpsHandler loads a customer only
+     * when the job names one, and assertScopeMayServe() returns early for a
+     * null customer. The cast is guarded for the same reason: `(string) null`
+     * is an empty string, which the char(26) foreign key refuses.
+     *
+     * The same rule — newest by `created_at` then `id`, unfiltered — is
+     * applied in two more places, and the three must stay one rule or they
+     * will disagree about who held one address: IpamQuarantineController's
+     * lastReservationFor(), which feeds the audit entry, and the eager load in
+     * its index(), which puts a customer on the queue row an operator reads.
+     *
+     * With no reservation at all, the newest assignment naming a customer
+     * answers. Nothing reaches that leg with a timeout quarantine: every
+     * assignment commit() makes closes a reservation, and the assignments
+     * with no reservation behind them — the E2E seeder writes some — are on
+     * addresses whose only way into quarantine is ServiceTerminated, which
+     * lockForClearance() refuses before this is asked. The leg's filter and
+     * its unguarded cast are untested for that reason, and are left as they
+     * are rather than edited blind.
+     */
+    private function customerWhoWasHolding(IpAddress $address): ?string
+    {
+        /** @var IpReservation|null $reserved */
+        $reserved = IpReservation::query()
+            ->where('ip_address_id', $address->getKey())
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($reserved !== null) {
+            return $reserved->customer_id === null ? null : (string) $reserved->customer_id;
+        }
+
+        /** @var IpAssignment|null $assigned */
+        $assigned = IpAssignment::query()
+            ->where('ip_address_id', $address->getKey())
+            ->whereNotNull('customer_id')
+            ->orderByDesc('assigned_at')
+            ->orderByDesc('id')
+            ->first();
+
+        return $assigned === null ? null : (string) $assigned->customer_id;
     }
 
     private function endAssignment(IpAssignment $assignment, ReleaseReason $reason, bool $startTheClock): IpAssignment

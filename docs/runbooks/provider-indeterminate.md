@@ -141,6 +141,18 @@ Until both are done the customer's machine runs with an address the platform
 shows as quarantined and assigned to nothing, and the platform cannot manage
 the machine.
 
+The address has a route of its own now (F-34):
+`POST /api/admin/infrastructure/ip-addresses/{address}/adopt`, evidence
+required, which takes it out of quarantine as an assignment for the job's
+customer and service. It is not the second bullet: the assignment it records
+names **no machine**, because there is no machine row to name, and nothing on
+the platform ends an assignment that names no machine — destroying the service
+later does not bring the address back. If the `virtual_machines` row is
+inserted, point that assignment at it (`assignable_type`, `assignable_id`)
+rather than inserting a second one; the live-assignment index refuses a second.
+The list of timed-out addresses, and the release for one whose machine does not
+exist, are in [ip-exhaustion](ip-exhaustion.md).
+
 ## What not to do
 
 Do not settle from a guess. Do not settle a batch. There is no Force Success in

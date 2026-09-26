@@ -2751,6 +2751,43 @@ return [
             'service_id' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminQuarantinedAddress' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'address' => ['type' => 'string'],
+            'subnet_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'quarantine_reason' => ['type' => ['string', 'null'], 'description' => 'Always `provisioning_timed_out` today: the only reason whose quarantine an operator clears.'],
+            'quarantined_until' => ['$ref' => '#/components/schemas/Timestamp'],
+            'ends_on_a_clock' => ['type' => 'boolean', 'description' => 'False: `quarantined_until` passes and nothing happens. Only adoption or a release by hand ends it.'],
+            'provisioning_job_id' => ['type' => ['string', 'null'], 'description' => 'The job the timeout closed.'],
+            'customer_id' => ['type' => ['string', 'null'], 'description' => 'Who the address was reserved for; null when the job was the platform\'s own.'],
+            'timed_out_at' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'AdminAdoptedAddress' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'address' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+            'assignment_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'customer_id' => ['type' => ['string', 'null']],
+            'service_id' => ['type' => ['string', 'null']],
+            'mac_address' => ['type' => ['string', 'null'], 'description' => 'Upper case, colon separated.'],
+        ],
+    ],
+    'AdminReleasedAddress' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'address' => ['type' => 'string'],
+            'status' => ['type' => 'string'],
+        ],
+    ],
     'AdminNamedHostingDomain' => [
         'type' => 'object',
         'additionalProperties' => false,

@@ -73,10 +73,29 @@ hand-editing existing rows.
 Addresses quarantined **because of abuse** are held longer and flagged. Those are not
 candidates for early release at all.
 
-**One kind of quarantine does not drain on its own.** A row with `quarantined_until`
-null is *held*. The designed way into that state is a dedicated server that was
-decommissioned and is still racked with the address configured on its disks. Its clock
-starts only when an operator returns that machine to stock (`POST /api/admin/dedicated/{server}/return-to-stock`)
+**Two kinds of quarantine do not drain on their own.**
+
+The first is a **timeout's** (`quarantine_reason = 'provisioning_timed_out'`). It has a
+`quarantined_until` like any other, and nothing acts on it: the build that reserved the
+address stopped answering, the platform does not know whether a machine was made with
+the address configured, and waiting does not tell it. `GET
+/api/admin/infrastructure/ip-addresses/awaiting-clearance` lists them, each with the job
+the timeout closed. Look at the provider for that job's machine, then either:
+
+- **adopt** it (`POST /api/admin/infrastructure/ip-addresses/{address}/adopt`) when the
+  machine is there — the address stays with it, as an assignment that names no machine,
+  and **it never comes back to the pool**: nothing on the platform ends an assignment that
+  names no machine; or
+- **release** it (`POST /api/admin/infrastructure/ip-addresses/{address}/release`) when
+  the machine demonstrably does not exist — the address is available again at once.
+
+Both need `ipam.manage` and the evidence you looked at, which is audited. Both refuse
+(409) any other kind of quarantine.
+
+The second kind is *held*: a row with `quarantined_until`
+null. It came off a dedicated server that was decommissioned and is still
+racked with the address configured on its disks. Its clock starts only when an
+operator returns that machine to stock (`POST /api/admin/dedicated/{server}/return-to-stock`)
 or retires it (`POST /api/admin/dedicated/{server}/retire`). `php artisan ipam:capacity`
 counts them per pool and lists the longest-waiting with the machine each is waiting for
 (the count is the true total when the list is cut short); a count that only grows is a

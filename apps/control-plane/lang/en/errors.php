@@ -344,9 +344,11 @@ return [
     ],
     'ipam' => [
         'address_not_allocatable' => 'That address cannot be assigned.',
+        'address_not_quarantined' => 'That address is not quarantined, so there is nothing to clear.',
         'invalid_hostname' => 'That is not a valid hostname.',
         'invalid_ip_address' => 'That is not a valid IP address.',
         'pool_exhausted' => 'No IP addresses are available right now.',
+        'quarantine_not_clearable' => 'That address\'s quarantine is not one that can be cleared here.',
         'reservation_expired' => 'That address reservation has expired.',
         'reverse_dns_provider_failed' => 'The reverse DNS change did not go through. Try again in a moment.',
         'reverse_dns_provider_unavailable' => 'Reverse DNS cannot be changed right now.',
