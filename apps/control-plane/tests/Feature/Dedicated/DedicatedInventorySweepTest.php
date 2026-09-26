@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Tests\Feature\Dedicated;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Lynomia\Modules\Dedicated\Application\Actions\RetireDedicatedServer;
 use Lynomia\Modules\Dedicated\Application\Actions\SyncHardwareInventory;
 use Lynomia\Modules\Dedicated\Application\Jobs\SyncDedicatedServer;
 use Lynomia\Modules\Dedicated\Domain\Enums\DedicatedServerStatus;
 use Lynomia\Modules\Dedicated\Infrastructure\Models\DedicatedServer;
+use Mockery;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -110,5 +113,44 @@ final class DedicatedInventorySweepTest extends TestCase
             ->handle(app(SyncHardwareInventory::class));
 
         $this->addToAssertionCount(1);
+    }
+
+    #[Test]
+    public function a_machine_retired_after_the_sweep_is_found_by_its_worker_and_left_out_of_the_next_sweep(): void
+    {
+        /*
+         * The race the missing-row branch above used to be blamed on, run
+         * through the real operator act. Retiring keeps the row, so the job
+         * queued before it finds the machine and runs its sync once more; it
+         * is the next sweep that leaves the machine out.
+         */
+        Queue::fake([SyncDedicatedServer::class]);
+
+        $server = DedicatedServer::factory()->status(DedicatedServerStatus::Maintenance)->create();
+
+        $this->artisan('dedicated:sync-inventory')->assertExitCode(0);
+
+        /** @var SyncDedicatedServer $queued */
+        $queued = Queue::pushed(SyncDedicatedServer::class)->sole();
+
+        app(RetireDedicatedServer::class)->execute($server);
+
+        $this->assertSame(DedicatedServerStatus::Retired, DedicatedServer::query()->findOrFail($server->getKey())->status);
+
+        // Found, not missing: the worker reaches the sync, which stops at the
+        // absent controller endpoint. The missing-row branch logs nothing.
+        Log::spy();
+
+        $queued->handle(app(SyncHardwareInventory::class));
+
+        Log::shouldHaveReceived('info')
+            ->with('A dedicated server has no BMC endpoint to sync from.', Mockery::on(
+                static fn (array $context): bool => $context['server_id'] === (string) $server->getKey(),
+            ))
+            ->once();
+
+        $this->artisan('dedicated:sync-inventory')->assertExitCode(0);
+
+        Queue::assertPushed(SyncDedicatedServer::class, 1);
     }
 }
