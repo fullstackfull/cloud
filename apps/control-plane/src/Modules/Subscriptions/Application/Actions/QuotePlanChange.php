@@ -133,7 +133,11 @@ final readonly class QuotePlanChange
          * customer is shown is the credit they will get: never more than the
          * period collected, less what earlier changes already gave back.
          */
-        $credit = $this->collected->ceilCredit($credit, $charge, $subscription);
+        $credit = $this->collected->ceilCredit(
+            $this->collected->pricedAsThePeriodWas($credit, $subscription),
+            $charge,
+            $subscription,
+        );
 
         return new PlanChangeQuote(
             planId: (string) $plan->getKey(),

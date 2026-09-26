@@ -273,6 +273,77 @@ final class APlanChangeMovesOnlyMoneyThatWasCollectedTest extends BillingApiTest
         $this->assertSame(0, $this->walletOf($customer), 'The whole period is on its way back to the card.');
     }
 
+    #[Test]
+    public function a_period_a_percentage_coupon_discounted_credits_its_unused_time_at_the_discounted_price(): void
+    {
+        /*
+         * O-3 (a). The period was sold at half price - 45.000 for a 90.000
+         * plan - and the remainder was credited at list: 30.000 of unused time
+         * returned for the 15.000 that time had cost.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        // Smaller at the same disk, so nothing refuses the move but the money.
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $this->large);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+        $period->forceFill(['subtotal_minor' => 90_000, 'discount_minor' => 45_000, 'total_minor' => 45_000, 'amount_paid_minor' => 45_000])->save();
+        InvoiceItem::query()->where('invoice_id', $period->getKey())->update(['discount_minor' => 45_000, 'total_minor' => 45_000]);
+        Transaction::query()->where('invoice_id', $period->getKey())->update(['amount_minor' => 45_000]);
+
+        $quoted = $this->actingAs($user)
+            ->getJson("/api/v1/subscriptions/{$subscription->id}/plan-options")
+            ->assertOk()
+            ->json('data');
+
+        $this->changePlan($user, $subscription, $lean, 'coupon-down-1')->assertOk();
+
+        // 15.000 paid for the unused third, less 3.000 for the rest on small.
+        $this->assertSame(12_000, $this->walletOf($customer));
+        $this->assertSame(-15_000, PlanChange::query()->where('subscription_id', $subscription->getKey())->sole()->credit_minor);
+
+        $option = collect($quoted)->firstWhere('plan_id', $lean->id);
+        $this->assertIsArray($option);
+        $this->assertSame(15_000, abs((int) $option['credit']['minor_units']), 'The quote and the change agree.');
+    }
+
+    #[Test]
+    public function after_a_paid_upgrade_a_discounted_period_credits_the_upgraded_time_at_the_price_it_was_bought_at(): void
+    {
+        /*
+         * The other half of O-3 (a): the discount belongs to the time the
+         * coupon priced. An upgrade's charge is at list (proration lines are
+         * not discountable), so once it is paid, the time on the bigger plan
+         * was bought at list and is returned at list.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $base = $this->plan('base', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 10_000);
+        $lean = $this->plan('lean', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $subscription = $this->paidSubscriptionOn($customer, $base);
+        $this->serviceWithMachine($customer, $subscription);
+
+        /** @var Invoice $period */
+        $period = Invoice::query()->where('subscription_id', $subscription->getKey())->sole();
+        $period->forceFill(['subtotal_minor' => 10_000, 'discount_minor' => 5_000, 'total_minor' => 5_000, 'amount_paid_minor' => 5_000])->save();
+        InvoiceItem::query()->where('invoice_id', $period->getKey())->update(['discount_minor' => 5_000, 'total_minor' => 5_000]);
+        Transaction::query()->where('invoice_id', $period->getKey())->update(['amount_minor' => 5_000]);
+
+        $this->changePlan($user, $subscription, $this->large, 'coupon-up-1')->assertOk();
+        $upgrade = $this->openProrationInvoice($subscription);
+
+        // Half of base's unused 3.333 came off; large's 30.000 was charged.
+        $this->assertSame(30_000 - 1_667, $upgrade->total_minor);
+        $this->settle($upgrade, $customer);
+        $this->finishEveryProvisioningJob();
+
+        $this->changePlan($user, $subscription->fresh(), $lean, 'coupon-up-down-1')->assertOk();
+
+        // Large's unused 30.000 at the list price it was bought at, less 3.000.
+        $this->assertSame(27_000, $this->walletOf($customer));
+    }
+
     // ---- 2. the resize delivers what the paid invoice bought ---------------
 
     #[Test]

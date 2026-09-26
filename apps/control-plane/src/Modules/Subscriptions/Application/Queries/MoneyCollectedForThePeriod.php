@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Subscriptions\Application\Queries;
 
+use Brick\Math\RoundingMode;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
@@ -212,6 +213,43 @@ final readonly class MoneyCollectedForThePeriod
     }
 
     /**
+     * The remainder of the plan being left, at the price the customer paid for
+     * that time rather than its list price (O-3).
+     *
+     * The period was sold at a discount when a coupon reduced the line that
+     * bought it: the renewal's plan line in the period, or, for the period an
+     * order bought, the order's lines this subscription's services were built
+     * from. Its fraction - discount over the line's pre-discount amount, which
+     * for a percentage coupon is the coupon's rate - is taken off the
+     * remainder too. Credited at list price, a 50%-off period returned about
+     * 27.000 of unused time the customer had paid about 15.000 for.
+     *
+     * Only while the plan the subscription has paid for is still the one that
+     * line bought. A plan change that was paid for in the period - an upgrade
+     * whose invoice settled, or a downgrade or like-for-like move, whose charge
+     * half was netted against its credit - priced the time since at list
+     * (proration lines are not discountable, see ChangeSubscriptionPlan), so
+     * its remainder is returned at list. An upgrade not paid for (open, void,
+     * uncollectible) bought nothing and does not count.
+     */
+    public function pricedAsThePeriodWas(Money $remainder, Subscription $subscription): Money
+    {
+        if ($this->aPaidChangeRepricedThePeriod($subscription)) {
+            return $remainder;
+        }
+
+        [$discountMinor, $grossMinor] = $this->discountOnThePeriod($subscription);
+
+        if ($grossMinor <= 0 || $discountMinor <= 0) {
+            return $remainder;
+        }
+
+        $paidMinor = max(0, $grossMinor - $discountMinor);
+
+        return $remainder->multipliedBy($paidMinor)->dividedBy($grossMinor, RoundingMode::HalfUp);
+    }
+
+    /**
      * The credit half of a proration (a positive amount: the remainder of the
      * plan being left), lowered so the net comes out at no more
      * than what is still returnable.
@@ -280,6 +318,55 @@ final readonly class MoneyCollectedForThePeriod
             ->where('changed_at', '>=', $from)
             ->where('changed_at', '<', $until)
             ->sum('wallet_credit_minor');
+    }
+
+    private function aPaidChangeRepricedThePeriod(Subscription $subscription): bool
+    {
+        return DB::table('subscription_plan_changes')
+            ->where('subscription_id', $subscription->getKey())
+            ->where('changed_at', '>=', $subscription->current_period_start)
+            ->where('changed_at', '<', $subscription->current_period_end)
+            ->where(static fn (Builder $bought): Builder => $bought
+                ->whereNull('proration_invoice_id')
+                ->orWhereExists(static fn (Builder $invoice): Builder => $invoice
+                    ->selectRaw('1')
+                    ->from('invoices')
+                    ->whereColumn('invoices.id', 'subscription_plan_changes.proration_invoice_id')
+                    ->whereIn('invoices.status', [InvoiceStatus::Paid->value, InvoiceStatus::Refunded->value])))
+            ->exists();
+    }
+
+    /**
+     * The discount on the line that bought the current period, and that
+     * line's amount before it: `[discount, total - tax + discount]` in minor
+     * units, summed over the order's lines for the period an order bought.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function discountOnThePeriod(Subscription $subscription): array
+    {
+        $renewal = DB::table('invoice_items')
+            ->where('subscription_id', $subscription->getKey())
+            ->where('kind', InvoiceItemKind::Plan->value)
+            ->where('period_start', '>=', $subscription->current_period_start)
+            ->where('period_start', '<', $subscription->current_period_end)
+            ->orderByDesc('period_start')
+            ->first(['discount_minor', 'tax_minor', 'total_minor']);
+
+        if ($renewal !== null) {
+            return [
+                (int) $renewal->discount_minor,
+                (int) $renewal->total_minor - (int) $renewal->tax_minor + (int) $renewal->discount_minor,
+            ];
+        }
+
+        $order = DB::table('services')
+            ->join('order_items', 'order_items.id', '=', 'services.order_item_id')
+            ->where('services.subscription_id', $subscription->getKey())
+            ->selectRaw('coalesce(sum(order_items.discount_minor), 0) as discount_minor, coalesce(sum(order_items.total_minor - order_items.tax_minor + order_items.discount_minor), 0) as gross_minor')
+            ->first();
+
+        return [(int) ($order->discount_minor ?? 0), (int) ($order->gross_minor ?? 0)];
     }
 
     private function periodWasRenewed(Subscription $subscription): bool
