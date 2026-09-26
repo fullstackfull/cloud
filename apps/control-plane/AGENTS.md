@@ -26,36 +26,44 @@ layers:
 
 Between modules, one boundary is absolute and one is not. A module never
 reaches into another module's `Http`.
-`LayeringTest::no_module_calls_another_modules_http_layer` holds every `use`
-statement to that, refusing an import of the layer's namespace or one above
-it as well as of anything in it; the rule named below holds the rest, within
-the limits the next paragraph states. Reaching into another module's
-`Infrastructure` is not asserted as a module boundary, and it is common: most
-of it is one module using another's Eloquent model, as Orders prices a line
-with Catalog's `Plan`. It is not counted here, because nothing would keep a
-figure in this file true. (`Domain` code has a rule of its own about provider
-adapters, whichever module owns them.) The Http rule's docblock says why
-asserting the stricter boundary would leave a permanently red test. For new
-cross-module work, prefer the other module's `Domain` contracts and
-`Application` actions.
+`LayeringTest::no_module_calls_another_modules_http_layer` reads `use`
+statements, in the forms its docblock lists, and refuses an import of
+anything in that layer, of the layer's namespace or of one above it; the
+rule named below holds what it reads of the rest, within the limits the next
+paragraph states. Reaching into another module's `Infrastructure` is not
+asserted as a module boundary, and it is common: most of it is one module
+using another's Eloquent model, as Orders prices a line with Catalog's
+`Plan`. It is not counted here, because nothing would keep a figure in this
+file true. (`Domain` code has a rule of its own about provider adapters,
+whichever module owns them.) The Http rule's docblock says why asserting the
+stricter boundary would leave a permanently red test. For new cross-module
+work, prefer the other module's `Domain` contracts and `Application`
+actions.
 
 The import rules in `LayeringTest` read `use` statements and nothing else. A
 class named in a docblock, written inline by its full name, or held in a
-string is invisible to them, and so is one named through an import or a
-declared namespace at or above its layer: they see the namespace, not the
+string is invisible to them, and so is one named through an import of a
+namespace or through a declared namespace: they see the namespace, not the
 class. So
 `LayeringTest::no_module_names_another_modules_infrastructure_or_http_out_of_sight`
-holds that surface at zero for both layers: another module's `Infrastructure`
-class is named in a `use` line that names it, where the import rules see it,
-and its `Http` not at all. It reads names as they are written, and a string
+holds at zero, for both layers, what it reads of that surface: a name
+written out from `Lynomia` to the layer in a comment, in code or in a
+string; a qualified name in code through one of the file's imports; a string
 that stops at `Lynomia\`, at `Lynomia\Modules` or at another module's
-namespace for the rest to be chosen at runtime; a name split at any other
-point is not claimed. One thing crosses into another module's `Application`
-through a string, and no rule in `LayeringTest` holds it:
-`ReferenceTopologyValidator` builds `Monitoring` collector class names from a
-string. What these two paragraphs call a boundary or not asserted, the rules
-they name, and what they say the import rules see are checked against the
-code by `LayeringTest`.
+namespace for the rest to be chosen at runtime; and an import or a declared
+namespace at or above either layer. The scanner it runs,
+`crossingsOutOfSight()`, lists in its docblock exactly what it reads, and a
+name built any other way is not read. Attack has found two such ways that
+stand, a backslash written as an escape sequence and a name split at another
+point. They are what attack found, not the edge of what the rule misses.
+When this was written neither reached another module's `Infrastructure` or
+`Http` anywhere under `src/Modules`; the scanner's docblock gives the command
+that measures each and what it found. One thing crosses into another
+module's `Application` through a string, and no rule in `LayeringTest` holds
+it: `ReferenceTopologyValidator` builds `Monitoring` collector class names
+from a string. What these two paragraphs call a boundary or not asserted,
+the rules they name, and what they say the import rules see are checked
+against the code by `LayeringTest`.
 
 ## Running things
 

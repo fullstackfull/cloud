@@ -61,9 +61,10 @@ final class LayeringTest extends TestCase
     /**
      * The names a file imports, as every import rule here sees them.
      *
-     * That is top-level `use` statements and nothing else. A class named in a
-     * docblock, written inline by its fully-qualified name, or held in a string
-     * never reaches this list, so no rule built on it can see such a reference.
+     * That is the `use` statements read() reads, in the forms it lists, and
+     * nothing else. A class named in a docblock, written inline by its
+     * fully-qualified name, or held in a string never reaches this list, so no
+     * rule built on it can see such a reference.
      * The agent instructions say so, and
      * the_agent_instructions_say_only_what_the_import_rules_can_see() probes
      * this method to keep them saying so.
@@ -76,31 +77,38 @@ final class LayeringTest extends TestCase
     }
 
     /**
-     * A file read the way PHP resolves the names in it: what its top-level
-     * `use` statements import, the namespaces it declares, and every other
-     * token.
+     * A file read for the names in it: what its `use` statements import, the
+     * namespaces it declares, and every other token.
      *
-     * An import is read the way PHP reads one, so that no spelling of it is
-     * missed: `use A\B`, `use A\B as C`, the list `use A, B`, the group
-     * `use A\{B, C\D}`, `use function` and `use const`, with or without a
-     * leading backslash, over any number of lines, at the top level of a file
-     * or of a braced namespace block. Each is recorded by the full name it
-     * brings in, without its alias. A trait's `use` inside a class and a
+     * These are the imports it reads: `use A\B`, `use A\B as C`, the list
+     * `use A, B`, the group `use A\{B, C\D}`, `use function` and `use const`,
+     * with or without a leading backslash, over any number of lines, at the
+     * top level of a file or of a braced namespace block. Each is recorded by
+     * the full name it brings in and by the name the file knows it by: its
+     * alias, or else its last part. A trait's `use` inside a class and a
      * closure's `use (...)` are not imports and stay with the other tokens,
      * and so does a comment written inside a `use` statement.
      *
-     * A statement ends at a semicolon or at a closing tag, which PHP reads as
-     * one. A reader that stopped only at the semicolon swallowed the code
-     * after `use Lynomia\Modules ?>` into the import's name, where no rule
-     * read it; and after a namespace declaration ended that way, it took the
-     * next class's brace for a namespace's, and the trait `use` inside for an
-     * import.
+     * A `use` or `namespace` statement is read where one begins: at the start
+     * of the file, or after `;`, `{`, `}`, an opening or closing tag, or a
+     * label's colon. It ends at a semicolon or at a closing tag, which PHP
+     * reads as one. A reader that stopped only at the semicolon swallowed the
+     * code after `use Lynomia\Modules ?>` into the import's name, where no
+     * rule read it; and after a namespace declaration ended that way, it took
+     * the next class's brace for a namespace's, and the trait `use` inside for
+     * an import. One that did not know a label is a statement of its own never
+     * read `billing: use Lynomia\Modules\Billing;` at all.
+     *
+     * That is a list, not a boundary. It is what reading PHP's grammar and
+     * attacking this reader produced, and both of those entries were found by
+     * attack after the list had been called complete. A form it does not list
+     * is not read, and no rule built on it claims one.
      *
      * It is read through PHP's own tokenizer, because a hand-rolled reader
      * gets strings wrong - apostrophes in prose are enough - and a reader that
      * fails reports the clean tree one was hoping for.
      *
-     * @return array{imports: list<array{name: string, line: int}>, namespaces: list<array{name: string, line: int}>, rest: list<PhpToken>}
+     * @return array{imports: list<array{name: string, as: string, line: int}>, namespaces: list<array{name: string, line: int}>, rest: list<PhpToken>}
      */
     private static function read(string $source): array
     {
@@ -113,17 +121,24 @@ final class LayeringTest extends TestCase
         // One entry per brace still open: whether it opened a namespace block.
         $braces = [];
         $opensANamespace = false;
+
+        // The last two tokens that are neither whitespace nor a comment.
         $previous = null;
+        $beforePrevious = null;
 
         for ($i = 0; $i < $count; $i++) {
             $token = $tokens[$i];
-            $startsAStatement = $previous === null || $previous->is([';', '{', '}', T_OPEN_TAG, T_CLOSE_TAG]);
+            $startsAStatement = $previous === null
+                || $previous->is([';', '{', '}', T_OPEN_TAG, T_CLOSE_TAG])
+                // A label is an identifier and a colon, and a statement of its own.
+                || ($previous->is(':') && $beforePrevious !== null && $beforePrevious->is(T_STRING));
 
             if ($token->is(T_USE) && $startsAStatement && ! in_array(false, $braces, true)) {
                 $prefix = '';
                 $name = '';
                 $line = $token->line;
                 $alias = false;
+                $as = null;
 
                 for ($i++; $i < $count; $i++) {
                     $part = $tokens[$i];
@@ -134,10 +149,12 @@ final class LayeringTest extends TestCase
                         $alias = true;
                     } elseif ($part->is([',', '}', ';', T_CLOSE_TAG])) {
                         if ($name !== '') {
-                            $imports[] = ['name' => ltrim($prefix.$name, '\\'), 'line' => $line];
+                            $full = ltrim($prefix.$name, '\\');
+                            $imports[] = ['name' => $full, 'as' => $as ?? substr((string) strrchr('\\'.$full, '\\'), 1), 'line' => $line];
                         }
 
                         $name = '';
+                        $as = null;
                         $prefix = $part->is('}') ? '' : $prefix;
 
                         if ($part->is([';', T_CLOSE_TAG])) {
@@ -148,6 +165,7 @@ final class LayeringTest extends TestCase
                         $name = '';
                     } elseif ($part->is([T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_NS_SEPARATOR])) {
                         if ($alias) {
+                            $as = $part->text;
                             $alias = false;
                         } else {
                             $line = $name === '' ? $part->line : $line;
@@ -157,6 +175,7 @@ final class LayeringTest extends TestCase
                 }
 
                 $previous = $tokens[$i] ?? null;
+                $beforePrevious = null;
 
                 continue;
             }
@@ -181,6 +200,7 @@ final class LayeringTest extends TestCase
             $rest[] = $token;
 
             if (! $token->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                $beforePrevious = $previous;
                 $previous = $token;
             }
         }
@@ -566,35 +586,64 @@ final class LayeringTest extends TestCase
          * another module couples two features to a URL shape and drags request
          * parsing into the middle of a domain operation.
          *
-         * This reads `use` statements through importsIn(), and refuses every
-         * import that reaches another module's Http: one naming something in
-         * it, and one naming a namespace at or above it - the layer's own, the
-         * module's, `Lynomia\Modules` or `Lynomia` - aliased or not, because
-         * every controller can be named through the latter without its name
-         * appearing anywhere. PHP's import grammar is a closed set, and the
-         * check is shown each form of it, and each place and way a `use`
-         * statement can begin and end, before it reads the tree:
-         * importsTheHttpRuleMustRefuse() walks them. A module that wants
-         * another's Domain imports the Domain class it wants, not the module.
+         * This reads `use` statements through importsIn(), in the forms and
+         * places read() lists, and refuses each import it reads that reaches
+         * another module's Http: one naming something in it, and one naming a
+         * namespace at or above it - the layer's own, the module's,
+         * `Lynomia\Modules` or `Lynomia` - aliased or not, because every
+         * controller can be named through the latter without its name
+         * appearing anywhere. Before it reads the tree it is shown one file per
+         * form and place read() lists, through the same function the tree is
+         * read through: importsTheHttpRuleMustRefuse(). A form read() does not
+         * list is not claimed. A module that wants another's Domain imports the
+         * Domain class it wants, not the module.
          *
          * A controller named in full anywhere but a `use` statement - in a
          * docblock, inline, or in a string - or through a namespace the file
-         * declares at or above the layer is not an import. It is held at zero
-         * by no_module_names_another_modules_infrastructure_or_http_out_of_sight().
+         * declares at or above the layer is not an import. What
+         * no_module_names_another_modules_infrastructure_or_http_out_of_sight()
+         * reads of those, it holds at zero.
          */
-        $unseen = array_keys(array_filter(self::importsTheHttpRuleMustRefuse(), static fn (string $source): bool => self::importsReachingAnotherModulesHttp($source, 'Orders') === []));
+        $unseen = array_keys(array_filter(self::importsTheHttpRuleMustRefuse(), static fn (string $source): bool => self::whatTheHttpRuleFindsIn(self::asAFileOfOrders($source)) === []));
 
         $this->assertSame([], $unseen, "The Http rule cannot see these, so a clean result from it would mean nothing:\n  ".implode("\n  ", $unseen));
 
-        $refused = array_keys(array_filter(self::importsTheHttpRuleMustAllow(), static fn (string $source): bool => self::importsReachingAnotherModulesHttp($source, 'Orders') !== []));
+        $refused = array_keys(array_filter(self::importsTheHttpRuleMustAllow(), static fn (string $source): bool => self::whatTheHttpRuleFindsIn(self::asAFileOfOrders($source)) !== []));
 
         $this->assertSame([], $refused, "The Http rule refuses these, which reach no other module's Http:\n  ".implode("\n  ", $refused));
 
+        $violations = self::whatTheHttpRuleFindsIn($this->phpFiles(self::SRC.'/Modules'));
+
+        $this->assertSame([], $violations, "Cross-module reach into an HTTP layer:\n  ".implode("\n  ", $violations));
+    }
+
+    /**
+     * $source as the one file of a list the rules here read, placed in the
+     * Orders module, where every self-check's sources are written to stand.
+     *
+     * @return list<array{relative: string, source: string}>
+     */
+    private static function asAFileOfOrders(string $source): array
+    {
+        return [['relative' => 'Modules/Orders/Application/Actions/Planted.php', 'source' => $source]];
+    }
+
+    /**
+     * What the Http rule reports in $files, each given by its path under src/
+     * and its source, whose module is the directory under src/Modules. The
+     * rule reads the tree through this and its self-checks read their sources
+     * through it, so a change to how the tree is read is a change to what the
+     * self-checks are shown.
+     *
+     * @param  list<array{relative: string, source: string, ...}>  $files
+     * @return list<string>
+     */
+    private static function whatTheHttpRuleFindsIn(array $files): array
+    {
         $violations = [];
 
-        foreach ($this->phpFiles(self::SRC.'/Modules') as $file) {
-            $parts = explode('/', $file['relative']);
-            $own = $parts[1] ?? '';
+        foreach ($files as $file) {
+            $own = explode('/', $file['relative'])[1] ?? '';
 
             if ($own === '') {
                 continue;
@@ -605,7 +654,7 @@ final class LayeringTest extends TestCase
             }
         }
 
-        $this->assertSame([], $violations, "Cross-module reach into an HTTP layer:\n  ".implode("\n  ", $violations));
+        return $violations;
     }
 
     /**
@@ -632,16 +681,18 @@ final class LayeringTest extends TestCase
 
     /**
      * One file of the Orders module per way a `use` statement can reach
-     * Billing's Http. PHP's import grammar is a closed set, and this walks
-     * it: what is imported - a class, a function or a constant, or a
-     * namespace at each level from the layer's own up to `Lynomia` - and
-     * how: by its full name, with a leading backslash, under an alias, in
-     * another letter case, as a later name of a list whether or not an
-     * earlier one is aliased, or in a group - plain, typed or mixed, with the
-     * crossing in its first name or a later one. Then where the statement
-     * stands - after `<?php`, after another statement, after a comment,
-     * after a class, or inside a braced namespace block - and how it ends: at
-     * a semicolon, or at a closing tag, which PHP reads as one.
+     * Billing's Http, one per form and place read() lists: what is imported -
+     * a class, a function or a constant, or a namespace at each level from
+     * the layer's own up to `Lynomia` - and how: by its full name, with a
+     * leading backslash, under an alias, in another letter case, as a later
+     * name of a list whether or not an earlier one is aliased, or in a group -
+     * plain, typed or mixed, with the crossing in its first name or a later
+     * one. Then where the statement stands - after `<?php`, after another
+     * statement, after a comment, after a class, after a label, or inside a
+     * braced namespace block - and how it ends: at a semicolon, or at a
+     * closing tag, which PHP reads as one. That is read()'s list, not PHP's
+     * grammar shown whole; the label was missing from both until attack
+     * found it.
      *
      * @return array<string, string>
      */
@@ -803,13 +854,32 @@ final class LayeringTest extends TestCase
          * Infrastructure sentence be reworded into a lie while the Http one
          * kept it green.
          *
-         * Then every layer it calls a boundary must measure zero crossings,
-         * seen or unseen: a `use` statement naming something in the layer, and
-         * everything crossingsOutOfSight() reports, which includes an import
-         * or a declared namespace at or above it. No count is pinned: a layer
-         * is either a boundary, and then nothing crosses it, or it is
-         * disclosed as not asserted.
+         * Then every layer it calls a boundary must measure zero crossings of
+         * the two kinds the rules here read: a `use` statement naming something
+         * in the layer, and whatever crossingsOutOfSight() reports, which
+         * includes an import or a declared namespace at or above it. The count
+         * is shown one crossing of each kind in each layer first, so neither
+         * half of it can go missing while the tree stays clean. No count is
+         * pinned: a layer is either a boundary, and then nothing the rules read
+         * crosses it, or it is disclosed as not asserted.
          */
+        $uncounted = [];
+
+        foreach (self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS as $layer) {
+            $crossings = [
+                'a `use` statement naming a class in it' => "<?php\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\nuse Lynomia\\Modules\\Billing\\{$layer}\\Planted;\n",
+                'a class in it named in a docblock' => "<?php\n\nnamespace Lynomia\\Modules\\Orders\\Application\\Actions;\n\n/** {@see \\Lynomia\\Modules\\Billing\\{$layer}\\Planted} */\nfinal class Planted {}\n",
+            ];
+
+            foreach ($crossings as $way => $source) {
+                if (self::crossingsInto($layer, self::asAFileOfOrders($source)) === []) {
+                    $uncounted[] = sprintf('`%s`: %s', $layer, $way);
+                }
+            }
+        }
+
+        $this->assertSame([], $uncounted, "The count of crossings misses these, so a count of zero from it would mean nothing:\n  ".implode("\n  ", $uncounted));
+
         $said = self::whatTheInstructionsSayAboutEachLayer(self::agentInstructions());
 
         $unclear = [];
@@ -825,9 +895,10 @@ final class LayeringTest extends TestCase
         $this->assertSame([], $unclear, "AGENTS.md must say, for each layer, either \"A module never reaches into another module's `<Layer>`\" or \"Reaching into another module's `<Layer>` is not asserted\" - exactly one:\n  ".implode("\n  ", $unclear));
 
         $crossed = [];
+        $files = $this->phpFiles(self::SRC.'/Modules');
 
         foreach ($said['boundary'] as $layer) {
-            $crossings = $this->crossingsInto($layer);
+            $crossings = self::crossingsInto($layer, $files);
 
             if ($crossings !== []) {
                 $crossed[] = sprintf('`%s` is crossed %d times, first %s', $layer, count($crossings), $crossings[0]);
@@ -868,11 +939,12 @@ final class LayeringTest extends TestCase
     /**
      * The rules in this file that hold each layer the agent instructions may
      * call a boundary between modules: the import rule, and the rule for
-     * every other way of naming the layer. A layer with no entry is not held
-     * as a boundary, although part of it may be held: `Infrastructure` has
-     * none, because its `use` statements are allowed, while
-     * no_module_names_another_modules_infrastructure_or_http_out_of_sight()
-     * holds every other way of naming it. A layer with an entry is asserted.
+     * what it reads of the other ways of naming the layer. A layer with no
+     * entry is not held as a boundary, although part of it may be held:
+     * `Infrastructure` has none, because its `use` statements are allowed,
+     * while no_module_names_another_modules_infrastructure_or_http_out_of_sight()
+     * holds what it reads of the other ways of naming it. A layer with an
+     * entry is asserted.
      *
      * @var array<string, list<string>>
      */
@@ -1018,41 +1090,57 @@ final class LayeringTest extends TestCase
     public function no_module_names_another_modules_infrastructure_or_http_out_of_sight(): void
     {
         /*
-         * The import rules read `use` statements, so the one crossing they are
+         * The import rules read `use` statements, so the crossing they are
          * blind to is the one nobody can see: another module's class named in
-         * a docblock, written inline by its full name, held in a string,
-         * finished at runtime from a namespace prefix, or named through an
-         * import or a declared namespace at or above its layer, where the
-         * import rules see the namespace and never the class. The runtime
-         * prefix is the shape ReferenceTopologyValidator uses to reach
-         * Monitoring's collectors; that reach is into Application, which this
-         * rule does not cover, and it is named in the agent instructions
-         * instead.
+         * a docblock, written inline, held in a string, finished at runtime
+         * from a namespace prefix, or named through an import or a declared
+         * namespace, where the import rules see the namespace and never the
+         * class. The runtime prefix is the shape ReferenceTopologyValidator
+         * uses to reach Monitoring's collectors; that reach is into
+         * Application, which this rule does not cover, and it is named in the
+         * agent instructions instead.
          *
          * Reaching another module's Infrastructure is allowed and reaching its
-         * Http is not, but either is done in a `use` line naming the class,
-         * where the import rules see it, or not at all. This holds everything
-         * else crossingsOutOfSight() can read at zero for both layers. It is a
-         * property rather than a list: nothing is exempt, and there is no count
-         * to keep up to date. A name split at a point crossingsOutOfSight()
-         * does not list is not claimed.
+         * Http is not. This holds at zero, for both layers, what
+         * crossingsOutOfSight() reads. Its docblock says exactly what that is,
+         * and names the ways attack has found past it, each with the command
+         * that measures it in the tree and what that found when it was
+         * written. It is a property rather than a list of exemptions: nothing
+         * it reads is exempt, and there is no count to keep up to date.
          *
-         * The scanner is shown each shape it claims first - with each token
-         * read() must leave to it rather than take for an import - and a few
-         * it must not report. A scan that fails to parse a file does not go
-         * red; it reports the clean tree one was hoping for.
+         * The scanner is shown one source per shape its docblock says it reads
+         * first, through the same function the tree is read through - with
+         * each token read() must leave to it rather than take for an import -
+         * and a few it must not report. A scan that fails to parse a file does
+         * not go red; it reports the clean tree one was hoping for.
          */
-        $unseen = array_keys(array_filter(self::outOfSightCrossingsTheScanMustFind(), static fn (string $source): bool => self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) === []));
+        $unseen = array_keys(array_filter(self::outOfSightCrossingsTheScanMustFind(), static fn (string $source): bool => self::whatTheOutOfSightRuleFindsIn(self::asAFileOfOrders($source)) === []));
 
         $this->assertSame([], $unseen, "The scan cannot see these, so a clean result from it would mean nothing:\n  ".implode("\n  ", $unseen));
 
-        $reported = array_keys(array_filter(self::referencesTheScanMustNotReport(), static fn (string $source): bool => self::crossingsOutOfSight($source, 'Orders', self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) !== []));
+        $reported = array_keys(array_filter(self::referencesTheScanMustNotReport(), static fn (string $source): bool => self::whatTheOutOfSightRuleFindsIn(self::asAFileOfOrders($source)) !== []));
 
         $this->assertSame([], $reported, "The scan reports these, which are not crossings it exists to find:\n  ".implode("\n  ", $reported));
 
+        $violations = self::whatTheOutOfSightRuleFindsIn($this->phpFiles(self::SRC.'/Modules'));
+
+        $this->assertSame([], $violations, "Another module's Infrastructure or Http named where no import rule can see it. Import it with `use` (Infrastructure only) or do not name it:\n  ".implode("\n  ", $violations));
+    }
+
+    /**
+     * What the out-of-sight rule reports in $files, each given by its path
+     * under src/ and its source, whose module is the directory under
+     * src/Modules. The rule reads the tree through this and its self-checks
+     * read their sources through it, as the Http rule does.
+     *
+     * @param  list<array{relative: string, source: string, ...}>  $files
+     * @return list<string>
+     */
+    private static function whatTheOutOfSightRuleFindsIn(array $files): array
+    {
         $violations = [];
 
-        foreach ($this->phpFiles(self::SRC.'/Modules') as $file) {
+        foreach ($files as $file) {
             $own = explode('/', $file['relative'])[1] ?? '';
 
             foreach (self::crossingsOutOfSight($file['source'], $own, self::THE_LAYERS_THE_BOUNDARY_PARAGRAPH_COVERS) as $reference) {
@@ -1060,7 +1148,7 @@ final class LayeringTest extends TestCase
             }
         }
 
-        $this->assertSame([], $violations, "Another module's Infrastructure or Http named where no import rule can see it. Import it with `use` (Infrastructure only) or do not name it:\n  ".implode("\n  ", $violations));
+        return $violations;
     }
 
     /**
@@ -1100,19 +1188,21 @@ final class LayeringTest extends TestCase
     }
 
     /**
-     * Every place a module names another module's class in $layer: the `use`
-     * statements importsIn() reads, and everything it cannot.
+     * The crossings into another module's $layer that the rules here read, in
+     * $files: each import importsIn() reads that names something in the
+     * layer, and each name crossingsOutOfSight() reports.
      *
+     * @param  list<array{relative: string, source: string, ...}>  $files
      * @return list<string>
      */
-    private function crossingsInto(string $layer): array
+    private static function crossingsInto(string $layer, array $files): array
     {
         $found = [];
 
-        foreach ($this->phpFiles(self::SRC.'/Modules') as $file) {
+        foreach ($files as $file) {
             $own = explode('/', $file['relative'])[1] ?? '';
 
-            foreach ($this->importsIn($file['source']) as $import) {
+            foreach (self::importsIn($file['source']) as $import) {
                 if (self::reach($import, $own, $layer) === 'inside') {
                     $found[] = $file['relative'].' -> '.$import;
                 }
@@ -1129,32 +1219,53 @@ final class LayeringTest extends TestCase
     }
 
     /**
-     * Every name of another module's class in one of $layers that importsIn()
-     * cannot see, as "line: name".
+     * The names of another module's class in one of $layers that this reads
+     * and importsIn() does not, as "line: name".
      *
      * The file is read by read(), and what importsIn() takes from it is left
-     * out, so a `use` statement naming a class is not reported. Of every
-     * other token, these are read: comments, docblocks, inline names -
-     * qualified, fully qualified, or relative to the namespace, since in a
-     * file that declares none `Lynomia\...` and `namespace\Lynomia\...` name
-     * the same class `\Lynomia\...` does - and string literals, with single or
-     * double backslashes. A name is matched without regard to letter case,
-     * as PHP resolves it.
+     * out, so a `use` statement naming a class is not reported. This is what
+     * it reads, and all it reads:
      *
-     * An import or a declared namespace at or above one of the layers is
-     * reported as well, although it names no class: every class in the layer
-     * can be named through it, and none of those names is seen by anything.
+     * - each import and declared namespace read() finds that is at or above
+     *   one of the layers. It names no class, but every class in the layer
+     *   can be named through it, and none of those names is seen by anything.
+     * - in comments, docblocks, inline names and string literals, a name
+     *   written out from `Lynomia` through `Modules` and a module to the
+     *   layer, with one or two backslashes between each part. An inline name
+     *   is qualified, fully qualified, or relative to the namespace, since in
+     *   a file that declares none `Lynomia\...` and `namespace\Lynomia\...`
+     *   name the class `\Lynomia\...` does.
+     * - in code, a qualified name whose first part is the name one of the
+     *   file's imports is known by. PHP reads it as that import followed by
+     *   the rest, and so does this. A namespace declaration's own name is not
+     *   read that way, because PHP does not read it that way.
+     * - in string literals, a name that stops at `Lynomia\`, at
+     *   `Lynomia\Modules` or at another module's namespace, with or without a
+     *   trailing separator, leaving the module or the layer to runtime. It is
+     *   reported whatever the layer: no reading of the source can tell what
+     *   it reaches.
      *
+     * A name is matched without regard to letter case, as PHP resolves it.
      * The module named `Infrastructure` is a module, not a layer:
      * `Lynomia\Modules\Infrastructure\Domain\...` crosses into nobody's
      * Infrastructure layer, and is not reported.
      *
-     * A string that stops at `Lynomia\` or `Lynomia\Modules`, leaving the
-     * module to runtime, is reported whatever the layer, and so is one that
-     * stops at another module's namespace, leaving the layer to runtime - with
-     * or without a trailing separator: no reading of the source can tell what
-     * either reaches. A name split at any other point - mid-word, or right
-     * after `Lynomia` - is not claimed.
+     * That is a reading, not a boundary around every way of naming a class,
+     * and a name built any other way is not read. Attack has found two such
+     * ways that stand, named here because attack found them, not because
+     * they are the edge of what this misses. From apps/control-plane, when
+     * this was written:
+     *
+     * - A backslash spelled as an escape sequence in a string,
+     *   "Lynomia\x5cModules\x5c...". `grep -rnE --include=*.php
+     *   '\\(x5[cC]|134|u\{0*5[cC]\})' src/Modules` finds no line.
+     * - A name split at any other point: mid-word, or right after `Lynomia`
+     *   with the separator in the next piece. `grep -rniE --include=*.php
+     *   "['\"][^'\"]*\\\\(modules|http|infrastructure)\\b" src/Modules`, a
+     *   quoted string holding a backslash before one of those words, finds
+     *   two lines: ReferenceTopologyValidator's prefix, which reaches into
+     *   Application and is named in the agent instructions, and a sentence
+     *   in RequestLocale's docblock.
      *
      * @param  list<string>  $layers
      * @return list<string>
@@ -1166,6 +1277,7 @@ final class LayeringTest extends TestCase
 
         $read = self::read($source);
         $found = [];
+        $knownAs = [];
 
         foreach ([...$read['imports'], ...$read['namespaces']] as ['name' => $name, 'line' => $line]) {
             foreach ($layers as $layer) {
@@ -1177,7 +1289,33 @@ final class LayeringTest extends TestCase
             }
         }
 
+        foreach ($read['imports'] as ['name' => $name, 'as' => $as]) {
+            $knownAs[strtolower($as)] = $name;
+        }
+
+        $previous = null;
+
         foreach ($read['rest'] as $token) {
+            $through = $token->is(T_NAME_QUALIFIED) && ($previous === null || ! $previous->is(T_NAMESPACE))
+                ? $knownAs[strtolower((string) strstr($token->text, '\\', true))] ?? null
+                : null;
+
+            if ($through !== null) {
+                $resolved = $through.strstr($token->text, '\\');
+
+                foreach ($layers as $layer) {
+                    if (self::reach($resolved, $own, $layer) === 'inside') {
+                        $found[] = $token->line.': '.$token->text.', which is '.$resolved;
+
+                        break;
+                    }
+                }
+            }
+
+            if (! $token->is([T_WHITESPACE, T_COMMENT, T_DOC_COMMENT])) {
+                $previous = $token;
+            }
+
             $isString = $token->is([T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE]);
 
             if (! $isString && ! $token->is([T_COMMENT, T_DOC_COMMENT, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED, T_NAME_RELATIVE])) {
@@ -1207,12 +1345,12 @@ final class LayeringTest extends TestCase
     }
 
     /**
-     * One source per shape crossingsOutOfSight() claims to find, and per
-     * token read() must leave to it rather than take for an import - a
-     * comment inside a `use` statement, the code after one ended by a
-     * closing tag, a closure's `use`, a trait's `use` wherever the braces
-     * around it put it - each as it would appear in a file of the Orders
-     * module.
+     * One source per shape crossingsOutOfSight()'s docblock says it reads -
+     * per shape, not per combination of shapes - and per token read() must
+     * leave to it rather than take for an import - a comment inside a `use`
+     * statement, the code after one ended by a closing tag, a closure's
+     * `use`, a trait's `use` wherever the braces around it put it - each as
+     * it would appear in a file of the Orders module.
      *
      * @return array<string, string>
      */
