@@ -12,6 +12,7 @@ use Lynomia\Modules\Compute\Domain\Enums\SuspensionPolicy;
 use Lynomia\Modules\Dns\Infrastructure\DnsProviderFactory;
 use Lynomia\Modules\Ipam\Infrastructure\ReverseDnsProviderFactory;
 use Lynomia\Modules\Payments\Infrastructure\PaymentProviderRegistry;
+use Lynomia\Support\Environment\SettleTheApplicationEnvironment;
 use RuntimeException;
 
 /**
@@ -134,7 +135,8 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
     }
 
     /**
-     * Whether APP_ENV is present in the process environment.
+     * Whether APP_ENV is present in the process environment, or a console
+     * `--env=` argument named the environment.
      *
      * Read from the superglobals and getenv() rather than through `env()`,
      * which this codebase forbids outside config/ for a reason that matters
@@ -144,17 +146,20 @@ final class ProviderRegistryServiceProvider extends ServiceProvider
      * in production, which is the one place it exists for. The question being
      * asked is not "what is the configured environment" (that is
      * `$this->app->isProduction()`, already answered above) but "did anything
-     * out there say so at all".
+     * out there say so at all". A command line that says `--env=production`
+     * (in any casing; see SettleTheApplicationEnvironment) said so.
      */
     private function environmentWasNamed(): bool
     {
-        foreach ([$_SERVER['APP_ENV'] ?? null, $_ENV['APP_ENV'] ?? null, getenv('APP_ENV')] as $value) {
-            if (is_string($value) && $value !== '') {
-                return true;
-            }
+        if (SettleTheApplicationEnvironment::appEnvWasNamed()) {
+            return true;
         }
 
-        return false;
+        $argv = $_SERVER['argv'] ?? null;
+
+        return $this->app->runningInConsole()
+            && is_array($argv)
+            && SettleTheApplicationEnvironment::consoleArgument($argv) !== null;
     }
 
     /**

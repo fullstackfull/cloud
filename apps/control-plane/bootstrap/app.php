@@ -6,6 +6,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Bootstrap\LoadConfiguration;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
@@ -26,13 +27,14 @@ use Lynomia\Http\Middleware\TrustProxies;
 use Lynomia\Http\Responses\ApiError;
 use Lynomia\Http\Responses\ErrorCatalogue;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
+use Lynomia\Support\Environment\SettleTheApplicationEnvironment;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-return Application::configure(basePath: dirname(__DIR__))
+$app = Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
@@ -278,3 +280,13 @@ return Application::configure(basePath: dirname(__DIR__))
             )->toResponse($request);
         });
     })->create();
+
+/*
+ * F-16: settle `$app['env']` the moment configuration is loaded, before any
+ * service provider registers or boots. Every production guard compares
+ * `$app['env']`, which a console `--env=` argument overrides verbatim; see
+ * SettleTheApplicationEnvironment for what "settle" means.
+ */
+$app->afterBootstrapping(LoadConfiguration::class, (new SettleTheApplicationEnvironment)(...));
+
+return $app;

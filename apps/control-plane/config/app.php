@@ -31,11 +31,16 @@ return [
     /*
      * Normalised, and deliberately so. Every production guard in this platform
      * is an exact string comparison against `production`: `isProduction()` and
-     * `environment('production')` both compare this value verbatim, at 38 call
-     * sites that include the ones refusing a fake payment, compute, dedicated,
-     * hosting, DNS or backup driver, the one refusing to load the reference
-     * estate into a real database, and the one deciding whether the readiness
-     * ladder is enforced at all.
+     * `environment('production')` both compare `$app['env']` verbatim, at the
+     * call sites that refuse a fake payment, compute, dedicated, hosting, DNS or
+     * backup driver, the one refusing to load the reference estate into a real
+     * database, and the one deciding whether the readiness ladder is enforced
+     * at all. Laravel sets `$app['env']` from this value - except in a console
+     * process given `--env=`, where the flag overrides it verbatim.
+     * SettleTheApplicationEnvironment (run from bootstrap/app.php straight after
+     * configuration loads) normalises that flag the same way, keeps a configured
+     * production from being talked out of it, and writes the settled answer
+     * back here, so `$app['env']` and `config('app.env')` agree.
      *
      * An unset value already failed closed, on the default below. A
      * miscapitalised one did not: `APP_ENV=Production` is not `production`, so

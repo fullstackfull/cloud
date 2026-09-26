@@ -60,7 +60,9 @@ use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
  *     is a list waiting for the member it lacks.
  *   - IANA special-purpose blocks PHP's filter flags do not know about:
  *     benchmarking, the IETF protocol assignments, the retired 6to4 relay
- *     and site-local blocks, discard-only.
+ *     and site-local blocks, discard-only, and the SRv6 SID block `5f00::/16`
+ *     (RFC 9602, not globally reachable), which was accepted on every road
+ *     until the re-audit after round two named it.
  *   - Zone identifiers (`fe80::1%eth0`), which name an interface on this
  *     host.
  *   - The root label (`169.254.169.254.`) and the separators UTS-46 maps to
@@ -188,6 +190,7 @@ final readonly class EndpointPolicy
         ['100::', 64, 'the discard-only block'],
         ['2001::', 23, 'the IETF protocol assignments block, among them Teredo, whose addresses carry an IPv4 address inside them'],
         ['2002::', 16, '6to4, whose addresses carry an IPv4 address inside them'],
+        ['5f00::', 16, 'the SRv6 segment identifier block (RFC 9602), which is not globally reachable'],
         ['fe80::', 10, 'link-local'],
         ['fec0::', 10, 'the retired site-local block'],
         ['ff00::', 8, 'multicast'],

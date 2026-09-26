@@ -179,6 +179,11 @@ final class EverySpellingOfARefusedAddressIsStillThatAddressTest extends TestCas
         yield 'site-local' => ['fec0::1', 'reserved'];
         yield 'benchmarking, v6' => ['2001:2::1', 'reserved'];
         yield 'multicast, v6' => ['ff02::fb', 'reserved'];
+        // SRv6 segment identifiers (RFC 9602): not globally reachable, and
+        // accepted on every road until the re-audit after round two.
+        yield 'SRv6 SIDs, first address' => ['5f00::1', 'SRv6'];
+        yield 'SRv6 SIDs, last address' => ['5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff', 'SRv6'];
+        yield 'SRv6 SIDs, upper case and written out' => ['5F00:0:0:0:0:0:0:1', 'SRv6'];
 
         // Zone identifiers name an interface on this host.
         yield 'a zone on a link-local address' => ['fe80::1%eth0', 'zone identifier'];

@@ -255,9 +255,15 @@ final class OperatorAndRoleManagementTest extends TestCase
 
         $this->assertFalse($target->fresh()?->hasRole(Role::SuperAdmin->value));
 
-        // And the same person may still do the part they are authorised for.
+        // And the same person may still do the part they are authorised for:
+        // an operator whose roles, before and after, are all the delegate's
+        // own. (This used to take Noc off a Noc operator, a role the delegate
+        // does not hold; removal is now judged like granting - see
+        // RoleManagementCannotTakeWhatItCannotGiveTest.)
+        $colleague = $this->operator(Role::Support);
+
         $this->actingAs($delegate)
-            ->putJson('/api/admin/operators/'.$target->id.'/roles', [
+            ->putJson('/api/admin/operators/'.$colleague->id.'/roles', [
                 'roles' => [Role::Support->value],
             ])
             ->assertOk();
@@ -278,12 +284,14 @@ final class OperatorAndRoleManagementTest extends TestCase
     public function the_last_privileged_operator_cannot_be_stripped(): void
     {
         /*
-         * Escalation by demotion, which is the shape this rule is actually
-         * for. A delegate who holds `role.manage` cannot *grant* super admin —
-         * the rule above stops that — but taking it away is not granting
-         * anything, and a deployment with no administrator cannot get one
-         * back: the console bootstrap refuses the moment one exists, and every
-         * other path is behind a permission nobody would hold.
+         * Escalation by demotion. A delegate who holds `role.manage` cannot
+         * *grant* super admin — the rule above stops that — and cannot take
+         * it away either: removal is judged like granting. This test used to
+         * assert, as its "positive control", that a Noc delegate could strip
+         * Super Admin from a super admin the moment a spare existed (200).
+         * That pinned the defect the re-audit after round two measured: a
+         * lesser operator demoting the top authority. Both requests are now
+         * refused, spare or no spare, with the removal code.
          */
         $delegate = User::factory()->create();
         $delegate->syncRoles([Role::Noc->value]);
@@ -296,19 +304,28 @@ final class OperatorAndRoleManagementTest extends TestCase
         $this->actingAs($delegate)
             ->putJson('/api/admin/operators/'.$only->id.'/roles', ['roles' => [Role::Noc->value]])
             ->assertStatus(422)
-            ->assertJsonPath('error.code', 'rbac.last_administrator');
+            ->assertJsonPath('error.code', 'rbac.role_not_yours_to_remove');
 
         $this->assertTrue($only->fresh()?->hasRole(Role::SuperAdmin->value));
         $this->assertSame(1, User::query()->role(Role::SuperAdmin->value)->count());
 
-        /*
-         * The positive control: the same request succeeds the moment somebody
-         * else can administer the platform, so the refusal above is the
-         * last-admin rule and not a blanket "you may not touch a super admin".
-         */
         $spare = $this->operator();
 
         $this->actingAs($delegate)
+            ->putJson('/api/admin/operators/'.$only->id.'/roles', ['roles' => [Role::Noc->value]])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'rbac.role_not_yours_to_remove');
+
+        $this->assertTrue($only->fresh()?->hasRole(Role::SuperAdmin->value));
+
+        /*
+         * The positive control: a super admin may take the role from another
+         * super admin, so the refusal above is about who is asking and not a
+         * blanket "a super admin cannot be demoted". The last-administrator
+         * rule itself is exercised under the lock in
+         * RoleManagementCannotTakeWhatItCannotGiveTest.
+         */
+        $this->actingAs($spare)
             ->putJson('/api/admin/operators/'.$only->id.'/roles', ['roles' => [Role::Noc->value]])
             ->assertOk();
 

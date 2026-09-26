@@ -26,6 +26,13 @@ use Spatie\Permission\PermissionRegistrar;
  * not from the rows attached to it, so an operator editing that list would be
  * changing something that does not decide anything — and would reasonably
  * believe they had restricted it.
+ *
+ * A delegate (an operator holding `role.manage` without Super Admin) may
+ * neither add nor remove a permission they do not hold. The list is replaced
+ * as a whole, so checking only the new list let a support operator empty
+ * `infrastructure-admin` (measured: 200, remaining []). The removal side is
+ * judged against the role's permissions read under a lock on the role row,
+ * inside the transaction that makes the change.
  */
 final readonly class SetRolePermissions
 {
@@ -58,8 +65,19 @@ final readonly class SetRolePermissions
         }
 
         return $this->record->execute(
-            act: function () use ($role, $permissions): Role {
+            act: function () use ($actor, $role, $permissions): Role {
+                Role::query()->lockForUpdate()->findOrFail($role->getKey());
+
+                /** @var list<string> $before */
                 $before = $role->permissions()->pluck('name')->values()->all();
+
+                if (! $actor->hasRole(RoleEnum::SuperAdmin->value)) {
+                    foreach (array_diff($before, $permissions) as $permission) {
+                        if (! $actor->can($permission)) {
+                            throw RoleChangeRefusedException::becauseThePermissionIsNotYoursToRemove($permission);
+                        }
+                    }
+                }
 
                 $role->syncPermissions($permissions);
 

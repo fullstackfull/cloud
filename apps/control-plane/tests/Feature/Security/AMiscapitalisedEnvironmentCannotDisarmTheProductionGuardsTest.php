@@ -10,15 +10,22 @@ use Tests\TestCase;
 /**
  * Every production guard in this platform is an exact string comparison
  * against `production` - `$app->isProduction()` and `$app->environment(
- * 'production')` both compare `config('app.env')` verbatim. There are 38 such
- * call sites, and they include the ones that refuse a fake payment, compute,
- * dedicated, hosting, DNS or backup driver, the one that refuses to load the
- * reference estate into a real database, and the one that decides whether the
- * readiness ladder is enforced at all.
+ * 'production')` both compare `$app['env']` verbatim. They include the ones
+ * that refuse a fake payment, compute, dedicated, hosting, DNS or backup
+ * driver, the one that refuses to load the reference estate into a real
+ * database, and the one that decides whether the readiness ladder is enforced
+ * at all.
  *
  * So a single miscapitalised `APP_ENV=Production` disarmed all of them at
- * once: the value is never normalised, `'Production' !== 'production'`, and
+ * once: the value was never normalised, `'Production' !== 'production'`, and
  * every guard silently decided it was not in production.
+ *
+ * What this file reads, and all it reads: config/app.php's own expression for
+ * `app.env`, evaluated in isolation with APP_ENV set to each value. That is
+ * the APP_ENV channel only. Laravel copies that value into `$app['env']`,
+ * except in a console process given `--env=`, which overrides it; that second
+ * channel, and what the guards themselves answer, are pinned by
+ * AnEnvFlagCannotDisarmTheProductionGuardsTest, not here.
  *
  * An unset APP_ENV already failed closed, because config/app.php defaults to
  * `production`. A misspelt one did not. These tests pin both directions.

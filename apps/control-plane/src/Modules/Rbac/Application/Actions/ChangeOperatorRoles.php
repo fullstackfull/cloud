@@ -13,7 +13,7 @@ use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
 
 /**
- * Sets the roles an operator holds, and refuses the three ways that is an
+ * Sets the roles an operator holds, and refuses the four ways that is an
  * escalation.
  *
  * ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  * the role at the same time both see somebody else holding it.
  *
  * ---------------------------------------------------------------------------
- * The three refusals
+ * The four refusals
  * ---------------------------------------------------------------------------
  *
  *  - Your own account. Grant, use, revoke is the shortest escalation there is,
@@ -36,9 +36,20 @@ use Lynomia\Modules\Rbac\Domain\Exceptions\RoleChangeRefusedException;
  *    platform has", obtained through an account you create and then sign in as.
  *    A Super Admin holds everything by the Gate bypass, so this only ever binds
  *    the delegated case — which is exactly the case it is for.
+ *  - A role you do not hold, taken away. The mirror of the rule above, and
+ *    the one that was missing: only the new set was checked, so a support
+ *    operator holding `role.manage` could set a super admin's roles to
+ *    [support] and demote the top authority (measured: 200), stopped only
+ *    when the target happened to be the last one. Judged against the target's
+ *    roles read under the row lock, so it sees what is actually removed.
+ *    Together the two rules mean a delegate can change only an operator whose
+ *    roles, before and after, are all roles the delegate holds.
  *  - The last administrator. The console bootstrap refuses once a privileged
  *    operator exists, so a deployment that loses its last one has no supported
- *    way back.
+ *    way back. With the removal rule in place only a super admin can take the
+ *    role away, and never from themselves, so what this binds is the race:
+ *    two super admins demoting each other at once, each checked before the
+ *    other's change landed. The locked read below settles it.
  */
 final readonly class ChangeOperatorRoles
 {
@@ -60,11 +71,14 @@ final readonly class ChangeOperatorRoles
         $this->assertEveryRoleIsTheActorsToGive($actor, $roles);
 
         return $this->record->execute(
-            act: function () use ($target, $roles): User {
+            act: function () use ($actor, $target, $roles): User {
                 /** @var User $locked */
                 $locked = User::query()->lockForUpdate()->findOrFail($target->getKey());
 
+                /** @var list<string> $before */
                 $before = $locked->getRoleNames()->values()->all();
+
+                $this->assertEveryRemovedRoleIsTheActorsToTake($actor, $before, $roles);
 
                 $this->assertSomebodyIsStillInCharge($locked, $roles);
 
@@ -102,6 +116,25 @@ final readonly class ChangeOperatorRoles
         foreach ($roles as $role) {
             if (! $actor->hasRole($role)) {
                 throw RoleChangeRefusedException::becauseTheRoleIsNotYoursToGrant($role);
+            }
+        }
+    }
+
+    /**
+     * @param  list<string>  $before  the target's roles, read under the lock
+     * @param  list<string>  $roles  the new set
+     *
+     * @throws RoleChangeRefusedException
+     */
+    private function assertEveryRemovedRoleIsTheActorsToTake(User $actor, array $before, array $roles): void
+    {
+        if ($actor->hasRole(Role::SuperAdmin->value)) {
+            return;
+        }
+
+        foreach (array_diff($before, $roles) as $role) {
+            if (! $actor->hasRole($role)) {
+                throw RoleChangeRefusedException::becauseTheRoleIsNotYoursToRemove($role);
             }
         }
     }
