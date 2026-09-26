@@ -27,22 +27,33 @@ final readonly class BackupNotificationKey
      * second event they are owed a word about.
      *
      * A restore whose provider call never returned a handle has none to scope
-     * to, and needs none: it lands in `NeedsReview`, which nothing transitions
-     * out of, so that row can produce this message at most once ever.
+     * to. It lands in `NeedsReview`, and since a person can now settle that
+     * row and the customer can restore it again (F-09), a second handle-less
+     * attempt is a second event: such an attempt is scoped to when it started
+     * instead, which is fixed for the life of the attempt and is not a clock
+     * read at the moment of sending.
      */
-    public static function restore(string $backupId, ?string $restoreTaskId, string $outcome): string
-    {
+    public static function restore(
+        string $backupId,
+        ?string $restoreTaskId,
+        string $outcome,
+        ?string $attemptStartedAt = null,
+    ): string {
         $task = trim((string) $restoreTaskId);
 
-        return sprintf('restore:%s:%s:%s', $backupId, $task === '' ? 'no-task' : $task, $outcome);
+        if ($task === '') {
+            $task = $attemptStartedAt === null ? 'no-task' : 'no-task@'.$attemptStartedAt;
+        }
+
+        return sprintf('restore:%s:%s:%s', $backupId, $task, $outcome);
     }
 
     /**
      * A backup's own outcome. One row, one creation task, one of these.
      *
-     * Deliberately not scoped to `provider_task_id`: a verification overwrites
-     * that column, so a key built from it would not be stable for the life of
-     * the row.
+     * Deliberately not scoped to `provider_task_id`. A verification used to
+     * overwrite that column, so rows exist whose value is not the backup's
+     * own task, and a key built from it would not be stable for them.
      */
     public static function backup(string $backupId, string $outcome): string
     {
@@ -53,19 +64,36 @@ final readonly class BackupNotificationKey
      * The platform cannot account for this backup at all.
      *
      * Scoped to the row and nothing else, and that is the canonical identity
-     * rather than a convenient one. Two facts from the model make it so:
-     * `NeedsReview` is terminal, and every backup run creates its own row, so
-     * one row reaches this outcome at most once in its life.
+     * rather than a convenient one. Two facts from the model make it so: a
+     * backup that went to review is never settled out of it
+     * (`BackupState::afterReview()` has no answer for one), and every backup
+     * run creates its own row, so one row reaches this outcome at most once in
+     * its life.
      *
      * Scoping it to the provider task would be weaker, not stronger. A
-     * verification overwrites `provider_task_id`, so it is not stable for the
-     * life of the row — and the route that matters most here, a start call
-     * that never answered, has no task id at all. That is what indeterminate
+     * verification used to overwrite `provider_task_id`, so it is not stable
+     * on older rows — and the route that matters most here, a start call that
+     * never answered, has no task id at all. That is what indeterminate
      * means.
      */
     public static function needsReview(string $backupId): string
     {
         return self::backup($backupId, 'needs_review');
+    }
+
+    /**
+     * A verification of this archive the platform lost track of.
+     *
+     * Not the backup's own needs-review key: the backup succeeded, and a
+     * verification that went to review can be settled by a person and a later
+     * one lost again. Scoped to the verification task, which every
+     * verification that reaches the poller has.
+     */
+    public static function verificationNeedsReview(string $backupId, ?string $verificationTaskId): string
+    {
+        $task = trim((string) $verificationTaskId);
+
+        return self::backup($backupId, 'verification_needs_review:'.($task === '' ? 'no-task' : $task));
     }
 
     /**

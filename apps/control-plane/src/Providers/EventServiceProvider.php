@@ -35,6 +35,7 @@ use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobStarted;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
 use Lynomia\Modules\Provisioning\Domain\Events\ServiceStatusChanged;
 use Lynomia\Modules\SharedHosting\Application\Listeners\InstallWordPressOnceTheAccountExists;
+use Lynomia\Modules\Subscriptions\Application\Listeners\EndTheSubscriptionWithItsService;
 use Lynomia\Modules\Subscriptions\Application\Listeners\EnforceServiceStateForSubscription;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettlement;
 use Lynomia\Modules\Subscriptions\Application\Listeners\ReviveSubscriptionOnRenewalPayment;
@@ -60,7 +61,9 @@ use Lynomia\Modules\Subscriptions\Domain\Events\SubscriptionStatusChanged;
  *                               on a first purchase's order (F-19)
  *     ServiceStatusChanged,   → keep the order in step with what it bought:
  *     ProvisioningJobStarted,   queued, being built, active, suspended, under
- *     …NeedsReview, …Failed     review, refused, ended (F-19)
+ *     …NeedsReview, …Failed     review, refused, ended (F-19); and a service
+ *                               that has ended ends the subscription that
+ *                               paid for it (I-1)
  *
  * The settlement event in the middle is what lets a zero-total order reach
  * fulfilment: it owes nothing, so it produces no invoice, and a chain that
@@ -144,6 +147,11 @@ final class EventServiceProvider extends BaseEventServiceProvider
          */
         ServiceStatusChanged::class => [
             MoveTheOrderWithWhatItBought::class,
+
+            // A service that has ended — by any door, or by the destroy
+            // worker — is not billed for again (I-1). Synchronous and
+            // never throwing, for the same reason as the order's.
+            EndTheSubscriptionWithItsService::class,
         ],
         ProvisioningJobStarted::class => [
             MoveTheOrderWithWhatItBought::class,

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Contracts\FileLevelBackupProvider;
 use Lynomia\Modules\Backups\Domain\Enums\BackupFileKind;
-use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupFileRefusedException;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
@@ -67,18 +67,31 @@ final readonly class RestoreBackupFiles
         $paths = $this->unique($paths);
         $this->assertEachIsAFileOrDirectory($backup, $provider, $paths);
 
-        $restore = BackupFileRestore::query()->create([
-            'backup_id' => $backup->getKey(),
-            'customer_id' => $backup->customer_id,
-            'service_id' => $backup->service_id,
-            'virtual_machine_id' => $machine->getKey(),
-            'state' => FileRestoreState::Requested,
-            'node_name' => $backup->node_name,
-            'paths' => array_map(static fn (BackupPath $p): string => $p->value, $paths),
-            'path_count' => count($paths),
-            'requested_by_user_id' => $userId,
-            'started_at' => now(),
-        ]);
+        /*
+         * The in-flight guard again and the row that makes this restore
+         * visible to the next one, as one step under the machine's lock — the
+         * same lock RestoreServiceBackup takes — so a file restore and a
+         * whole-machine restore of one machine cannot both pass their guards
+         * before either is written.
+         */
+        $restore = DB::transaction(function () use ($backup, $machine, $paths, $userId): BackupFileRestore {
+            VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->firstOrFail();
+
+            $this->assertRestorable($backup, $machine);
+
+            return BackupFileRestore::query()->create([
+                'backup_id' => $backup->getKey(),
+                'customer_id' => $backup->customer_id,
+                'service_id' => $backup->service_id,
+                'virtual_machine_id' => $machine->getKey(),
+                'state' => FileRestoreState::Requested,
+                'node_name' => $backup->node_name,
+                'paths' => array_map(static fn (BackupPath $p): string => $p->value, $paths),
+                'path_count' => count($paths),
+                'requested_by_user_id' => $userId,
+                'started_at' => now(),
+            ]);
+        });
 
         try {
             $operation = $provider->startFileRestore(
@@ -122,17 +135,17 @@ final readonly class RestoreBackupFiles
             throw BackupFileRefusedException::notAvailable((string) $backup->getKey(), 'the service is not active');
         }
 
-        $wholeMachine = Backup::query()
-            ->where('virtual_machine_id', $machine->getKey())
-            ->where('state', BackupState::Restoring->value)
-            ->exists();
-
         // In flight, or in review: a restore nobody has confirmed the end of
         // may still be writing, and a second over it cannot be reasoned
         // about afterwards. A person settles the first (see the runbook).
+        // That holds for a whole-machine restore as much as for a file one;
+        // reading only `restoring` for it let a whole-machine restore that
+        // went to review release the machine (F-09).
+        $wholeMachine = Backup::query()->restoreUnsettledOn((string) $machine->getKey())->exists();
+
         $files = BackupFileRestore::query()
             ->where('virtual_machine_id', $machine->getKey())
-            ->whereIn('state', [FileRestoreState::Requested->value, FileRestoreState::Running->value, FileRestoreState::NeedsReview->value])
+            ->whereIn('state', FileRestoreState::holdingTheMachine())
             ->exists();
 
         if ($wholeMachine || $files) {

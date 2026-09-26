@@ -8,6 +8,7 @@ use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\DTOs\RemoteBackup;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -230,7 +231,26 @@ final readonly class ReconcileBackupInventory
             return false;
         }
 
-        $row->transitionTo(BackupState::Deleted, ['provider_deleted_at' => now()]);
+        try {
+            $row->transitionTo(BackupState::Deleted, ['provider_deleted_at' => now()]);
+        } catch (IllegalBackupTransitionException $e) {
+            if (! $e->wasRaced()) {
+                throw $e;
+            }
+
+            /*
+             * The rows were loaded before the listing call, and the retention
+             * sweep's DeleteBackupAtProvider confirms the same `deleting` rows.
+             * One that somebody else settled meanwhile is not this sweep's to
+             * settle again, and a refusal must not abort the rest of the run
+             * — it used to escape and end `backups:reconcile-inventory` for
+             * every machine after this one. The row is read again, so what is
+             * reported about it below is what it now is.
+             */
+            $row->refresh();
+
+            return false;
+        }
 
         return true;
     }

@@ -10,6 +10,9 @@ use Illuminate\Validation\Rule;
 /**
  * Deliberately thin.
  *
+ * An IPv4 block is expanded into the address rows the allocator hands out as
+ * it is registered (RegisterSubnet says how, and what is refused).
+ *
  * Whether the block parses, which version it is, how long its prefix is and
  * whether the gateway falls inside it are all answered by the Cidr value
  * object in the action — the same one IpAllocator reads the block with. A
@@ -68,6 +71,17 @@ final class RegisterSubnetRequest extends FormRequest
             'cidr' => ['required', 'string', 'max:64'],
             'gateway' => ['nullable', 'string', 'max:64'],
             'network_id' => ['nullable', 'string', Rule::exists('networks', 'id')],
+            /*
+             * Whether the block is expanded into address rows the allocator
+             * hands out (the default), or recorded as held space only. Which
+             * addresses are reserved, and whether they are inside the block,
+             * is the action's question for the same reason the block's shape
+             * is: the seeder parses them with the value object the allocator
+             * reads.
+             */
+            'allocatable' => ['sometimes', 'boolean'],
+            'reserved_addresses' => ['sometimes', 'array', 'max:256'],
+            'reserved_addresses.*' => ['string', 'max:64'],
         ];
     }
 }

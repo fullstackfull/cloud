@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\SharedHosting\Application\Actions;
 
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Provisioning\Application\Actions\EndAnUnbuiltService;
 use Lynomia\Modules\Provisioning\Application\Actions\TransitionService;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
@@ -22,12 +23,20 @@ use Lynomia\Modules\SharedHosting\Infrastructure\Models\HostingAccount;
  * Ending a shared-hosting service: the account at the panel, then the service.
  *
  * TerminateHostingAccount ends an account and says nothing about the service
- * that was bought, which is right for the hosting-account route — an operator
- * clearing out an account — and was wrong for everything that ends a
- * *service*. The retention sweep ended the account and left the service
- * `suspended` beside it for ever (seen on F-18's branch), and the service
- * route did not reach hosting at all: it sent every service down the VPS path,
- * which refused a hosting service for having no virtual machine.
+ * that was bought. That was wrong for everything that ends a *service* — the
+ * retention sweep ended the account and left the service `suspended` beside
+ * it for ever (seen on F-18's branch), and the service route did not reach
+ * hosting at all: it sent every service down the VPS path, which refused a
+ * hosting service for having no virtual machine.
+ *
+ * It was wrong for the hosting-account route too, which this file used to
+ * call right. An account deleted at the panel is a site that no longer
+ * exists, and the re-audit after round two measured that route leaving
+ * `service=active order=active sub=active` behind it (I-1): the portal said
+ * the purchase was live and the renewal sweep went on billing it. That route
+ * now calls afterTheAccountEnded() once the panel has confirmed the delete,
+ * so the service ends with its account whichever door was used, and ending
+ * the service ends its subscription (EndTheSubscriptionWithItsService).
  *
  * So this is the service-shaped half. What it adds is about the service —
  * ending it once the account has gone, refusing one that has already ended,
@@ -112,5 +121,47 @@ final readonly class EndHostingService
         $this->transitionService->execute($service, ServiceStatus::Terminated);
 
         return $terminated;
+    }
+
+    /**
+     * The service half, for a caller that ended the account itself.
+     *
+     * The hosting-account route terminates through TerminateHostingAccount,
+     * under F-18's guard and its own controller gate, and then asks this. The
+     * account is gone from the panel by then, so the service it served has
+     * ended, and saying otherwise would keep a site that does not exist on
+     * the customer's list and on the renewal sweep's.
+     *
+     * Nothing to do for an account that belongs to no service, or whose
+     * service has already ended. A service the state machine cannot end from
+     * where it stands — one still PROVISIONING, whose pending account an
+     * operator forced out — is left for the build to settle and logged, not
+     * forced: the build's own outcome moves it next.
+     *
+     * @return Service|null the service that ended here, or null when there was none to end
+     */
+    public function afterTheAccountEnded(HostingAccount $account): ?Service
+    {
+        if ($account->status !== HostingAccountStatus::Terminated || $account->service_id === null) {
+            return null;
+        }
+
+        $service = Service::query()->find($account->service_id);
+
+        if ($service === null || $service->status === ServiceStatus::Terminated) {
+            return null;
+        }
+
+        if (! $this->serviceStates->canTransition($service->status, ServiceStatus::Terminated)) {
+            Log::warning('A hosting account was terminated while its service cannot end from where it stands.', [
+                'hosting_account_id' => (string) $account->getKey(),
+                'service_id' => (string) $service->getKey(),
+                'status' => $service->status->value,
+            ]);
+
+            return null;
+        }
+
+        return $this->transitionService->execute($service, ServiceStatus::Terminated);
     }
 }

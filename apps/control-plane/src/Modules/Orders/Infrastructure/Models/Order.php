@@ -110,6 +110,18 @@ class Order extends Model
     }
 
     /**
+     * Every invoice raised against this order. CancelOrder::isCancellable
+     * reads this relation when it is loaded, so a list of orders asks for
+     * their invoices in one query rather than one per order.
+     *
+     * @return HasMany<Invoice, $this>
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
+    /**
      * The services this order brought into being, once it is paid.
      *
      * @return HasMany<Service, $this>

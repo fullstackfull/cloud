@@ -12,6 +12,7 @@ use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupNotConfiguredException;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -138,7 +139,9 @@ final readonly class RequestServiceBackup
                 retentionDays: $retentionDays,
             ));
         } catch (BackupProviderException $e) {
-            $backup->transitionTo(
+            // A row this request created a moment ago and nothing else moves
+            // while it is `requested` without a task; see moveOwnRow().
+            $this->moveOwnRow($backup, fn () => $backup->transitionTo(
                 $e->isIndeterminate() ? BackupState::NeedsReview : BackupState::Failed,
                 [
                     /*
@@ -154,17 +157,38 @@ final readonly class RequestServiceBackup
                     'failure_reason' => $this->redactor->redactString($e->getMessage()),
                     'finished_at' => $e->isIndeterminate() ? null : now(),
                 ],
-            );
+            ));
 
             return $this->announceStartOutcome($backup->refresh());
         }
 
-        $backup->transitionTo(BackupState::Running, [
+        $this->moveOwnRow($backup, fn () => $backup->transitionTo(BackupState::Running, [
             'provider_task_id' => $operation->taskId,
             'started_at' => now(),
-        ]);
+        ]));
 
         return $backup->refresh();
+    }
+
+    /**
+     * Move the row this request created, and accept that somebody else did.
+     *
+     * Every transition is a compare-and-set ({@see Backup::transitionTo()}).
+     * Nothing in this module moves a `requested` row that has no task yet —
+     * the poller skips it, and a deletion refuses a row still being written
+     * — so a race here would be something new; if one comes, the row as it
+     * now stands is the answer, rather than a refusal escaping to the
+     * customer's request.
+     */
+    private function moveOwnRow(Backup $backup, callable $move): void
+    {
+        try {
+            $move();
+        } catch (IllegalBackupTransitionException $e) {
+            if (! $e->wasRaced()) {
+                throw $e;
+            }
+        }
     }
 
     /**

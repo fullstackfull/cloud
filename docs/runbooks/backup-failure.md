@@ -40,6 +40,18 @@ A backup that exists but will not restore is worse than a missing one, because
 the customer has been told they are protected. Test the restore into a scratch
 VM rather than over the customer's live one — always, without exception.
 
+## A restore or verification stuck in review
+
+A row in `needs_review` whose `quarantined_from` is `restoring` or `verifying` is an
+operation the platform stopped watching after `backups.max_poll_hours`. The archive is
+not the problem; the platform's knowledge is.
+
+1. `GET /api/admin/backups/needs-review` for the row, its task id and when it started.
+2. Read that task's log on the hypervisor or the datastore. A restore may still be
+   running: while the row is in review, no other restore of that machine will start.
+3. `POST /api/admin/backups/{backup}/resolve` with `verdict` `completed` or `failed` and
+   the `evidence` you read. It is audited, and the customer is told the outcome.
+
 ## What not to do
 
 Do not mark a backup successful in Lynomia to clear a report. The backup screen
