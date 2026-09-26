@@ -108,6 +108,6 @@ independent re-audit follows. The specification is
 | 05 | F-16 `--env` disarms production guards; operator RBAC (role removal, permission emptying, invite atomicity, bootstrap promotion); F-03 test; EndpointPolicy 5f00::/16 | upheld with reservations; merged `a607ea2`, full suite 5,199/5,199, 628 suites `skipped="0"`, exit 0 | `31c8357` |
 | 06 | F-26 empty reserved-zone default and preflight wording; I-3 customer blamed for operator misconfiguration | upheld with reservations; sentences narrowed in `862f416`; merged `306aa57` | `862f416` |
 | 07 | F-20 false rebuild label; F-42 vitest under load; F-21 gate budget | verifying | `56d7847` |
-| 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | fixing | |
+| 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | verifying | `7faf903` |
 | 09 | F-38 `tofu validate` on no configuration; validator empty subjects and stale docstrings; CI grep exit codes | fixing | |
 | 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | queued | |
