@@ -108,6 +108,10 @@ independent re-audit follows. The specification is
 | 05 | F-16 `--env` disarms production guards; operator RBAC (role removal, permission emptying, invite atomicity, bootstrap promotion); F-03 test; EndpointPolicy 5f00::/16 | upheld with reservations; merged `a607ea2`, full suite 5,199/5,199, 628 suites `skipped="0"`, exit 0 | `31c8357` |
 | 06 | F-26 empty reserved-zone default and preflight wording; I-3 customer blamed for operator misconfiguration | upheld with reservations; sentences narrowed in `862f416`; merged `306aa57`, full suite 5,233/5,233, 631 suites `skipped="0"`, exit 0 | `862f416` |
 | 07 | F-20 false rebuild label; F-42 vitest under load; F-21 gate budget | upheld with reservations; follow-up `46e5a17`; merged `0a4ffda`: vitest 642/642, tsc, eslint, Architecture 219/219 | `46e5a17` |
-| 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | upheld with reservations (follow-up verified); merged `65965e7`, Architecture 258/258; full suite running | `584ce03` |
+| 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | upheld with reservations (follow-up verified); merged `65965e7`, full suite 5,296/5,296, 638 suites `skipped="0"`, exit 0 | `584ce03` |
 | 09 | F-38 `tofu validate` on no configuration; validator empty subjects and stale docstrings; CI grep exit codes | upheld after four repairs (last delta checked by the coordinator); merged `e423c17`: every self-test, safety gate 10/10, make infra-validate 0 | `4d23a55` |
 | 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | upheld with reservations; follow-up `b1147a9` checked; merged `5cbd39d`: Architecture+Api+Simulation+Compute 633/633, pint, openapi | `b1147a9` |
+
+PHPStan could not be run in this environment: its dependencies download from
+`api.github.com` and `codeload.github.com`, which the environment's network policy
+refuses (measured 2026-09-26). It runs in CI (`ci.yml`, "Static analysis").
