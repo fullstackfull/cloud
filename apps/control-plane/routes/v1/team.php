@@ -41,8 +41,22 @@ Route::get('team/invitations', [TeamController::class, 'invitations'])->name('te
  * and the router's priority sort runs any ThrottleRequests before `customer`
  * has resolved it — the budget silently became one per administrator.
  * ThrottleAfterAccountResolution runs the same limiter where it is declared.
- * TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest holds every route
- * that uses InvitationMailer to both halves of that.
+ * TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest holds both halves
+ * of that for these two routes by name, and for any other route whose
+ * controller method uses InvitationMailer in a form its scan reads: a
+ * parameter of that type; the class's name, in code or in a string; or a
+ * property of that type, on the method's class or the routed one, read with
+ * `->`, `?->` or `::`, with whitespace and comments beside the operator
+ * dropped and a name that is an expression counted. Its docblock lists those
+ * forms, which of them its fixture holds, and the escapes attack has found —
+ * a send reached through a helper, a service or a job, among others. Those
+ * escapes are not the boundary; nobody has established one. What was
+ * measured is the occupancy: when this was written, outside the mailer's own
+ * two files the only use of it in src/ and app/ was TeamController's typed
+ * `$mailer`, read only as `$this->mailer->send(…)` in these two routes'
+ * actions (`grep -rlw -e InvitationMailer -e InvitationMail src app`: 3
+ * files; `grep -rn -e '->mailer' src app`: 2 lines), so use outside the
+ * scan's forms was 0 sites.
  */
 Route::post('team/invitations', [TeamController::class, 'invite'])
     ->middleware(ThrottleAfterAccountResolution::class.':team-invitations')

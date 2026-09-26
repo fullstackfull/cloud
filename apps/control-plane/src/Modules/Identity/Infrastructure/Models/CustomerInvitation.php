@@ -115,6 +115,20 @@ class CustomerInvitation extends Model
     }
 
     /**
+     * The earliest moment the account that made this offer may mail its
+     * address again — `teams.invitation_cooldown_minutes` after the last mail.
+     *
+     * Counted from the row's creation when it recorded no send, because a
+     * null read as "never mailed" would be no wait at all.
+     */
+    public function mailableAgainAt(): CarbonImmutable
+    {
+        $minutes = max(1, (int) config('teams.invitation_cooldown_minutes', 10));
+
+        return CarbonImmutable::instance($this->last_sent_at ?? $this->created_at)->addMinutes($minutes);
+    }
+
+    /**
      * @return BelongsTo<Customer, $this>
      */
     public function customer(): BelongsTo
