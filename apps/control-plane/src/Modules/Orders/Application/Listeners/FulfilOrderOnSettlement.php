@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Orders\Application\Listeners;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Billing\Application\Actions\CreditWhatACancelledOrderPaid;
 use Lynomia\Modules\Billing\Domain\Events\OrderFinanciallySettled;
 use Lynomia\Modules\Catalog\Application\Actions\RedeemCoupon;
 use Lynomia\Modules\Catalog\Application\DTOs\CouponContext;
@@ -59,7 +60,8 @@ use Throwable;
  * been paid — once it has, it may already be building, active or further
  * along, and asking for `paid` again would be an illegal move backwards rather
  * than the no-op it used to be. An order that has ended since is not fulfilled
- * a second time. StartSubscription refuses to create a second subscription for
+ * a second time, and an order that was cancelled is not fulfilled at all: what
+ * it took is credited back to the customer's wallet (F-05). StartSubscription refuses to create a second subscription for
  * a line that has one, and ProvisionOrderedService returns the existing service
  * rather than a second machine — so a redelivered webhook, a retried job, or a
  * settlement that ran twice all produce one fulfilment.
@@ -84,6 +86,7 @@ final class FulfilOrderOnSettlement implements ShouldQueue
         private readonly RedeemCoupon $redeemCoupon,
         private readonly ProvisionOrderedService $provisionService,
         private readonly KeepTheOrderInStepWithItsServices $follow,
+        private readonly CreditWhatACancelledOrderPaid $creditCancelled,
     ) {}
 
     public function handle(OrderFinanciallySettled $event): void
@@ -108,6 +111,12 @@ final class FulfilOrderOnSettlement implements ShouldQueue
                 'status' => $order->status->value,
                 'invoice_id' => $event->invoiceId,
             ]);
+
+            return;
+        }
+
+        if ($order->status === OrderStatus::Cancelled) {
+            $this->handBackWhatACancelledOrderPaid($order, $event);
 
             return;
         }
@@ -147,6 +156,27 @@ final class FulfilOrderOnSettlement implements ShouldQueue
         }
 
         $this->follow->execute((string) $order->getKey(), 'every line of the order was handed to provisioning');
+    }
+
+    /**
+     * A settlement that reached an order the customer had already withdrawn.
+     *
+     * CANCELLED is terminal, so the move to PAID below would be refused on
+     * every retry and the job would end in failed_jobs with the money kept
+     * (F-05). Nothing is delivered for a withdrawn order; whatever it took is
+     * credited back instead. A zero-total order cancelled before this ran
+     * took nothing, and gets only the log line.
+     */
+    private function handBackWhatACancelledOrderPaid(Order $order, OrderFinanciallySettled $event): void
+    {
+        $credited = $this->creditCancelled->execute((string) $order->getKey());
+
+        Log::warning('A settlement arrived for an order that was cancelled; nothing was delivered and what it took was credited to the wallet.', [
+            'order_id' => (string) $order->getKey(),
+            'invoice_id' => $event->invoiceId,
+            'basis' => $event->basis->value,
+            'credited_minor' => $credited,
+        ]);
     }
 
     /**

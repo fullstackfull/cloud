@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature\Orders;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Events\CallQueuedListener;
+use Illuminate\Support\Facades\Queue;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Listeners\SettleInvoiceOnPaymentCaptured;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
@@ -16,6 +18,7 @@ use Lynomia\Modules\Orders\Application\Actions\CancelOrder;
 use Lynomia\Modules\Orders\Application\Actions\PlaceOrder;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutLine;
 use Lynomia\Modules\Orders\Application\DTOs\CheckoutRequest;
+use Lynomia\Modules\Orders\Application\Listeners\FulfilOrderOnSettlement;
 use Lynomia\Modules\Orders\Domain\Enums\OrderStatus;
 use Lynomia\Modules\Orders\Domain\Exceptions\OrderCannotBeCancelledException;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
@@ -27,6 +30,8 @@ use Lynomia\Modules\Payments\Domain\Events\PaymentCaptured;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
@@ -63,6 +68,10 @@ use PHPUnit\Framework\Attributes\Test;
  *      cannot even be started, so no provider intent is ever created.
  *   B  settlement wins    — the order is genuinely paid, cancellation refuses,
  *      and fulfilment proceeds. A paid order is a refund, not a cancellation.
+ *      "Paid" is the invoice's word here, not the order's: between
+ *      SettleInvoice and the queued fulfilment the order still reads
+ *      pending_payment, and cancelling it there used to keep the money and
+ *      deliver nothing (F-05, as the re-audit after round two measured it).
  *   C  a capture arrives after cancellation won — the money is real and at the
  *      provider. It goes to the customer's wallet, which is the mechanism this
  *      domain already uses for a capture an invoice cannot absorb.
@@ -133,6 +142,16 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
 
     // ---- case B: settlement wins ------------------------------------------
 
+    /*
+     * Settlement and fulfilment are two different moments in production.
+     * SettleInvoice marks the invoice paid and announces it; the order only
+     * leaves `pending_payment` when the queued FulfilOrderOnSettlement job
+     * runs on the payments worker. phpunit.xml runs the queue synchronously,
+     * which closes that window inside a test, so every case here fakes the
+     * queue first and runs the fulfilment job by hand, afterwards, the way a
+     * worker a few seconds behind would.
+     */
+
     #[Test]
     public function an_order_that_has_been_paid_cannot_be_cancelled(): void
     {
@@ -140,9 +159,14 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
         $order = $this->placedOrder($customer);
         $invoice = $this->invoiceFor($order);
 
+        Queue::fake();
+
         $this->settle($invoice, $customer);
 
+        // The window is open: the money is taken and the order does not know.
         $this->assertSame(InvoiceStatus::Paid, $invoice->refresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->refresh()->status);
+        $this->assertNull($order->paid_at, 'Precondition: fulfilment has not run yet, so the window is open.');
 
         try {
             app(CancelOrder::class)->execute($order->refresh());
@@ -150,11 +174,134 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
         } catch (OrderCannotBeCancelledException $e) {
             // The refusal names the money, not the workflow: a customer whose
             // order is paid needs to be pointed at a refund.
-            $this->assertStringContainsString('order.', $e->errorCode());
+            $this->assertSame('order.already_paid', $e->errorCode());
         }
 
         // And the invoice the customer paid is untouched by the attempt.
         $this->assertSame(InvoiceStatus::Paid, $invoice->refresh()->status);
+        $this->assertSame(OrderStatus::PendingPayment, $order->refresh()->status);
+        $this->assertFalse(CancelOrder::isCancellable($order), 'The portal must not offer a button the action refuses.');
+
+        // The worker catches up, and the order it finds is one it can fulfil.
+        $this->runQueuedFulfilment();
+
+        $this->assertNotNull($order->refresh()->paid_at);
+        $this->assertNotSame(OrderStatus::Cancelled, $order->status);
+        $this->assertSame(1, Service::query()->where('order_id', $order->getKey())->count());
+    }
+
+    #[Test]
+    public function a_customer_who_pays_from_credit_cannot_cancel_before_the_payments_worker_runs(): void
+    {
+        /*
+         * The re-audit's own path, driven only through customer routes: a
+         * wallet payment settles at once, and the cancel request arrives before
+         * the payments worker has picked the fulfilment up.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(
+            wallet: $ledger->walletFor($customer, 'KWD'),
+            amount: Money::ofMinor($invoice->total_minor, 'KWD'),
+            kind: WalletTransactionKind::Topup,
+            description: 'Top-up by card ending 4242',
+        );
+
+        Queue::fake();
+
+        $this->actingAs($user)
+            ->withHeaders(['Idempotency-Key' => 'f05-wallet-then-cancel'])
+            ->postJson('/api/v1/invoices/'.$invoice->getKey().'/wallet-credit')
+            ->assertOk()
+            ->assertJsonPath('data.status', InvoiceStatus::Paid->value);
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->refresh()->status);
+
+        $this->actingAs($user)
+            ->getJson('/api/v1/orders/'.$order->getKey())
+            ->assertOk()
+            ->assertJsonPath('data.is_cancellable', false);
+
+        $this->actingAs($user)
+            ->postJson('/api/v1/orders/'.$order->getKey().'/cancel')
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'order.already_paid');
+
+        $this->runQueuedFulfilment();
+
+        $this->assertNotSame(OrderStatus::Cancelled, $order->refresh()->status);
+        $this->assertNotNull($order->paid_at);
+        $this->assertSame(1, Service::query()->where('order_id', $order->getKey())->count());
+        $this->assertSame(0, $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits());
+    }
+
+    #[Test]
+    public function a_partly_paid_order_is_refused_as_paid_and_its_invoice_is_left_alone(): void
+    {
+        /*
+         * Money that has been applied to the document is money the customer
+         * handed over. Voiding the invoice would say it never happened, and
+         * cancelling the order around it would leave it attached to nothing.
+         */
+        [$customer] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        $this->settle($invoice, $customer, $invoice->total_minor - 1_000);
+
+        $this->assertSame(InvoiceStatus::Open, $invoice->refresh()->status);
+        $this->assertGreaterThan(0, $invoice->amount_paid_minor);
+
+        try {
+            app(CancelOrder::class)->execute($order->refresh());
+            $this->fail('An order with money applied to its invoice was cancelled.');
+        } catch (OrderCannotBeCancelledException $e) {
+            $this->assertSame('order.already_paid', $e->errorCode());
+        }
+
+        $this->assertSame(OrderStatus::PendingPayment, $order->refresh()->status);
+        $this->assertSame(InvoiceStatus::Open, $invoice->refresh()->status);
+    }
+
+    #[Test]
+    public function fulfilment_that_finds_a_cancelled_order_hands_the_money_back_once(): void
+    {
+        /*
+         * CancelOrder now refuses once money is on the invoice, under the
+         * invoice's lock, so this row should not be reachable through it. A
+         * row written before that refusal existed is, and the fulfilment job
+         * must not answer it with five retries and a permanent failure while
+         * the customer's money sits on a paid invoice.
+         */
+        [$customer] = $this->accountWithOwner();
+        $order = $this->placedOrder($customer);
+        $invoice = $this->invoiceFor($order);
+
+        Queue::fake();
+
+        $this->settle($invoice, $customer);
+
+        // Written as the pre-fix code wrote it: the order cancelled beside a
+        // paid invoice.
+        $order->forceFill(['status' => OrderStatus::Cancelled, 'cancelled_at' => now()])->save();
+
+        $ledger = app(WalletLedger::class);
+
+        // Retried the way the queue retries it; none of them may throw.
+        $this->runQueuedFulfilment();
+        $this->runQueuedFulfilment();
+
+        $this->assertSame(
+            $invoice->total_minor,
+            $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
+            'The money taken for an order that was cancelled belongs to the customer, once.',
+        );
+        $this->assertSame(OrderStatus::Cancelled, $order->refresh()->status);
+        $this->assertSame(0, Service::query()->where('order_id', $order->getKey())->count());
+        $this->assertSame(0, Subscription::query()->where('order_id', $order->getKey())->count());
     }
 
     // ---- case C: the capture lands after cancellation ---------------------
@@ -326,16 +473,35 @@ final class ACancelledOrderCollectsNoMoneyTest extends OrdersApiTestCase
         return Invoice::query()->where('order_id', $order->getKey())->sole();
     }
 
-    private function settle(Invoice $invoice, Customer $customer): void
+    private function settle(Invoice $invoice, Customer $customer, ?int $amountMinor = null): void
     {
         $capture = Transaction::factory()->create([
             'customer_id' => $customer->getKey(),
             'invoice_id' => $invoice->getKey(),
-            'amount_minor' => $invoice->total_minor,
+            'amount_minor' => $amountMinor ?? $invoice->total_minor,
             'currency' => $invoice->currency,
         ]);
 
         app(SettleInvoice::class)->execute($invoice, $capture);
+    }
+
+    /**
+     * What the payments worker does when it reaches the settlement: every
+     * FulfilOrderOnSettlement the faked queue is holding, run as the queue
+     * would run it.
+     */
+    private function runQueuedFulfilment(): void
+    {
+        $jobs = Queue::pushed(
+            CallQueuedListener::class,
+            static fn (CallQueuedListener $job): bool => $job->class === FulfilOrderOnSettlement::class,
+        );
+
+        $this->assertNotEmpty($jobs, 'Precondition: fulfilment was queued, not run inline.');
+
+        foreach ($jobs as $job) {
+            app(FulfilOrderOnSettlement::class)->handle($job->data[0]);
+        }
     }
 
     private function capture(Customer $customer, Invoice $invoice): void

@@ -49,6 +49,17 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  *
  * Keyed on the capture, so a redelivered webhook credits once. The ledger
  * refuses a second entry under a key it has already posted.
+ *
+ * ---------------------------------------------------------------------------
+ * The second caller: an order cancelled with its money already taken
+ * ---------------------------------------------------------------------------
+ *
+ * {@see CreditWhatACancelledOrderPaid} hands captures here for an order that
+ * reached CANCELLED beside a paid invoice (F-05). It is the same fact — money
+ * the customer handed over for something that will not be delivered — and the
+ * same key, so a capture compensated by either path is compensated once. Only
+ * the sentence on the customer's statement differs, because "the invoice was
+ * withdrawn" would be untrue of a document that is still marked paid.
  */
 final readonly class CompensateUncollectableCapture
 {
@@ -56,7 +67,11 @@ final readonly class CompensateUncollectableCapture
         private WalletLedger $wallet,
     ) {}
 
-    public function execute(Invoice $invoice, Transaction $capture): ?WalletTransaction
+    /**
+     * @param  string|null  $description  the line on the customer's statement; the default
+     *                                    describes a capture against a withdrawn invoice
+     */
+    public function execute(Invoice $invoice, Transaction $capture, ?string $description = null): ?WalletTransaction
     {
         $amount = $capture->amount();
 
@@ -77,7 +92,7 @@ final readonly class CompensateUncollectableCapture
              * payment would read as the wallet having settled something.
              */
             kind: WalletTransactionKind::Topup,
-            description: sprintf('Payment received after invoice %s was withdrawn', $invoice->number),
+            description: $description ?? sprintf('Payment received after invoice %s was withdrawn', $invoice->number),
             metadata: [
                 'invoice_id' => (string) $invoice->getKey(),
                 'invoice_status' => $invoice->status->value,
