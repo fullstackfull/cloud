@@ -101,6 +101,17 @@ final class TheSubnetRegistrationLockHasOneOwnerTest extends TestCase
             'The sweep did not read app/Console/Commands.',
         );
 
+        // And it reached what a hand-kept list of directories once left out:
+        // lang/, public/ and resources/ ship PHP too, the reference topology
+        // loader's data file among them, and artisan is PHP without the suffix.
+        foreach (['artisan', 'lang/', 'public/', 'resources/'] as $reach) {
+            $this->assertNotSame(
+                [],
+                array_filter($read, static fn (string $path): bool => $path === $reach || str_starts_with($path, $reach)),
+                sprintf('The sweep did not read %s.', $reach),
+            );
+        }
+
         $this->assertSame(
             [],
             $offenders,
