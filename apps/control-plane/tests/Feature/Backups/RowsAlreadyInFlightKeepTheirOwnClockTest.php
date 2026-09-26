@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Backups;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +42,8 @@ final class RowsAlreadyInFlightKeepTheirOwnClockTest extends TestCase
             'restored_at' => now()->subDays(2)->addHour(),
         ]);
         $lostBackup = $this->row(BackupState::NeedsReview, []);
+        $unstampedRestore = $this->row(BackupState::Restoring, ['restore_started_at' => null]);
+        $touchedAt = DB::table('backups')->where('id', $unstampedRestore)->value('updated_at');
 
         $migration->up();
 
@@ -48,6 +51,12 @@ final class RowsAlreadyInFlightKeepTheirOwnClockTest extends TestCase
         $this->assertSame(BackupState::Restoring, Backup::query()->findOrFail($interruptedRestore)->quarantined_from);
         $this->assertNull(Backup::query()->findOrFail($restoredThenLost)->quarantined_from, 'That restore was seen to finish.');
         $this->assertNull(Backup::query()->findOrFail($lostBackup)->quarantined_from, 'Nothing proves which operation this was.');
+
+        // A restore with no start stamp is measured from its last update, not
+        // from the archive's creation three days ago.
+        $stamped = Backup::query()->findOrFail($unstampedRestore)->restore_started_at;
+        $this->assertNotNull($stamped);
+        $this->assertTrue($stamped->equalTo(CarbonImmutable::parse((string) $touchedAt)));
     }
 
     /**

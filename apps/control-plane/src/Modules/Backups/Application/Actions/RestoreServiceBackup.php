@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
@@ -89,6 +90,9 @@ final readonly class RestoreServiceBackup
             throw RestoreRefusedException::confirmationMismatch();
         }
 
+        // Once here, so the refusals come in the order a customer can act on
+        // them, and once more under the lock below, which is the one that
+        // counts.
         $this->assertRestorable($backup, $machine);
 
         $cluster = $machine->cluster()->first();
@@ -117,23 +121,51 @@ final readonly class RestoreServiceBackup
 
         $provider = $this->providers->for($cluster);
 
-        // Moved before the call, exactly as the backup path writes its row
-        // first: if this process dies mid-request, the platform still knows a
-        // restore was started and an operator can find it.
-        $backup->transitionTo(BackupState::Restoring, [
-            // The clock this restore is measured on. ReconcileBackup gives up
-            // on it `backups.max_poll_hours` after THIS, not after the archive
-            // was taken — which for a backup days old is on the first poll.
-            'restore_started_at' => now(),
-            'restored_by_user_id' => $restoredByUserId,
-            // Cleared: a previous attempt's reason has nothing to say about
-            // this one, and leaving it makes a running restore look broken.
-            'failure_reason' => null,
-            // A new operation to watch, asked about ahead of rows already
-            // polled; the backup's own poll history says nothing about it.
-            'last_polled_at' => null,
-            'poll_count' => 0,
-        ]);
+        /*
+         * The guard and the write, as one step per machine.
+         *
+         * The checks above ran on the copy the caller read, and between them
+         * and a write somebody else could start a restore of another archive
+         * of this machine, or the verification sweep could start reading this
+         * one. Checking again and writing, under a lock on the machine's row,
+         * is what makes "nothing else is restoring" true at the moment it is
+         * acted on: two requests for two archives of one machine used to both
+         * pass the guard and both start. Nothing slow happens inside — the
+         * provider call is after — and the row itself moves by
+         * compare-and-set, so a verification written in between is a refusal
+         * rather than something to write over.
+         *
+         * Moved before the call, exactly as the backup path writes its row
+         * first: if this process dies mid-request, the platform still knows a
+         * restore was started and an operator can find it.
+         */
+        $backup = DB::transaction(function () use ($backup, $machine, $restoredByUserId): Backup {
+            VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->firstOrFail();
+
+            /** @var Backup $locked */
+            $locked = Backup::query()->whereKey($backup->getKey())->lockForUpdate()->firstOrFail();
+
+            $this->assertRestorable($locked, $machine);
+
+            $locked->transitionTo(BackupState::Restoring, [
+                // The clock this restore is measured on. ReconcileBackup gives
+                // up on it `backups.max_poll_hours` after THIS, not after the
+                // archive was taken — which for a backup days old is on the
+                // first poll.
+                'restore_started_at' => now(),
+                'restored_by_user_id' => $restoredByUserId,
+                // Cleared: a previous attempt's reason has nothing to say
+                // about this one, and leaving it makes a running restore look
+                // broken.
+                'failure_reason' => null,
+                // A new operation to watch, asked about ahead of rows already
+                // polled; the backup's own poll history says nothing about it.
+                'last_polled_at' => null,
+                'poll_count' => 0,
+            ]);
+
+            return $locked;
+        });
 
         try {
             $operation = $provider->startRestore(

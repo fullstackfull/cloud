@@ -8,8 +8,10 @@ use Database\Seeders\RolePermissionSeeder;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileRunningBackups;
+use Lynomia\Modules\Backups\Application\Actions\SettleBackupReview;
 use Lynomia\Modules\Backups\Application\Actions\VerifyStoredArchives;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
 use Lynomia\Modules\Backups\Infrastructure\Providers\FakeBackupProvider;
@@ -413,6 +415,12 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
 
         $body = ['verdict' => 'completed', 'evidence' => 'looked'];
 
+        // The queue itself shows archive and task identifiers across every
+        // account: the same permission, not merely a login.
+        $this->actingAs($this->operator(Role::Support))->getJson('/api/admin/backups/needs-review')->assertForbidden();
+        $this->actingAs($user)->getJson('/api/admin/backups/needs-review')->assertForbidden();
+        $this->actingAs($this->operator(Role::InfrastructureAdmin))->getJson('/api/admin/backups/needs-review')->assertOk();
+
         $this->actingAs($this->operator(Role::Support))
             ->postJson('/api/admin/backups/'.$old->id.'/resolve', $body)
             ->assertForbidden();
@@ -424,6 +432,83 @@ final class AnOperationIsTimedFromWhenItStartedTest extends VpsApiTestCase
         $this->actingAs($this->operator(Role::InfrastructureAdmin))
             ->postJson('/api/admin/backups/'.$old->id.'/resolve', $body)
             ->assertOk();
+    }
+
+    #[Test]
+    public function two_verdicts_on_one_row_are_one_verdict_and_one_refusal(): void
+    {
+        /*
+         * Two operators working from the same list: both read the row in
+         * review, both decide. The first verdict stands; the second is refused
+         * and leaves no trail and no second message. Driven through the
+         * action with the copy both of them read, because the controller
+         * re-reads and would hide the race.
+         */
+        [$customer, $user, $machine, $old] = $this->restoreStartedOnAnOldArchive();
+        $this->travel(13)->hours();
+        app(ReconcileRunningBackups::class)->execute();
+
+        $seenByBoth = Backup::query()->findOrFail($old->id);
+        $this->assertSame(BackupState::NeedsReview, $seenByBoth->state);
+
+        app(SettleBackupReview::class)->execute($seenByBoth, completed: true, evidence: 'TASK OK', resolvedBy: 'first');
+
+        try {
+            app(SettleBackupReview::class)->execute($seenByBoth, completed: false, evidence: 'task killed', resolvedBy: 'second');
+            $this->fail('A second verdict on a settled row must be refused.');
+        } catch (IllegalBackupTransitionException) {
+            // refused
+        }
+
+        $this->assertSame(BackupState::Restored, $old->refresh()->state);
+        $this->assertSame(1, AuditEntry::query()->whereIn('action', [AuditAction::BackupOperationConfirmed, AuditAction::BackupOperationFailed])->count());
+        $this->assertSame(1, $this->notifications($customer, NotificationType::RestoreCompleted));
+        $this->assertSame(0, $this->notifications($customer, NotificationType::RestoreFailed));
+    }
+
+    #[Test]
+    public function each_handle_less_restore_attempt_is_its_own_message(): void
+    {
+        /*
+         * A restore whose start never answered has no task to key its message
+         * on. Settled by a person and tried again, the second attempt is a
+         * second event, and the customer is owed a second word about it.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $timedOut = $this->oldArchiveFor($customer, $machine, archive: 'vzdump-'.FakeBackupProvider::TIMEOUT_MARKER.'.vma.zst');
+        $url = $this->restoreUrl($machine, $timedOut);
+
+        $this->actingAs($user)->postJson($url, ['confirmation' => $machine->hostname]);
+        $this->assertSame(BackupState::NeedsReview, $timedOut->refresh()->state);
+
+        $this->actingAs($this->operator())
+            ->postJson('/api/admin/backups/'.$timedOut->id.'/resolve', ['verdict' => 'failed', 'evidence' => 'no task on the node'])
+            ->assertOk();
+
+        $this->travel(1)->hours();
+        $this->actingAs($user)->postJson($url, ['confirmation' => $machine->hostname]);
+        $this->assertSame(BackupState::NeedsReview, $timedOut->refresh()->state);
+
+        $this->assertSame(2, $this->notifications($customer, NotificationType::RestoreNeedsReview));
+    }
+
+    #[Test]
+    public function a_restore_is_polled_as_a_new_operation(): void
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $old = $this->oldArchiveFor($customer, $machine);
+        $old->forceFill(['poll_count' => 7, 'last_polled_at' => now()->subDays(2)])->save();
+        $this->fake($machine)->pollsBeforeSettling = 1_000;
+
+        $this->actingAs($user)
+            ->postJson($this->restoreUrl($machine, $old), ['confirmation' => $machine->hostname])
+            ->assertStatus(202);
+
+        $row = $old->refresh();
+        $this->assertSame(0, $row->poll_count, 'The backup\'s poll history is not the restore\'s.');
+        $this->assertNull($row->last_polled_at, 'Asked about ahead of rows already polled.');
     }
 
     // ---- fixtures -----------------------------------------------------------

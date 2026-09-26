@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Backups\Application\Actions;
 use Lynomia\Modules\Backups\Application\Services\BackupAnnouncements;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
 use Lynomia\Modules\Backups\Infrastructure\Models\Backup;
@@ -113,7 +114,28 @@ final readonly class ReconcileBackup
         private BackupAnnouncements $announcements,
     ) {}
 
+    /**
+     * Settle one row, or leave it to whoever moved it first.
+     *
+     * Every transition here is a compare-and-set ({@see Backup::transitionTo()}).
+     * A row an operator settled, or that another worker already settled,
+     * while this one was asking the provider is not written over: the race is
+     * a refusal, and the row as it now stands is returned.
+     */
     public function execute(Backup $backup): Backup
+    {
+        try {
+            return $this->settle($backup);
+        } catch (IllegalBackupTransitionException $e) {
+            if (! $e->wasRaced()) {
+                throw $e;
+            }
+
+            return $backup->refresh();
+        }
+    }
+
+    private function settle(Backup $backup): Backup
     {
         if (! $backup->isAwaitingProvider()) {
             return $backup;

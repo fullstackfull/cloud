@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Backups\Application\Actions;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Contracts\FileLevelBackupProvider;
 use Lynomia\Modules\Backups\Domain\Enums\BackupFileKind;
 use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
@@ -66,18 +67,31 @@ final readonly class RestoreBackupFiles
         $paths = $this->unique($paths);
         $this->assertEachIsAFileOrDirectory($backup, $provider, $paths);
 
-        $restore = BackupFileRestore::query()->create([
-            'backup_id' => $backup->getKey(),
-            'customer_id' => $backup->customer_id,
-            'service_id' => $backup->service_id,
-            'virtual_machine_id' => $machine->getKey(),
-            'state' => FileRestoreState::Requested,
-            'node_name' => $backup->node_name,
-            'paths' => array_map(static fn (BackupPath $p): string => $p->value, $paths),
-            'path_count' => count($paths),
-            'requested_by_user_id' => $userId,
-            'started_at' => now(),
-        ]);
+        /*
+         * The in-flight guard again and the row that makes this restore
+         * visible to the next one, as one step under the machine's lock — the
+         * same lock RestoreServiceBackup takes — so a file restore and a
+         * whole-machine restore of one machine cannot both pass their guards
+         * before either is written.
+         */
+        $restore = DB::transaction(function () use ($backup, $machine, $paths, $userId): BackupFileRestore {
+            VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->firstOrFail();
+
+            $this->assertRestorable($backup, $machine);
+
+            return BackupFileRestore::query()->create([
+                'backup_id' => $backup->getKey(),
+                'customer_id' => $backup->customer_id,
+                'service_id' => $backup->service_id,
+                'virtual_machine_id' => $machine->getKey(),
+                'state' => FileRestoreState::Requested,
+                'node_name' => $backup->node_name,
+                'paths' => array_map(static fn (BackupPath $p): string => $p->value, $paths),
+                'path_count' => count($paths),
+                'requested_by_user_id' => $userId,
+                'started_at' => now(),
+            ]);
+        });
 
         try {
             $operation = $provider->startFileRestore(

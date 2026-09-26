@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupMode;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
@@ -151,19 +152,57 @@ class Backup extends Model
      * restore that may still be writing a machine's disks apart from any
      * other row a person has been asked to look at (F-09).
      *
+     * And it is a compare-and-set, not a save over whatever is there. The
+     * table's current state is read under a row lock and must still be the
+     * one this copy was read in; otherwise nothing is written and the refusal
+     * says it was a race ({@see IllegalBackupTransitionException::wasRaced()}).
+     * Every sweep in this module loads a batch and then makes one provider
+     * call per row, and every request reads, checks, asks something else and
+     * then writes; checking only the copy in memory let the verification sweep
+     * write `verifying` over a restore a customer had started meanwhile, and a
+     * stale `delete_requested` move to `deleting` an archive that had been
+     * kept and was being restored.
+     *
      * @throws IllegalBackupTransitionException
      */
     public function transitionTo(BackupState $next, array $attributes = []): void
     {
-        if (! $this->state->canBecome($next)) {
-            throw IllegalBackupTransitionException::between((string) $this->getKey(), $this->state, $next);
+        $from = $this->state;
+
+        if (! $from->canBecome($next)) {
+            throw IllegalBackupTransitionException::between((string) $this->getKey(), $from, $next);
         }
 
         if ($next === BackupState::NeedsReview) {
-            $attributes['quarantined_from'] = $this->state;
+            $attributes['quarantined_from'] = $from;
         }
 
-        $this->forceFill([...$attributes, 'state' => $next])->save();
+        $this->compareAndSet($from, $next, $attributes);
+    }
+
+    /**
+     * Write `$next` only if the table still says `$expected`, under a row lock.
+     *
+     * @param  array<string, mixed>  $attributes
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    private function compareAndSet(BackupState $expected, BackupState $next, array $attributes): void
+    {
+        DB::transaction(function () use ($expected, $next, $attributes): void {
+            $stored = static::query()->whereKey($this->getKey())->lockForUpdate()->toBase()->value('state');
+
+            if ($stored !== $expected->value) {
+                throw IllegalBackupTransitionException::movedUnderneath(
+                    (string) $this->getKey(),
+                    $expected,
+                    is_string($stored) ? $stored : null,
+                    $next,
+                );
+            }
+
+            $this->forceFill([...$attributes, 'state' => $next])->save();
+        });
     }
 
     /**
@@ -197,7 +236,9 @@ class Backup extends Model
             );
         }
 
-        $this->forceFill([...$attributes, 'state' => $next, 'quarantined_from' => null])->save();
+        // The same compare-and-set as every other move: two verdicts on one
+        // row are one verdict and one refusal, whoever read it first.
+        $this->compareAndSet(BackupState::NeedsReview, $next, [...$attributes, 'quarantined_from' => null]);
 
         return $next;
     }

@@ -672,15 +672,13 @@ final class TheFailureMatrixTest extends GoldenPathHarness
          * backup restores because the check ran, which is the one thing worse
          * than not checking.
          *
-         * A carried gap goes with it, in §33 of the report: nothing in the
-         * platform starts a verification. `startVerification` exists on the
-         * provider contract and on both drivers, `Verifying` is a state with
-         * transitions out of it, and no action, job or command ever puts a row
-         * into it. So the row below is put into `Verifying` here, and this
-         * test covers the half that exists — the verdict — while
-         * `EveryBackupAlertMetricHasAProducerTest` covers the consequence of
-         * the half that does not: a finished backup is never reported as a
-         * verified one.
+         * The gap §33 of the report carried — nothing in the platform started
+         * a verification — has since closed: `VerifyStoredArchives`
+         * (`backups:verify`) puts a stored archive into `Verifying`, and
+         * `AnOperationIsTimedFromWhenItStartedTest` drives that sweep end to
+         * end. This test still builds the `Verifying` row itself, in the shape
+         * the sweep writes, because what it pins is the verdict: what the
+         * platform does with a verification task's answer, across processes.
          */
         [$backup] = $this->committedVerification(FakeBackupProvider::FAILING_MARKER);
 
