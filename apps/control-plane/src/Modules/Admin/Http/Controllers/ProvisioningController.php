@@ -76,8 +76,9 @@ final class ProvisioningController
      * not use to (F-15): the finding's code and its `reason` — the runbook's
      * rows for a taken identity are keyed on the reason, and the only other
      * place the reason appeared was `last_error`, which the screen truncates —
-     * and the provider identity a create reserved, with every node and name a
-     * create under it was sent with, because that is where to look.
+     * and the provider identity a create reserved, with every node an attempt
+     * under it was placed on and every name a create under it was sent with,
+     * because that is where to look.
      *
      * The finding is published only while it is current, in both of the
      * senses `RepointReservedIdentity` requires before it acts on one: it is

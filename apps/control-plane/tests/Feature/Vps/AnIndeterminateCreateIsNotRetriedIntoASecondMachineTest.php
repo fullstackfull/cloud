@@ -42,7 +42,12 @@ use Tests\TestCase;
  * name a create under it is sent with immediately before it is sent, and
  * makes every attempt look under the identity before it builds. What the look
  * finds, and what each finding licenses, is what the rest of this file pins —
- * including that nothing found before any create was sent is ever claimed.
+ * including that nothing found before any create was sent is claimed, on a
+ * first attempt, under an identity a repoint gave, after attempts that sent
+ * nothing, and at a pinned id on a first attempt. The one place the row
+ * cannot show that nothing was sent — a pinned id on a job attempted before,
+ * whose earlier attempt may have sent a create without recording it — has
+ * its own test, and its residual is the handler's to state.
  * The repoint that a stranger's machine licenses has its own file; the bound
  * on the payload that the ownership rule rests on has two (a behavioural pin
  * in this band, and a static census in the Provisioning band that fails on a
@@ -284,6 +289,100 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
     }
 
     #[Test]
+    public function names_a_create_under_the_old_identity_was_sent_with_are_not_carried_to_the_new_one(): void
+    {
+        /*
+         * The same property, where it can fail: a create under the first
+         * identity HAS been sent, so there is a name recorded for the repoint
+         * to leave behind. The create is lost before the cluster acts on it,
+         * a stranger takes the id, the retry reports it named otherwise, and
+         * the job is repointed. At the new id is a machine named as this
+         * build names its machine and shaped as its plan. No create has been
+         * sent under the new id, so it is not this build's — and it would be
+         * claimed, with a message saying an earlier attempt sent a create
+         * under the new id, if the old identity's names came with the job.
+         */
+        $job = $this->createJob();
+        $this->hypervisor->loseTheRequestToCreates = true;
+
+        try {
+            $this->runWorker($job);
+        } finally {
+            $this->hypervisor->loseTheRequestToCreates = false;
+        }
+
+        $old = (string) $job->refresh()->reserved_provider_id;
+        $this->assertSame(['web-01'], $job->reserved_provider_hostnames);
+
+        $this->aStrangerAt($old);
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_OTHERWISE, $job->refresh()->result['error']['reason'] ?? null);
+
+        $moved = (string) $this->repointAsOperator($job)->assertOk()->json('data.reserved_provider_id');
+        $this->assertNotSame($old, $moved);
+        $this->aMachineShapedAsThisBuildAt($moved, name: 'web-01');
+
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(CreateVpsHandler::IDENTITY_TAKEN, $job->result['error']['code'] ?? null);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_OTHERWISE, $job->result['error']['reason'] ?? null);
+        $this->assertSame($moved, $job->result['error']['reserved_provider_id'] ?? null);
+        $this->assertArrayNotHasKey('provider_reference', $job->result ?? []);
+        $this->assertNull($job->reserved_provider_hostnames, 'the old identity\'s names came with the job to the new one');
+        $this->assertCount(1, $this->hypervisor->creates, 'a create was sent under the new identity');
+    }
+
+    #[Test]
+    public function every_name_a_create_under_the_identity_was_sent_with_is_kept_not_only_the_latest(): void
+    {
+        /*
+         * The list is append-only because the comparison is against every
+         * name a create under the identity was sent with. Nothing on the
+         * platform edits a payload, so in practice there is one; the list is
+         * what keeps the comparison right if something outside the platform
+         * does. Here a create is sent as "web-01" and lost before the
+         * cluster acts on it, the payload is changed by hand to "web-02",
+         * and the retry's create is lost the same way. A machine named
+         * "web-01" at the identity afterwards carries a name a create under
+         * it was sent with, and is not called a stranger's — which it would
+         * be, licensing a repoint and a build beside it, if the second name
+         * had replaced the first.
+         */
+        $job = $this->createJob();
+        $this->hypervisor->loseTheRequestToCreates = true;
+
+        try {
+            $this->runWorker($job);
+            DB::table('provisioning_jobs')->where('id', $job->id)->update([
+                'payload' => json_encode([...$job->refresh()->payload, 'hostname' => 'web-02']),
+            ]);
+            $this->retryAsOperator($job)->assertOk();
+            $this->runWorker($job);
+        } finally {
+            $this->hypervisor->loseTheRequestToCreates = false;
+        }
+
+        $job->refresh();
+        $this->assertSame(['web-01', 'web-02'], $job->reserved_provider_hostnames);
+
+        // A name already held is not held twice: a list of names, not a log of sends.
+        $job->recordCreateSentWith('web-01');
+        $this->assertSame(['web-01', 'web-02'], $job->refresh()->reserved_provider_hostnames);
+
+        $this->aMachineShapedAsThisBuildAt((string) $job->reserved_provider_id, name: 'web-01');
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->result['error']['code'] ?? null);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_AS_CALLED, $job->result['error']['reason'] ?? null);
+        $this->assertCount(2, $this->hypervisor->creates, 'the third attempt built beside the machine the first create made');
+    }
+
+    #[Test]
     public function an_attempt_that_reserved_the_identity_and_sent_nothing_gives_the_next_nothing_to_claim_by(): void
     {
         /*
@@ -348,29 +447,89 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
     }
 
     #[Test]
-    public function an_id_pinned_on_the_payload_is_judged_as_if_its_name_had_been_sent(): void
+    public function an_id_pinned_on_the_payload_of_a_job_attempted_before_is_judged_as_if_its_name_had_been_sent(): void
     {
         /*
          * The one case in which "nothing recorded" is not "nothing sent". An
          * id pinned on the payload was honoured before creates were recorded
-         * — the create used it directly — so an attempt from then may have
-         * sent a create under it with the payload's name. A machine at a
-         * pinned id carrying that name and this build's shape is therefore
-         * not called a stranger's: it is taken to be this build's, and the
-         * operator is told why, without being told an earlier attempt of
-         * this job sent it.
+         * — the create used it directly — so an attempt made then may have
+         * sent a create under it with the payload's name and recorded
+         * nothing. Here that attempt is the job's first: it sent the create,
+         * its answer was lost, and it left the job for review with nothing
+         * reserved and nothing recorded, exactly as the create did before
+         * F-15. The machine it built is at the pinned id. The operator's
+         * retry is the job's second attempt, and a machine at the pinned id
+         * carrying the payload's name and this build's shape is taken to be
+         * this build's — and the operator is told why, without being told a
+         * create under the id is recorded as sent.
+         *
+         * Only a job attempted before: see
+         * a_first_attempt_at_an_id_pinned_on_the_payload_claims_nothing_there.
          */
-        $job = $this->createJob(['vm_id' => 4242]);
+        $job = $this->createJob(['vm_id' => 4242], [
+            'status' => ProvisioningJobStatus::NeedsReview,
+            'attempts' => 1,
+            'failure_class' => FailureClass::Timeout,
+            'last_error' => 'The request to the cluster timed out; it may have been accepted.',
+        ]);
         $this->aMachineShapedAsThisBuildAt('4242', name: 'web-01');
+
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(2, $job->attempts);
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->result['error']['code'] ?? null);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_AS_CALLED, $job->result['error']['reason'] ?? null);
+        $this->assertTrue($job->result['response']['payload_name_taken_as_sent'] ?? null);
+        $this->assertSame('4242', $job->result['provider_reference'] ?? null);
+        $this->assertNull($job->reserved_provider_hostnames);
+        $this->assertStringNotContainsString('was sent by this build', (string) $job->last_error);
+        $this->assertStringContainsString('pinned', (string) $job->last_error);
+        $this->assertStringContainsString('attempted before', (string) $job->last_error);
+        $this->assertSame([], $this->hypervisor->creates);
+    }
+
+    #[Test]
+    public function a_first_attempt_at_an_id_pinned_on_the_payload_claims_nothing_there(): void
+    {
+        /*
+         * The round-four verification's reproduction, kept. The pinned
+         * exception rests on an earlier attempt that may have sent a create
+         * before sends were recorded, and a first attempt has no earlier
+         * attempt. A stranger at the pinned id, named as the payload names
+         * this build's machine and shaped as its plan, used to be claimed
+         * here all the same: FOUND_ITS_OWN_BUILD with the stranger's id as
+         * this job's provider reference, retry and repoint both refused, and
+         * adoption the only act left, on a job that had built nothing.
+         */
+        $job = $this->createJob(['vm_id' => 55555]);
+        $this->aMachineShapedAsThisBuildAt('55555', name: 'web-01');
 
         $this->runWorker($job);
 
         $job->refresh();
-        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->result['error']['code'] ?? null);
-        $this->assertSame('4242', $job->result['provider_reference'] ?? null);
-        $this->assertStringNotContainsString('earlier attempt', (string) $job->last_error);
-        $this->assertStringContainsString('pinned', (string) $job->last_error);
+        $this->assertSame(1, $job->attempts);
+        $this->assertSame('55555', $job->reserved_provider_id);
+        $this->assertSame(CreateVpsHandler::IDENTITY_TAKEN, $job->result['error']['code'] ?? null);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_OTHERWISE, $job->result['error']['reason'] ?? null);
+        $this->assertTrue($job->result['response']['pinned_on_the_payload'] ?? null);
+        $this->assertFalse($job->result['response']['payload_name_taken_as_sent'] ?? null);
+        $this->assertArrayNotHasKey('provider_reference', $job->result ?? []);
+        $this->assertStringNotContainsString('pinned', (string) $job->last_error);
         $this->assertSame([], $this->hypervisor->creates);
+        $this->assertNull($job->reserved_provider_hostnames);
+
+        // The review row names the finding and offers nothing to adopt.
+        $row = collect($this->actingAs($this->operator())->getJson('/api/admin/provisioning/needs-review')->assertOk()->json('data'))
+            ->firstWhere('id', $job->id);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_OTHERWISE, $row['error_reason'] ?? null);
+        $this->assertNull($row['provider_reference'] ?? null, 'a job that built nothing is offered the stranger\'s machine to adopt');
+
+        // Nothing of this build's is at the id: the way out is the one that
+        // builds elsewhere, and it is not refused.
+        $this->repointAsOperator($job)->assertOk();
+        $this->retryAsOperator($job)->assertOk();
     }
 
     #[Test]
@@ -468,7 +627,10 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
 
         $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->refresh()->result['error']['code'] ?? null);
         $this->assertSame(CreateVpsHandler::REASON_NAMED_AS_CALLED, $job->result['error']['reason'] ?? null);
-        $this->assertStringContainsString('An earlier attempt of this build sent a create', (string) $job->last_error);
+        $this->assertStringContainsString(
+            sprintf('A create under provider identity %s was sent by this build with the name "web-01"', $this->derivedIdOf($job)),
+            (string) $job->last_error,
+        );
     }
 
     #[Test]

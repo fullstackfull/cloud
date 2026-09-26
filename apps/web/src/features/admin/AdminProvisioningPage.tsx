@@ -49,10 +49,13 @@ function adoptableReference(job: AdminProvisioningJob): string | null {
  *
  * Each carries what the runbook tells the operator to read (F-15): the finding
  * and its reason, the whole error rather than a truncation of it, and for a
- * VPS create the provider identity it reserved with every node and name a
- * create under it was sent with. And the three ways out — retry, adopt and
- * repoint — are offered wherever the page has what the act needs. Retry is
- * offered on every job. Adopt attaches a reference rather than asking for
+ * VPS create the provider identity it reserved, with every node an attempt
+ * under it was placed on and every name a create under it was sent with.
+ * And the three ways out — retry, adopt and repoint — are offered wherever
+ * the page has what the act needs. Retry is offered on every job. Adopt is
+ * labelled for the machine rather than for "what it built", since it is
+ * offered, with the reserved id, on jobs that may have built nothing — right
+ * after a repoint, say — and attaches a reference rather than asking for
  * one, so it is offered only where the page has one to attach (see
  * adoptableReference): not on a job that has neither found a provider
  * resource nor reserved an identity — which, until something is found, is

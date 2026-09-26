@@ -105,7 +105,9 @@ describe('AdminProvisioningPage review list', () => {
 
     const row = await reviewRowOf(STRANGERS.id)
 
-    expect(within(row).queryByRole('button', { name: /adopt what it built/i })).not.toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /^adopt the machine$/i })).not.toBeInTheDocument()
+    // The act is offered by that name elsewhere, so its absence here is not a misspelt query.
+    expect(within(await reviewRowOf(ITS_OWN.id)).getByRole('button', { name: /^adopt the machine$/i })).toBeInTheDocument()
     // The way out that finding licenses is still there.
     expect(within(row).getByRole('button', { name: /move to a new identity/i })).toBeInTheDocument()
   })
@@ -116,7 +118,7 @@ describe('AdminProvisioningPage review list', () => {
 
     const row = await reviewRowOf(ITS_OWN.id)
 
-    await userEvent.click(within(row).getByRole('button', { name: /adopt what it built/i }))
+    await userEvent.click(within(row).getByRole('button', { name: /^adopt the machine$/i }))
 
     expect(await screen.findByText(/records machine 51234 as this job's build/i)).toBeInTheDocument()
   })

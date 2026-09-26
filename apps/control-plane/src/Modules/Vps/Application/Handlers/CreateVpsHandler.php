@@ -74,19 +74,22 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * second machine beside the first: one billed, one orphaned and holding a
  * customer's address.
  *
- * Now every attempt of one job asks for one identity, reserved on the job row
- * before the call (`ProvisioningJob::reserveProviderIdentity()`), and every
- * attempt first asks the hypervisor what is already there under it, on every
- * node an attempt under it was placed on. Each name a create under the
- * identity is sent with is written down immediately before it is sent
- * (`ProvisioningJob::recordCreateSentWith()`), and only then: a machine found
- * is judged against those names, read as the row holds them once it has been
- * found. What the look finds decides the attempt:
+ * Now every attempt of one job asks for the identity the job holds, reserved
+ * on the job row before the call (`ProvisioningJob::reserveProviderIdentity()`)
+ * and the same one until an operator repoints the job
+ * (`RepointReservedIdentity`), and every attempt first asks the hypervisor
+ * what is already there under it, on every node an attempt under it was
+ * placed on. Each name a create under the identity is sent with is written
+ * down immediately before it is sent (`ProvisioningJob::recordCreateSentWith()`),
+ * and only then: a machine found is judged against those names, read as the
+ * row holds them once it has been found. What the look finds decides the
+ * attempt:
  *
  *  - **Nothing** — build.
- *  - **A machine carrying a name an earlier create under this identity was
- *    sent with, and a shape nothing about it contradicts** — taken to be this
- *    build's own, left by that attempt whose answer was lost. Nothing new is
+ *  - **A machine carrying a name a create under this identity was sent with,
+ *    and a shape nothing about it contradicts** — taken to be the machine
+ *    that create built: an earlier attempt's whose answer was lost, or that
+ *    of another worker holding the job at the same time. Nothing new is
  *    built; the attempt settles for review carrying the machine as its
  *    provider reference, so the retry refusal holds from then on and the way
  *    out is adoption.
@@ -103,29 +106,42 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *
  * **Before any create under the identity has been sent** — a first attempt,
  * the first under an identity a repoint gave, or any after attempts that all
- * ended before sending — nothing at the identity can be this build's, and a
- * machine there is never claimed: whatever it is called, the name this job is
- * about to send included, it is named otherwise, since no create was sent
- * with any name. (It is still reported as unnamed when it has no name, which
- * refuses the repoint for no gain but builds nothing; once it has a name, a
- * retry reports it for what it is.) The one exception is an id pinned on the
- * payload with no name recorded under it: the create honoured a pinned id
- * before it recorded anything it sent, so an attempt from then may have sent
- * a create under it with the payload's name, and that name is judged as if it
- * had been sent.
+ * ended before sending — nothing at the identity can be this build's, and,
+ * outside the one case below in which the row cannot show that none was
+ * sent, a machine there is not claimed: whatever it is called, the name this
+ * job is about to send included, it is named otherwise, since no create was
+ * sent with any name. (It is still reported as unnamed when it has no name,
+ * which refuses the repoint for no gain but builds nothing; once it has a
+ * name, a retry reports it for what it is.)
+ *
+ * That rests on the row holding every name a create was sent with, and one
+ * kind of job's row cannot be relied on for it: a job whose id is pinned on
+ * the payload and which has been attempted before. The create honoured a
+ * pinned id before it recorded anything it sent, so an earlier attempt of
+ * such a job may have sent a create under the id, with the payload's name,
+ * and recorded nothing; and nothing on the row says whether that attempt ran
+ * before sends were recorded or after. There, and while no name is recorded,
+ * the payload's name is judged as if it had been sent. A first attempt has
+ * no earlier attempt, so at a pinned id it is judged like any other, and
+ * nothing there is claimed.
  *
  * What is claimed as "ours" is claimed on the name, compared exactly against
  * every name a create under this identity was sent with, and on nothing
- * contradicting the shape. There are two residuals, one in each direction.
- * A machine whose name was changed at the hypervisor after this job built it
- * reads as a stranger. And a stranger that takes the id after a create under
- * it was sent and built nothing (refused, or lost before the cluster acted
- * on it), carrying the very name that create was sent with and nothing that
- * contradicts the plan's shape, is taken to be this build's — which is why
- * the finding tells the operator to confirm the machine at the node before
- * adopting it. Tags or the config lock could establish ownership positively
- * and were not taken up; that is a recorded design choice, not an
- * impossibility.
+ * contradicting the shape. There are three residuals. A machine whose name
+ * was changed at the hypervisor after this job built it reads as a stranger.
+ * A stranger that takes the id after a create under it was sent and built
+ * nothing (refused, or lost before the cluster acted on it), carrying the
+ * very name that create was sent with and nothing that contradicts the
+ * plan's shape, is taken to be this build's. And at an id pinned on the
+ * payload of a job attempted before, with no name recorded, a stranger
+ * carrying the payload's name and nothing that contradicts the plan's shape
+ * is taken to be this build's even when every earlier attempt in fact ended
+ * before sending. The last two are why the finding tells the operator to
+ * confirm the machine at the node before adopting it. Tags or the config
+ * lock could establish ownership positively; recording, per attempt, that it
+ * ran after sends were recorded would confine the third to jobs attempted
+ * before then, for which nothing on the platform can tell. Neither was taken
+ * up; that is a recorded design choice, not an impossibility.
  */
 final readonly class CreateVpsHandler implements ProvisioningHandler
 {
@@ -133,10 +149,11 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
     public const string IDENTITY_TAKEN = 'vps.create_identity_taken';
 
     /**
-     * A machine at the reserved identity carries a name an earlier create
-     * under it was sent with (or, at a pinned id nothing is recorded under,
-     * the payload's name) and nothing about it contradicts this build: it is
-     * taken to be the build that create made, whose answer was lost.
+     * A machine at the reserved identity carries a name a create under it
+     * was sent with (or, at an id pinned on the payload of a job attempted
+     * before, with nothing recorded under it, the payload's name) and nothing
+     * about it contradicts this build: it is taken to be the build that
+     * create made.
      */
     public const string FOUND_ITS_OWN_BUILD = 'vps.create_found_its_own_build';
 
@@ -148,7 +165,9 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
 
     /**
      * The machine found is named, and not with any name a create under this
-     * identity was sent with — which, before any was sent, is every name.
+     * identity was sent with — which, while none is recorded as sent, is
+     * every name (but the payload's, at an id pinned on the payload of a job
+     * attempted before).
      */
     public const string REASON_NAMED_OTHERWISE = 'named_otherwise';
 
@@ -157,15 +176,17 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
 
     /**
      * The machine found carries a name a create under this identity was sent
-     * with (at a pinned id nothing is recorded under, the payload's), and a
-     * shape it did not ask for.
+     * with (at an id pinned on the payload of a job attempted before, with
+     * nothing recorded under it, the payload's), and a shape it did not ask
+     * for.
      */
     public const string REASON_SHAPE_DIFFERS = 'shape_differs';
 
     /**
      * The machine found carries a name a create under this identity was sent
-     * with (at a pinned id nothing is recorded under, the payload's), and
-     * nothing that contradicts it.
+     * with (at an id pinned on the payload of a job attempted before, with
+     * nothing recorded under it, the payload's), and nothing that contradicts
+     * it.
      */
     public const string REASON_NAMED_AS_CALLED = 'named_as_called';
 
@@ -547,10 +568,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                     // finding about an identity says: it lands in the
                     // attempt's own record and in the job's finding, each of
                     // which then names the id on its own. The review list
-                    // shows the id from the job's reserved_provider_id
-                    // column, and reads this one to decide whether the
-                    // finding is still current: after a repoint it is about
-                    // an identity the job no longer holds, and is not shown.
+                    // and the repoint compare a finding's id with the one
+                    // the job holds; for this finding the two agree for as
+                    // long as it is the job's, since a repoint needs a later
+                    // attempt's `named_otherwise`, which replaces it first.
                     'reserved_provider_id' => $identity->providerId,
                 ],
             );
@@ -609,11 +630,11 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
     /**
      * The hypervisor id this job asks for.
      *
-     * In order: the identity the job already holds, so every attempt of one
-     * build offers the same id; then an id named on the payload, which is how
-     * a migration pins a specific id for a job that has not yet reserved one;
-     * then an id derived from the idempotency key, which is fixed for the life
-     * of the order item.
+     * In order: the identity the job already holds, so every attempt offers
+     * the id the job holds — one id, until an operator repoints the job; then
+     * an id named on the payload, which is how a migration pins a specific id
+     * for a job that has not yet reserved one; then an id derived from the
+     * idempotency key, which is fixed for the life of the order item.
      *
      * The first branch is not what holds the id still. The reservation this
      * feeds keeps the first id it was given and hands that back whatever it
@@ -680,8 +701,8 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      * What the hypervisor already has at this job's identity, on the nodes
      * given.
      *
-     * Every node a create under the identity was sent to, between the two
-     * calls in execute(), not only the one this attempt was placed on:
+     * Every node an attempt under the identity was placed on, between the
+     * two calls in execute(), not only the one this attempt was placed on:
      * placement is recomputed per attempt, and the machine an earlier attempt
      * built is on the node THAT attempt chose.
      *
@@ -738,8 +759,9 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      * were when this attempt reserved the identity (see
      * `ProvisioningJob::namesACreateWasSentWith()`). When none has been sent,
      * there is no name it could be claimed by, and it is not claimed — except
-     * at an id pinned on the payload, which a create from before sends were
-     * recorded may have used with the payload's name.
+     * at an id pinned on the payload of a job attempted before, where an
+     * earlier attempt made before sends were recorded may have sent a create
+     * with the payload's name (see mayHaveSentUnrecorded()).
      *
      * @param  array<string, mixed>  $payload
      */
@@ -751,16 +773,25 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         VmResources $resources,
     ): ProvisioningResult {
         $sent = $job->namesACreateWasSentWith();
-        $pinned = $sent === [] && $this->isPinnedOnThePayload($identity, $payload);
+        $unrecorded = $sent === [] && $this->mayHaveSentUnrecorded($job, $identity, $payload);
 
-        $judgedAgainst = new ReservedProviderIdentity(
+        // The identity with its names as the row holds them now, and apart
+        // from them the one name judged as if sent, where there is one: the
+        // payload's is not recorded as sent, and is not put among those that
+        // are.
+        $asHeldNow = new ReservedProviderIdentity(
             providerId: $identity->providerId,
             clusterId: $identity->clusterId,
             nodes: $identity->nodes,
-            hostnames: $pinned ? [$this->hostnameFor($job, $payload)] : $sent,
+            hostnames: $sent,
         );
 
-        $reason = $this->whoseItIs($machine, $judgedAgainst, $resources);
+        $reason = $this->whoseItIs(
+            $machine,
+            $asHeldNow,
+            $unrecorded ? $this->hostnameFor($job, $payload) : null,
+            $resources,
+        );
 
         $metadata = [
             'reason' => $reason,
@@ -770,16 +801,20 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             'found_vcpu' => $machine->vcpu,
             'found_memory_mib' => $machine->memoryMib,
             'called_names' => $sent,
-            'pinned_on_the_payload' => $pinned,
+            'pinned_on_the_payload' => $this->isPinnedOnThePayload($identity, $payload),
+            // Whether the payload's name was judged as if a create had been
+            // sent with it: pinned, attempted before, and nothing recorded.
+            'payload_name_taken_as_sent' => $unrecorded,
         ];
 
         if ($reason === self::REASON_NAMED_AS_CALLED) {
             /*
-             * Taken to be this build's own machine, left by an earlier
-             * attempt whose answer was lost — the one that sent a create
-             * under this identity with the name the machine carries. Carried
-             * as the provider reference, so the retry refusal holds from here
-             * on and the only way forward is adoption; and a timeout, so the
+             * Taken to be this build's own machine, built by the create sent
+             * under this identity with the name the machine carries — an
+             * earlier attempt's whose answer was lost, or that of another
+             * worker holding the job at the same time. Carried as the
+             * provider reference, so the retry refusal holds from here on
+             * and the only way forward is adoption; and a timeout, so the
              * addresses the machine was configured with are quarantined
              * rather than handed to the next customer. What it rests on is a
              * name and a shape, so the operator is told to confirm it.
@@ -787,15 +822,15 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
             return ProvisioningResult::failed(
                 FailureClass::Timeout,
                 self::FOUND_ITS_OWN_BUILD,
-                $pinned
+                $unrecorded
                     ? sprintf(
-                        'Provider identity %s is pinned on this build\'s payload, and a machine named "%s", as this build names its machine, is on node %s with nothing about it contradicting this build. No create under the id is recorded as sent, but one from before creates were recorded may have been. Nothing new was built. It is taken to be this build\'s: confirm it at the node, then adopt it rather than building another.',
+                        'Provider identity %s is pinned on this build\'s payload, and a machine named "%s", as this build names its machine, is on node %s with nothing about it contradicting this build. No create under the id is recorded as sent; but this build has been attempted before, and a create sent under a pinned id before creates were recorded left no record, so one may have been sent. Nothing new was built. It is taken to be this build\'s: confirm it at the node, then adopt it rather than building another.',
                         $identity->providerId,
                         (string) $machine->name,
                         $machine->nodeName,
                     )
                     : sprintf(
-                        'An earlier attempt of this build sent a create under provider identity %s with the name "%s", and a machine of that name is on node %s with nothing about it contradicting this build. Nothing new was built. It is taken to be that attempt\'s machine, whose answer was lost: confirm it at the node, then adopt it rather than building another.',
+                        'A create under provider identity %s was sent by this build with the name "%s", and a machine of that name is on node %s with nothing about it contradicting this build. Nothing new was built. It is taken to be the machine that create built: confirm it at the node, then adopt it rather than building another.',
                         $identity->providerId,
                         (string) $machine->name,
                         $machine->nodeName,
@@ -808,16 +843,17 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
         if ($reason === self::REASON_NAMED_OTHERWISE) {
             /*
              * Not this build's: named, and not with any name a create under
-             * this identity was sent with — which, before any was sent, is
-             * every name, this job's own included. Nothing of this build's
-             * exists at the id, so its reservations are released like any
-             * refusal before a build, and an operator may move the job to a
-             * new identity.
+             * this identity was sent with — which, while none is recorded as
+             * sent, is every name, this job's own included (outside a pinned
+             * id on a job attempted before; see mayHaveSentUnrecorded()).
+             * Nothing of this build's exists at the id, so its reservations
+             * are released like any refusal before a build, and an operator
+             * may move the job to a new identity.
              */
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 self::IDENTITY_TAKEN,
-                $judgedAgainst->hostnames === []
+                $sent === [] && ! $unrecorded
                     ? sprintf(
                         'Provider identity %s is already used on node %s by a machine named "%s", and no create under this identity has been sent yet, so it is not this build\'s whatever it is called. Nothing was built; repoint this job to a new identity.',
                         $identity->providerId,
@@ -853,11 +889,32 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
     }
 
     /**
-     * Whether the identity is the id the payload pins.
+     * Whether a create under this identity may have been sent by an earlier
+     * attempt and never recorded: the id is pinned on the payload, and this
+     * job has been attempted before.
      *
      * The create has always honoured a pinned id, and before F-15 it did so
-     * without recording anything it sent — so at a pinned id, "no name
-     * recorded" does not mean "no create sent".
+     * without recording anything it sent, under the name hostnameFor() still
+     * gives — so at a pinned id, on a job whose earlier attempt may have run
+     * under that code, "no name recorded" does not establish "no create
+     * sent". Nothing on the row says which code an earlier attempt ran under,
+     * so every earlier attempt counts as possibly one of those.
+     *
+     * A first attempt has no earlier attempt, and for it "nothing recorded"
+     * is "nothing sent" like anywhere else. `attempts` counts this attempt
+     * already — the claim that handed the job here incremented it — and has
+     * no other writer that lets a job run again: the one other increment is
+     * adoption's, which settles the job, and nothing sets it back.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function mayHaveSentUnrecorded(ProvisioningJob $job, ReservedProviderIdentity $identity, array $payload): bool
+    {
+        return $job->attempts > 1 && $this->isPinnedOnThePayload($identity, $payload);
+    }
+
+    /**
+     * Whether the identity is the id the payload pins.
      *
      * @param  array<string, mixed>  $payload
      */
@@ -870,7 +927,10 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
 
     /**
      * Whose the machine at the reserved identity is, as one of four reasons,
-     * judged against the names given on the identity.
+     * judged against the names a create under the identity was sent with,
+     * and the one name taken as sent where the row cannot show that none
+     * was (see mayHaveSentUnrecorded()). Both compared exactly, for the
+     * reason ReservedProviderIdentity::calledWith() gives.
      *
      * A null is the absence of an observation, not an observation of absence
      * — and that cuts both ways. A machine with no name is NOT "named
@@ -878,13 +938,13 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
      * config, which is precisely the window in which a retry arrives after a
      * lost answer. And a null vCPU or memory figure contradicts nothing.
      */
-    private function whoseItIs(RemoteVmState $machine, ReservedProviderIdentity $identity, VmResources $resources): string
+    private function whoseItIs(RemoteVmState $machine, ReservedProviderIdentity $identity, ?string $takenAsSent, VmResources $resources): string
     {
         if ($machine->name === null || $machine->name === '') {
             return self::REASON_UNNAMED;
         }
 
-        if (! $identity->calledWith($machine->name)) {
+        if (! $identity->calledWith($machine->name) && $machine->name !== $takenAsSent) {
             return self::REASON_NAMED_OTHERWISE;
         }
 

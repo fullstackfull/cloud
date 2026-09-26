@@ -2191,7 +2191,7 @@ return [
             'provider_reference' => ['type' => ['string', 'null']],
             'reserved_provider_id' => ['type' => ['string', 'null'], 'description' => 'The hypervisor id a VPS create reserved before calling; where to look for what it built.'],
             'reserved_cluster_id' => ['type' => ['string', 'null']],
-            'reserved_provider_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every node a create under the reserved id was sent to.'],
+            'reserved_provider_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every node an attempt under the reserved id was placed on: every node a create under it was sent to, and any node an attempt was placed on that ended before sending one.'],
             'reserved_provider_hostnames' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Every name a create under the reserved id was sent with.'],
             'correlation_id' => ['type' => ['string', 'null']],
             'started_at' => ['$ref' => '#/components/schemas/Timestamp'],

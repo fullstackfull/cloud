@@ -186,8 +186,9 @@ class ProvisioningJob extends Model
      * and recorded only once the provider had answered, so a create whose
      * answer was lost left nothing behind: an operator's retry drew a new id
      * and built a second machine beside the first. The identity is now held
-     * by the job, and every attempt asks for the same one — and looks for what
-     * an earlier attempt may have built under it before building anything.
+     * by the job, and every attempt asks for the one it holds — the same one
+     * until an operator repoints the job — and looks for what an earlier
+     * attempt may have built under it before building anything.
      *
      * One statement, for three reasons:
      *
