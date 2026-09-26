@@ -75,9 +75,10 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * stops the allocator reading a subnet; it does not release the addresses
  * already assigned out of it.
  *
- * The whole comparison is one PHP predicate, sameRealm(), rather than SQL:
- * the realm turns on classifying an address, which the table's varchar cannot
- * do, and a rule split between a query and a loop is two rules.
+ * The whole comparison is made in PHP — Cidr::overlaps() and sameRealm(),
+ * over every registered block — rather than in SQL: the realm turns on
+ * classifying an address, which the table's varchar cannot do, and a rule
+ * split between a query and a loop is two rules.
  *
  * ---------------------------------------------------------------------------
  * The lock

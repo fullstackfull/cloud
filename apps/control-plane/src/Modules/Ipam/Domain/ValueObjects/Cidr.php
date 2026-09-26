@@ -207,6 +207,12 @@ final readonly class Cidr implements Stringable
 
     /**
      * Whether every address of $other is inside this block.
+     *
+     * A block of the other family is never inside this one. (As in
+     * overlaps(), the masked comparison would reach that on its own — the
+     * masked address keeps $other's family and is compared with this block's
+     * network address, and a v4 and a v6 address never print alike; the
+     * check states it rather than leaving it to how addresses are printed.)
      */
     public function encloses(self $other): bool
     {

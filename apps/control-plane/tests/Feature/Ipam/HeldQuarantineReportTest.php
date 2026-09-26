@@ -213,8 +213,11 @@ final class HeldQuarantineReportTest extends TestCase
     {
         /*
          * The address is not unique at the scope this query works at: the
-         * constraint is (subnet_id, address), and a pool holds many subnets —
-         * overlapping ones included, today. The row id is the last key, and the
+         * constraint is (subnet_id, address), and a pool holds many subnets.
+         * RegisterSubnet refuses a new overlap, but the schema does not, so
+         * one predating that check, or one written by the reference topology
+         * loader or SubnetFactory — which is how this test writes it — still
+         * puts one address on two rows. The row id is the last key, and the
          * rows are written higher id first so insertion order cannot pass.
          */
         $this->freezeTime();

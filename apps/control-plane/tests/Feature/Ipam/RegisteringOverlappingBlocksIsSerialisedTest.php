@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Ipam;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Infrastructure\Models\Datacenter;
@@ -38,6 +39,12 @@ use Tests\TestCase;
  * lock_timeout turns that wait into an error this test can see instead of a
  * hang. If B is not serialised it reads past A, finds nothing, and commits —
  * which is the failure.
+ *
+ * That transaction is the test's, and a caller's transaction would hold the
+ * lock whether or not the registration takes it inside its own. HTTP callers
+ * have none, so one row freezes A another way: with nothing around it, B is
+ * run from a query listener at the point where A has read the estate and not
+ * yet written.
  *
  * One lock for the whole platform, not one per building: whether two blocks
  * may coexist is decided across buildings as well as within one, so a key
@@ -126,6 +133,60 @@ final class RegisteringOverlappingBlocksIsSerialisedTest extends TestCase
             first: [$this->pool($this->datacenter('kw-north'), 'north-public'), '198.51.100.0/24'],
             second: [$this->pool($this->datacenter('kw-south'), 'south-public'), '198.51.100.0/25'],
         );
+    }
+
+    #[Test]
+    public function the_lock_is_held_by_the_registrations_own_transaction_when_its_caller_has_none(): void
+    {
+        /*
+         * Two HTTP requests arrive with no transaction around either. The two
+         * rows above hold A inside a transaction the test opened, and that
+         * transaction would keep holding a transaction-scoped lock even if the
+         * registration took it outside its own — before the transaction the
+         * write commits in, where on a bare connection it is released as soon
+         * as its statement ends. So here A has no transaction of the test's
+         * around it, and B is run at the one moment that matters: after A has
+         * read the estate and before A has written to it, from inside A.
+         */
+        $site = $this->datacenter('kw-north');
+        $firstPool = $this->pool($site, 'north-public');
+        $secondPool = $this->pool($site, 'north-reserve');
+
+        $this->assertSame(0, DB::connection($this->defaultConnection)->transactionLevel(), 'A must start with no transaction around it.');
+
+        $b = null;
+
+        DB::listen(function (QueryExecuted $query) use (&$b, $secondPool): void {
+            $sql = strtolower($query->sql);
+
+            if ($b !== null
+                || $query->connectionName !== $this->defaultConnection
+                || ! str_starts_with(ltrim($sql), 'select')
+                || ! str_contains($sql, 'from "subnets"')) {
+                return;
+            }
+
+            // A has read the estate and not yet written. B tries now.
+            try {
+                $this->asOperatorB(
+                    fn (): Subnet => app(RegisterSubnet::class)->execute($secondPool, '203.0.113.0/25', null, null, $this->operator),
+                );
+                $b = 'committed';
+            } catch (QueryException $e) {
+                $b = (string) $e->getCode();
+            } catch (SubnetRegistrationRefused) {
+                $b = 'refused';
+            }
+        });
+
+        app(RegisterSubnet::class)->execute($firstPool, '203.0.113.0/24', null, null, $this->operator);
+
+        $this->assertSame(
+            self::LOCK_NOT_AVAILABLE,
+            $b,
+            'B was not made to wait while A stood between its read and its write: A no longer held the lock there.',
+        );
+        $this->assertSame(['203.0.113.0/24'], Subnet::query()->pluck('cidr')->all());
     }
 
     #[Test]

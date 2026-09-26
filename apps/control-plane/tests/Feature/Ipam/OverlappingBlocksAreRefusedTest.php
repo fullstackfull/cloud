@@ -325,6 +325,32 @@ final class OverlappingBlocksAreRefusedTest extends TestCase
     }
 
     #[Test]
+    public function the_block_is_ordered_before_the_pool_that_holds_it(): void
+    {
+        /*
+         * The pool's slug breaks a tie on the block; it does not come before
+         * it. The row above puts both blocks in one pool, so it cannot tell
+         * block-then-pool from pool-then-block. Here two disjoint blocks sit
+         * in two pools of one building, and the slug order and the order of
+         * registration agree with each other and disagree with the block's
+         * text: `a-pool` is written first and holds `10.9.0.0/16`, `b-pool`
+         * holds `10.1.0.0/16`. A scan by pool first, or in the order the rows
+         * were written, would name the first; the block names the second.
+         */
+        $a = $this->pool('kw-north', IpPoolScope::Private, 'a-pool');
+        $b = $this->pool('kw-north', IpPoolScope::Private, 'b-pool');
+        $candidate = $this->pool('kw-north', IpPoolScope::Private);
+
+        $this->register($a, '10.9.0.0/16')->assertCreated();
+        $this->register($b, '10.1.0.0/16')->assertCreated();
+
+        $refusal = $this->register($candidate, '10.0.0.0/8');
+
+        $this->assertRefusedOver($refusal, '10.1.0.0/16', 'b-pool', 'kw-north');
+        $this->assertStringNotContainsString('10.9.0.0/16', (string) $refusal->json('error.message'));
+    }
+
+    #[Test]
     public function the_refusal_names_the_same_pool_when_two_pools_tie_on_the_block(): void
     {
         /*

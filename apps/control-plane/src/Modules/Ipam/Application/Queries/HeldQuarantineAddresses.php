@@ -91,8 +91,11 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  *  - `order by ip_addresses.id`, the last key. Held by
  *    `one_address_in_two_overlapping_subnets_is_still_ordered`. The address is
  *    not unique at the scope this query works at: the constraint is
- *    `UNIQUE (subnet_id, address)`, a pool holds many subnets, and overlapping
- *    subnets are accepted today.
+ *    `UNIQUE (subnet_id, address)`, a pool holds many subnets, and nothing in
+ *    the schema keeps two of them from overlapping. RegisterSubnet refuses a
+ *    new overlap; an overlap an estate held before that check, or one written
+ *    by the reference topology loader, SubnetFactory or a hand-written INSERT,
+ *    is still a pool with one address on two rows.
  *  - `limit`. Held by `the_report_states_the_true_total_when_it_lists_fewer`.
  *  - The six `(string)` casts in the map. Inert because of the schema: the
  *    selected columns are `character varying`, `character(26)` and
