@@ -262,6 +262,61 @@ final class AnOrderFollowsWhatItBoughtTest extends TestCase
     }
 
     #[Test]
+    public function a_full_refund_is_recorded_on_the_order_wherever_its_service_stands(): void
+    {
+        /*
+         * The re-audit's observation [B] against F-19: the table let an order
+         * record a refund from PAID, PROVISIONING_FAILED, MANUAL_REVIEW and
+         * ACTIVE only, so a full refund while the order was queued, building
+         * or suspended was logged by RecordRefundOnTheOrder and left off the
+         * order, which went on reading as if the money were still held.
+         *
+         * The product decision reads the same from every one of those: a
+         * refund records the money and nothing else. So the order says
+         * `refunded`, and nothing else moves — the service stays where it is,
+         * and the plan unit is still held while it lives.
+         */
+        $observed = [];
+
+        foreach ([OrderStatus::QueuedForProvisioning, OrderStatus::Provisioning, OrderStatus::Suspended] as $standing) {
+            $plan = $this->sharedHostingPlan('refund-'.$standing->value, stockLimit: 1);
+            $order = $this->buySharedHosting($this->customer(), $plan);
+
+            if ($standing === OrderStatus::Suspended) {
+                // Reached the way production reaches it: dunning suspends the
+                // subscription, the service follows, and the order follows it.
+                $subscription = Subscription::query()->where('order_id', $order->getKey())->sole();
+                app(TransitionSubscription::class)->execute($subscription, SubscriptionStatus::PastDue);
+                app(TransitionSubscription::class)->execute($subscription->refresh(), SubscriptionStatus::Suspended);
+            } else {
+                // A build still in flight when the refund lands.
+                $order->forceFill(['status' => $standing])->save();
+            }
+
+            $this->assertSame($standing, $order->refresh()->status, 'Precondition: the order stands where the case says.');
+            $serviceBefore = $this->serviceOf($order)->status;
+
+            /** @var Invoice $invoice */
+            $invoice = Invoice::query()->where('order_id', $order->getKey())->sole();
+            app(RecordInvoiceRefund::class)->execute($invoice, Money::ofMinor($invoice->amount_paid_minor, $invoice->currency));
+
+            $observed[] = sprintf(
+                '%s → order=%s service_unchanged=%s claimed=%d',
+                $standing->value,
+                $order->refresh()->status->value,
+                $this->serviceOf($order)->status === $serviceBefore ? 'yes' : 'no',
+                app(PlanCapacity::class)->claimed((string) $plan->getKey()),
+            );
+        }
+
+        $this->assertSame([
+            'queued_for_provisioning → order=refunded service_unchanged=yes claimed=1',
+            'provisioning → order=refunded service_unchanged=yes claimed=1',
+            'suspended → order=refunded service_unchanged=yes claimed=1',
+        ], $observed);
+    }
+
+    #[Test]
     public function a_coupon_hold_is_given_back_by_the_end_of_the_service_and_not_by_the_refund(): void
     {
         /*

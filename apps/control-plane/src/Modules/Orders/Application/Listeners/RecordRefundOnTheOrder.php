@@ -31,9 +31,16 @@ use Lynomia\Modules\Shared\Domain\Exceptions\IllegalStateTransitionException;
  * Heard from InvoiceRefunded rather than from RefundIssued, because "refunded
  * in full" is the invoice's judgement — it knows what it took and what has gone
  * back across every refund — and it announces it once, on the transition. The
- * order moves only where its state machine lets it; a refund of an order in the
- * middle of a build, or already ended, is recorded on the invoice and left off
- * the order rather than forced onto it.
+ * order moves only where its state machine lets it. That is every status an
+ * order holds once it has been paid — PAID, QUEUED_FOR_PROVISIONING,
+ * PROVISIONING, PROVISIONING_FAILED, MANUAL_REVIEW, ACTIVE and SUSPENDED —
+ * because the decision reads the same from each of them. The build-in-flight
+ * and suspended cases used to be missing from the table, so a full refund
+ * there was only logged below and the order went on reading as if the money
+ * were held (the re-audit after round two, observation [B] on F-19). What is
+ * left to the log is an order that has already ended (REFUNDED, TERMINATED,
+ * CANCELLED), or one that never took money: there is nothing to record on it
+ * that is not already true.
  */
 final class RecordRefundOnTheOrder implements ShouldQueue
 {
