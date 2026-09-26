@@ -27,6 +27,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import re
 import tempfile
 from pathlib import Path
 
@@ -526,6 +527,52 @@ jobs:
 ]
 
 
+# What the gate prints about the tree it read, beside its verdict. Its
+# docstring used to carry these counts, typed, and they went stale the day two
+# steps were added; so they are printed instead, and pinned here on a tree
+# whose counts are known.
+CENSUS_TREE = GOOD + """      - uses: actions/setup-python@v5
+      - name: a step with a heredoc, where code_lines stops following
+        run: |
+          cat <<'EOF'
+          # not a comment to bash
+          EOF
+  other:
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: a step not read as bash
+        run: echo hello
+"""
+CENSUS = (
+    "1 workflow file(s), 4 run step(s) inspected: 3 read as bash, 1 of them "
+    "past a construct code_lines stops at; 2 `uses:` step(s), whose code is not read"
+)
+
+# Counts of the tree that the gate prints. A docstring sentence stating one of
+# them as a figure goes stale when a step is added, so none may.
+TYPED_COUNT = re.compile(
+    r"\b\d+\s+(?:workflow files?\b|run steps?\b|`uses:` steps?\b|bash steps?\b"
+    r"|steps that run\b)|\bin \d+ of the \d+\b"
+)
+
+
+def check_census() -> list[str]:
+    problems: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        directory = Path(tmp) / ".github" / "workflows"
+        directory.mkdir(parents=True)
+        (directory / "ci.yml").write_text(CENSUS_TREE)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = gate.main(["check-ci-cannot-apply.py", tmp])
+    if code != 0 or out.getvalue().strip() != CENSUS:
+        problems.append(f"exit {code}, printed {out.getvalue().strip()!r}, expected {CENSUS!r}")
+    typed = TYPED_COUNT.findall((HERE / "check-ci-cannot-apply.py").read_text())
+    if typed:
+        problems.append(f"the gate's source states counts it prints as figures: {typed!r}")
+    return problems
+
+
 # The table above is this self-test's subject, and a self-test over an emptied
 # table prints `0/0 passed` and exits 0 -- the very shape the gate it proves
 # exists to refuse. The count is literal source in this file, maintained by
@@ -553,7 +600,12 @@ def main() -> int:
         if not ok:
             failures += 1
             print(f"      expected {expected!r}, got exit {code} and stderr:\n{err}")
-    print(f"\n{len(CASES) - failures}/{len(CASES)} passed")
+    problems = check_census()
+    print(f"{'PASS' if not problems else 'FAIL'}  the gate prints the counts of what it read, and types none")
+    for problem in problems:
+        print(f"      {problem}")
+    failures += bool(problems)
+    print(f"\n{len(CASES) + 1 - failures}/{len(CASES) + 1} passed")
     return 1 if failures else 0
 
 
