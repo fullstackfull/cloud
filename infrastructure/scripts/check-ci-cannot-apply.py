@@ -2,28 +2,52 @@
 """CI validates infrastructure; a person applies it.
 
 A pipeline that can reimage a node on merge is a pipeline that eventually will,
-on a branch nobody meant to merge. This parses the workflow files -- `.yml` and
-`.yaml` alike, because GitHub Actions runs both -- and reads the `run:` text of
-every step for the commands in `APPLYING`.
+on a branch nobody meant to merge. This is a tripwire over what CI spells out,
+not a proof that no workflow can apply, and what follows says what it reads.
 
-A step bash runs (`reads_as_bash`) is read as bash reads it (`code_lines`):
-quotes, escapes and comments are followed from the top of the text, comments
-are removed and line continuations joined, so a comment neither disarms the
-check nor trips it, and a line that only looks like one -- a `#` inside a
-quote an earlier line left open -- is read as the command it is. From the first
-construct that reading does not follow, and in every step another shell runs,
-no comment is removed: one there is read as code, a false red, the safe
-direction.
+What it reads. The `run:` text of each step of each job in each `.yml` and
+`.yaml` file directly under `.github/workflows` (GitHub Actions runs both),
+matched against the patterns in `APPLYING`: tofu or terraform apply and destroy
+(global options allowed before the verb), `scripts/apply.sh`, and
+ansible-playbook without --check, -C or --syntax-check among its own command's
+words (`command_words`). Before matching, a step `reads_as_bash` picks out has
+its comments removed and line continuations joined by `code_lines`, a reading
+of a subset of bash's grammar that stops at the first construct outside the
+subset and keeps the rest verbatim; any other step only has its continuations
+joined. Kept text is the safe direction -- a comment read as code is a false
+red -- and removed text that bash runs is the dangerous one.
 
-It reads text; it does not execute or follow anything. A `uses:` step runs an
-action's code, a job-level `uses:` runs a reusable workflow, and a `run:` step
-can call a script or a Makefile target (`make deploy-staging` runs
-ansible-playbook without --check). None of those is opened here, except a
-reusable workflow that is itself a file in `.github/workflows`, which is read
-like any other. What passing establishes is therefore narrower than "no
-workflow applies infrastructure": no step's `run:` text, read as above, matches
-a pattern in `APPLYING`, a list that names the known applying commands and
-cannot name every way to reach one.
+What it does not read. A `uses:` step runs an action's code, a job-level
+`uses:` runs a reusable workflow, and a `run:` step can call a script or a
+Makefile target (`make deploy-staging` runs ansible-playbook without --check).
+None of those is opened here, except a reusable workflow that is itself a file
+in `.github/workflows`, which is read like any other. `APPLYING` names the
+applying commands known here and cannot name every way to reach one; the
+subset `code_lines` follows, the constructs it stops at and the rules
+`reads_as_bash` applies are what attack on this gate has found so far, not a
+boundary inside which bash and this reading agree.
+
+Measured in the tree today, where this script prints 1 workflow file and 44
+run steps (`python3 infrastructure/scripts/check-ci-cannot-apply.py .`):
+20 `uses:` steps (`grep -E '^\\s+(- )?uses:' .github/workflows/*.yml`), of
+seven actions -- actions/checkout, cache, setup-node, setup-python and
+upload-artifact, opentofu/setup-opentofu and shivammathur/setup-php -- which
+check out, cache, install a toolchain or upload a file; no job-level `uses:`;
+no step read as another shell, every job being `runs-on: ubuntu-latest` with
+no `shell:` or `container:`; no `make` call; 11 steps that run a script file
+from this repository -- nine of the Python validators and self-tests here,
+pint, and test_safety_gate.sh, which runs ansible-playbook without --check
+against the runner itself through a throwaway `ansible_connection: local`
+inventory, running only `assert` and `debug`; 5 bash steps where `code_lines`
+stops early; and no step whose verdict removing comments changes, since no
+step's text matches a pattern in `APPLYING` even with its comments left in.
+The other steps run tools -- composer, npm and npx, php artisan, ansible-lint,
+tofu fmt and validate, git -- whose code is not read either. No package.json
+script names an applying command (`git ls-files '*package.json' | xargs grep
+-lE 'tofu|terraform|ansible-playbook|apply\\.sh'` finds none); the backend
+test suite that `php artisan test` runs holds application code that builds an
+ansible-playbook command (AnsibleDeploymentController), and whether a test run
+reaches it is that code's guard's question, not measured here.
 
 Exit status 0 when no step's `run:` text, read as above, matches a pattern in
 `APPLYING`; 1 when one does, and 1 when there is no workflow file, or no `run:`
@@ -67,20 +91,27 @@ _CONTINUATION = re.compile(r"(?<!\\)((?:\\\\)*)\\\n")
 
 
 def code_lines(text: str) -> str:
-    """`text` as bash reads it: comments removed, line continuations joined.
+    """`text` with comments removed and line continuations joined, by a
+    reading of a subset of bash's grammar.
 
-    Quotes ('...', "..." and $'...'), backslash escapes and comments are
-    followed from the top as bash follows them, so a `#` is a comment only
-    where bash takes one: beginning a word, outside quotes. A line inside a
-    quote an earlier line left open is kept, and so is one a trailing backslash
-    joins to the word before it (`a\\` then `#b` is the word `a#b`).
+    The subset: quotes ('...', "..." and $'...'), backslash escapes, a plain
+    `${...}` read as one word, and a here-string, followed from the top of the
+    text. A `#` is taken as a comment where it begins a word outside quotes,
+    which is bash's rule. A line inside a quote an earlier line left open is
+    kept, and so is one a trailing backslash joins to the word before it
+    (`a\\` then `#b` is the word `a#b`).
 
-    Bash's reading of some constructs depends on context this does not track:
-    a heredoc, a backtick, `((`, `$[`, a `$(` inside double quotes, a `${...}`
-    other than a plain one, an array subscript or compound assignment, and a
-    `#` right after `(` or `)` (`(true)#x` is a comment, `$(true)#x` is not).
-    At the first of them following stops, and the rest of the text is kept as
-    it is -- comments included, continuations joined unless escaped.
+    It stops following at the first construct found to be read by bash in a
+    way that depends on context this does not track: a heredoc, a backtick,
+    `((`, `$[`, a `$(` inside double quotes, a `${...}` other than a plain one,
+    an array subscript or compound assignment, and a `#` right after `(` or `)`
+    (`(true)#x` is a comment, `$(true)#x` is not). From there the rest of the
+    text is kept as it is -- comments included, continuations joined unless
+    escaped. Those are the constructs attack has found so far, not every place
+    bash and this reading part: one not listed that bash reads differently
+    could make this remove a line bash runs. In the tree today it stops early
+    in 5 of the 44 `run:` steps, and in none does removing comments change the
+    verdict (the module docstring has the measurement).
     """
     out: list[str] = []
     quote = ""  # the quote open here: "", "'", '"' or "$'"
@@ -146,12 +177,15 @@ def code_lines(text: str) -> str:
 
 
 def reads_as_bash(workflow: dict, job: dict, step: dict) -> bool:
-    """Whether GitHub runs this step's `run:` with bash: the `shell:` in force
-    -- the step's, else the job's default, else the workflow's -- names bash,
-    or none is set and the job runs outside a container on one GitHub-hosted
-    Linux or macOS runner label (`ubuntu-*`, `macos-*`), where bash is the
-    default. Any other step may be run by a shell whose comments and quotes
-    are not bash's."""
+    """Whether this reads the step's `run:` as bash: the `shell:` in force --
+    the step's, else the job's default, else the workflow's -- names bash, or
+    none is set and the job runs outside a container on a single runner label
+    `ubuntu-*` or `macos-*`, which on GitHub-hosted runners defaults to bash.
+    Any other step may be run by a shell whose comments and quotes are not
+    bash's, and is not read as bash. The label is read as a name: a
+    self-hosted runner carrying one of those labels is read as bash whatever
+    shell it has. In the tree today every job is `runs-on: ubuntu-latest`
+    with no `shell:` or `container:`, so every step is read as bash."""
     for scope in (
         step,
         (job.get("defaults") or {}).get("run") or {},
@@ -175,10 +209,13 @@ def reads_as_bash(workflow: dict, job: dict, step: dict) -> bool:
 def command_words(body: str, start: int) -> list[str] | None:
     """The words of the shell command that continues from `start`.
 
-    It ends at the first `;`, `&`, `|`, `)` or newline outside quotes, or at a
-    `#` that begins a word, which starts a comment. Quotes are removed as the
-    shell removes them, so `-e "x --check"` is one word and not a flag. None
-    when the quoting does not close, which the caller treats as no check flag.
+    It ends at the first `;`, `&`, `|`, `)` or newline outside '...' or "..."
+    quotes, or at a `#` that begins a word, which starts a comment. Quotes are
+    removed by shlex's POSIX rules, so `-e "x --check"` is one word and not a
+    flag. None when the quoting does not close under those rules -- `$'it\\'s'`
+    is one such, being bash's and not POSIX's -- which the caller treats as no
+    check flag. In the tree today there is one `ansible-playbook` in any
+    `run:` text, with --syntax-check among its own words.
     """
     quote = None
     at = start
@@ -264,8 +301,9 @@ def main(argv: list[str]) -> int:
             # A comment explaining why we do not apply is not an apply, and a
             # command split over three lines with backslashes is still one
             # command -- reading it as three is how `ansible-playbook ... \
-            # --syntax-check` gets mistaken for a real run. Both are bash's
-            # rules, so they are applied only where bash runs the step.
+            # --syntax-check` gets mistaken for a real run. Comments are bash's
+            # rule, so they are removed only in a step `reads_as_bash` picks
+            # out, and only as far as `code_lines` follows.
             if reads_as_bash(workflow, job, step):
                 body = code_lines(command)
             else:

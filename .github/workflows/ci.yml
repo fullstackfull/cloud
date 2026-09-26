@@ -592,11 +592,13 @@ jobs:
       # on merge is a pipeline that eventually will, on a branch nobody meant to
       # merge. CI validates; a person applies.
       #
-      # The step is named for what the check reads: the `run:` text of every
-      # workflow step, for a list of known applying commands. It does not
-      # follow a step into a script, a Makefile target (`make deploy-staging`
-      # applies) or an action, so it is a tripwire over what CI spells out and
-      # not a proof that no workflow can apply; its docstring draws the line.
+      # The step is named for what the check reads: the `run:` text of the
+      # steps in .github/workflows, for a list of known applying commands. It
+      # does not follow a step into a script, a Makefile target (`make
+      # deploy-staging` applies) or an action, so it is a tripwire over what
+      # CI spells out and not a proof that no workflow can apply. Its
+      # docstring says what it reads, what it does not, and how much of the
+      # tree falls in each today.
       - name: No workflow run step names a known applying command
         run: python3 infrastructure/scripts/check-ci-cannot-apply.py .
 

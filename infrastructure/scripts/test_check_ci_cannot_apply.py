@@ -11,10 +11,12 @@ gate that scans an empty subject passes silently and reads, in review, exactly
 like a gate that found nothing wrong.
 
 Being green is not evidence. This drives the validator over synthetic
-workflow trees and checks it goes RED for each failure its name promises, and
-stays GREEN for each legitimate shape that superficially resembles one --
+workflow trees and checks it goes RED for each failure in the table below, and
+stays GREEN for each legitimate shape there that superficially resembles one --
 because a gate that cannot tell `ansible-playbook --check` from
-`ansible-playbook` is a gate somebody will disable.
+`ansible-playbook` is a gate somebody will disable. The table holds the shapes
+found so far, attack included; it is not every way to hide an apply from a
+reading of text, and the validator's docstring says which ways it knows of.
 
 Run: python3 infrastructure/scripts/test_check_ci_cannot_apply.py
 Exit 0 when every case behaves, 1 otherwise.

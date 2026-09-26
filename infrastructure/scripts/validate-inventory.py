@@ -6,17 +6,47 @@ is what stops a machine getting there without a stated purpose, a named owner
 and a deliberate safety class — and what stops a credential being committed
 alongside it.
 
-It reads facts out of the YAML directly rather than asking Ansible, so it needs
-no Ansible installed and contacts no host. It reads the files Ansible reads for
-an inventory, the way Ansible reads them: an environment is a directory under
-`ansible/inventories/`, taken the way `-i <that directory>` takes it
-(`inventory_sources`), and each host is judged on the variables that inventory
-gives it -- its YAML sources, then the `group_vars/` and `host_vars/` in the
-directory -- which is what `ansible-inventory -i <that directory> --host <host>`
-prints (`resolve`). A file or a shape it cannot read that way is refused, never
-skipped. What a playbook adds at run time -- the `group_vars/` beside the
-playbook, a group made by `group_by` -- is not part of the inventory, and is not
-read here.
+It reads the YAML itself rather than asking Ansible, so it needs no Ansible
+installed and contacts no host. That makes it a reimplementation of part of
+Ansible's inventory resolution, and what follows says which part.
+
+What it reads. An environment is a directory under `ansible/inventories/`. Its
+sources are the files `inventory_sources` lists -- those in the directory and
+its subdirectories that Ansible's default ignore rules do not skip -- and each
+must be a non-empty YAML mapping of groups (`load`). A host's variables are
+resolved from the groups, children, hosts and vars those mappings declare and
+from the `group_vars/` and `host_vars/` files in the directory, by the rules
+`resolve` and `vars_files` list. Those rules were taken from ansible-core
+2.18's source with default settings, which ansible.cfg here does not change
+(`grep -cE 'inventory_ignore|yaml_valid_extensions|enable_plugins|vars_plugins'
+infrastructure/ansible/ansible.cfg` is 0). Each host is judged on the result.
+
+What it refuses. A source or shape it has been shown to read differently from
+Ansible is refused rather than read: a source that is not YAML, is executable,
+configures a plugin or holds an empty document; a variables file that is
+Vault-encrypted, unparseable or not a mapping; a group key Ansible skips; a
+host range or port; a group loop; an `ungrouped` with a parent or children; a
+file directly under `ansible/inventories/`; an environment with no source or
+that declares no host. That list is what attack on this validator has found so
+far, not a boundary: a shape nobody has tried may be resolved differently from
+Ansible and not refused. The measurable quantity is the occupancy, and today it
+is nil. `python3 infrastructure/scripts/validate-inventory.py` refuses nothing
+(3 environments, 32 hosts, exit 0), and for each of the 32 hosts `resolve`
+gives the variables `ansible-inventory -i <environment> --list` (ansible-core
+2.18.1, its own magic variables aside) gives, run from a directory with no
+`group_vars/` or `host_vars/` of its own.
+
+What it does not read. Anything a play adds at run time, which is not part of
+the inventory: the `group_vars/` and `host_vars/` beside a playbook, or beside
+the working directory -- so `ansible-inventory` run from
+`infrastructure/ansible/`, where ansible.cfg is, prints variables from
+`infrastructure/ansible/group_vars/` that are not this validator's subject --
+and `group_by`, `add_host`, play, role and extra vars. Measured today: that
+`group_vars/` (which `playbooks/group_vars` links to) holds 11 files, and of
+the variables judged here they set only `allow_reimage: false`, plus two whose
+names carry a secret hint and hold none (`hardening_password_authentication:
+false`, `proxmox_api_token_name: control-plane`); `grep -rlE
+'\\b(group_by|add_host)\\b' infrastructure/ansible` finds no file.
 
 Exit status 0 when every environment's inventory passes, 1 otherwise.
 """
@@ -75,9 +105,9 @@ REWRITTEN_HOST_KEY = re.compile(r"\[|^[^:\[\]]*:[0-9]+$")
 
 
 def section(group: str, body: dict, key: str, where: Path) -> dict:
-    """One of a group's `vars`, `children` or `hosts`, read as Ansible reads it:
-    absent or empty is nothing, a bare string is a one-key mapping (`hosts:
-    web-1` is the host web-1), and anything else must be a mapping."""
+    """One of a group's `vars`, `children` or `hosts`, read by Ansible's rule
+    for it: absent or empty is nothing, a bare string is a one-key mapping
+    (`hosts: web-1` is the host web-1), and anything else must be a mapping."""
     value = body.get(key)
     if value is None:
         return {}
@@ -95,13 +125,13 @@ def resolve(
     documents: list[tuple[Path, dict]],
     directory: Path | None = None,
 ) -> tuple[dict[str, tuple[dict, dict[str, Path], list[str], Path]], set[str]]:
-    """Every host the documents declare, with the variables Ansible gives it.
+    """Every host the documents declare, with the variables these rules give it.
 
-    This follows ansible-core's YAML inventory plugin, its reconciliation, and
-    the host_group_vars plugin that reads the directories beside an inventory
-    (plugins/inventory/yaml.py, inventory/data.py, inventory/helpers.py,
-    plugins/vars/host_group_vars.py, vars/manager.py), and each rule below is
-    one of theirs:
+    The rules are taken from ansible-core's YAML inventory plugin, its
+    reconciliation, and the host_group_vars plugin that reads the directories
+    beside an inventory (plugins/inventory/yaml.py, inventory/data.py,
+    inventory/helpers.py, plugins/vars/host_group_vars.py, vars/manager.py).
+    Each rule below is one of theirs; the list is not all of theirs:
 
     - Every top-level key of a document is a group, `all` only one of them.
     - A group, or a host, is one object however many places declare it, in
@@ -126,11 +156,15 @@ def resolve(
 
     Returns {host: (variables, the file each variable came from, groups it was
     declared in, first file that declared it)} and the set of group names
-    defined. Raises Unreadable for a shape Ansible refuses or skips, a host key
-    it would rewrite, a variables file this cannot read (`load_vars`), or an
-    `ungrouped` with a parent other than `all` or with children of its own --
-    shapes whose hosts Ansible's reconciliation treats in ways these rules do
-    not follow.
+    defined. Raises Unreadable for these shapes, each found to be one Ansible
+    refuses, skips, or resolves by rules not listed above: a group or host key
+    that is empty or not a string, a group, section or host's vars that is not
+    a mapping, a group key other than vars, children and hosts, a host key
+    Ansible would rewrite, an ansible_group_priority that is not a number, a
+    group loop or `all` as a child, a variables file this cannot read
+    (`load_vars`), and an `ungrouped` with a parent other than `all` or with
+    children of its own. These are the shapes attack has found, not every
+    shape on which these rules and Ansible's part.
 
     The walk used to start at `all` and follow the document's nesting, so a
     host under a group written beside `all:` was neither counted nor checked,
@@ -507,7 +541,8 @@ YAML_SUFFIXES = ("", ".yml", ".yaml", ".json")
 
 
 def inventory_sources(directory: Path) -> list[Path]:
-    """Every file Ansible reads as inventory when given this directory."""
+    """The files Ansible reads as inventory when given this directory, under
+    the default ignore settings above."""
     found: list[Path] = []
     for entry in sorted(directory.iterdir(), key=lambda p: p.name):
         if IGNORED_NAME.search(entry.name) or entry.name.endswith(IGNORED_ENDINGS):
@@ -544,8 +579,19 @@ def load(path: Path) -> dict:
             f"{path}: does not parse as YAML ({detail}), so Ansible would try "
             "another plugin on it, and this validator cannot"
         ) from None
-    if document is None:
-        return {}
+    # The YAML plugin refuses an empty document -- `{}`, `null`, `~`, a file
+    # of comments -- with "Parsed empty YAML file", and Ansible hands the file
+    # to the next plugin. INI takes `{}`, `null` or `~` as a host in
+    # `ungrouped`. This used to read such a file as no groups and print `ok`
+    # over that host (F-38). A file of comments alone, which INI reads as
+    # nothing, is refused with the rest: a false red, the safe direction.
+    if not document:
+        raise Unreadable(
+            f"{path}: holds an empty YAML document, which Ansible's YAML plugin "
+            "refuses; Ansible then tries another plugin on the file (INI takes "
+            "a line like `{}` or `null` as a host), and this validator cannot "
+            "read it that way"
+        )
     if not isinstance(document, dict):
         raise Unreadable(
             f"{path}: not a YAML mapping of groups, so Ansible would try another "
@@ -562,8 +608,8 @@ def load(path: Path) -> dict:
 def check_inventory(
     sources: list[Path], where: Path, directory: Path | None = None,
 ) -> tuple[list[str], int, set[str]]:
-    """Check one inventory made of these sources, read together as Ansible
-    reads them, with the `group_vars/` and `host_vars/` in `directory`.
+    """Check one inventory made of these sources, read together by the rules
+    in `resolve`, with the `group_vars/` and `host_vars/` in `directory`.
     Returns (problems, hosts resolved, groups defined).
 
     A source need not have an `all:` key: Ansible reads every top-level key as
