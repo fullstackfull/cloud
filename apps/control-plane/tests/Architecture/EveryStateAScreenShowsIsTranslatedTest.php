@@ -103,6 +103,16 @@ use RuntimeException;
  * every case of each — in English and in Arabic. Adding a case to one of these
  * enums fails this test until somebody writes the two sentences a person will
  * read.
+ *
+ * Except a case nothing can enter. A state
+ * {@see EveryEnumCaseHasAProducerTest} excuses as `unwritten`, or
+ * {@see EveryStateAMachineCanEnterHasAProducerTest} excuses as unproduced, is
+ * not a state a screen can show, and no string is demanded for it: the list
+ * is read from those two gates ({@see EveryEnumCaseHasAProducerTest::unenterable()}),
+ * so the gates cannot disagree about a state. A string that already exists
+ * for one is left alone, not refused. When such a state gains a writer, its
+ * excuse fails as stale, and removing the excuse makes this gate demand the
+ * strings again.
  */
 final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
 {
@@ -332,17 +342,67 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
         string $locale,
         string $file,
     ): void {
-        $catalogue = $this->catalogue($file);
+        $missing = self::missingIn($this->catalogue($file));
+
+        $this->assertSame([], $missing, sprintf(
+            'The %s catalogue has no string for these states, so a screen showing one renders its raw '.
+            "enum value:\n  %s\nAdd them to apps/web/src/i18n/locales/%s.",
+            $locale,
+            implode("\n  ", $missing),
+            $file,
+        ));
+    }
+
+    /**
+     * The two gates cannot disagree about a state. A state nothing can enter
+     * — excused as unwritten by {@see EveryEnumCaseHasAProducerTest}, or as
+     * unproduced by {@see EveryStateAMachineCanEnterHasAProducerTest} — is not
+     * a state a screen can show, so no string is demanded for it. This gate
+     * used to demand copy for `InvoiceStatus::Uncollectible` while its sibling
+     * documented the state as one no invoice can reach.
+     *
+     * Measured on the real English catalogue with strings taken out, so that
+     * both directions are held: a string for an unenterable state may go, and
+     * a string for a state that can occur may not.
+     */
+    #[Test]
+    public function no_string_is_demanded_for_a_state_nothing_can_enter_and_every_other_is_still_demanded(): void
+    {
+        $catalogue = $this->catalogue('en.json');
+
+        $this->assertArrayHasKey('uncollectible', $catalogue['status'], 'The fixture needs the real string to take out.');
+        $this->assertArrayHasKey('info', $catalogue['attention']['severity'], 'The fixture needs the real string to take out.');
+
+        unset($catalogue['status']['uncollectible'], $catalogue['attention']['severity']['info'], $catalogue['status']['paid']);
+
+        $missing = self::missingIn($catalogue);
+
+        $this->assertNotContains('status.uncollectible ('.InvoiceStatus::class.')', $missing, 'InvoiceStatus::Uncollectible is a state nothing can enter; no string may be demanded for it.');
+        $this->assertNotContains('attention.severity.info ('.AttentionSeverity::class.')', $missing, 'AttentionSeverity::Info is a case nothing writes; no string may be demanded for it.');
+        $this->assertContains('status.paid ('.InvoiceStatus::class.')', $missing, 'A state an invoice does enter must still be demanded.');
+    }
+
+    /**
+     * Every rendered value the catalogue has no string for, as
+     * "namespace.value (Enum)", less what cannot be shown: a value a
+     * namespace deliberately does not carry, and a state nothing can enter.
+     *
+     * @param  array<string, mixed>  $catalogue
+     * @return list<string>
+     */
+    private static function missingIn(array $catalogue): array
+    {
         $missing = [];
+        $unenterable = array_flip(EveryEnumCaseHasAProducerTest::unenterable());
 
         foreach (self::RENDERED as $namespace => $enums) {
-            $strings = $this->at($catalogue, $namespace);
+            $strings = self::at($catalogue, $namespace);
 
             foreach ($enums as $enum) {
                 foreach ($enum::cases() as $case) {
                     $value = (string) $case->value;
 
-                    if (isset(self::NOT_SHOWN[$namespace][$value])) {
+                    if (isset(self::NOT_SHOWN[$namespace][$value]) || isset($unenterable[$enum.'::'.$case->name])) {
                         continue;
                     }
 
@@ -353,13 +413,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             }
         }
 
-        $this->assertSame([], array_values(array_unique($missing)), sprintf(
-            'The %s catalogue has no string for these states, so a screen showing one renders its raw '.
-            "enum value:\n  %s\nAdd them to apps/web/src/i18n/locales/%s.",
-            $locale,
-            implode("\n  ", array_unique($missing)),
-            $file,
-        ));
+        return array_values(array_unique($missing));
     }
 
     /**
@@ -382,7 +436,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
             $namespace = substr($key, 0, (int) strrpos($key, '.'));
             $leaf = substr($key, (int) strrpos($key, '.') + 1);
 
-            if (! array_key_exists($leaf, $this->at($catalogue, $namespace))) {
+            if (! array_key_exists($leaf, self::at($catalogue, $namespace))) {
                 $missing[] = $key;
             }
         }
@@ -421,7 +475,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
                 }
             }
 
-            foreach (array_keys($this->at($catalogue, $namespace)) as $key) {
+            foreach (array_keys(self::at($catalogue, $namespace)) as $key) {
                 if (! in_array($key, $known, strict: true)) {
                     $orphans[] = $namespace.'.'.$key;
                 }
@@ -459,7 +513,7 @@ final class EveryStateAScreenShowsIsTranslatedTest extends TestCase
      * @param  array<string, mixed>  $catalogue
      * @return array<string, mixed>
      */
-    private function at(array $catalogue, string $namespace): array
+    private static function at(array $catalogue, string $namespace): array
     {
         $node = $catalogue;
 
