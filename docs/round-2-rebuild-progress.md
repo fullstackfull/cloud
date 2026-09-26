@@ -101,7 +101,7 @@ independent re-audit follows. The specification is
 
 | Group | Scope | Status | Commit |
 |---|---|---|---|
-| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | repaired again (+ unpaid-upgrade billing); re-verifying | `52d3471` |
+| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | sibling-order blocker fixed; rejected on four items in the void/renewal work, repairing | `52d3471` |
 | 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | repaired (+ card refund of wallet-credited money refused); re-verifying | `3f542e3` |
 | 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | repaired again; re-verifying | `2252ab9` |
 | 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | races fixed; rejected on two defects the repair added (undefined variable in the raced catch; inventory sweep aborts on a raced refusal), repairing | `3aee1e2` |
