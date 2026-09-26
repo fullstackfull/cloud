@@ -101,7 +101,7 @@ independent re-audit follows. The specification is
 
 | Group | Scope | Status | Commit |
 |---|---|---|---|
-| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | rejected again (sibling subscriptions of one order mint credit after a partial refund), repairing; voided-upgrade billing added | `708bfb1` |
+| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | repaired again (+ unpaid-upgrade billing); re-verifying | `52d3471` |
 | 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | repaired `1a54f59`; closing refund-after-wallet-credit before re-verification | `1a54f59` |
 | 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | repaired again; re-verifying | `2252ab9` |
 | 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | repaired (compare-and-set transitions, machine lock); re-verifying | `3aee1e2` |
@@ -110,4 +110,4 @@ independent re-audit follows. The specification is
 | 07 | F-20 false rebuild label; F-42 vitest under load; F-21 gate budget | upheld with reservations; follow-up `46e5a17`; merged `0a4ffda`: vitest 642/642, tsc, eslint, Architecture 219/219 | `46e5a17` |
 | 08 | F-23 enum reachability and translation-gate reconciliation; producer-gate blind spots; F-44 clock; F-41 guard gaps; I-2; F-14 oracles | upheld with reservations (follow-up verified); merged `65965e7`, Architecture 258/258; full suite running | `584ce03` |
 | 09 | F-38 `tofu validate` on no configuration; validator empty subjects and stale docstrings; CI grep exit codes | upheld after four repairs (last delta checked by the coordinator); merged `e423c17`: every self-test, safety gate 10/10, make infra-validate 0 | `4d23a55` |
-| 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | upheld with reservations; follow-up before merge | `44990fd` |
+| 10 | Simulator convenient cases (occupied VMID, `.invalid` domains); DirectAdmin `error=0`; uncatalogued error codes on customer routes | upheld with reservations; follow-up `b1147a9` checked; merged `5cbd39d`: Architecture+Api+Simulation+Compute 633/633, pint, openapi | `b1147a9` |
