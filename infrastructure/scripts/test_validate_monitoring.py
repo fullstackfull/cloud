@@ -238,10 +238,14 @@ LOKI_RULE_FILE = (
 COMPOSE_LOKI = """
 services:
   loki:
+    image: grafana/loki:3.5.7
+    command: ["-config.file=/etc/loki/loki-config.yml"]
     volumes:
       - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
 """
+
+LOKI_COMMAND = '    command: ["-config.file=/etc/loki/loki-config.yml"]\n'
 
 COMPOSE_ALERTMANAGER = """
 services:
@@ -271,8 +275,13 @@ def drift(
     alertmanager: str | None = ALERTMANAGER,
     pinned: dict | None = None,
     extra_yml: dict[str, str] | None = None,
+    compose: str | None = COMPOSE_ALERTMANAGER,
 ) -> dict:
+    # An alertmanager.yml comes with the compose service that loads it, as it
+    # does in the tree: the model check refuses one that nothing runs.
     files = {"alertmanager/alertmanager.yml": alertmanager} if alertmanager is not None else {}
+    if alertmanager is not None and compose is not None:
+        files["docker-compose.monitoring.yml"] = compose
     files.update(extra_yml or {})
     return {
         "php": DRIFT_PHP,
@@ -909,9 +918,9 @@ groups:
         {"extra_yml": {
             "loki/loki-config.yml": "auth_enabled: false\n",
             "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
-                "    volumes:\n",
+                LOKI_COMMAND,
                 '    command: ["-config.file=/etc/loki/loki-config.yml", '
-                '"-ruler.alertmanager-url=http://alertmanager:9093"]\n    volumes:\n'),
+                '"-ruler.alertmanager-url=http://alertmanager:9093"]\n'),
         }},
         "the loki service's -ruler.alertmanager-url flag wires the ruler to http://alertmanager:9093",
     ),
@@ -923,9 +932,8 @@ groups:
             "loki/loki-config.yml": LOKI_WITH_RULER.replace(
                 "  alertmanager_url: http://alertmanager:9093\n", ""),
             "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
-                "    volumes:\n",
-                "    command: -config.file=/etc/loki/loki-config.yml --ruler.alertmanager-url http://am:9093\n"
-                "    volumes:\n"),
+                LOKI_COMMAND,
+                "    command: -config.file=/etc/loki/loki-config.yml --ruler.alertmanager-url http://am:9093\n"),
         }},
         "flag wires the ruler to http://am:9093 and mounts no rule files at /loki/rules/<tenant>/",
     ),
@@ -939,10 +947,92 @@ groups:
                 "      - loki-data:/loki\n",
                 "      - loki-data:/loki\n      - ./loki/rules:/loki/rules:ro\n",
             ).replace(
-                "    volumes:\n",
-                '    command: ["-ruler.alertmanager-url=http://alertmanager:9093"]\n    volumes:\n'),
+                LOKI_COMMAND,
+                '    command: ["-config.file=/etc/loki/loki-config.yml", '
+                '"-ruler.alertmanager-url=http://alertmanager:9093"]\n'),
         }},
         None,
+    ),
+    # -- An empty subject is not a pass (I-4) ------------------------------------
+    #
+    # Both checks above read a subject found by name: the Loki config at one
+    # fixed path, the Alertmanager under one service key. Moved or renamed,
+    # each read nothing and passed. So the subject is now found the way
+    # compose finds it, and not finding it is a refusal.
+    (
+        "a Loki config the compose file loads from another path is read, and its empty ruler refused",
+        {"extra_yml": {
+            "loki/loki.yml": LOKI_WITH_RULER,
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "loki-config.yml", "loki.yml"),
+        }},
+        "loki/loki.yml wires the ruler to http://alertmanager:9093 and mounts no rule files",
+    ),
+    (
+        "a Loki service whose config file no bind mount supplies is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "-config.file=/etc/loki/loki-config.yml", "-config.file=/etc/loki/other.yml"),
+        }},
+        "no bind mount here supplies it",
+    ),
+    (
+        "a Loki service that names no config file is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(LOKI_COMMAND, ""),
+        }},
+        "names no -config.file",
+    ),
+    (
+        "a Loki service under another key, wired by its flag with no rules, is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "docker-compose.monitoring.yml": COMPOSE_LOKI.replace(
+                "  loki:\n", "  loki-primary:\n").replace(
+                LOKI_COMMAND,
+                '    command: ["-config.file=/etc/loki/loki-config.yml", '
+                '"-ruler.alertmanager-url=http://alertmanager:9093"]\n'),
+        }},
+        "the loki-primary service's -ruler.alertmanager-url flag wires the ruler",
+    ),
+    (
+        "Loki configuration that no compose service runs is refused",
+        {"extra_yml": {
+            "loki/loki-config.yml": "auth_enabled: false\n",
+            "docker-compose.monitoring.yml": "services:\n  grafana:\n    image: grafana/grafana:12.0.0\n",
+        }},
+        "no service in docker-compose.monitoring.yml runs Loki",
+    ),
+    (
+        "Loki configuration with no compose file at all is refused",
+        {"extra_yml": {"loki/loki-config.yml": "auth_enabled: false\n"}},
+        "no service in docker-compose.monitoring.yml runs Loki",
+    ),
+    (
+        "an unmodelled Alertmanager under another service key is refused",
+        drift(compose=COMPOSE_ALERTMANAGER.replace("v0.28.1", "v0.31.0").replace(
+            "  alertmanager:\n", "  alertmanager-primary:\n")),
+        "the route walk models",
+    ),
+    (
+        "an Alertmanager found only by the file it mounts is held to the model",
+        drift(compose=(
+            "services:\n  am:\n    image: registry.example/am:1\n    volumes:\n"
+            "      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro\n"
+        )),
+        "runs Alertmanager 'registry.example/am:1'",
+    ),
+    (
+        "an alertmanager.yml with no compose file to say what loads it is refused",
+        drift(compose=None),
+        "no service in docker-compose.monitoring.yml runs Alertmanager",
+    ),
+    (
+        "an alertmanager.yml with a compose file that runs no Alertmanager is refused",
+        drift(compose="services:\n  grafana:\n    image: grafana/grafana:12.0.0\n"),
+        "no service in docker-compose.monitoring.yml runs Alertmanager",
     ),
 ]
 
@@ -1089,7 +1179,7 @@ def golden_failures() -> list[tuple[str, list[str]]]:
 # for the other checks and exit 0. The count is literal source in this file,
 # maintained by whoever edits the table, so adding or removing a case is a
 # deliberate edit of this number too.
-EXPECTED_CASES = 77
+EXPECTED_CASES = 87
 
 
 def main() -> int:
