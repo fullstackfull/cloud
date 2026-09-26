@@ -138,6 +138,40 @@ waiting for, and it becomes `deleted`. A missing archive under any other state i
 quietly marked deleted: the difference between "we removed this" and "this vanished" is
 the difference between a policy and an incident.
 
+## When the platform loses track of an operation
+
+`ReconcileBackup` polls the provider task a row is waiting on and gives up after
+`config('backups.max_poll_hours')` (12 by default), handing the row to a person as
+`needs_review`. The window is measured from when **that operation** started:
+
+| Row is waiting on | Measured from |
+| --- | --- |
+| the backup itself | `started_at` (or the row's creation, while still `requested`) |
+| a restore | `restore_started_at` |
+| a verification | `verification_started_at` |
+
+It used to be measured from the archive's `started_at` for all three, so a restore or a
+scheduled verification of any archive older than the window went to review on its first
+poll, with a reason claiming twelve hours had passed (F-09). The reason written now names
+the operation and the hours it actually ran.
+
+A row records which state it left for review (`quarantined_from`). A restore that went to
+review keeps holding its machine: neither a whole-machine restore nor a file restore will
+start over it until a person settles it, because the platform stopped watching the task,
+not the provider writing the disks. A file restore in flight or in review holds the
+machine against a whole-machine restore in the same way. A verification that went to
+review tells the customer the backup needs review, since the archive stops being offered
+for restore until it is settled.
+
+Settling one: `GET /api/admin/backups/needs-review` lists the rows, the operation each
+interrupted and whether it can be settled there; `POST /api/admin/backups/{backup}/resolve`
+takes `verdict` (`completed` or `failed`) and the `evidence` read at the provider, under
+`backup.manage`, audited in the same transaction. An interrupted restore becomes
+`restored` or returns to `succeeded`; an interrupted verification becomes `verified` or
+`failed` (unreadable). A backup that never reported its archive, a deletion with an
+unknown outcome, and a row with no recorded interruption are refused: a verdict does not
+carry the facts those need.
+
 ## Restore procedures
 
 Restores are documented in `docs/runbooks/` and rehearsed on the schedule in

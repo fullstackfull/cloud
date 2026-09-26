@@ -1295,6 +1295,21 @@ return [
         'body' => ['verdict', 'evidence'],
         'response' => $one('AdminReinstallVerdict'),
     ],
+    'api.admin.backups.needs_review' => [
+        'tag' => 'Operator',
+        'summary' => 'Backups waiting for a person',
+        'description' => 'Every backup row in `needs_review`, oldest first. `interrupted_operation` is the state the row left for review — `restoring`, `verifying`, `running`, `delete_requested`, … — or null for a row from before the platform recorded it. `resolvable` says whether the resolve route can settle it: only an interrupted restore or verification can. A row whose interrupted operation is `restoring` holds its machine against any other restore until it is settled.',
+        'permission' => 'backup.manage',
+        'response' => $many('AdminBackupInReview'),
+    ],
+    'api.admin.backups.resolve' => [
+        'tag' => 'Operator',
+        'summary' => 'Record a verdict on a restore or verification the platform lost track of',
+        'description' => 'For a row in `needs_review` whose interrupted operation was a restore or a verification, and no other (422 otherwise). `completed` or `failed`, with what the operator read at the provider: a restore becomes `restored` or returns to `succeeded` with the archive intact; a verification becomes `verified` or `failed` (unreadable). Audited in the same transaction, and the customer is told the outcome under the same key the poller would have used. Nothing here calls a provider.',
+        'permission' => 'backup.manage',
+        'body' => ['verdict', 'evidence'],
+        'response' => $one('AdminBackupVerdict'),
+    ],
     /* ---------------------------------------------------------------------
      | The estate an operator configures
      |

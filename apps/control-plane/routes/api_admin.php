@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Lynomia\Modules\Admin\Http\Controllers\AuditController;
+use Lynomia\Modules\Admin\Http\Controllers\BackupReviewController;
 use Lynomia\Modules\Admin\Http\Controllers\BillingController;
 use Lynomia\Modules\Admin\Http\Controllers\CountryCurrencyChangeController;
 use Lynomia\Modules\Admin\Http\Controllers\CustomerController;
@@ -174,6 +175,24 @@ Route::middleware(['auth:sanctum', 'verified', 'throttle:api'])->group(function 
     Route::post('operations/reinstalls/{type}/{operation}/resolve', [OperationsController::class, 'resolveReinstall'])
         ->middleware('permission:'.Permission::ProvisioningRetry->value)
         ->name('operations.reinstall_resolve');
+
+    /*
+     * Backups waiting for a person (F-09). A restore or a verification the
+     * platform lost track of leaves a good archive in review, where nothing
+     * the platform does will ever take it back out; this is where a person
+     * does, with the evidence they read. Both behind backup.manage, the
+     * permission that names this estate: reading the queue shows archive and
+     * task identifiers, and settling one changes what the platform believes
+     * happened to a customer's machine or data.
+     */
+    Route::get('backups/needs-review', [BackupReviewController::class, 'index'])
+        ->middleware('permission:'.Permission::BackupManage->value)
+        ->name('backups.needs_review');
+
+    Route::post('backups/{backup}/resolve', [BackupReviewController::class, 'resolve'])
+        ->whereUlid('backup')
+        ->middleware('permission:'.Permission::BackupManage->value)
+        ->name('backups.resolve');
 
     /*
      * The domain queues. Read-only, and under `service.view_any` because a

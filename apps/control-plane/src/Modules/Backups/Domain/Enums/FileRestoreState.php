@@ -32,4 +32,16 @@ enum FileRestoreState: string
     {
         return $this === self::NeedsReview;
     }
+
+    /**
+     * The states in which this restore may still be writing into the machine,
+     * so no other restore of either kind may start over it: in flight, or in
+     * review because nobody has seen it end.
+     *
+     * @return list<string>
+     */
+    public static function holdingTheMachine(): array
+    {
+        return [self::Requested->value, self::Running->value, self::NeedsReview->value];
+    }
 }

@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupMode;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\BackupTrigger;
@@ -37,6 +38,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?string $cluster_id
  * @property string $provider
  * @property BackupState $state
+ * @property ?BackupState $quarantined_from
  * @property BackupTrigger $trigger
  * @property BackupMode $mode
  * @property string $node_name
@@ -48,6 +50,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  * @property ?CarbonImmutable $verified_at
  * @property ?string $verification_task_id
  * @property ?CarbonImmutable $verification_requested_at
+ * @property ?CarbonImmutable $verification_started_at
  * @property int $verification_attempts
  * @property ?string $restore_task_id
  * @property ?int $retention_days
@@ -104,6 +107,7 @@ class Backup extends Model
     {
         return [
             'state' => BackupState::class,
+            'quarantined_from' => BackupState::class,
             'trigger' => BackupTrigger::class,
             'mode' => BackupMode::class,
             'size_bytes' => 'integer',
@@ -112,6 +116,7 @@ class Backup extends Model
             'poll_count' => 'integer',
             'verified_at' => 'immutable_datetime',
             'verification_requested_at' => 'immutable_datetime',
+            'verification_started_at' => 'immutable_datetime',
             'verification_attempts' => 'integer',
             'expires_at' => 'immutable_datetime',
             'protected_until' => 'immutable_datetime',
@@ -142,15 +147,100 @@ class Backup extends Model
      *                                            state and the facts that justify
      *                                            it never land separately.
      *
+     * Every route into `NeedsReview` records which state it left, here and
+     * not at each caller, so no caller can forget it: that is what tells a
+     * restore that may still be writing a machine's disks apart from any
+     * other row a person has been asked to look at (F-09).
+     *
+     * And it is a compare-and-set, not a save over whatever is there. The
+     * table's current state is read under a row lock and must still be the
+     * one this copy was read in; otherwise nothing is written and the refusal
+     * says it was a race ({@see IllegalBackupTransitionException::wasRaced()}).
+     * Every sweep in this module loads a batch and then makes one provider
+     * call per row, and every request reads, checks, asks something else and
+     * then writes; checking only the copy in memory let the verification sweep
+     * write `verifying` over a restore a customer had started meanwhile, and a
+     * stale `delete_requested` move to `deleting` an archive that had been
+     * kept and was being restored.
+     *
      * @throws IllegalBackupTransitionException
      */
     public function transitionTo(BackupState $next, array $attributes = []): void
     {
-        if (! $this->state->canBecome($next)) {
-            throw IllegalBackupTransitionException::between((string) $this->getKey(), $this->state, $next);
+        $from = $this->state;
+
+        if (! $from->canBecome($next)) {
+            throw IllegalBackupTransitionException::between((string) $this->getKey(), $from, $next);
         }
 
-        $this->forceFill([...$attributes, 'state' => $next])->save();
+        if ($next === BackupState::NeedsReview) {
+            $attributes['quarantined_from'] = $from;
+        }
+
+        $this->compareAndSet($from, $next, $attributes);
+    }
+
+    /**
+     * Write `$next` only if the table still says `$expected`, under a row lock.
+     *
+     * @param  array<string, mixed>  $attributes
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    private function compareAndSet(BackupState $expected, BackupState $next, array $attributes): void
+    {
+        DB::transaction(function () use ($expected, $next, $attributes): void {
+            $stored = static::query()->whereKey($this->getKey())->lockForUpdate()->toBase()->value('state');
+
+            if ($stored !== $expected->value) {
+                throw IllegalBackupTransitionException::movedUnderneath(
+                    (string) $this->getKey(),
+                    $expected,
+                    is_string($stored) ? $stored : null,
+                    $next,
+                );
+            }
+
+            $this->forceFill([...$attributes, 'state' => $next])->save();
+        });
+    }
+
+    /**
+     * Leave `NeedsReview` on a person's word, or refuse.
+     *
+     * The one way out of a state the transition table keeps closed, and only
+     * to where {@see BackupState::afterReview()} says the interrupted
+     * operation could have ended. The caller is the operator's settling
+     * action, which records who said so in the same transaction.
+     *
+     * It does not weaken the rule on {@see self::transitionTo()} that only a
+     * task reporting OK makes a backup `Succeeded`: the one row it returns to
+     * `Succeeded` is an interrupted restore's, whose archive a task had
+     * already reported before the restore began.
+     *
+     * @param  array<string, mixed>  $attributes
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    public function settleReview(bool $completed, array $attributes = []): BackupState
+    {
+        $next = $this->state === BackupState::NeedsReview && $this->quarantined_from !== null
+            ? BackupState::afterReview($this->quarantined_from, $completed)
+            : null;
+
+        if ($next === null) {
+            throw IllegalBackupTransitionException::between(
+                (string) $this->getKey(),
+                $this->state,
+                $completed ? BackupState::Succeeded : BackupState::Failed,
+            );
+        }
+
+        // The same compare-and-set as every other move: two verdicts on one
+        // row are one verdict and one refusal, whoever read it first.
+        $this->compareAndSet(BackupState::NeedsReview, $next, [...$attributes, 'quarantined_from' => null]);
+
+        return $next;
     }
 
     /**
@@ -183,10 +273,20 @@ class Backup extends Model
 
     /**
      * Whether this row still needs the provider asked about it.
+     *
+     * A verification is waiting on its own task, `verification_task_id`;
+     * every other in-flight row is keyed on `provider_task_id`, the backup's
+     * own handle, which no later operation writes over.
      */
     public function isAwaitingProvider(): bool
     {
-        return $this->state->isInFlight() && $this->provider_task_id !== null;
+        if (! $this->state->isInFlight()) {
+            return false;
+        }
+
+        return $this->state === BackupState::Verifying
+            ? $this->verification_task_id !== null
+            : $this->provider_task_id !== null;
     }
 
     /**
@@ -263,6 +363,32 @@ class Backup extends Model
     }
 
     /**
+     * Whole-machine restores of one machine that nobody has seen end.
+     *
+     * A row in `Restoring`, and a row that went to review from `Restoring`:
+     * the platform stopped watching that one, but the provider may not have
+     * stopped writing, and until a person settles it a second restore over
+     * the same disks is the one outcome nobody could reason about afterwards.
+     * Reading `restoring` alone is what let a restore of any archive older
+     * than the poll window release the machine on its first poll (F-09).
+     *
+     * @param  Builder<Backup>  $query
+     * @return Builder<Backup>
+     */
+    public function scopeRestoreUnsettledOn(Builder $query, string $virtualMachineId): Builder
+    {
+        return $query
+            ->where('virtual_machine_id', $virtualMachineId)
+            ->where(static function (Builder $query): void {
+                $query->where('state', BackupState::Restoring->value)
+                    ->orWhere(static function (Builder $query): void {
+                        $query->where('state', BackupState::NeedsReview->value)
+                            ->where('quarantined_from', BackupState::Restoring->value);
+                    });
+            });
+    }
+
+    /**
      * Rows the platform is still waiting on, least recently asked about first.
      *
      * @param  Builder<Backup>  $query
@@ -277,7 +403,15 @@ class Backup extends Model
                 BackupState::Verifying->value,
                 BackupState::Restoring->value,
             ])
-            ->whereNotNull('provider_task_id')
+            // The same rule as isAwaitingProvider(): a verification by its
+            // own handle, everything else by the backup's.
+            ->where(static function (Builder $query): void {
+                $query->where(static function (Builder $query): void {
+                    $query->where('state', BackupState::Verifying->value)->whereNotNull('verification_task_id');
+                })->orWhere(static function (Builder $query): void {
+                    $query->where('state', '!=', BackupState::Verifying->value)->whereNotNull('provider_task_id');
+                });
+            })
             ->orderByRaw('last_polled_at nulls first')
             ->orderBy('created_at');
     }

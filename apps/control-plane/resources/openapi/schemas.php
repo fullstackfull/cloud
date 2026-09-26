@@ -2872,6 +2872,33 @@ return [
             'state' => ['type' => ['string', 'null']],
         ],
     ],
+    'AdminBackupInReview' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'customer_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'service_id' => ['$ref' => '#/components/schemas/Ulid'],
+            'virtual_machine_id' => ['type' => ['string', 'null']],
+            'interrupted_operation' => ['type' => ['string', 'null'], 'description' => 'The state the row left for review; null for a row from before this was recorded.'],
+            'resolvable' => ['type' => 'boolean', 'description' => 'True only for an interrupted restore or verification.'],
+            'failure_reason' => ['type' => ['string', 'null']],
+            'archive_id' => ['type' => ['string', 'null']],
+            'restore_task_id' => ['type' => ['string', 'null']],
+            'restore_started_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'verification_task_id' => ['type' => ['string', 'null']],
+            'verification_started_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'in_review_since' => ['$ref' => '#/components/schemas/Timestamp'],
+        ],
+    ],
+    'AdminBackupVerdict' => [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'state' => ['type' => 'string', 'enum' => ['restored', 'succeeded', 'verified', 'failed']],
+        ],
+    ],
     'AdminTerminatedService' => [
         'type' => 'object',
         'additionalProperties' => false,

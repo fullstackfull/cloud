@@ -180,6 +180,15 @@ enum AuditAction: string
     case ReinstallAbandoned = 'reinstall.abandoned';
 
     /**
+     * An operator's verdict on a restore or a verification of a backup that
+     * the platform lost track of (F-09): `confirmed` says the operation
+     * completed, `failed` says it did not. A person read the provider and
+     * said so, and the row leaves review on the strength of it.
+     */
+    case BackupOperationConfirmed = 'backup.operation_confirmed';
+    case BackupOperationFailed = 'backup.operation_failed';
+
+    /**
      * Somebody turned an optional message off, or back on.
      *
      * Recorded because the next dispute is "you never told me my server was
@@ -405,6 +414,7 @@ enum AuditAction: string
             self::OrphanAdopted, self::ProvisioningIdentityRepointed,
             self::DriftResolved, self::DriftAcknowledged,
             self::ReinstallConfirmed, self::ReinstallAbandoned,
+            self::BackupOperationConfirmed, self::BackupOperationFailed,
             self::DedicatedServerReturnedToStock, self::DedicatedServerRetired,
             self::QuarantinedAddressAdopted, self::QuarantinedAddressReleased => true,
             default => false,
