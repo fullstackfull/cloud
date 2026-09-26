@@ -27,11 +27,15 @@ use Tests\TestCase;
  * comes from the payload and from nowhere else. So the claim rule is only as
  * narrow as the payload is stable: a second writer that changes the hostname
  * — a "harmless" normalisation added to the retry path, say — grows that list
- * to two names, and the job's own machine read under the old name becomes a
- * stranger that licenses a repoint and a second build. A second writer that
- * leaves the hostname alone ("stamp the retry into the payload so the screen
- * can show it") breaks the bound silently instead: nothing changes until the
- * writer that does change the hostname arrives under its cover.
+ * by a name the order never had, and the rule widens with it. The list is
+ * append-only, so the job's own machine is still recognised under the name it
+ * was built with; what changes is that a machine at the identity answering to
+ * the new name is claimed as this build's too, whoever built it — and that
+ * claim is what licenses adopting a stranger's machine as the customer's. A
+ * second writer that leaves the hostname alone ("stamp the retry into the
+ * payload so the screen can show it") breaks the bound silently instead:
+ * nothing changes until the writer that does change the hostname arrives
+ * under its cover.
  *
  * Two pins, one per link. The behavioural one lives in the F-15 band and
  * drives every operator act the platform offers, asserting the payload comes
@@ -68,19 +72,38 @@ use Tests\TestCase;
  * shapes below, anywhere under `src/`, including in a file that already
  * holds one — and nothing more than that. The raw-SQL shape reads across
  * lines, across string concatenation and across heredocs, because the only
- * thing it will not cross is a `;`.
+ * thing it will not cross is a `;`; and it reads both forms a SET clause
+ * assigns a column in, `set …, payload = …` and the row constructor
+ * `set (…, payload) = (…)`.
  *
  * The raw-SQL window is sized by a criterion, not a feeling: at least twice
- * the widest `UPDATE … SET` clause in `src/` today, which is the reservation
- * statement in `ProvisioningJob::reserveProviderIdentity()` — the very
- * statement a second writer is likeliest to be appended to. Measured when
- * this was written at 825 characters, comment-stripped, from `set` to the
- * `where` where a new column would be appended; hence 2,000. A test below
- * re-measures it on every run and fails when any raw UPDATE outgrows half the
- * window, and another fails when the window is narrowed below a fixture wide
- * enough to matter. Widening cost nothing: over the clean tree the raw-SQL
- * shape matches no file at widths 30, 200, 400, 800, 1,500, 3,000, 4,000 and
- * 6,000, all four expected entries being `array key`.
+ * the widest `UPDATE … SET` clause in `src/` today. An UPDATE is any `update`
+ * followed by a `set` before the next `;`, whatever the target between them —
+ * an alias, a schema, `only`, quotes, a method call, an interpolation — so
+ * the measure has no target form to miss; and a clause is measured from its
+ * `set` to the `;` that ends its statement, not to its first `where`, which
+ * may be a subquery's. That over-counts (the WHERE and RETURNING clauses and
+ * the bindings are in it), which is the safe direction for a floor. The
+ * widest today is the reservation statement in
+ * `ProvisioningJob::reserveProviderIdentity()` — the very statement a second
+ * writer is likeliest to be appended to — at 1,310 characters,
+ * comment-stripped. Twice that is 2,620; the window is the next round
+ * thousand, 3,000.
+ *
+ * What holds that: `the_raw_sql_window_is_twice_the_widest_set_clause_in_the_tree`
+ * re-measures the tree on every run and fails when any UPDATE's clause
+ * outgrows half the window, which is also what fails when a writer is
+ * planted further past its `set` than the census can read; and
+ * `the_measure_sees_a_set_clause_whatever_form_its_update_takes` drives the
+ * same measure with every target form and with a subquery in the SET clause,
+ * so a measure that stops seeing one fails. The window's floor is held by the
+ * first of those. `a_writer_most_of_the_window_past_its_set_is_seen` reads its
+ * gap from the constant, so it does not hold the constant; it holds the
+ * pattern to it. Widening cost nothing: over the clean tree the raw-SQL
+ * shape, row constructor included, matches no file at widths 30, 200, 1,000,
+ * 2,000, 3,000, 4,000, 6,000 and 20,000, all four expected entries being
+ * `array key`; and the measure finds one UPDATE in `src/`, the same one the
+ * narrower measure it replaced found.
  *
  * ===========================================================================
  * WHAT THIS SCAN STILL DOES NOT SEE
@@ -91,10 +114,17 @@ use Tests\TestCase;
  * - **A statement assembled across statements** — `$sql = 'update … set ';
  *   $sql .= 'payload = ?';`. Letting the raw-SQL shape cross a `;` is what
  *   would turn it into a false-positive machine across whole files.
- * - **A `;` inside a string literal in a SET clause, before the column** —
- *   `set note = 'a; b', payload = ?`. Same reason: the window stops at the
- *   first `;`, and telling a literal's `;` from a statement's would take a
- *   SQL tokenizer, not a pattern.
+ * - **A `;` in the statement's text before the column** — in a SQL string
+ *   literal, `set note = 'a; b', payload = ?`, or in a SQL comment inside a
+ *   heredoc. Same reason: the window stops at the first `;`, and so does the
+ *   measure of how wide the window must be; telling a literal's or a
+ *   comment's `;` from a statement's would take a SQL tokenizer, not a
+ *   pattern.
+ * - **An UPDATE whose `update` is not in its statement's text before the
+ *   `set`** — the verb held in a variable, or supplied after the `set` as a
+ *   `sprintf()` argument. The raw-SQL shape does not need the verb and may
+ *   still see the column; the measure does, and does not measure that
+ *   statement.
  * - **Mass assignment** — `$job->update($request->validated())`. The model
  *   guards only `id`, so this would reach the column, and it is undecidable
  *   from the text. There is no such call anywhere in `src/`, `app/` or
@@ -135,7 +165,7 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
      * How far the raw-SQL shape reads past a `set` to find the column. See
      * the class docblock for why this number.
      */
-    private const int RAW_SQL_WINDOW = 2000;
+    private const int RAW_SQL_WINDOW = 3000;
 
     /**
      * Six shapes a write to a column named `payload` takes in this codebase's
@@ -154,8 +184,9 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             'property assignment' => '/->payload\s*(?:\[[^\]]*\]\s*)*(?:=(?![=>])|\?\?=)/',
             // $job->setAttribute('payload', …).
             'setAttribute' => '/setAttribute\(\s*["\']payload["\']/',
-            // update … set …, payload = … — in a string, a concatenation or a heredoc.
-            'raw SQL' => '/\bset\b[^;]{0,'.self::RAW_SQL_WINDOW.'}?["\'`]?\bpayload\b["\'`]?\s*=(?![=>])/is',
+            // update … set …, payload = … — in a string, a concatenation or a
+            // heredoc — and the row-constructor form, set (…, payload) = (…).
+            'raw SQL' => '/\bset\b[^;]{0,'.self::RAW_SQL_WINDOW.'}?(?:\([^();]*?["\'`]?\bpayload\b["\'`]?[^();]*\)|["\'`]?\bpayload\b["\'`]?)\s*=(?![=>])/is',
             // jsonb_set(payload, …) / jsonb_insert(payload, …): the value a SET would write.
             'jsonb function' => '/\bjsonb_(?:set|insert)\s*\(\s*["\'`]?payload\b/i',
         ];
@@ -202,7 +233,13 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
 
         // A census that read nothing would agree with an empty expectation.
         $this->assertGreaterThan(1000, count($files));
-        $this->assertArrayHasKey(array_key_first(self::PROVISIONING_JOBS_PAYLOAD_WRITERS), $files);
+
+        // And one that read lines would miss every writer whose `set` and
+        // column sit on different lines: the tree yields each file whole.
+        foreach ([array_key_first(self::PROVISIONING_JOBS_PAYLOAD_WRITERS), array_key_first(self::OTHER_PAYLOAD_SITES)] as $path) {
+            $this->assertArrayHasKey($path, $files);
+            $this->assertSame((string) file_get_contents(base_path($path)), $files[$path], $path.' was not read whole.');
+        }
     }
 
     #[Test]
@@ -219,6 +256,9 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
                 "DB::update('update provisioning_jobs set \"payload\" = ? where id = ?', \$b);",
                 "DB::update('update provisioning_jobs set '\n    .'attempts = attempts + 1, '\n    .'payload = ? where id = ?', \$b);",
                 "DB::update(<<<'SQL'\n    update provisioning_jobs\n    set\n        payload = payload || ?::jsonb\n    where id = ?\n    SQL, \$b);",
+                "DB::update('update provisioning_jobs set (updated_at, payload) = (now(), payload || ?::jsonb) where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set (payload) = row(?::jsonb) where id = ?', \$b);",
+                "DB::update('update provisioning_jobs set ('\n    .'updated_at, \"payload\", attempts'\n    .') = (select now(), ?::jsonb, 1) where id = ?', \$b);",
             ],
             'jsonb function' => ["DB::update('update provisioning_jobs set x = 1, result = jsonb_set(payload, ...)');"],
         ];
@@ -231,6 +271,8 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             "DB::select('select payload from provisioning_jobs where id = ?');",
             "\$q->where('payload->hostname', 'web-01');",
             "\$settings = ['payloads' => 1];",
+            "DB::update('update provisioning_jobs set (updated_at, attempts) = (now(), 1) where id = ?', \$b);",
+            "DB::update('update provisioning_jobs set (updated_at, payloads) = (now(), 1) where id = ?', \$b);",
         ];
 
         foreach ($must as $shape => $sources) {
@@ -253,8 +295,13 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
      * helper; rewriting census() itself to scan line by line — the ordinary
      * shape of an edit made to stop it holding every file in memory at once —
      * then reopened the heredoc hole with every test here still green.
-     * Driven through the entry point, a census that splits the source, or
-     * that reads files for itself instead of the sources it is handed, fails.
+     * Driven through the entry point, a census() that splits every source it
+     * scans, or that reads files for itself instead of the sources it is
+     * handed, fails. A census() that splits only what it reads from disk and
+     * keeps what it is handed whole passes, and no test that hands it sources
+     * could see that: it is exactly the case such code does not split. What
+     * does see the ordinary streaming edit, one that makes `sourceTree()`
+     * yield lines, is `the_scan_reads_the_whole_source_tree`.
      */
     #[Test]
     public function the_census_reads_whole_files_and_not_lines(): void
@@ -279,25 +326,7 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
     #[Test]
     public function the_raw_sql_window_is_twice_the_widest_set_clause_in_the_tree(): void
     {
-        $widest = 0;
-        $where = '';
-
-        foreach ($this->sourceTree() as $path => $source) {
-            $code = self::normalise($source);
-
-            if (preg_match_all('/\bupdate\s+(?:["`]?\w+["`]?\s+)?set\b/i', $code, $matches, PREG_OFFSET_CAPTURE) === 0) {
-                continue;
-            }
-
-            foreach ($matches[0] as [$text, $offset]) {
-                $clause = substr($code, $offset + strlen($text) - 3);
-
-                if (preg_match('/\bwhere\b|;/i', $clause, $end, PREG_OFFSET_CAPTURE) === 1 && $end[0][1] > $widest) {
-                    $widest = $end[0][1];
-                    $where = $path;
-                }
-            }
-        }
+        [$widest, $where] = self::widestSetClause($this->sourceTree());
 
         // The statement the class docblock names: if this stops being found,
         // the measurement is measuring something else.
@@ -307,6 +336,49 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
             self::RAW_SQL_WINDOW,
             sprintf('A raw UPDATE in %s has a SET clause %d characters wide; the raw-SQL window must be at least twice that.', $where, $widest),
         );
+    }
+
+    /**
+     * The measure above, driven with statements that exist nowhere on disk:
+     * it sees the SET clause of an UPDATE whatever its target looks like, and
+     * however far the clause runs.
+     *
+     * An earlier measure recognised only `update <one word> set`, so a wide
+     * UPDATE whose table carried an alias was never measured, and a writer
+     * more than the window past its `set` was seen by nothing: in the tree,
+     * that measure and the census both stayed green with such a writer
+     * executing. And one that stopped at the first `where` stopped inside a
+     * subquery in the SET clause, short of the clause's end.
+     */
+    #[Test]
+    public function the_measure_sees_a_set_clause_whatever_form_its_update_takes(): void
+    {
+        $filler = str_repeat('a = a, ', 200);
+
+        $statements = [
+            'plain' => "DB::update('update provisioning_jobs set ".$filler."payload = ? where id = ?', \$b);",
+            'with an alias after as' => "DB::update('update provisioning_jobs as pj set ".$filler."payload = ? where pj.id = ?', \$b);",
+            'with a bare alias' => "DB::update('update provisioning_jobs pj set ".$filler."payload = ? where pj.id = ?', \$b);",
+            'schema-qualified' => "DB::update('update public.provisioning_jobs set ".$filler."payload = ? where id = ?', \$b);",
+            'with only' => "DB::update('update only provisioning_jobs set ".$filler."payload = ? where id = ?', \$b);",
+            'quoted' => "DB::update('update \"provisioning_jobs\" set ".$filler."payload = ? where id = ?', \$b);",
+            'with the table from a method' => "DB::update('update '.\$this->getTable().' set ".$filler."payload = ? where id = ?', \$b);",
+            'with the table interpolated' => 'DB::update("update {$table} set '.$filler.'payload = ? where id = ?", $b);',
+            'as an upsert' => "DB::statement('insert into provisioning_jobs (id) values (?) on conflict (id) do update set ".$filler."payload = ?', \$b);",
+            'with a subquery in its set clause' => "DB::update('update provisioning_jobs set updated_at = (select now() where true), ".$filler."payload = ? where id = ?', \$b);",
+        ];
+
+        $unmeasured = [];
+
+        foreach ($statements as $form => $statement) {
+            [$width] = self::widestSetClause(['src/Planted/Wide.php' => "<?php\n".$statement]);
+
+            if ($width <= strlen($filler)) {
+                $unmeasured[$form] = $width;
+            }
+        }
+
+        $this->assertSame([], $unmeasured, sprintf('The measure does not reach the end of a SET clause %d characters wide.', strlen($filler)));
     }
 
     /**
@@ -337,12 +409,16 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
     }
 
     /**
-     * The other direction: a window narrowed below a gap that exists is seen
-     * as a failure, not as a quieter census.
+     * The pattern is held to the window: a raw-SQL shape given a narrower
+     * quantifier of its own than `RAW_SQL_WINDOW` fails here, because this gap
+     * is most of the window.
      *
      * Every other raw-SQL fixture in this file has a gap of a few dozen
-     * characters, so without this one the window could be cut to 30 and
-     * nothing here would notice. This gap is most of the window.
+     * characters, so without this one the pattern's reach could be cut to 30
+     * and nothing here would notice. The gap is read from the constant, so
+     * narrowing the constant itself is not seen here; that is
+     * `the_raw_sql_window_is_twice_the_widest_set_clause_in_the_tree`'s, which
+     * fails when the constant is under twice the widest clause in the tree.
      */
     #[Test]
     public function a_writer_most_of_the_window_past_its_set_is_seen(): void
@@ -415,6 +491,53 @@ final class AProvisioningJobsPayloadIsWrittenOnceAndNeverAgainTest extends TestC
         ksort($census);
 
         return $census;
+    }
+
+    /**
+     * The widest `UPDATE … SET` clause among the sources, and where it is.
+     *
+     * An UPDATE is any `update` followed by a `set` before the next `;`. That
+     * is the whole of Postgres's grammar for the target between them — a
+     * table, schema-qualified or not, quoted or not, with or without `only`,
+     * with or without an alias — and it is also whatever PHP assembles the
+     * target from, a method call or an interpolation, and an upsert's
+     * `do update set`. Nothing in the target needs recognising, so nothing in
+     * it can be missed.
+     *
+     * A clause is measured from its `set` to the `;` that ends the statement,
+     * not to its `where`: the first `where` may be a subquery's inside the SET
+     * clause, and the `;` is where the raw-SQL shape stops reading anyway.
+     * That over-counts — it includes the WHERE and RETURNING clauses and the
+     * bindings — which is the safe direction for a floor.
+     *
+     * @param  iterable<string, string>  $sources
+     * @return array{int, string}
+     */
+    private static function widestSetClause(iterable $sources): array
+    {
+        $widest = 0;
+        $where = '';
+
+        foreach ($sources as $path => $source) {
+            $code = self::normalise($source);
+
+            if (preg_match_all('/\bupdate\b[^;]*?\bset\b/i', $code, $matches, PREG_OFFSET_CAPTURE) === 0) {
+                continue;
+            }
+
+            foreach ($matches[0] as [$text, $offset]) {
+                $clause = substr($code, $offset + strlen($text) - 3);
+                $end = strpos($clause, ';');
+                $width = $end === false ? strlen($clause) : $end;
+
+                if ($width > $widest) {
+                    $widest = $width;
+                    $where = $path;
+                }
+            }
+        }
+
+        return [$widest, $where];
     }
 
     /**

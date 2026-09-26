@@ -69,6 +69,15 @@ final readonly class PollProviderTasks
 {
     private const string RESOURCE = 'virtual_machine';
 
+    /** The job's finding when the hypervisor says its task ended in failure. */
+    public const string TASK_FAILED = 'compute.task_failed';
+
+    /**
+     * The job's finding when the platform stopped waiting for its task: still
+     * running past the ceiling, or the hypervisor could not be asked.
+     */
+    public const string TASK_UNCONFIRMED = 'compute.task_unconfirmed';
+
     public function __construct(
         private ComputeProviderFactory $providers,
         private RecordDrift $drift,
@@ -114,6 +123,7 @@ final readonly class PollProviderTasks
                     $this->sendForReview(
                         $job,
                         FailureClass::Timeout,
+                        self::TASK_UNCONFIRMED,
                         'The hypervisor could not be asked what became of this task: '
                             .$this->redactor->redactString($e->getMessage()),
                     );
@@ -141,6 +151,7 @@ final readonly class PollProviderTasks
                 $this->sendForReview(
                     $job,
                     FailureClass::Permanent,
+                    self::TASK_FAILED,
                     'The hypervisor task this job started ended in failure: '
                         .$this->redactor->redactString($state->exitStatus ?? 'no exit status was given'),
                 );
@@ -160,6 +171,7 @@ final readonly class PollProviderTasks
                 $this->sendForReview(
                     $job,
                     FailureClass::Timeout,
+                    self::TASK_UNCONFIRMED,
                     'The hypervisor task this job started has not finished, and the platform has stopped waiting for it.',
                 );
 
@@ -218,13 +230,32 @@ final readonly class PollProviderTasks
      * a machine or nothing at all behind, and releasing its address into the
      * pool on that guess is how the next customer gets an address that still
      * answers for somebody else.
+     *
+     * It writes the job's finding, `result.error`, as the stale sweeper does,
+     * and for the same reason: the review list publishes the finding as what
+     * the job's last attempt came to, and the runbook's rows are keyed on it.
+     * A job reaches this having succeeded, and whatever finding it still
+     * carries was written before this — an operator's verdict on a rebuild,
+     * for one, settles a job without touching it — so a finding left in place
+     * would put the job on the list under a reason that is not why it is
+     * there (F-15: a build repointed off a stranger's machine, whose task then
+     * failed, was listed as "somebody else's machine holds the id"). This one
+     * replaces it, stamped with the attempt whose task it is about.
      */
-    private function sendForReview(ProvisioningJob $job, FailureClass $class, string $reason): void
+    private function sendForReview(ProvisioningJob $job, FailureClass $class, string $code, string $reason): void
     {
         $job->forceFill([
             'status' => ProvisioningJobStatus::NeedsReview,
             'failure_class' => $class,
             'last_error' => $reason,
+            'result' => [
+                ...($job->result ?? []),
+                'error' => [
+                    'code' => $code,
+                    'class' => $class->value,
+                    'attempt' => $job->attempts,
+                ],
+            ],
         ])->save();
 
         event(new ProvisioningJobNeedsReview(

@@ -65,7 +65,11 @@ is never retried into a second machine: the retry finds the first one.
 
 The review list shows, per job, `error_code`, `error_reason`,
 `reserved_provider_id`, `reserved_provider_nodes` and
-`reserved_provider_hostnames`:
+`reserved_provider_hostnames`. The code and reason are the job's **current**
+finding: what its last attempt found, about the id it holds now. A row whose
+finding is not current shows neither — most often a job repointed since its
+last attempt, whose next step is the retry; its `last_error` is still the
+last attempt's message, about the id it held then.
 
 ```
 GET /admin/provisioning/needs-review
@@ -82,6 +86,7 @@ the row:
 | `vps.create_identity_taken` | `shape_differs` | A machine named as ordered but with a different vCPU or memory. Whose it is cannot be established. | Look at it. If it is this build's, adopt it; if it is not, it has to be renamed or removed at the hypervisor before a retry. Repoint is refused. |
 | `vps.create_identity_reserved_elsewhere` | — | The job's payload names a different cluster from the one its identity was reserved on. Nothing on the platform edits a payload, so the change came from outside it. | There is no route to put it back from this screen, and nothing on this page is one. Escalate; the reserved cluster is where an earlier build would be. |
 | `vps.create_identity_unverifiable` | — | The hypervisor could not be asked what is at the id; nothing was built. The engine retries this on its own. | Nothing, unless it exhausts its attempts — then fix the cluster's reachability and retry. |
+| `compute.task_failed`, `compute.task_unconfirmed` | — | The build settled with a machine, and afterwards the hypervisor said its task failed, or the platform stopped waiting for the task to finish (`last_error` says which). `provider_reference` is the id the build was answered with. | Look at that machine at the node. Retry and repoint are refused, because something was built. |
 
 **Repoint** (`POST /admin/provisioning/jobs/{job}/repoint`, evidence
 required) is refused unless the job has stopped for review, holds an

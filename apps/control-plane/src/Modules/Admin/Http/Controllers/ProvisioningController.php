@@ -78,6 +78,18 @@ final class ProvisioningController
      * place the reason appeared was `last_error`, which the screen truncates —
      * and the provider identity a create reserved, with every node and name a
      * create under it was sent with, because that is where to look.
+     *
+     * The finding is published only while it is current, in both of the
+     * senses `RepointReservedIdentity` requires before it acts on one: it is
+     * stamped with the job's last attempt, and, where it is about a provider
+     * identity, about the one the job holds now. Otherwise the row carries no
+     * finding. Every door into this list writes its own finding, and a
+     * successful attempt or an adoption removes the one before it; this is
+     * the reader's half of that, so that a door which one day does not — or
+     * a repoint, which moves the identity and leaves the finding that
+     * licensed it — is shown as "no current finding" rather than as one the
+     * job is no longer about, which would send the operator to the wrong
+     * runbook row.
      */
     public function needingReview(Request $request): JsonResponse
     {
@@ -88,7 +100,7 @@ final class ProvisioningController
             ->paginate($this->perPage($request));
 
         return $this->paginated($jobs, static function (ProvisioningJob $job): array {
-            $finding = is_array($job->result['error'] ?? null) ? $job->result['error'] : [];
+            $finding = self::currentFinding($job);
             $reference = $job->result['provider_reference'] ?? null;
 
             return [
@@ -224,6 +236,25 @@ final class ProvisioningController
                 'service_id' => $adopted->service_id,
             ],
         ]);
+    }
+
+    /**
+     * The job's finding if it is current, or an empty array. See
+     * needingReview() for what current means and why.
+     *
+     * @return array<string, mixed>
+     */
+    private static function currentFinding(ProvisioningJob $job): array
+    {
+        $finding = is_array($job->result['error'] ?? null) ? $job->result['error'] : [];
+
+        if (($finding['attempt'] ?? null) !== $job->attempts) {
+            return [];
+        }
+
+        $identity = $finding['reserved_provider_id'] ?? null;
+
+        return $identity === null || $identity === $job->reserved_provider_id ? $finding : [];
     }
 
     /**

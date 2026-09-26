@@ -86,6 +86,18 @@ final class RepointRefusedException extends DomainException
             ->as('provisioning.repoint_ownership_not_established');
     }
 
+    /**
+     * Every id the repoint would draw next is one this job has already held.
+     * Not a finding about the job: the draw ran out, and a person picks the
+     * way forward at the hypervisor.
+     */
+    public static function becauseNoFreshIdentityRemains(string $jobId, int $candidates): self
+    {
+        return (new self('Every provider identity this job could be moved to is one it has already held.'))
+            ->withContext(['provisioning_job_id' => $jobId, 'candidates_tried' => $candidates])
+            ->as('provisioning.repoint_no_fresh_identity');
+    }
+
     public function errorCode(): string
     {
         return $this->errorCode;

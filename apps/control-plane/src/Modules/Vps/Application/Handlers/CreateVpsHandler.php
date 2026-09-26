@@ -487,8 +487,11 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
                 $e->getMessage(),
                 metadata: [
                     ...$this->redactor->redact($e->context()),
-                    // Which identity the lost answer was about, so the screen
-                    // can say where to look without a query.
+                    // Which identity the lost answer was about, as every
+                    // finding about an identity says: it lands in the
+                    // attempt's own record and in the job's finding, each of
+                    // which then names the id on its own. (The review list
+                    // reads the job's reserved_provider_id column, not this.)
                     'reserved_provider_id' => $identity->providerId,
                 ],
             );
@@ -547,11 +550,19 @@ final readonly class CreateVpsHandler implements ProvisioningHandler
     /**
      * The hypervisor id this job asks for.
      *
-     * In order: the identity the job already holds — so every attempt of one
-     * build asks for the same id, which is the whole of F-15's repair; then
-     * an id named on the payload, which is how a migration pins a specific id
-     * for a job that has not yet reserved one; then an id derived from the
-     * idempotency key, which is fixed for the life of the order item.
+     * In order: the identity the job already holds, so every attempt of one
+     * build offers the same id; then an id named on the payload, which is how
+     * a migration pins a specific id for a job that has not yet reserved one;
+     * then an id derived from the idempotency key, which is fixed for the life
+     * of the order item.
+     *
+     * The first branch is not what holds the id still. The reservation this
+     * feeds keeps the first id it was given and hands that back whatever it
+     * is offered, so a later attempt asks for the held id either way; the
+     * branch only makes the offer agree with the answer. Holding the id is
+     * half of F-15's repair; the other half is looking under it before
+     * building, which is what makes the second attempt find the first one's
+     * machine rather than build beside it.
      *
      * The payload's id is consulted only while nothing is reserved. Once an
      * identity exists it is the job's, and the only thing that changes it is

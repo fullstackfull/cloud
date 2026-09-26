@@ -196,6 +196,6 @@ final readonly class RepointReservedIdentity
 
         // Unreachable in practice: 64 draws from 90,000 ids all landing on
         // ids this one job has already held.
-        throw RepointRefusedException::becauseNothingIsReserved((string) $job->getKey());
+        throw RepointRefusedException::becauseNoFreshIdentityRemains((string) $job->getKey(), self::MAX_CANDIDATES);
     }
 }

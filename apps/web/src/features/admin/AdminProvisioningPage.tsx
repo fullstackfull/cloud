@@ -26,9 +26,16 @@ import {
 /**
  * The reference an adoption would attach: what the job found, or else the
  * identity it reserved before calling — the place its build would be.
+ *
+ * Except where the job's current finding is that somebody else's machine, by
+ * name, holds that identity: then the machine there is the stranger's, and
+ * this page does not propose adopting it, whatever the server would say.
  */
 function adoptableReference(job: AdminProvisioningJob): string | null {
-  return job.provider_reference ?? job.reserved_provider_id ?? null
+  if (job.provider_reference != null) return job.provider_reference
+  if (job.error_reason === 'named_otherwise') return null
+
+  return job.reserved_provider_id ?? null
 }
 
 /**
@@ -44,7 +51,10 @@ function adoptableReference(job: AdminProvisioningJob): string | null {
  * and its reason, the whole error rather than a truncation of it, and for a
  * VPS create the provider identity it reserved with every node and name a
  * create under it was sent with. And all three ways out are here — retry,
- * adopt, and repoint — each refused by the server where it would be wrong.
+ * adopt, and repoint. Which of them a job may take is the server's to say,
+ * and the page shows its refusal when it gives one. The page pre-empts only
+ * one thing: it never prefills Adopt with an identity the job's current
+ * finding says somebody else's machine holds (see adoptableReference).
  */
 export function AdminProvisioningPage() {
   const { t } = useTranslation()
