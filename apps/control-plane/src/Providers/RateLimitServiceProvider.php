@@ -152,7 +152,10 @@ final class RateLimitServiceProvider extends ServiceProvider
          * ThrottleRequests before `ResolveActingCustomer`, this closure found
          * no account, and the budget became one per administrator rather
          * than one per account. TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
-         * pins the attachment and the order; the key is pinned separately.
+         * pins the attachment and the order;
+         * TheInvitationLimiterCannotBeRotatedByAHeaderTest pins the key — one
+         * per account, shared by its administrators, moved by nothing in the
+         * header.
          *
          * The header used to be consulted first, with a fallback that fired
          * only when it was ABSENT. A caller who sent junk therefore still

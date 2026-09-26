@@ -46,10 +46,8 @@ use Tests\Feature\Team\TeamApiTestCase;
  *   not, so a plain `throttle:team-invitations` declared after `customer` ran
  *   BEFORE it, the closure found no account, and fell back to the user: one
  *   budget per administrator, not per account. The key test could not see
- *   this because it sets the account itself, and the HTTP tests could not
- *   either, because the acting customer is a scoped binding that nothing
- *   flushes between two requests inside one test — the second request read
- *   the account the first one resolved.
+ *   this because it sets the account itself, and no HTTP test asserted the
+ *   invitation budget at all.
  *
  * **Which routes are "roads that post an invitation" is derived, not listed.**
  * A route is one when its controller method uses InvitationMailer — through a
@@ -65,6 +63,20 @@ use Tests\Feature\Team\TeamApiTestCase;
  * routes; and the size of the budget, which is configuration. The floor turns
  * the first of those into a failure for the two roads that exist today, not
  * for a new one.
+ *
+ * **Why a test and not a check at boot.** Refusing to boot when a road that
+ * posts an invitation lacks this limiter would make the mistake undeployable
+ * rather than detected. It is not done, for three reasons. It would read
+ * the same route table this class reads, so it could see nothing this class
+ * cannot. It would move the failure from CI, before merge, to the
+ * application's boot, where one wrong route stops every route answering. And
+ * it would walk every route's middleware on every boot. A shape that does see
+ * further is a check inside InvitationMailer::send that the request being
+ * served ran the limiter: that would catch a send reached through a helper, a
+ * service or a listener, but it ties a mailer to the HTTP layer, fails at the
+ * moment a customer sends, and has no route to ask about for a send made
+ * outside a request. The other half of the same question — a limiter
+ * registered and attached to no route — is not checked anywhere.
  */
 final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends TeamApiTestCase
 {
@@ -147,9 +159,7 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
      * Two administrators of one account share a budget, the budget binds on
      * both roads, and a header full of junk does not buy a fresh one. Every
      * request starts without an acting customer (startAFreshRequest), because
-     * that is what a real request starts with and because carrying the last
-     * one over is exactly what hid the ordering defect from every HTTP test
-     * before this one.
+     * that is what a real request starts with.
      */
     #[Test]
     public function an_account_that_has_spent_its_budget_is_refused_on_both_roads_whatever_it_sends(): void
@@ -203,8 +213,8 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
      * Forgetting the scoped instance is not enough on its own. A route builds
      * its controller while gathering middleware and keeps it, and
      * TeamController holds the ActingCustomer it was built with — so the
-     * route's controller is flushed too, as Octane does between requests, or
-     * the next request would authorise against the previous one's account.
+     * route's controller is flushed too, or the next request would authorise
+     * against the previous one's account.
      */
     private function startAFreshRequest(): void
     {

@@ -8,6 +8,7 @@ use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Domain\Services\ActingCustomer;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
@@ -16,8 +17,9 @@ use Tests\TestCase;
 
 /**
  * The invitation limiter is the only thing bounding outbound mail to
- * addresses a customer chooses, and `ResendInvitation` deliberately has no
- * cooldown of its own, so this bucket is the whole control.
+ * addresses a customer chooses, and `ResendInvitation` has no cooldown of its
+ * own — it writes `sent_count` and `last_sent_at` and compares neither — so
+ * this bucket is the whole control.
  *
  * It used to be keyed on the raw `X-Lynomia-Customer` request header. The
  * fallback to the user fired only when the header was ABSENT, never when it
@@ -31,8 +33,10 @@ use Tests\TestCase;
  * `throttle:` alias is sorted ahead of it — so the resolved account is
  * available to the limiter and there is no reason to consult the header at
  * all. This class sets the account itself and calls the closure directly, so
- * it pins the key and cannot see attachment or order;
- * TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest does.
+ * it pins the key — the account, shared by everyone acting for it, separate
+ * from every other account, and moved by nothing in the header — and cannot
+ * see attachment or order; TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
+ * does.
  */
 final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
 {
@@ -74,6 +78,32 @@ final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
         );
     }
 
+    /**
+     * The key is the account, not the person acting for it.
+     *
+     * The other three cases hold the header out of the key and keep two
+     * accounts apart. None of them tells an account key from a user key: each
+     * has one user per account, so a limiter keyed on the user passes all
+     * three. This case does tell them apart, and it is the failure the
+     * ordering defect produced — the closure fell back to the user, and every
+     * administrator of an account brought a budget of their own.
+     */
+    #[Test]
+    public function two_administrators_of_one_account_share_one_bucket(): void
+    {
+        $customer = Customer::factory()->organization()->create();
+        $first = $this->administratorOf($customer);
+        $second = $this->administratorOf($customer);
+
+        $this->assertSame(
+            $this->bucketFor($first, $customer, null),
+            $this->bucketFor($second, $customer, null),
+            'Two administrators acting for one account were given two buckets, so the account can post as many '
+            .'invitations an hour as it has administrators times the limit. The budget protects the recipients, '
+            .'and they do not care which colleague sent it.'
+        );
+    }
+
     #[Test]
     public function the_bucket_still_separates_two_different_accounts(): void
     {
@@ -96,6 +126,19 @@ final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
         $user = User::factory()->create(['email_verified_at' => now()]);
 
         return [$user, $customer];
+    }
+
+    private function administratorOf(Customer $customer): User
+    {
+        $user = User::factory()->create(['email_verified_at' => now()]);
+
+        $customer->members()->create([
+            'user_id' => $user->id,
+            'role' => CustomerRole::Administrator,
+            'accepted_at' => now(),
+        ]);
+
+        return $user;
     }
 
     /**
