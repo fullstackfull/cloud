@@ -62,6 +62,8 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import re
+import subprocess
 import tempfile
 import traceback
 from pathlib import Path
@@ -639,6 +641,47 @@ def check_threshold() -> list[str]:
     return problems
 
 
+# A command in the gate's docstring, indented, followed by `#` and the output
+# it gives on this tree: `      grep -c x docs/runbooks/*.md    # 0`.
+MEASUREMENT = re.compile(r"^ {4,}(?P<command>\S.*?)\s{2,}# (?P<expected>\S+)\s*$")
+
+
+def check_measurements() -> list[str]:
+    """Each measurement the gate's docstring states is the one the tree gives.
+
+    The docstring says, with a command beside each figure, how often each
+    place its grammar and a renderer part company occurs on the real pages. A
+    figure typed there once went on saying fourteen fence lines after a page
+    added two, so every such line is run here, from the repository root, and
+    its output compared with the figure written after it. At least one must be
+    found: a docstring whose measurements this can no longer read would
+    otherwise pass by checking none.
+    """
+    root = HERE.parent.parent
+    problems: list[str] = []
+    measured = 0
+    for line in (gate.__doc__ or "").splitlines():
+        found = MEASUREMENT.match(line)
+        if not found:
+            continue
+        measured += 1
+        result = subprocess.run(
+            ["bash", "-o", "pipefail", "-c", found["command"]],
+            cwd=root, capture_output=True, text=True,
+        )
+        got = result.stdout.strip()
+        # grep -c exits 1 when it counts nothing; that is the measurement, not
+        # a failure to take it. Anything else on stderr is.
+        if result.stderr.strip() or got != found["expected"]:
+            problems.append(
+                f"{found['command']!r} gives {got!r} (stderr {result.stderr.strip()!r}), "
+                f"and the docstring says {found['expected']!r}"
+            )
+    if measured == 0:
+        problems.append("found no measurement in the gate's docstring to check")
+    return problems
+
+
 def check_write() -> list[str]:
     """`--write` fixes a count and refuses to decide a register row."""
     problems = []
@@ -682,6 +725,7 @@ def main() -> int:
     for name, check in (
         ("the citation threshold is exactly eight, pinned from both sides", check_threshold),
         ("--write rewrites the counts and leaves the register to a person", check_write),
+        ("each measurement the gate's docstring states is what the tree gives", check_measurements),
     ):
         try:
             problems = check()
@@ -692,7 +736,7 @@ def main() -> int:
             print(f"      {problem}")
         failures += bool(problems)
 
-    total = len(CASES) + 2
+    total = len(CASES) + 3
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 

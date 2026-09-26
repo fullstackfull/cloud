@@ -32,24 +32,29 @@ Markdown parser:
 Where a Markdown renderer shows a code span that this grammar does not read, a
 citation there passes unread. These are the places attack has found. They are
 where the attacks stopped, not the boundary, and nobody here has established
-the boundary; what can be measured is how often each occurs. On the pages in
-`docs/runbooks/` none of them occurs today, as these commands from the
-repository root show:
+the boundary; what can be measured is how often each occurs on the pages in
+`docs/runbooks/`, and these commands from the repository root measure it. The
+figure after each is what it printed when this was last revised, and the
+self-test (`check_measurements`) runs every one of them and fails when the tree
+gives another, so a figure here cannot go stale unnoticed:
 
   - A code span whose backticks are on different lines, or whose pairing a
     backslash-escaped backtick or a backtick inside an HTML tag shifts. Outside
-    fence lines, no line has an odd number of backticks or a run of two or
-    more, and none has an escaped backtick; one line has a backtick inside an
-    HTML tag, the README's counts comment, around a word not of citation shape:
+    fence lines, the lines with an odd number of backticks are code spans split
+    over two lines, around API paths rather than words of citation shape (the
+    league/commonmark cross-check below finds no citation this gate misses in
+    them). No line has a run of two or more backticks or an escaped one, and
+    the one backtick inside an HTML tag is in the README's counts comment,
+    around a word not of citation shape:
 
-      grep -hvE '^ {0,3}(`{3,}|~{3,})' docs/runbooks/*.md | awk -F'`' 'NF > 1 && NF % 2 == 0' | wc -l    # 0
+      grep -hvE '^ {0,3}(`{3,}|~{3,})' docs/runbooks/*.md | awk -F'`' 'NF > 1 && NF % 2 == 0' | wc -l    # 4
       grep -hvE '^ {0,3}(`{3,}|~{3,})' docs/runbooks/*.md | grep -c '``'                                 # 0
       grep -h '\\`' docs/runbooks/*.md | wc -l                                                           # 0
-      grep -nE '<[A-Za-z!/][^>]*`' docs/runbooks/*.md                                                    # README.md:11
+      grep -nE '<[A-Za-z!/][^>]*`' docs/runbooks/*.md | cut -d: -f1,2                                    # docs/runbooks/README.md:11
 
   - A fence line inside an HTML block that spans lines (a comment, a `<pre>`),
-    which this gate reads as a fence. Four lines open an HTML block, and each
-    is a comment that closes on the same line:
+    which this gate reads as a fence. Each line that opens an HTML block is a
+    comment that closes on the same line:
 
       grep -nE '^ {0,3}<' docs/runbooks/*.md | wc -l                     # 4
       grep -nE '^ {0,3}<' docs/runbooks/*.md | grep -vc -- '-->'          # 0
@@ -60,12 +65,12 @@ repository root show:
     what follows; no such line exists. One opened on a line of its own that
     the list item ends before the fence's closing line is read on to that
     line; only a fence opened with one to three spaces can be inside a list
-    item and read as a fence here, there are seven, fourteen fence lines, and
-    no line inside any of them is indented less than its opening line, which
-    is what would end the item:
+    item and read as a fence here, the second command below counts their
+    fence lines, and the third finds no line inside any of them indented less
+    than its opening line, which is what would end the item:
 
       grep -nE '^ *([-*+]|[0-9]+[.)]) +(`{3,}|~{3,})' docs/runbooks/*.md | wc -l    # 0
-      grep -hcE '^ {1,3}(`{3,}|~{3,})' docs/runbooks/*.md | paste -sd+ | bc        # 14
+      grep -hcE '^ {1,3}(`{3,}|~{3,})' docs/runbooks/*.md | awk '{ n += $1 } END { print n }'    # 16
       awk 'FNR == 1 { open = 0 } /^  ? ?(```|~~~)/ { if (open) open = 0; else { open = 1; ind = match($0, /[`~]/) - 1 }; next } open && NF && match($0, /[^ ]/) - 1 < ind { n++ } END { print n + 0 }' docs/runbooks/*.md   # 0
 
 The other way round -- text a renderer shows as something other than a code
@@ -79,11 +84,14 @@ section holds none of those forms today:
 
       sed -n '/^## Alerts with no page here/,/^## Pages with no alert here/p' docs/runbooks/README.md | grep -cE '^    |^ *>|<|\]\('   # 0
 
-As a cross-check, not a proof: on 2026-09-26 the 59 citations this gate read in
-`docs/runbooks/` were, page by page, exactly the code spans whose trimmed
-content is of citation shape that league/commonmark 2.10.0 -- the control
-plane's own Markdown parser, with its GitHub-flavoured extension -- found
-there.
+As a cross-check, not a proof: when this paragraph was last revised, the
+citations this gate read in `docs/runbooks/` were, page by page and counted
+with repetition, exactly the code spans whose trimmed content is of citation
+shape that league/commonmark 2.10.0 -- the control plane's own Markdown
+parser, with its GitHub-flavoured extension -- found there. No figure is given
+because the check is not run on every change: a page added since is covered
+by it only once somebody runs it again, and a count here would read as though
+it had been.
 
 Eight has no margin: `NodeDown`, the shortest alert the rules define, is exactly
 eight. So the gate also refuses a rule defining an alert the shape cannot see,
