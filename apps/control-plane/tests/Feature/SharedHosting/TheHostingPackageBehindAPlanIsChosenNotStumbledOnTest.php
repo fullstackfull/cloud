@@ -136,10 +136,22 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
     {
         /*
          * The same two rows in both physical orders. An UPDATE writes a new
-         * row version at the end of the heap, so touching the package on sale
-         * puts the withdrawn one first for a sequential scan — which is the
-         * whole of what `first()` without an `ORDER BY` consulted.
+         * row version after the old one, so touching the package on sale puts
+         * the withdrawn one first for a sequential scan — which is the whole
+         * of what `first()` without an `ORDER BY` consulted.
+         *
+         * Index scans are switched off for this transaction first. With the
+         * plan_id index in place, a table with no statistics (every table a
+         * test run migrates) is read through the index, and an UPDATE that
+         * touches no indexed column is HOT: the index entry keeps pointing at
+         * the row's original slot, so an index scan answers in the original
+         * order and this demonstration would show nothing. The migration that
+         * adds the index says the same.
          */
+        DB::statement('set local enable_indexscan = off');
+        DB::statement('set local enable_bitmapscan = off');
+        DB::statement('set local enable_indexonlyscan = off');
+
         $plan = $this->planUnder('business', 51_200, 4_000);
         $current = $this->packageFor($plan, 'lyn_business', 51_200, onSale: true);
         $this->packageFor($plan, 'lyn_business_legacy', 10_240, onSale: false);
@@ -149,6 +161,12 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
         $this->assertSame((string) $current->getKey(), $asked());
 
         DB::table('hosting_packages')->where('id', $current->getKey())->update(['updated_at' => now()->addSecond()]);
+
+        $this->assertSame(
+            'lyn_business_legacy',
+            DB::selectOne('select panel_package_name from hosting_packages where plan_id = ? limit 1', [(string) $plan->getKey()])->panel_package_name,
+            'The rewrite did not put the withdrawn package first in the heap, so this test would prove nothing.',
+        );
 
         $this->assertSame(
             (string) $current->getKey(),
@@ -269,13 +287,13 @@ final class TheHostingPackageBehindAPlanIsChosenNotStumbledOnTest extends TestCa
     public function a_blank_plan_id_is_refused_before_the_database_is_asked(): void
     {
         /*
-         * The separating input for the `$planId === ''` arm. `plan_id` is
-         * `character(26)`: blank-padded, so PostgreSQL compares it ignoring
-         * trailing blanks and `plan_id = ''` matches a row stored as ''. With
-         * such a row present, a resolver that let '' through to the query
-         * would hand this package back while it is on sale, and answer
-         * ALL_WITHDRAWN once it is withdrawn. Refused up front, '' names no
-         * package both times.
+         * The separating input for the `$planId === ''` arm: a plan whose id
+         * is blank, and a package filed under it. `plan_id = ''` finds that
+         * package — on `character(26)` '' and twenty-six blanks compare equal,
+         * so it would however the blank was written. A resolver that let ''
+         * through to the query would hand this package back while it is on
+         * sale, and answer ALL_WITHDRAWN once it is withdrawn. Refused up
+         * front, '' names no package both times.
          */
         $package = $this->packageUnderABlankPlan();
 

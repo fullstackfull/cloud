@@ -886,6 +886,16 @@ return [
          * by reference id. The plan is what a customer bought; the package is
          * what the panel is told to create. They stay separate rows so that
          * renaming a plan never changes the argument passed to createacct.
+         *
+         * They load withdrawn (`is_active: false`), and that is deliberate. The
+         * catalogue seeder already puts a package on sale behind each of these
+         * three plans, so loading these on sale as well gave every hosting plan
+         * two packages on sale. Purchases used to take whichever row the heap
+         * returned first — sometimes one of these, from an estate that says
+         * nothing in it exists — and the platform now refuses to choose between
+         * two at all (F-32), which would leave the development catalogue with
+         * nothing it can sell. Withdrawn, they still show an engineer the shape
+         * of a package mapping without competing with the real one.
          */
 
         'hosting_node' => [
@@ -913,15 +923,15 @@ return [
 
         'hosting_package' => [
             'ref-package-alpha-starter' => [
-                'facts' => ['slug' => 'ref-pkg-starter', 'plan_slug' => 'hosting-starter', 'panel_package_name' => 'ref_starter', 'is_active' => true],
+                'facts' => ['slug' => 'ref-pkg-starter', 'plan_slug' => 'hosting-starter', 'panel_package_name' => 'ref_starter', 'is_active' => false],
                 'refs' => ['hosting_node' => 'ref-hosting-alpha-1'],
             ],
             'ref-package-alpha-business' => [
-                'facts' => ['slug' => 'ref-pkg-business', 'plan_slug' => 'hosting-business', 'panel_package_name' => 'ref_business', 'is_active' => true],
+                'facts' => ['slug' => 'ref-pkg-business', 'plan_slug' => 'hosting-business', 'panel_package_name' => 'ref_business', 'is_active' => false],
                 'refs' => ['hosting_node' => 'ref-hosting-alpha-1'],
             ],
             'ref-package-alpha-agency' => [
-                'facts' => ['slug' => 'ref-pkg-agency', 'plan_slug' => 'hosting-agency', 'panel_package_name' => 'ref_agency', 'is_active' => true],
+                'facts' => ['slug' => 'ref-pkg-agency', 'plan_slug' => 'hosting-agency', 'panel_package_name' => 'ref_agency', 'is_active' => false],
                 'refs' => ['hosting_node' => 'ref-hosting-alpha-1'],
             ],
         ],
