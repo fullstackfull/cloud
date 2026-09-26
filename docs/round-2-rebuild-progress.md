@@ -101,10 +101,10 @@ independent re-audit follows. The specification is
 
 | Group | Scope | Status | Commit |
 |---|---|---|---|
-| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | unpaid upgrades made provisional and resolved synchronously; re-verifying | `115065e` |
-| 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | upheld with reservations; follow-up before merge | `3f542e3` |
-| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | B3 (null-drop armed a reinstall) repaired; re-verifying | `d16030e` |
-| 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | repaired again; re-verifying | `a087707` |
+| 01 | F-01 plan changes: credit minting, resize to what was paid, atomicity; F-01 × F-06 capacity; billing route docblock, units, throttle names | part-paid lapse fixed; re-verifying with a trial merge | `727a403` |
+| 02 | F-05 settle-to-fulfil cancel window; F-07 feasibility and renewal of undelivered services; I-1 ended services keep renewing; refunds in-flight | upheld with reservations; follow-up `f10e588` checked; merged on candidate | `f10e588` |
+| 03 | F-02 production writer of allocatable addresses and OS profiles; stranded chassis; estate tests that stop short | upheld after four repairs (last delta checked); merged on candidate | `dc0d06c` |
+| 04 | F-09 restore/verify clock measured from the archive; second restore over the same disks | upheld with reservations; merged on candidate | `a087707` |
 | 05 | F-16 `--env` disarms production guards; operator RBAC (role removal, permission emptying, invite atomicity, bootstrap promotion); F-03 test; EndpointPolicy 5f00::/16 | upheld with reservations; merged `a607ea2`, full suite 5,199/5,199, 628 suites `skipped="0"`, exit 0 | `31c8357` |
 | 06 | F-26 empty reserved-zone default and preflight wording; I-3 customer blamed for operator misconfiguration | upheld with reservations; sentences narrowed in `862f416`; merged `306aa57`, full suite 5,233/5,233, 631 suites `skipped="0"`, exit 0 | `862f416` |
 | 07 | F-20 false rebuild label; F-42 vitest under load; F-21 gate budget | upheld with reservations; follow-up `46e5a17`; merged `0a4ffda`: vitest 642/642, tsc, eslint, Architecture 219/219 | `46e5a17` |
