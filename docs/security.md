@@ -134,6 +134,62 @@ possible silent failure into a deployment error visible immediately.
   within hours, and the resulting listings cost every other customer on the range their
   mail delivery for weeks.
 
+## Where the platform may open a connection
+
+One policy, `EndpointPolicy` in the Shared module, decides where the platform may open a
+connection. The Control Center asks it when a provider endpoint, compute cluster, hosting node,
+managed server or BMC is registered, and when a cluster or hosting node is edited; some roads
+ask again at use (below). It refuses loopback, link-local, multicast, the unspecified address,
+the cloud metadata services and a named set of IANA special-purpose blocks (benchmarking, the
+IETF protocol assignments, the retired 6to4 relay and site-local blocks, discard-only) for
+everybody, and private addresses for a provider that is not on our own hardware.
+
+It judges **the address, not a spelling of it**. `0x7f000001`, `2130706433`, `0177.0.0.1` and
+`127.1` are all `127.0.0.1` to a resolver, and are refused as numbers before anything resolves
+them. IPv4 carried inside IPv6 (mapped, compatible, SIIT, NAT64, 6to4, Teredo), zone
+identifiers, a trailing dot and non-ASCII dot look-alikes (`。．｡`) are refused for what they
+are, and IPv6 literals are compared as bytes, so writing one long or in upper case changes
+nothing.
+
+**A name must resolve before it can be registered.** Names are resolved for both address
+families, every answer is judged, and a name the resolver has no address for is refused rather
+than waved through — an unresolvable name used to run the address checks zero times and be
+accepted, which made every refusal about a name conditional on the resolver having answered.
+The operational consequence is real: a hosting node, provider, managed server or BMC cannot be
+registered by name before its DNS record exists. Create the record first, or register the
+address itself.
+
+**Where a name is checked again at use, the resolver is in the request.** A dedicated server's
+BMC address is asked about again when a connection to it is built, so a BMC recorded by
+hostname is resolved inside each power request, and a resolver that is briefly unable to
+answer turns the request into a refusal, which the customer sees as "this server cannot
+currently be operated remotely". Recording BMCs by address avoids it. Connection tests and managed-server probes are also checked at use. The hosting panel
+connections (`WhmConnection::forNode`, `DirectAdminConnection::forNode`),
+`ComputeProviderFactory::proxmox`, `BackupProviderFactory` and the console gateway's
+`ConsoleUpstream::socketAddress` are **not**: they dial the stored row as it stands, so a row
+that reaches those tables by a seeder, an import or SQL rather than through the Control Center
+is not re-checked.
+
+**A hosting node's hostname is checked when it is what gets dialled.** A node with no API
+endpoint is dialled at `https://{hostname}:{port}` with the panel's root token, so on both the
+create and the edit road the hostname is checked whenever the node is left without an
+endpoint.
+
+Two limits, named so nobody reads the policy as closing them:
+
+- **An AAAA record that exists only in `/etc/hosts`** (or another non-DNS `nsswitch` source) is
+  invisible: the A lookup goes through the C library and sees it but reports only IPv4, and the
+  AAAA lookup asks DNS alone. Seeing it properly needs `getaddrinfo`, which PHP exposes only
+  through ext-sockets, and this project does not declare that extension. A name with no address
+  the lookups can see is refused, so on its own an invisible answer is a refusal rather than a
+  pass. A name that also has a visible address is judged by the visible one only — arranging
+  that takes editing the control plane host's own `/etc/hosts` or name-service configuration.
+- **NAT64 is a topology question.** An IPv6-only management network that reaches IPv4-only
+  BMCs through NAT64 cannot register them by their translated addresses, because the whole of
+  `::/8` — which holds both NAT64 prefixes — is refused, and `64:ff9b::a9fe:a9fe` is exactly
+  the metadata address the refusal exists for. Supporting that estate means a configured NAT64
+  prefix whose embedded IPv4 address is judged by these same rules: a feature, not a repair.
+
 ## Audit
 
 Administrative actions are recorded append-only with actor, target, before/after and

@@ -64,8 +64,19 @@ final readonly class RecordBmcEndpoint
         ?string $credentialsReference,
         User $operator,
     ): BmcEndpoint {
+        /*
+         * The port is joined to the address in the one form that still means
+         * that address and that port. An IPv6 address takes brackets first:
+         * joined with a bare colon, `fd00:ec2::254` and port 80 read as the
+         * different address `fd00:ec2::254:80`, and the policy judged that one
+         * instead.
+         */
         $this->endpoints->assertMachineAddress(
-            $port === null ? $address : $address.':'.$port,
+            match (true) {
+                $port === null => $address,
+                str_contains($address, ':') && ! str_starts_with($address, '[') => sprintf('[%s]:%d', $address, $port),
+                default => sprintf('%s:%d', $address, $port),
+            },
             production: $this->app->environment('production'),
         );
 

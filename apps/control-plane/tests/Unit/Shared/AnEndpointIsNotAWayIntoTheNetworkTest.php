@@ -9,11 +9,12 @@ use Lynomia\Modules\Shared\Domain\Services\EndpointPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\StaticHostResolver;
 
 /**
  * The strings an attacker with the provider-manage permission would type,
- * and what happens to each. Pure: nothing here resolves a real name except
- * where the test says so.
+ * and what happens to each. Pure: names are answered from a table, and nothing
+ * here resolves a real one.
  */
 final class AnEndpointIsNotAWayIntoTheNetworkTest extends TestCase
 {
@@ -23,7 +24,7 @@ final class AnEndpointIsNotAWayIntoTheNetworkTest extends TestCase
     {
         parent::setUp();
 
-        $this->policy = new EndpointPolicy;
+        $this->policy = new EndpointPolicy(new StaticHostResolver);
     }
 
     /**

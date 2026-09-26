@@ -648,6 +648,25 @@ final class InventoryController
         }
 
         /*
+         * The hostname is what gets dialled when the node has no API endpoint,
+         * so it is asked about whenever this edit leaves the node in that
+         * state and touches either field: a new hostname on a node without an
+         * endpoint, or an endpoint cleared on a node whose hostname was never
+         * asked about. The create road asks the same question
+         * (RegisterHostingNode). A fake panel dials nothing.
+         */
+        $endpointAfter = array_key_exists('api_endpoint', $changes) ? $changes['api_endpoint'] : $found->api_endpoint;
+        $hostnameAfter = (string) ($changes['hostname'] ?? $found->hostname);
+
+        if (
+            $found->panel !== HostingPanel::Fake
+            && trim((string) $endpointAfter) === ''
+            && (array_key_exists('hostname', $changes) || array_key_exists('api_endpoint', $changes))
+        ) {
+            $this->endpoints->assertMachineAddress($hostnameAfter, production: app()->environment('production'));
+        }
+
+        /*
          * Offline means the platform will not reach it. Draining — no new
          * accounts, the existing ones untouched — is the supported way to wind
          * a node down and is never refused.

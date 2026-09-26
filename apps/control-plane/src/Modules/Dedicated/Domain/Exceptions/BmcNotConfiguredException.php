@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Dedicated\Domain\Exceptions;
 
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
+use Lynomia\Modules\Shared\Domain\Exceptions\EndpointRefused;
 
 /**
  * A BMC endpoint row exists but the platform cannot build a working connection
@@ -21,6 +22,27 @@ final class BmcNotConfiguredException extends DomainException
     public static function missingAddress(string $endpointId): self
     {
         $exception = new self(sprintf('BMC endpoint %s has no address.', $endpointId));
+
+        return $exception->withContext(['bmc_endpoint_id' => $endpointId]);
+    }
+
+    /**
+     * The row's address is one the endpoint policy refuses, so no connection
+     * is built to it.
+     *
+     * The policy's own refusal names the address, which is what an operator
+     * needs and exactly what a customer must not be handed, so it travels as
+     * `previous` — kept for the log — and this message names the endpoint id
+     * and nothing about where it points. A caller on a customer route
+     * translates this exception again; one that stores its message stores no
+     * address.
+     */
+    public static function addressRefused(string $endpointId, EndpointRefused $refused): self
+    {
+        $exception = new self(
+            sprintf('BMC endpoint %s has an address the endpoint policy refuses, so no connection is built to it.', $endpointId),
+            previous: $refused,
+        );
 
         return $exception->withContext(['bmc_endpoint_id' => $endpointId]);
     }
