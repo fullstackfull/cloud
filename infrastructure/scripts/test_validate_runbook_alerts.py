@@ -29,8 +29,15 @@ same refusal names it.
 
 The escape hatch is only as strict as its corroboration, so that is pinned too:
 a truncation of a real alert (`QueueBacklog`, inside `QueueBacklogGrowing`) is
-not named by the rule that contains it, and this gate and this file, which
-quote invented names as fixtures, cannot vouch for them.
+not named by the rule that contains it; this gate and this file, which quote
+invented names as fixtures, cannot vouch for them; a document cannot vouch for
+a word wherever it sits -- under `docs/`, beside the rules, at the repository
+root -- because the only thing an invented alert name needs to pass is a
+document that names it; and a dependency's code or another branch's worktree
+is not this tree's. The limit the gate states for itself is pinned from the
+other side: a comment in a rule file does vouch, because a code or
+configuration file is read whole, and if that ever changes the gate's
+docstring has to change with it.
 
 Run: python3 infrastructure/scripts/test_validate_runbook_alerts.py
 Exit 0 when every case behaves, 1 otherwise.
@@ -42,6 +49,7 @@ import contextlib
 import importlib.util
 import io
 import tempfile
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -208,6 +216,16 @@ CASES: list[tuple[str, dict, str | None]] = [
         "docs/runbooks/README.md:13: `CertificateGone` is cited as an alert",
     ),
     (
+        "a code span of two backticks is read like one of one",
+        {"pages": queue_page("``QueueStalled`` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:7: `QueueStalled` is cited as an alert",
+    ),
+    (
+        "the spaces CommonMark strips inside a code span do not hide a citation",
+        {"pages": queue_page("`` QueueStalled `` fires when nothing completes.")},
+        "docs/runbooks/queue-backlog.md:7: `QueueStalled` is cited as an alert",
+    ),
+    (
         "an alert name inside a fenced block is not read as a citation",
         {"pages": queue_page("```", "grep `NotReadHereAtAll` /var/log", "```")},
         None,
@@ -235,18 +253,71 @@ CASES: list[tuple[str, dict, str | None]] = [
             "`ProviderTasksIndeterminate` fires on them.",
             "<!-- not-an-alert: ProviderTasksIndeterminate - it is only prose now, honestly -->",
         )},
-        "nothing outside docs/ names it",
+        "no code or configuration file outside docs/ names it",
     ),
+    *[
+        (
+            f"naming the invented word in another document does not launder it ({where})",
+            {
+                "pages": queue_page(
+                    "`ProviderTasksIndeterminate` fires on them.",
+                    "<!-- not-an-alert: ProviderTasksIndeterminate - it is only prose now, honestly -->",
+                ),
+                "other": {path: "When a job hangs, `ProviderTasksIndeterminate` fires and pages.\n"},
+            },
+            "no code or configuration file outside docs/ names it",
+        )
+        for where, path in (
+            ("a report under docs/", "docs/some-report.md"),
+            ("a README beside the rules", "infrastructure/monitoring/README.md"),
+            ("the repository README", "README.md"),
+            ("an application changelog", "apps/control-plane/CHANGELOG.md"),
+            ("a plain-text note", "infrastructure/monitoring/NOTES.txt"),
+        )
+    ],
+    *[
+        (
+            f"code that is not this tree's own does not vouch for a word ({where})",
+            {
+                "pages": queue_page(
+                    "`ProviderTasksIndeterminate` fires on them.",
+                    "<!-- not-an-alert: ProviderTasksIndeterminate - it is only prose now, honestly -->",
+                ),
+                "other": {path: body},
+            },
+            "no code or configuration file outside docs/ names it",
+        )
+        for where, path, body in (
+            (
+                "another branch's worktree",
+                ".claude/worktrees/other/apps/control-plane/app/ProviderTasksIndeterminate.php",
+                "<?php\n\nfinal class ProviderTasksIndeterminate {}\n",
+            ),
+            (
+                "a PHP dependency",
+                "apps/control-plane/vendor/acme/alerts/src/ProviderTasksIndeterminate.php",
+                "<?php\n\nfinal class ProviderTasksIndeterminate {}\n",
+            ),
+            (
+                "a JavaScript dependency",
+                "apps/web/node_modules/acme-alerts/index.js",
+                "module.exports = 'ProviderTasksIndeterminate';\n",
+            ),
+        )
+    ],
     (
-        "naming the invented word in another document does not launder it",
+        # The limit the module docstring states, pinned so that the paragraph
+        # saying so cannot go stale in either direction: a code or configuration
+        # file is read whole, and a comment in one is not told apart from code.
+        "a comment in a rule file vouches for a word, as the docstring says it does",
         {
             "pages": queue_page(
                 "`ProviderTasksIndeterminate` fires on them.",
                 "<!-- not-an-alert: ProviderTasksIndeterminate - it is only prose now, honestly -->",
             ),
-            "other": {"docs/some-report.md": "The `ProviderTasksIndeterminate` alert fires.\n"},
+            "rules": {"platform.yml": RULES + "# TODO: add ProviderTasksIndeterminate\n"},
         },
-        "nothing outside docs/ names it",
+        None,
     ),
     (
         # The audit's own case: the rules name `QueueBacklogGrowing`, which
@@ -256,7 +327,7 @@ CASES: list[tuple[str, dict, str | None]] = [
             "`QueueBacklog` fires first.",
             "<!-- not-an-alert: QueueBacklog - shorthand for both backlog alerts -->",
         )},
-        "declares `QueueBacklog` not an alert, and nothing outside docs/ names it",
+        "declares `QueueBacklog` not an alert, and no code or configuration file outside docs/ names it",
     ),
     (
         "a declaration for a truncation of a defined alert is refused (the tail of the name)",
@@ -264,7 +335,7 @@ CASES: list[tuple[str, dict, str | None]] = [
             "`BacklogGrowing` fires first.",
             "<!-- not-an-alert: BacklogGrowing - shorthand for the warning tier -->",
         )},
-        "declares `BacklogGrowing` not an alert, and nothing outside docs/ names it",
+        "declares `BacklogGrowing` not an alert, and no code or configuration file outside docs/ names it",
     ),
     (
         "this gate's self-test names invented words as fixtures, and cannot vouch for them",
@@ -275,7 +346,7 @@ CASES: list[tuple[str, dict, str | None]] = [
             ),
             "other": {"infrastructure/scripts/test_validate_runbook_alerts.py": "CASE = 'QueueStalled'\n"},
         },
-        "declares `QueueStalled` not an alert, and nothing outside docs/ names it",
+        "declares `QueueStalled` not an alert, and no code or configuration file outside docs/ names it",
     ),
     (
         "this gate names invented words in its own text, and cannot vouch for them",
@@ -286,7 +357,7 @@ CASES: list[tuple[str, dict, str | None]] = [
             ),
             "other": {"infrastructure/scripts/validate-runbook-alerts.py": "# e.g. QueueStalled\n"},
         },
-        "declares `QueueStalled` not an alert, and nothing outside docs/ names it",
+        "declares `QueueStalled` not an alert, and no code or configuration file outside docs/ names it",
     ),
     (
         "a declaration over a defined alert cannot silence a true citation",
@@ -491,7 +562,13 @@ def check_write() -> list[str]:
 def main() -> int:
     failures = 0
     for name, kwargs, expected in CASES:
-        code, _, err, _ = run(**kwargs)
+        # A gate that crashes has not refused anything. Report it against the
+        # case, with the traceback, rather than letting one crash stand in for
+        # every case after it.
+        try:
+            code, _, err, _ = run(**kwargs)
+        except Exception:  # noqa: BLE001
+            code, err = None, traceback.format_exc()
         if expected is None:
             ok = code == 0 and not err.strip()
         else:
@@ -505,7 +582,10 @@ def main() -> int:
         ("the citation threshold is exactly eight, pinned from both sides", check_threshold),
         ("--write rewrites the counts and leaves the register to a person", check_write),
     ):
-        problems = check()
+        try:
+            problems = check()
+        except Exception:  # noqa: BLE001
+            problems = [f"crashed:\n{traceback.format_exc()}"]
         print(f"{'PASS' if not problems else 'FAIL'}  {name}")
         for problem in problems:
             print(f"      {problem}")

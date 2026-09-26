@@ -8,7 +8,8 @@ One of the two alerts that send you here:
   from one provider failed processing within 15 minutes. Each is a payment event
   the platform has not recorded.
 - **`PaymentWebhooksStopped`** (warning, platform channel) — no webhook event of
-  any kind has arrived for six hours.
+  any kind has arrived in the trailing six hours, and that has stayed true for
+  an hour. It fires about seven hours after the last event arrived, not six.
 
 A third payments alert, `FailedPaymentsElevated`, is about declines — payment
 attempts refused at the gateway — and sends you to `payment-reconciliation.md`,

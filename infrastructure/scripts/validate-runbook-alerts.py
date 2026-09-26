@@ -10,10 +10,12 @@ go from a rule to the runbook it names -- and nothing walked back. This does.
 
 What counts as a citation
 -------------------------
-A backticked word on a page in `docs/runbooks/` is read as an alert name when it
-is UpperCamelCase -- at least two capitalised segments, letters and digits only
--- and at least MIN_CITATION_LENGTH (eight) characters long. Every such word
-must be an alert some rule file defines. Fenced code blocks are not read.
+A word on a page in `docs/runbooks/` is read as an alert name when it is the
+whole of a code span -- one or more backticks each side, as CommonMark reads
+them, surrounding spaces ignored -- and it is UpperCamelCase (at least two
+capitalised segments, letters and digits only) of at least MIN_CITATION_LENGTH
+(eight) characters. Every such word must be an alert some rule file defines.
+Fenced code blocks are not read.
 
 Eight has no margin: `NodeDown`, the shortest alert the rules define, is exactly
 eight. So the gate also refuses a rule defining an alert the shape cannot see,
@@ -34,15 +36,19 @@ whoever writes the page. A declaration is refused when:
     reason and rot into a standing exemption;
   - the word is an alert some rule defines, so a declaration cannot silence a
     true citation;
-  - nothing outside `docs/` names the word. Something that is not an alert and
-    is worth backticking on an operator page -- a class, a status, a command --
-    exists in the code or the configuration. An invented alert name exists only
-    in prose, and calling it something else does not make it real. `docs/` is
-    excluded as a whole because the remediation ledger and its briefs quote
-    every invented name this gate was written to catch, and so are this gate
-    and its self-test, which quote them as fixtures. Naming means as a word of
-    its own: a rule defining `QueueBacklogGrowing` does not name `QueueBacklog`,
-    because a truncation that matches two real alerts is still not an alert;
+  - no code or configuration file outside `docs/` names the word. Something
+    that is not an alert and is worth backticking on an operator page -- a
+    class, a status, a command -- is defined or used in the code or the
+    configuration, so one of those files names it. A document never vouches
+    for a word, wherever it is: Markdown and plain text are not searched at
+    all (SEARCH_SUFFIXES), in `docs/` or anywhere else, because an invented
+    alert name can be written into any of them and calling it something else
+    there does not make it real. Top-level `docs/` is excluded whatever the
+    file type, because the remediation ledger and its briefs quote every
+    invented name this gate was written to catch, and so are this gate and its
+    self-test, which quote them as fixtures. Naming means as a word of its own:
+    a rule defining `QueueBacklogGrowing` does not name `QueueBacklog`, because
+    a truncation that matches two real alerts is still not an alert;
   - the reason is shorter than twelve characters, or the declaration cannot be
     parsed at all. A declaration quoted inside a code span is an example, not a
     declaration.
@@ -76,8 +82,17 @@ Only `docs/runbooks/`. A document elsewhere that claims an alert exists is not
 read -- a convention-shaped sweep of the rest of `docs/` finds hundreds of class
 names and one false claim, which F-39 corrected by hand.
 
+Prose inside a code or configuration file is not told apart from code. Such a
+file is read whole, comments, docstrings and message strings included, because
+where prose ends inside one cannot be drawn by syntax: a docstring and an
+exception message are string literals like any other. So an occurrence
+anywhere in a code or configuration file vouches for a declared word -- a line
+`# TODO: add QueueStalled` in a rule file is enough for `QueueStalled` to pass
+as not an alert. The review of that line is the other half of this check, and
+the self-test pins the behaviour so this paragraph cannot go stale unnoticed.
+
 Exit status 0 when every citation resolves and the README agrees with the tree,
-1 otherwise.
+1 when anything does not, 2 when PyYAML is missing.
 """
 
 from __future__ import annotations
@@ -97,7 +112,10 @@ MIN_CITATION_LENGTH = 8
 MIN_REASON_LENGTH = 12
 
 CITATION_SHAPE = re.compile(r"(?:[A-Z][a-z0-9]*){2,}")
-CODE_SPAN = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
+# A code span as CommonMark reads one: a run of backticks, closed by a run of
+# the same length. Its content is stripped before it is read, so `` Word ``
+# and ``Word`` are the same citation as `Word`.
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 FENCE = re.compile(r"^\s*(```|~~~)")
 DECLARATION = re.compile(r"<!--\s*not-an-alert\b(.*?)-->")
 DECLARATION_BODY = re.compile(r"^:\s*([A-Za-z0-9]+)\s+-\s+(.*?)\s*$")
@@ -110,11 +128,17 @@ PAGELESS_HEADING = "## Alerts with no page here"
 
 # Where a declared word is looked for. Top-level `docs/` is excluded on purpose
 # (see the module docstring); the rest are dependencies, build output and
-# runtime state, none of which is the platform describing itself.
+# runtime state, none of which is the platform describing itself. Directories
+# whose name starts with a dot are skipped too: a git worktree of another
+# branch lives under `.claude/worktrees/`, and that branch's code does not
+# vouch for this one's pages.
 SKIP_DIRS = frozenset({"node_modules", "vendor", "storage", "dist", "build", "coverage", "__pycache__"})
+# Code and configuration only. No document suffix belongs here -- not `.md`,
+# not `.txt`, not `.rst` -- because a document can vouch for any word by
+# naming it, which is exactly what an invented alert name needs.
 SEARCH_SUFFIXES = frozenset({
     ".php", ".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".yml", ".yaml",
-    ".md", ".sh", ".j2", ".tf", ".toml", ".xml", ".neon", ".txt", ".conf", ".ini",
+    ".sh", ".j2", ".tf", ".toml", ".xml", ".neon", ".conf", ".ini",
 })
 # This gate and its self-test name invented words as fixtures; they cannot vouch
 # for them.
@@ -138,7 +162,8 @@ def read_page(text: str) -> tuple[list[tuple[int, str]], list[tuple[int, str]]]:
             continue
         if fenced:
             continue
-        for word in CODE_SPAN.findall(line):
+        for _, content in CODE_SPAN.findall(line):
+            word = content.strip()
             if is_citation(word):
                 citations.append((number, word))
         for body in DECLARATION.findall(CODE_SPAN.sub("", line)):
@@ -172,7 +197,8 @@ def names_word(text: str, word: str) -> bool:
 
 
 def named_outside_docs(repo_root: Path, words: set[str]) -> set[str]:
-    """The subset of `words` that some file outside `docs/` names as a word."""
+    """The subset of `words` that some code or configuration file outside
+    `docs/` names as a word, anywhere in it."""
     found: set[str] = set()
     if not words:
         return found
@@ -380,9 +406,11 @@ def main(argv: list[str]) -> int:
     for where, line, word, _ in pending:
         if word not in corroborated:
             problems.append(
-                f"{where}:{line}: declares `{word}` not an alert, and nothing outside "
-                f"docs/ names it. A word that exists only in prose is an invented "
-                f"alert name however it is described."
+                f"{where}:{line}: declares `{word}` not an alert, and no code or "
+                f"configuration file outside docs/ names it. A document does not "
+                f"count, wherever it is, because any document can name an invented "
+                f"alert. Cite the alert that sends the operator here, or say that "
+                f"nothing will."
             )
 
     if citations == 0:

@@ -35,8 +35,9 @@ defines. It found ten invented commands the first time it ran.
 
 ## Naming an alert on these pages
 
-A backticked UpperCamelCase word of eight or more characters, with at least two
-capitalised segments, is read as the name of an alert, and
+An UpperCamelCase word of eight or more characters, with at least two
+capitalised segments, that is the whole of a code span — any number of
+backticks each side — is read as the name of an alert, and
 `validate-runbook-alerts.py` fails the build unless a rule file defines it. That
 is the check in the other direction from `validate-monitoring.py`'s, and it
 exists because fifteen alert names had been written on these pages that no rule
@@ -50,10 +51,16 @@ A word of that shape that is genuinely not an alert, such as a test class
 mentioned in prose, is declared on the page that writes it, next to where it is
 written: `<!-- not-an-alert: Word - what it actually is -->`, with a reason of at
 least twelve characters. The declaration is refused if the page does not cite
-the word, if the word is a defined alert, or if nothing outside `docs/` names it
-as a word of its own — an invented alert name exists only in prose, and calling
-it something else does not make it real. A rule defining `QueueBacklogGrowing`
-does not name a truncation of it: a prefix that matches two alerts is neither.
+the word, if the word is a defined alert, or if no code or configuration file
+outside `docs/` names it as a word of its own. A document never counts,
+wherever it is — Markdown and plain text are not searched at all, because an
+invented alert name can be written into any document, and calling it something
+else there does not make it real. A code or configuration file is read whole,
+comments and strings included: the gate cannot tell prose inside one from
+code, so a comment naming the word vouches for it as surely as the class that
+defines it. Reviewing that comment is the other half of the check. A rule
+defining `QueueBacklogGrowing` does not name a truncation of it: a prefix that
+matches two alerts is neither.
 
 ## Alerts with no page here
 
@@ -88,14 +95,16 @@ A **Gap.** is a condition the platform exports a series for and no rule reads.
 No rule was written for these on purpose: a threshold nobody has ever watched
 fire is a guess, and a guessed threshold with a guessed duration reads as
 coverage while being unfired YAML. Writing one is a decision for somebody who
-can watch it fire against a real deployment. A **Procedure.** is something a
-person starts, not something that happens to them.
+can watch it fire against a real deployment. An **Indirect.** page is for a
+condition no series describes as such, which reaches you as other alerts whose
+pages send you on to it. A **Procedure.** is something a person starts, not
+something that happens to them.
 
 - `database-restore.md` — **Procedure.** A restore is a decision taken after data loss; no series says "restore now".
 - `deploy-lynomia.md` — **Procedure.** A deploy is started by a person, on purpose.
 - `rollback-lynomia.md` — **Procedure.** Started by a person, on a judgement about a release.
 - `dns-outage.md` — **Gap.** No rule reads the `lynomia_dns_*` series the control plane exports.
-- `pbs-unavailable.md` — **Gap.** Nothing alerts on the backup server as such. Its failure reaches you as backup alerts, which send you to `backup-failure.md`; that page sends you here when many services fail at once.
+- `pbs-unavailable.md` — **Indirect.** Nothing alerts on the backup server as such, and the backup series come from the control plane's own records, not from PBS. Its failure reaches you as backup alerts, which send you to `backup-failure.md`, or as `NodeDown` if the host stops answering, which sends you to `node-unavailable.md`; both pages send you on here.
 - `registrar-timeout.md` — **Gap.** `lynomia_domain_operations_total` is exported and no rule reads it.
 - `scheduler-stale.md` — **Gap.** `lynomia_scheduled_command_last_success_timestamp_seconds` and `lynomia_scheduled_command_consecutive_failures` are exported and no rule reads either.
 - `wordpress-provisioning-stuck.md` — **Gap.** `lynomia_wordpress_sites_total` is exported and no rule reads it.
