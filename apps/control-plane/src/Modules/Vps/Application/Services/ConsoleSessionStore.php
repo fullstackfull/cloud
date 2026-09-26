@@ -48,9 +48,10 @@ final readonly class ConsoleSessionStore
 
     /**
      * Public so a test can reach the record this store writes and rewrite its
-     * deadline — the only way to put a permit past its deadline in front of
-     * consume() while the cache still holds it, which is the state the deadline
-     * comparison exists for. Nothing in production writes here but issue().
+     * deadline. That is how a test puts a permit past its deadline in front of
+     * consume() while the cache still holds it, which is the state the
+     * deadline comparison exists for. In this class, issue() writes the key
+     * and consume() deletes it once the permit is spent.
      */
     public const string PREFIX = 'vps:console:session:';
 
@@ -94,16 +95,21 @@ final readonly class ConsoleSessionStore
      * can reach it enumerate live sessions.
      *
      * An expired permit is refused twice over. The cache's TTL is the first
-     * line, and in real operation the one that fires: the store drops the key
-     * at sixty seconds and there is nothing left to compare. The deadline
-     * inside the record is the second, because the TTL is a property of
-     * whichever driver a deployment configures — Redis counts it on the
-     * server's own clock, the array store on Carbon's — which this repository
-     * can neither state, nor test, nor keep across a driver swap; and because
-     * the ways it can be wrong are ordinary rather than exotic: a put() whose
-     * TTL drifts from TTL_SECONDS, a driver that rounds the TTL, skew between
-     * the host that wrote the deadline and the server counting the TTL, a
-     * future writer that reaches this key some other way.
+     * line, and in real operation almost always the one that fires: the store
+     * drops the key at sixty seconds and there is nothing left to compare.
+     * Not always, though. The deadline is stored to the whole second and the
+     * TTL is counted from put(). So even with no clock skew, the deadline falls
+     * due up to about a second before the key goes, and in that last fraction
+     * the comparison is what refuses.
+     *
+     * The deadline inside the record is the second line, because the TTL is
+     * a property of whichever driver a deployment configures — Redis counts
+     * it on the server's own clock, the array store on Carbon's — which this
+     * repository can neither state, nor test, nor keep across a driver swap;
+     * and because the ways it can be wrong are ordinary rather than exotic: a
+     * put() whose TTL drifts from TTL_SECONDS, a driver that rounds the TTL,
+     * skew between the host that wrote the deadline and the server counting
+     * the TTL, a future writer that reaches this key some other way.
      *
      * The two are one decision, not two guards that can disagree. The record
      * is read first, so the comparison only ever sees what the TTL has not
@@ -180,11 +186,27 @@ final readonly class ConsoleSessionStore
      * trusted; failing closed costs the customer one more request for a
      * permit.
      *
+     * The format alone is not that strict, so the string must also be exactly
+     * what the instant it was read as formats back to. On its own,
+     * createFromFormat(DATE_ATOM) takes zone spellings issue() never writes
+     * (Z, +0000, UTC, EST). It also takes clock and calendar values that do
+     * not exist and rolls them forward to a later instant: 10:99 is read as
+     * 11:39, 24:00 as the next midnight, 31 September as 1 October. A string
+     * that formats back to itself names one real instant, spelled the way
+     * issue() spells one. Any other string is unreadable here.
+     *
+     * The offset's value is not policed beyond that. issue() writes the
+     * application's own offset, which need not be +00:00, and an offset only
+     * renames an instant: any deadline refused for an unusual offset could be
+     * written again as the same instant in +00:00. The comparison then judges
+     * that instant, exactly as written.
+     *
      * The format has no fraction of a second, so a permit issued at
      * 10:00:00.700 is enforced until 10:01:00 and not 10:01:00.700 — a
-     * lifetime a little under sixty seconds. That is harmless because ConsoleSessionResource renders
-     * the same truncated string: the instant the client is told and the
-     * instant enforced here are one instant.
+     * lifetime a little under sixty seconds. That is harmless because
+     * ConsoleSessionResource renders the same truncated string as expires_at:
+     * the instant the client is told and the instant enforced here are one
+     * instant.
      *
      * @param  array<string, mixed>  $record
      */
@@ -202,7 +224,9 @@ final readonly class ConsoleSessionStore
             return null;
         }
 
-        return $deadline instanceof CarbonImmutable ? $deadline : null;
+        return $deadline instanceof CarbonImmutable && $deadline->format(DATE_ATOM) === $written
+            ? $deadline
+            : null;
     }
 
     private function store(): Repository

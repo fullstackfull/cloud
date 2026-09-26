@@ -29,21 +29,37 @@ use Tests\TestCase;
  * server's wall clock, which travel() cannot move: the key is still there and,
  * before consume() compared the deadline, the expired permit was redeemed.
  *
- * So nothing here travels past a TTL. Each test writes the record with its
- * deadline already where the test wants it and a TTL of an HOUR, so no cache
- * driver can be the thing refusing: if the permit is refused, consume()
- * refused it.
+ * So nothing here travels past a TTL. Every test that asks a real cache
+ * driver for a refusal, but one, writes the record with its deadline already
+ * where the test wants it and a TTL of an HOUR, so no driver can be the thing
+ * refusing: if the permit is refused, consume() refused it. Two more give the
+ * store a mocked repository in place of a driver and watch the calls it makes.
  *
- * Every refusal is followed by a control that demands a success from the
- * identical write path — the same record, rewritten by the same helper with a
- * live deadline. A refusal assertion on its own passes against a store that
- * keeps nothing, or a helper writing to the wrong key; the control fails
- * there, loudly, so this file cannot report green while proving nothing.
+ * The one is the_deadline_the_client_is_told_is_the_deadline_the_code_enforces.
+ * It keeps the sixty-second record issue() writes, because the truncation it
+ * pins happens inside issue(), and travels to the deadline — short of that
+ * TTL by the fraction of a second the truncation drops. The array store
+ * expires a key at the precise instant, and Redis on a clock travel() does not
+ * move, so under those two only the comparison can refuse there. The database
+ * and file stores floor their expiry to the whole second and refuse at that
+ * instant unaided: on those drivers, that test's refusal does not isolate the
+ * code.
  *
- * The controls sit ONE second inside the deadline, not thirty. The comparison
- * is exactly as strong as the tightest control: with a control thirty seconds
- * out, a comparison clock running twenty-nine seconds fast — a permit honoured
- * twenty-nine seconds past its deadline — would still leave every test green.
+ * Each of the hour-long refusals is followed by a control that demands a
+ * success from the identical write path — the same record, rewritten by the
+ * same helper with a live deadline. A refusal assertion on its own passes
+ * against a store that keeps nothing, or a helper writing to the wrong key;
+ * the control fails there, loudly, so this file cannot report green while
+ * proving nothing.
+ *
+ * The controls sit ONE second inside the deadline, not thirty, because only a
+ * control pins the early side of the comparison. A comparison clock running
+ * fast refuses permits that are still live, and nothing but a demanded
+ * success can catch that: with the controls thirty seconds out, a clock
+ * twenty-nine seconds fast — refusing every permit for the last half of its
+ * life — would still leave every test green. The late side, a clock running
+ * slow that honours a permit past its deadline, is pinned by the refusal at
+ * the instant of the deadline itself, however far out the controls sit.
  *
  * The clock is frozen at the start of a second because the deadline is stored
  * to the second (ISO-8601 as issue() writes it has no fraction); a clock left
