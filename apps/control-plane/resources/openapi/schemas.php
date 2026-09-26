@@ -2654,7 +2654,7 @@ return [
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'type' => ['type' => ['string', 'null']],
-            'category' => ['type' => ['string', 'null'], 'description' => 'security and billing cannot be silenced; service and operational can be, by email only.'],
+            'category' => ['type' => ['string', 'null'], 'description' => 'security and billing cannot be silenced; service can be, by email only. A security notification names one person and is shown only to them.'],
             'title' => ['type' => ['string', 'null']],
             'body' => ['type' => ['string', 'null']],
             'is_failure' => ['type' => 'boolean'],

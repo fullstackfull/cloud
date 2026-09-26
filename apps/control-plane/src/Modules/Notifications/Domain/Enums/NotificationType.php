@@ -15,26 +15,56 @@ namespace Lynomia\Modules\Notifications\Domain\Enums;
  * may switch it off. Putting that here rather than at the call site means a
  * new type cannot accidentally become silenceable by being sent from the wrong
  * place.
+ *
+ * ---------------------------------------------------------------------------
+ * A case here is a promise, so every one of them is raised
+ * ---------------------------------------------------------------------------
+ *
+ * F-46 found thirteen cases declared, given an English and an Arabic sentence,
+ * and raised by nothing — a list of things the platform said it told customers
+ * and did not. Five were wired where their moment happens; eight were deleted
+ * with their copy, each for the reason written beside where it stood. A type
+ * with no producer now fails `EveryNotificationTypeHasAProducerTest`, so a
+ * new case arrives with the code that raises it or not at all.
  */
 enum NotificationType: string
 {
     // ---------------------------------------------------------------- security
+    /*
+     * Personal, not the account's: raised by NotifyAboutAccountSecurity for
+     * the person whose password, second factor or sign-in it was, emailed to
+     * them rather than to the billing address, and shown in the inbox to them
+     * alone.
+     */
     case PasswordChanged = 'security.password_changed';
     case TwoFactorEnabled = 'security.two_factor_enabled';
     case TwoFactorDisabled = 'security.two_factor_disabled';
     case NewSignIn = 'security.new_sign_in';
 
     // ----------------------------------------------------------------- billing
-    case OrderPlaced = 'billing.order_placed';
+    /*
+     * Four billing types were deleted rather than wired (F-46):
+     *
+     *  - "order placed" — every order that owes money is issued an invoice by
+     *    EvaluateOrderFinancialRequirement in the same moment, and InvoiceIssued
+     *    says so; one that owes nothing is never paid for, so "we will start
+     *    as soon as it is paid" would be false. Either way a second message.
+     *  - "renewal failed" — a failed renewal payment is already told twice:
+     *    PaymentFailed by NotifyOnBillingEvent, and GracePeriodStarted when
+     *    dunning moves the subscription to past_due. A third is noise on the
+     *    one channel a customer cannot switch off.
+     *  - "renewal upcoming" and "suspension warning" — reminders need a
+     *    schedule, and none exists: the renewal clock bills at the period end
+     *    and InvoiceIssued announces that bill, and dunning has one warning,
+     *    GracePeriodStarted, which already names the day service stops.
+     *    Building reminder schedules is a billing policy nobody has decided.
+     */
     case InvoiceIssued = 'billing.invoice_issued';
     case PaymentSucceeded = 'billing.payment_succeeded';
     case PaymentFailed = 'billing.payment_failed';
     case RefundIssued = 'billing.refund_issued';
-    case RenewalUpcoming = 'billing.renewal_upcoming';
     case RenewalSucceeded = 'billing.renewal_succeeded';
-    case RenewalFailed = 'billing.renewal_failed';
     case GracePeriodStarted = 'billing.grace_period_started';
-    case SuspensionWarning = 'billing.suspension_warning';
     case CancellationScheduled = 'billing.cancellation_scheduled';
 
     /*
@@ -49,7 +79,14 @@ enum NotificationType: string
     case CountryCurrencyChangeNeedsReview = 'billing.country_currency_change_needs_review';
 
     // ----------------------------------------------------------------- service
-    case ServiceProvisioning = 'service.provisioning';
+    /*
+     * There is no "setting up your service" and no "reinstall started" (F-46,
+     * deleted). NotifyOnProvisioningOutcome's rule is that a customer hears
+     * about the work they cannot watch, and the start of a build or a
+     * reinstall is the moment right after they paid or pressed the button.
+     * What they cannot watch is the outcome, and every outcome has its own
+     * message below.
+     */
     case ServiceReady = 'service.ready';
     case ServiceProvisioningFailed = 'service.provisioning_failed';
     case ServiceNeedsReview = 'service.needs_review';
@@ -79,7 +116,6 @@ enum NotificationType: string
     case DataRetentionEnding = 'service.data_retention_ending';
     case PlanChangeCompleted = 'service.plan_change_completed';
     case PlanChangeFailed = 'service.plan_change_failed';
-    case ReinstallStarted = 'service.reinstall_started';
     case ReinstallCompleted = 'service.reinstall_completed';
     case ReinstallFailed = 'service.reinstall_failed';
     case BackupCompleted = 'service.backup_completed';
@@ -126,7 +162,6 @@ enum NotificationType: string
     case FileRestoreFailed = 'service.file_restore_failed';
     case FileRestoreNeedsReview = 'service.file_restore_needs_review';
 
-    // ------------------------------------------------------------- operational
     /*
      * Domains.
      *
@@ -157,8 +192,16 @@ enum NotificationType: string
     case TicketReplied = 'service.ticket_replied';
     case TicketResolved = 'service.ticket_resolved';
     case TicketClosed = 'service.ticket_closed';
-    case IncidentAffectingService = 'operational.incident';
-    case MaintenanceScheduled = 'operational.maintenance_scheduled';
+
+    /*
+     * There is no "incident affecting your service" and no "maintenance
+     * scheduled" (F-46, deleted with the operational category they were the
+     * only members of). The platform records no incident and schedules no
+     * maintenance window — a node can be put into maintenance, which is now
+     * and not "planned for a date" — so nothing could honestly raise either.
+     * Announcing incidents to the customers they touch is a capability to
+     * build, with its own operator screen, and not a string to keep.
+     */
 
     public function category(): NotificationCategory
     {
@@ -168,23 +211,16 @@ enum NotificationType: string
             self::TwoFactorDisabled,
             self::NewSignIn => NotificationCategory::Security,
 
-            self::OrderPlaced,
             self::InvoiceIssued,
             self::PaymentSucceeded,
             self::PaymentFailed,
             self::RefundIssued,
-            self::RenewalUpcoming,
             self::RenewalSucceeded,
-            self::RenewalFailed,
             self::GracePeriodStarted,
-            self::SuspensionWarning,
             self::CancellationScheduled,
             self::CountryCurrencyChangeApplied,
             self::CountryCurrencyChangeRejected,
             self::CountryCurrencyChangeNeedsReview => NotificationCategory::Billing,
-
-            self::IncidentAffectingService,
-            self::MaintenanceScheduled => NotificationCategory::Operational,
 
             default => NotificationCategory::Service,
         };
@@ -206,8 +242,7 @@ enum NotificationType: string
         $emailed = [
             self::PasswordChanged, self::TwoFactorEnabled, self::TwoFactorDisabled, self::NewSignIn,
             self::InvoiceIssued, self::PaymentFailed, self::RefundIssued,
-            self::RenewalUpcoming, self::RenewalFailed,
-            self::GracePeriodStarted, self::SuspensionWarning, self::CancellationScheduled,
+            self::GracePeriodStarted, self::CancellationScheduled,
             self::CountryCurrencyChangeApplied, self::CountryCurrencyChangeRejected,
             self::ServiceReady, self::ServiceProvisioningFailed,
             self::ServiceSuspended, self::ServiceRestored, self::ServiceReactivationFailed,
@@ -222,7 +257,6 @@ enum NotificationType: string
              */
             self::RestoreCompleted, self::RestoreFailed, self::RestoreNeedsReview,
             self::PlanChangeCompleted, self::PlanChangeFailed,
-            self::IncidentAffectingService, self::MaintenanceScheduled,
         ];
 
         return in_array($this, $emailed, strict: true)
@@ -241,7 +275,6 @@ enum NotificationType: string
     {
         return match ($this) {
             self::PaymentFailed,
-            self::RenewalFailed,
             self::ServiceProvisioningFailed,
             self::ServiceNeedsReview,
             self::ServiceReactivationFailed,
@@ -256,8 +289,7 @@ enum NotificationType: string
             self::FileRestoreNeedsReview,
             self::WordPressPushFailed,
             self::WordPressPushNeedsReview,
-            self::DomainRedemptionFailed,
-            self::IncidentAffectingService => true,
+            self::DomainRedemptionFailed => true,
             default => false,
         };
     }

@@ -81,7 +81,8 @@ final class AnIssuedInvoiceIsAnnouncedTest extends TestCase
     #[Test]
     public function an_invoice_that_was_rolled_back_was_never_announced(): void
     {
-        $customer = Customer::factory()->create(['currency' => 'KWD']);
+        Mail::fake();
+        $customer = Customer::factory()->create(['billing_email' => 'finance@example.com', 'currency' => 'KWD']);
 
         try {
             DB::transaction(function () use ($customer): void {
@@ -101,6 +102,10 @@ final class AnIssuedInvoiceIsAnnouncedTest extends TestCase
          * they were given is one the sequence has burned.
          */
         $this->assertCount(0, $this->announcements($customer));
+
+        // And no mail left before the rollback: a row rolled back with the
+        // invoice would be invisible, and an email already sent is not.
+        Mail::assertNotSent(NotificationMail::class);
     }
 
     #[Test]

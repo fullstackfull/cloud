@@ -262,6 +262,10 @@ final class AnAccountHolderHearsAboutTheirOwnAccountTest extends TestCase
 
         $notification = $this->told($owner, NotificationType::PasswordChanged)->sole();
 
+        // The session now carries the new password's hash; an instance still
+        // holding the old one would be signed out by Sanctum, correctly.
+        $owner->refresh();
+
         // The owner sees it, in the list, in the count and on the dashboard.
         $this->actingAs($owner)->getJson('/api/v1/notifications')
             ->assertOk()
@@ -275,7 +279,9 @@ final class AnAccountHolderHearsAboutTheirOwnAccountTest extends TestCase
          * else's inbox is a false alarm about their own account, and a
          * sign-in notice there would hand them the owner's address.
          */
+        // A browser of their own: the session above belongs to the owner.
         Auth::forgetGuards();
+        $this->flushSession();
         $this->actingAs($colleague)->getJson('/api/v1/notifications')
             ->assertOk()
             ->assertJsonPath('meta.total', 0)

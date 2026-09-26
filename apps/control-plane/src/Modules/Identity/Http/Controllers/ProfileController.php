@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use Lynomia\Http\Concerns\ConfirmsCurrentPassword;
+use Lynomia\Modules\Identity\Application\Actions\NotifyAboutAccountSecurity;
 use Lynomia\Modules\Identity\Http\Resources\UserResource;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 
@@ -44,7 +45,7 @@ final class ProfileController
         return response()->json(['data' => new UserResource($user->fresh())]);
     }
 
-    public function updatePassword(Request $request): JsonResponse
+    public function updatePassword(Request $request, NotifyAboutAccountSecurity $security): JsonResponse
     {
         $user = $this->currentUser($request);
 
@@ -73,6 +74,10 @@ final class ProfileController
             ->delete();
 
         $user->tokens()->delete();
+
+        // And the person is told, by email to them: if this was not them,
+        // the session that did it has just been left as the only one running.
+        $security->passwordChanged($user);
 
         return response()->json(status: 204);
     }

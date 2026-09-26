@@ -16,9 +16,12 @@ use Lynomia\Modules\Billing\Domain\ValueObjects\PricingLine;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Services\InvoiceNumberAllocator;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
+use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
+use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Orders\Infrastructure\Models\Order;
 use Lynomia\Modules\Shared\Domain\Exceptions\CurrencyMismatchException;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Throwable;
 
 /**
  * Turns priced lines into an issued invoice.
@@ -40,12 +43,16 @@ use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
  *  3. **Its totals are the sum of its lines.** They are added up from the
  *     drafts here rather than taken from a separately rounded figure, so the
  *     invoice cannot show lines that do not add up to what is charged.
+ *
+ * And the account is told it exists, once, after it has committed — see
+ * announceOnceCommitted().
  */
 final readonly class IssueInvoice
 {
     public function __construct(
         private InvoiceNumberAllocator $numbers,
         private TransitionInvoice $transitionInvoice,
+        private NotifyCustomer $notify,
     ) {}
 
     /**
@@ -147,9 +154,61 @@ final readonly class IssueInvoice
             // ever sees an invoice that has a number but has not been issued.
             $issued = $this->transitionInvoice->execute($invoice, InvoiceStatus::Open);
 
+            $this->announceOnceCommitted($issued);
+
             // amount_due_minor is computed by PostgreSQL on write, so the
             // in-memory row does not know it yet.
             return $issued->refresh();
+        });
+    }
+
+    /**
+     * Tell the account the invoice exists, once the transaction holding it
+     * has committed (F-46).
+     *
+     * `InvoiceIssued` was declared, translated and emailed by default, and
+     * nothing raised it but the E2E seeder. The platform holds no card on
+     * file, so an invoice is money somebody has to come and pay — and the
+     * renewal sweep issues one at the end of every period with nobody
+     * watching. This is the one place every invoice is issued, so it is the
+     * one place that says so: checkout, renewal, plan change and domain alike.
+     * An order that owes nothing is issued no invoice and is told nothing
+     * here, which is right: there is nothing to pay.
+     *
+     * After commit, not inside the transaction. An issue the caller rolls
+     * back — a renewal whose period advance failed, a checkout that threw —
+     * leaves no invoice, and a customer told about a document that does not
+     * exist goes looking for a number the sequence has already burned. A
+     * repeat issue for the same order returns before reaching here, and the
+     * idempotency key is the invoice itself, so a document is announced once.
+     *
+     * To the account's billing address, not to a person: nobody's user id is
+     * named. And never at the expense of the invoice: it has committed by the
+     * time this runs, and a notification that could not be raised is reported
+     * rather than thrown into the checkout or the sweep that issued it.
+     */
+    private function announceOnceCommitted(Invoice $invoice): void
+    {
+        $customerId = (string) $invoice->customer_id;
+        $data = [
+            'number' => (string) $invoice->number,
+            'amount' => Money::ofMinor((int) $invoice->total_minor, (string) $invoice->currency)->format(),
+            'due_date' => $invoice->due_at?->toDateString() ?? '',
+        ];
+
+        DB::afterCommit(function () use ($invoice, $customerId, $data): void {
+            try {
+                $this->notify->execute(
+                    customerId: $customerId,
+                    type: NotificationType::InvoiceIssued,
+                    idempotencyKey: 'invoice-issued:'.$invoice->getKey(),
+                    subject: $invoice,
+                    data: $data,
+                    link: '/invoices',
+                );
+            } catch (Throwable $e) {
+                report($e);
+            }
         });
     }
 

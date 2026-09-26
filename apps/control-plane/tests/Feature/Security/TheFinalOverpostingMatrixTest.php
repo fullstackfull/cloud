@@ -542,13 +542,13 @@ final class TheFinalOverpostingMatrixTest extends TestCase
     {
         $response = $this->write('PUT', 'me/notification-preferences', [
             /*
-             * Operational on email, because that is a combination the product
+             * Service on email, because that is a combination the product
              * lets a customer turn off. Security and billing cannot be: those
              * messages carry obligations, and the endpoint refuses rather than
              * accepting a setting it will not honour. Correct, and not what
              * this case is asking about.
              */
-            'category' => 'operational',
+            'category' => 'service',
             'channel' => 'email',
             'enabled' => false,
             ...$this->poison(),

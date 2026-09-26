@@ -17,16 +17,26 @@ use Lynomia\Modules\Identity\Infrastructure\Models\User;
  * pattern of attempts against non-existent accounts is exactly what reveals
  * credential-stuffing. The attempted address is stored; the attempted password
  * never is.
+ *
+ * A success is also the one place every completed sign-in passes through —
+ * the password-only path and the second-factor path alike — so it is where a
+ * sign-in from somewhere new is announced to the person (F-46). Announced
+ * here, after the row exists, so the history the check reads is the history
+ * the person sees on their security page.
  */
 final readonly class RecordLoginActivity
 {
+    public function __construct(
+        private NotifyAboutAccountSecurity $security,
+    ) {}
+
     public function execute(
         LoginOutcome $outcome,
         Request $request,
         ?User $user = null,
         ?string $emailAttempted = null,
     ): LoginActivity {
-        return LoginActivity::create([
+        $activity = LoginActivity::create([
             'user_id' => $user?->id,
             'email_attempted' => $emailAttempted !== null ? strtolower(trim($emailAttempted)) : null,
             'outcome' => $outcome,
@@ -37,5 +47,11 @@ final readonly class RecordLoginActivity
             ],
             'created_at' => now(),
         ]);
+
+        if ($outcome === LoginOutcome::Success && $user !== null) {
+            $this->security->signedIn($user, $activity);
+        }
+
+        return $activity;
     }
 }
