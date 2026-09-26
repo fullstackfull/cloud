@@ -268,7 +268,7 @@ final readonly class VerifyStoredArchives
              */
             Log::info('A verification was started for an archive whose row moved meanwhile; the row was left alone.', [
                 'backup_id' => $backup->getKey(),
-                'verification_task_id' => $taskId,
+                'verification_task_id' => $operation->taskId,
             ]);
 
             return VerificationAttempt::Superseded;

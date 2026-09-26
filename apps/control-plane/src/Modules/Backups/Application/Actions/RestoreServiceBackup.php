@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
+use Lynomia\Modules\Backups\Domain\Exceptions\IllegalBackupTransitionException;
 use Lynomia\Modules\Backups\Domain\Exceptions\RestoreRefusedException;
 use Lynomia\Modules\Backups\Domain\ValueObjects\BackupNotificationKey;
 use Lynomia\Modules\Backups\Infrastructure\BackupProviderFactory;
@@ -175,14 +176,28 @@ final readonly class RestoreServiceBackup
                 archiveId: $archive,
             );
         } catch (BackupProviderException $e) {
-            $backup->transitionTo(
-                // Indeterminate stops rather than fails: a restore that may be
-                // running must never be retried automatically.
-                $e->isIndeterminate() ? BackupState::NeedsReview : BackupState::Succeeded,
-                [
-                    'failure_reason' => $this->redactor->redactString($e->getMessage()),
-                ],
-            );
+            try {
+                $backup->transitionTo(
+                    // Indeterminate stops rather than fails: a restore that may
+                    // be running must never be retried automatically.
+                    $e->isIndeterminate() ? BackupState::NeedsReview : BackupState::Succeeded,
+                    [
+                        'failure_reason' => $this->redactor->redactString($e->getMessage()),
+                    ],
+                );
+            } catch (IllegalBackupTransitionException $raced) {
+                /*
+                 * A compare-and-set refusal. Nothing in this module moves a
+                 * `restoring` row that has no restore task yet — the poller
+                 * leaves it for `max_poll_hours` — so this would be something
+                 * new; the row as it now stands is the answer.
+                 */
+                if (! $raced->wasRaced()) {
+                    throw $raced;
+                }
+
+                return $backup->refresh();
+            }
 
             return $this->announce($backup->refresh());
         }

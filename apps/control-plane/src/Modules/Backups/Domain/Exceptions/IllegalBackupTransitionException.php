@@ -26,9 +26,17 @@ final class IllegalBackupTransitionException extends DomainException
      *
      * Not a bug in the caller's reasoning but in its timing: somebody else —
      * a customer's restore, a deletion request, an operator's verdict — moved
-     * the row after it was read. Nothing was written. A sweep skips the row
-     * and meets it again next time; a request refuses. Writing anyway is how
+     * the row after it was read. Nothing was written. Writing anyway is how
      * the verification sweep used to put `verifying` over a running restore.
+     *
+     * What each caller in this module does with it, when this was written:
+     * the verification sweep counts the row as superseded; the poller
+     * (ReconcileBackup), the deleter (DeleteBackupAtProvider) and the
+     * inventory sweep read the row again and go on with the next one; the
+     * operator's verdict (SettleBackupReview) is refused with a 422 by its
+     * controller; a backup or restore request takes the row as it now stands.
+     * A restore's own move to `restoring` happens under the row lock it has
+     * just read the row with, so it does not meet this.
      */
     public static function movedUnderneath(string $backupId, BackupState $expected, ?string $actual, BackupState $to): self
     {
