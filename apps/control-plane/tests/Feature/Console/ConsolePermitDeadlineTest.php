@@ -170,9 +170,9 @@ final class ConsolePermitDeadlineTest extends TestCase
     {
         /*
          * issue() writes toIso8601String(), which is DATE_ATOM, and consume()
-         * reads exactly that. Every one of these is something a lenient
-         * parse() accepts, and reads as a moment in the future — "tomorrow"
-         * and "+30 seconds" are the future by construction, whenever they are
+         * reads exactly that. Every one of these is something a more lenient
+         * reader accepts and reads as a moment in the future — "tomorrow" and
+         * "+30 seconds" are the future by construction, whenever they are
          * read. A deadline read generously is a deadline nobody can state;
          * failing closed costs the customer one more request for a permit.
          */
@@ -185,21 +185,60 @@ final class ConsolePermitDeadlineTest extends TestCase
             'a fraction of a second issue() never writes' => $future->format('Y-m-d\TH:i:s.uP'),
             'trailing data' => $future->toIso8601String().'x',
         ] as $shape => $deadline) {
-            [$id, $token] = $this->issue();
+            $this->assertRefusedAndControlled($shape, $deadline);
+        }
 
-            $this->rewriteDeadline($id, $deadline);
+        /*
+         * And the zone. issue() writes it as `±HH:MM`; createFromFormat(
+         * DATE_ATOM) on its own accepts every one of these in that place — so
+         * a strict format is not, by itself, a strict reading. Each is checked
+         * to be one the parser alone reads as the future, so none of them can
+         * pass here for a reason that has nothing to do with the zone.
+         */
+        $clock = $future->format('Y-m-d\TH:i:s');
 
-            $this->assertNull(
-                $this->store()->consume($id, $token),
-                "A permit whose deadline is {$shape} was redeemed.",
-            );
+        foreach ([
+            'a Z suffix issue() never writes' => $clock.'Z',
+            'a lower-case z suffix issue() never writes' => $clock.'z',
+            'an offset without its colon' => $clock.'+0000',
+            'an offset without its minutes' => $clock.'+00',
+            'the negative zero offset issue() never writes' => $clock.'-00:00',
+            'an offset whose minutes do not exist' => $clock.'-00:99',
+            'a zone abbreviation' => $clock.'UTC',
+            'another zone abbreviation' => $clock.'GMT',
+            'a zone abbreviation that moves the instant' => $clock.'EST',
+        ] as $shape => $deadline) {
+            $this->assertTheParserAloneReadsTheFuture($shape, $deadline);
+            $this->assertRefusedAndControlled($shape, $deadline);
+        }
+    }
 
-            $this->rewriteDeadline($id, $this->now->addSecond());
+    #[Test]
+    public function a_deadline_that_names_no_real_instant_is_refused_rather_than_rolled_forward(): void
+    {
+        /*
+         * createFromFormat(DATE_ATOM) accepts clock and calendar values that
+         * do not exist and rolls them over into a LATER instant: minute 99 is
+         * read as the next hour and 39 minutes, hour 24 as the next midnight,
+         * 31 September as 1 October. A deadline nothing wrote, read as one
+         * further away than anything written — the generous reading the strict
+         * format was chosen to rule out. Built from the frozen clock so every
+         * one of them rolls forward into the future whenever the test runs,
+         * and checked to, so none is refused merely for being in the past.
+         */
+        $offset = $this->now->format('P');
+        $nextYear = $this->now->addYear()->format('Y');
 
-            $this->assertNotNull(
-                $this->store()->consume($id, $token),
-                "The control for {$shape} was refused, so its refusal proved nothing.",
-            );
+        foreach ([
+            'minute 99' => $this->now->format('Y-m-d\TH').':99:00'.$offset,
+            'hour 24' => $this->now->format('Y-m-d').'T24:00:00'.$offset,
+            'second 60' => $this->now->format('Y-m-d\TH:i').':60'.$offset,
+            'the 31st of September' => $nextYear.'-09-31T00:00:00'.$offset,
+            'the 30th of February' => $nextYear.'-02-30T00:00:00'.$offset,
+            'month 13' => $this->now->format('Y').'-13-01T00:00:00'.$offset,
+        ] as $shape => $deadline) {
+            $this->assertTheParserAloneReadsTheFuture($shape, $deadline);
+            $this->assertRefusedAndControlled($shape, $deadline);
         }
     }
 
@@ -431,5 +470,45 @@ final class ConsolePermitDeadlineTest extends TestCase
     private function rewriteDeadline(string $id, mixed $deadline): void
     {
         Cache::put(ConsoleSessionStore::PREFIX.$id, $this->recordWithDeadline($id, $deadline), self::AN_HOUR);
+    }
+
+    /**
+     * A deadline the store must refuse, followed by the control that proves
+     * the refusal was about the deadline: the same record, rewritten by the
+     * same statement with a live one, is redeemed.
+     */
+    private function assertRefusedAndControlled(string $shape, mixed $deadline): void
+    {
+        [$id, $token] = $this->issue();
+
+        $this->rewriteDeadline($id, $deadline);
+
+        $this->assertNull(
+            $this->store()->consume($id, $token),
+            "A permit whose deadline is {$shape} was redeemed.",
+        );
+
+        $this->rewriteDeadline($id, $this->now->addSecond());
+
+        $this->assertNotNull(
+            $this->store()->consume($id, $token),
+            "The control for {$shape} was refused, so its refusal proved nothing.",
+        );
+    }
+
+    /**
+     * The premise of a strictness case: createFromFormat(DATE_ATOM) on its
+     * own accepts the string and reads it as a moment after now. Without it,
+     * a refusal could be the parser's or the clock's rather than the
+     * strictness the test is about.
+     */
+    private function assertTheParserAloneReadsTheFuture(string $shape, string $deadline): void
+    {
+        $read = CarbonImmutable::createFromFormat(DATE_ATOM, $deadline);
+
+        $this->assertTrue(
+            $read instanceof CarbonImmutable && $read->greaterThan($this->now),
+            "createFromFormat(DATE_ATOM) alone does not read {$shape} as the future, so refusing it proves nothing about how strictly consume() reads.",
+        );
     }
 }
