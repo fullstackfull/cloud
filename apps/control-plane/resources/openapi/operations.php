@@ -1147,12 +1147,18 @@ return [
         'description' => 'The response is identical whether or not the address already has a Lynomia login: the difference is exactly what an attacker would be fishing for. The token goes only to the address, never into this response.',
         'body' => ['email', 'role'],
         'response' => $one('TeamInvitation', 201),
+        'errors' => [
+            409 => 'Not sent. `membership.already_a_member`, `membership.account_is_full`, `membership.invitation_already_open` while an offer to the address is still live, or `membership.invitation_sent_too_recently` when this account mailed the address inside `teams.invitation_cooldown_minutes` - withdrawing an offer does not reset that clock. The last carries `retry_at` in `error.details`.',
+        ],
     ],
     'api.v1.team.invitations.resend' => [
         'tag' => 'Team',
         'summary' => 'Send an invitation again',
         'description' => 'Mints a new token and pushes the expiry out; the previous link stops working. The platform stores a hash rather than the token, so it cannot repeat a link it never kept.',
         'response' => $one('TeamInvitation'),
+        'errors' => [
+            409 => 'Not sent, and nothing about the offer changed. `membership.invitation_not_open`, or `membership.invitation_sent_too_recently` inside `teams.invitation_cooldown_minutes` of the last mail to the address, with `retry_at` in `error.details`.',
+        ],
     ],
     'api.v1.team.invitations.revoke' => [
         'tag' => 'Team',

@@ -98,6 +98,7 @@ return [
         'invitation_already_open' => 'An invitation to that address is already open.',
         'invitation_not_open' => 'This invitation is no longer open.',
         'invitation_not_yours' => 'This invitation was sent to a different email address.',
+        'invitation_sent_too_recently' => 'An invitation was sent to that address too recently. Wait a while before sending another.',
         'not_a_member' => 'That person is not a member of this account.',
         'only_the_owner_may_transfer' => 'Only the account owner can transfer ownership.',
         'owner_cannot_be_removed' => 'The account owner cannot be removed. Transfer ownership first.',

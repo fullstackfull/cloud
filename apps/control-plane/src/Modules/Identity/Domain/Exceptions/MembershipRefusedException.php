@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Identity\Domain\Exceptions;
 
+use DateTimeInterface;
 use Lynomia\Modules\Shared\Domain\Exceptions\DomainException;
 
 /**
@@ -96,6 +97,18 @@ final class MembershipRefusedException extends DomainException
     {
         return (new self('This account has reached its limit of members and open invitations.'))
             ->as('membership.account_is_full')->withContext(['limit' => $ceiling]);
+    }
+
+    /**
+     * Refused before anything was written or sent: no new token, no new
+     * expiry, no count, no mail. `retry_at` is when the same request would
+     * be accepted.
+     */
+    public static function becauseTheAddressWasMailedTooRecently(DateTimeInterface $retryAt): self
+    {
+        return (new self('An invitation was sent to that address too recently. Wait before sending another.'))
+            ->as('membership.invitation_sent_too_recently')
+            ->withContext(['retry_at' => $retryAt->format(DateTimeInterface::ATOM)]);
     }
 
     public static function becauseTheAddressIsNotVerified(): self

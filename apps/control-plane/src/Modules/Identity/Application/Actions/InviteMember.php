@@ -52,6 +52,7 @@ final readonly class InviteMember
         return DB::transaction(function () use ($customer, $address, $role, $invitedBy, $token): IssuedInvitation {
             $this->assertNotAlreadyAMember($customer, $address);
             $this->assertThereIsRoomForOneMore($customer);
+            $this->assertTheAddressWasNotJustMailed($customer, $address);
 
             try {
                 /** @var CustomerInvitation $invitation */
@@ -107,6 +108,53 @@ final readonly class InviteMember
 
         if ($members + $offers >= $this->ceiling()) {
             throw MembershipRefusedException::becauseTheAccountIsFull($this->ceiling());
+        }
+    }
+
+    /**
+     * An address this account mailed an invitation to moments ago is not
+     * mailed again by withdrawing the offer and inviting it afresh.
+     *
+     * ResendInvitation holds an open offer to its cooldown. This is the other
+     * road to the same inbox, and without it the wait was worth nothing:
+     * withdraw, invite, withdraw, invite — a new row, a new clock and a new
+     * mail each time, until the hourly budget ran out. So the clock is
+     * the address's within this account, read from every earlier offer to it
+     * rather than from the one on screen.
+     *
+     * Per account, deliberately. A wait shared across accounts would answer
+     * one customer's invitation with a refusal that means "somebody else
+     * invited this address a moment ago" — exactly the fact about another
+     * account an invitation must never disclose. The price is that several
+     * accounts each have a wait of their own.
+     *
+     * Only offers that have given up the address's one live slot — accepted,
+     * declined or withdrawn — are compared. One that still holds it, open or
+     * expired without being closed, makes the insert below fail on the
+     * partial unique index with an answer of its own, and the wait is not
+     * what stands in the way.
+     *
+     * The earlier offers are locked, not just read. A resend of the open one
+     * commits a fresh `last_sent_at` under that row's lock; read without a
+     * lock, a withdraw-and-invite racing it could see the older time, and the
+     * address would get two mails inside one wait.
+     */
+    private function assertTheAddressWasNotJustMailed(Customer $customer, string $address): void
+    {
+        $again = CustomerInvitation::query()
+            ->where('customer_id', $customer->getKey())
+            ->whereRaw('lower(email) = ?', [$address])
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->reject(static fn (CustomerInvitation $offer): bool => $offer->accepted_at === null
+                && $offer->declined_at === null
+                && $offer->revoked_at === null)
+            ->map(static fn (CustomerInvitation $offer): CarbonImmutable => $offer->mailableAgainAt())
+            ->max();
+
+        if ($again instanceof CarbonImmutable && CarbonImmutable::now()->lt($again)) {
+            throw MembershipRefusedException::becauseTheAddressWasMailedTooRecently($again);
         }
     }
 

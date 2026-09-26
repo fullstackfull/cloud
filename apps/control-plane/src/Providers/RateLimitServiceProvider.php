@@ -154,8 +154,9 @@ final class RateLimitServiceProvider extends ServiceProvider
          * than one per account. TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
          * pins the attachment and the order;
          * TheInvitationLimiterCannotBeRotatedByAHeaderTest pins the key — one
-         * per account, shared by its administrators, moved by nothing in the
-         * header.
+         * per account, shared by its administrators, and the same whether the
+         * header carries nothing, junk, the account's own id in either case,
+         * or another account's id.
          *
          * The header used to be consulted first, with a fallback that fired
          * only when it was ABSENT. A caller who sent junk therefore still
@@ -165,9 +166,17 @@ final class RateLimitServiceProvider extends ServiceProvider
          * distinct value is a fresh budget, and the same held for merely
          * case-folding the caller's own id, since Crockford base32 is
          * case-insensitive and the resolver lower-cases it while the limiter
-         * did not. This bucket is the whole control — `ResendInvitation`
-         * writes `sent_count` and `last_sent_at` and compares neither, so it
-         * has no cooldown of its own.
+         * did not.
+         *
+         * This bucket bounds how much an account sends, not where it goes: on
+         * its own it let one account spend the whole hour on one inbox. The
+         * where is `teams.invitation_cooldown_minutes`, a wait per address
+         * within an account that `ResendInvitation` and `InviteMember` hold
+         * against the address's last mail, so neither pressing Resend nor
+         * withdrawing and inviting again gets past it. It is theirs rather than
+         * this closure's because a refusal belongs with the write it refuses:
+         * it is compared inside the transaction that would write, under row
+         * locks, and a limiter holds none.
          *
          * Falling back to the user, and then to the address, keeps the limiter
          * defined for a request that somehow arrives without an account

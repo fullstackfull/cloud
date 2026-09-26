@@ -16,10 +16,11 @@ use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
- * The invitation limiter is the only thing bounding outbound mail to
- * addresses a customer chooses, and `ResendInvitation` has no cooldown of its
- * own — it writes `sent_count` and `last_sent_at` and compares neither — so
- * this bucket is the whole control.
+ * The invitation limiter bounds how much mail an account sends to addresses
+ * it chooses: one budget an hour, per account. Where that mail goes is a
+ * separate control — the per-address cooldown ResendInvitation and
+ * InviteMember hold, pinned by OneInboxWaitsOutTheInvitationCooldownTest — and
+ * nothing here tests it.
  *
  * It used to be keyed on the raw `X-Lynomia-Customer` request header. The
  * fallback to the user fired only when the header was ABSENT, never when it
@@ -34,8 +35,9 @@ use Tests\TestCase;
  * available to the limiter and there is no reason to consult the header at
  * all. This class sets the account itself and calls the closure directly, so
  * it pins the key — the account, shared by everyone acting for it, separate
- * from every other account, and moved by nothing in the header — and cannot
- * see attachment or order; TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
+ * from every other account, and the same whatever the header carries: nothing,
+ * junk, the account's own id in either case, or another account's id — and
+ * cannot see attachment or order; TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest
  * does.
  */
 final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
@@ -64,6 +66,41 @@ final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
         }
     }
 
+    /**
+     * A well-formed header, which is what the portal sends on every request.
+     *
+     * The junk case above holds only values the resolver cannot parse, and the
+     * case-folding one compares two spellings of the same id with each other.
+     * Neither compares "no header" with a valid one, so a limiter that keyed
+     * a parseable header under its own name passed both — and over HTTP an
+     * account that had spent its budget without the header bought a second
+     * one by sending its own id. The second assertion is the closure-level
+     * half: the resolver refuses an id the caller is not a member of before
+     * the limiter runs, but the closure must not need it to.
+     */
+    #[Test]
+    public function naming_an_account_in_the_header_does_not_move_the_bucket(): void
+    {
+        [$user, $customer] = $this->member();
+        [, $another] = $this->member();
+
+        $baseline = $this->bucketFor($user, $customer, null);
+
+        $this->assertSame(
+            $baseline,
+            $this->bucketFor($user, $customer, (string) $customer->getKey()),
+            'Naming the acting account in the header moved the bucket, so the same account has one budget with '
+            .'the header and another without it.'
+        );
+
+        $this->assertSame(
+            $baseline,
+            $this->bucketFor($user, $customer, (string) $another->getKey()),
+            'Naming another account in the header moved the bucket. The key is the account the request acts for, '
+            .'which the resolver settled; the header is only what the caller asked for.'
+        );
+    }
+
     #[Test]
     public function case_folding_the_callers_own_identifier_does_not_buy_a_fresh_bucket(): void
     {
@@ -81,10 +118,10 @@ final class TheInvitationLimiterCannotBeRotatedByAHeaderTest extends TestCase
     /**
      * The key is the account, not the person acting for it.
      *
-     * The other three cases hold the header out of the key and keep two
+     * The other four cases hold the header out of the key and keep two
      * accounts apart. None of them tells an account key from a user key: each
      * has one user per account, so a limiter keyed on the user passes all
-     * three. This case does tell them apart, and it is the failure the
+     * four. This case does tell them apart, and it is the failure the
      * ordering defect produced — the closure fell back to the user, and every
      * administrator of an account brought a budget of their own.
      */

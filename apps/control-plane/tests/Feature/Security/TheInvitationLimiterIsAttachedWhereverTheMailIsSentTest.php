@@ -34,8 +34,9 @@ use Tests\Feature\Team\TeamApiTestCase;
  * which were open:
  *
  * - **Attachment.** Deleting `throttle:team-invitations` from both routes left
- *   the whole suite green: the business group applies `throttle:api`, so a
- *   route that lost its own limiter was still "throttled" and still passed
+ *   Security, Team and Identity green, and those hold every test that names
+ *   these routes. The business group applies `throttle:api`, so a route that
+ *   lost its own limiter was still "throttled" and still passed
  *   EveryAuthenticatedRouteIsThrottledTest. The gap is between throttled and
  *   throttled by THIS limiter, and the outcome behind it is the one F-17 was
  *   filed for — an ordinary customer mailing any address at the rate they can
@@ -101,8 +102,13 @@ final class TheInvitationLimiterIsAttachedWhereverTheMailIsSentTest extends Team
         ThrottleRequests::class,
     ];
 
+    /**
+     * Presence in the stack, not execution: a runner that handed the request
+     * on without throttling would pass this. The HTTP case below is what
+     * proves the limiter runs.
+     */
     #[Test]
-    public function every_route_that_posts_an_invitation_runs_the_invitation_limiter(): void
+    public function every_route_that_posts_an_invitation_carries_the_invitation_limiter(): void
     {
         $roads = $this->roadsThatPostAnInvitation();
 
