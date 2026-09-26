@@ -33,6 +33,7 @@ use Lynomia\Modules\Payments\Domain\DTOs\PaymentIntentRequest;
 use Lynomia\Modules\Payments\Domain\Enums\RemotePaymentStatus;
 use Lynomia\Modules\Payments\Infrastructure\Providers\FakePaymentProvider;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\CreateAccountRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\WordPressInstallRequest;
 use Lynomia\Modules\SharedHosting\Domain\Enums\HostingPanel;
@@ -70,6 +71,18 @@ use Tests\TestCase;
  * finished. Those two cases are asserted as what they are rather than
  * flattened into "nothing happened", because a platform that retried them
  * would install over a customer's site and buy a second year of a domain.
+ *
+ * The hypervisor joined them late (F-24). Its only unanswered create used to
+ * throw before the machine existed and its only unanswered destroy before the
+ * machine was gone, so its own state settled every unknown outcome in the
+ * direction that cost nothing — and a platform that retried an unanswered
+ * create into a second machine passed every test here. Both shapes are now
+ * reachable, and asserted below as what they are.
+ *
+ * A refusal is also where a simulator can be too agreeable. The panel used to
+ * report an account opened, and a site installed, with a credential nobody
+ * could log in with — the empty string, or the redactor's placeholder — and
+ * the platform had sent both. It refuses them now, and records nothing.
  */
 final class AControlledDriverThatSaysItDidSomethingDidItTest extends TestCase
 {
@@ -133,6 +146,41 @@ final class AControlledDriverThatSaysItDidSomethingDidItTest extends TestCase
 
         $this->assertNull($provider->getVm('pve-01', '9002'));
         $this->assertSame([], $provider->listVms('pve-01'));
+    }
+
+    #[Test]
+    public function an_unanswered_build_may_have_built_and_an_unanswered_destroy_may_have_destroyed(): void
+    {
+        $provider = new FakeComputeProvider;
+
+        $built = $this->vmRequest(9003, FakeComputeProvider::failingHostname('rehearsal-three', FakeComputeProvider::BUILT_UNANSWERED_MARKER));
+
+        try {
+            $provider->createVirtualMachine($built);
+            $this->fail('The simulator answered a create it is supposed to go quiet on after building.');
+        } catch (ComputeProviderException $e) {
+            $this->assertTrue($e->isIndeterminate(), 'An unanswered create was reported as a refusal.');
+        }
+
+        $this->assertNotNull(
+            $provider->getVm('pve-01', '9003'),
+            'A hypervisor that went quiet built nothing, so a retry into a second machine is still unrepresentable.',
+        );
+
+        $removed = $this->vmRequest(9004, FakeComputeProvider::failingHostname('rehearsal-four', FakeComputeProvider::DESTROYED_UNANSWERED_MARKER));
+        $provider->createVirtualMachine($removed);
+
+        try {
+            $provider->destroyVm('pve-01', '9004');
+            $this->fail('The simulator answered a destroy it is supposed to go quiet on after destroying.');
+        } catch (ComputeProviderException $e) {
+            $this->assertTrue($e->isIndeterminate(), 'An unanswered destroy was reported as a refusal.');
+        }
+
+        $this->assertNull(
+            $provider->getVm('pve-01', '9004'),
+            'A hypervisor that went quiet on a destroy kept the machine, which is the only answer it used to give.',
+        );
     }
 
     #[Test]
@@ -237,6 +285,33 @@ final class AControlledDriverThatSaysItDidSomethingDidItTest extends TestCase
         $this->expectException(HostingProviderException::class);
 
         $provider->createAccount($node, $this->accountRequest('rehearse2'));
+    }
+
+    #[Test]
+    public function a_credential_nobody_can_log_in_with_opens_no_account_and_installs_no_site(): void
+    {
+        $provider = new FakeHostingProvider;
+        $node = HostingNode::factory()->create(['panel' => HostingPanel::Fake]);
+
+        try {
+            $provider->createAccount($node, $this->accountRequest('rehearse5', password: SecretRedactor::PLACEHOLDER));
+            $this->fail("The simulator opened an account with the redactor's placeholder as its password.");
+        } catch (HostingProviderException $e) {
+            $this->assertFalse($e->isIndeterminate());
+        }
+
+        $this->assertSame([], $provider->listAccounts($node));
+
+        $provider->createAccount($node, $this->accountRequest('rehearse5'));
+
+        try {
+            $provider->installWordPress($node, $this->installRequest('rehearse5', 'site.example', adminPassword: ''));
+            $this->fail('The simulator installed a site whose administrator password is empty.');
+        } catch (HostingProviderException $e) {
+            $this->assertFalse($e->isIndeterminate());
+        }
+
+        $this->assertFalse($provider->wordPressInstallation($node, 'rehearse5', 'site.example')->exists);
     }
 
     #[Test]
@@ -575,24 +650,40 @@ final class AControlledDriverThatSaysItDidSomethingDidItTest extends TestCase
         ]);
     }
 
-    private function accountRequest(string $username): CreateAccountRequest
+    private function vmRequest(int $vmId, string $hostname): CreateVmRequest
+    {
+        return new CreateVmRequest(
+            nodeName: 'pve-01',
+            vmId: $vmId,
+            hostname: $hostname,
+            vcpu: 2,
+            memoryMib: 2048,
+            diskGib: 20,
+            storageName: 'local-nvme',
+        );
+    }
+
+    private function accountRequest(string $username, string $password = 'a-rehearsal-password'): CreateAccountRequest
     {
         return new CreateAccountRequest(
             username: $username,
             primaryDomain: $username.'.example',
-            password: 'a-rehearsal-password',
+            password: $password,
             packageName: 'ref_starter',
             contactEmail: 'rehearsal@rehearsal.example',
         );
     }
 
-    private function installRequest(string $username, string $domain): WordPressInstallRequest
-    {
+    private function installRequest(
+        string $username,
+        string $domain,
+        string $adminPassword = 'a-rehearsal-password',
+    ): WordPressInstallRequest {
         return new WordPressInstallRequest(
             username: $username,
             domain: $domain,
             adminUsername: 'rehearsal',
-            adminPassword: 'a-rehearsal-password',
+            adminPassword: $adminPassword,
             adminEmail: 'rehearsal@rehearsal.example',
             siteTitle: 'A rehearsal',
         );
