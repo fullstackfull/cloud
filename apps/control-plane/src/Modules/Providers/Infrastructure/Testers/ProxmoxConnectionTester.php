@@ -91,11 +91,14 @@ class ProxmoxConnectionTester extends HttpIdentityTester
      *    `Sys.Audit`, and a node's storage list shows only the pools the token
      *    may audit, so without `Datastore.Audit` the sync records no pool and
      *    the scheduler — which places only on recorded pools — places nothing.
-     *    Such a token used to be declared ready.
+     *    `templates` needs the same privilege, so such a token is refused
+     *    either way; this entry is the one that names why placement fails.
      *
      * `create` and `reinstall` ask for `VM.Config.Cloudinit` because every call
      * that builds or rebuilds a machine hands the adapter a cloud-init config;
-     * the F-13 test reads both handlers' argument lists to hold that premise.
+     * the F-13 test reads every build call in both handlers' argument lists,
+     * and every other file for a build method named whole, to hold that
+     * premise.
      *
      * Known to be short: `suspend` and `unsuspend` write `onboot` and `lock`,
      * which is `VM.Config.Options`, and ask here only for `VM.PowerMgmt`. No
