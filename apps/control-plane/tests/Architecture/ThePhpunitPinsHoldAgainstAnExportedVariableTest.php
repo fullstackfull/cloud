@@ -193,14 +193,23 @@ final class ThePhpunitPinsHoldAgainstAnExportedVariableTest extends TestCase
         }
 
         $seen = self::throughPhpunit($decoys, $decoys);
+        $untouched = self::throughPhpunit([], []);
 
         foreach (self::MUST_NOT_YIELD as $name) {
             $pinned = $env[$name]['value'];
 
+            // env() turns some literals into PHP values ("null" is null), so
+            // it is compared with a run that exported nothing, not with the
+            // text of the pin.
             $this->assertSame(
-                ['server' => $pinned, 'env' => $pinned, 'getenv' => $pinned, 'laravel' => $pinned],
-                $seen[$name],
+                ['server' => $pinned, 'env' => $pinned, 'getenv' => $pinned],
+                array_diff_key($seen[$name], ['laravel' => true]),
                 "An exported {$name}, and one in .env.testing, must lose to phpunit.xml in every reader a test or its subprocesses use.",
+            );
+            $this->assertSame(
+                $untouched[$name]['laravel'],
+                $seen[$name]['laravel'],
+                "An exported {$name}, and one in .env.testing, must not change what env() returns.",
             );
         }
     }

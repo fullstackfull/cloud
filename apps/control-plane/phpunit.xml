@@ -28,11 +28,63 @@
         </include>
     </source>
     <php>
-        <env name="APP_ENV" value="testing"/>
-        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
-        <env name="BCRYPT_ROUNDS" value="4"/>
-        <env name="BROADCAST_CONNECTION" value="null"/>
-        <env name="CACHE_STORE" value="array"/>
+        <!--
+            READ THIS BEFORE MEASURING ANYTHING WITH AN EXPORTED VARIABLE.
+
+            Most of these entries are pins, not defaults: an exported
+            CACHE_STORE, QUEUE_CONNECTION, DB_CONNECTION or provider cannot
+            replace them. So "CACHE_STORE=redis php artisan test <path>" does
+            NOT run the suite on Redis. It runs it on the array store exactly
+            as before and reports green, which looks exactly like a
+            measurement and is not one.
+
+            It takes two attributes to make a pin, because PHPUnit and Laravel
+            read different places. An env entry writes putenv() and $_ENV, and
+            force="true" only decides whether it overwrites what is already
+            there; it never touches $_SERVER. A server entry writes $_SERVER
+            and nothing else, unconditionally. Laravel's env() reads $_SERVER
+            first, and an exported variable is in $_SERVER here. So force alone
+            still lets an exported value reach env(); server alone pins env()
+            but leaves getenv(), and so every worker subprocess, on the
+            exported value. Every pin below therefore has both: a forced env
+            entry and a server entry with the same value at the end of this
+            block. tests/Architecture/ThePhpunitPinsHoldAgainstAnExportedVariableTest
+            holds that, and measures it through PHPUnit's own handler.
+
+            Six entries are deliberately NOT pinned and carry neither
+            attribute: DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_URL and
+            REDIS_DB. They say only where the suite's disposable state lives,
+            and choosing that per run is how concurrent runs on one machine
+            stay apart. What arrives is checked rather than trusted:
+            Tests\Support\TestDatabaseGuard refuses a database not named as a
+            test database before RefreshDatabase drops anything, and
+            Tests\Support\RedisIndexForThisRun refuses a Redis index it cannot
+            read. Never give one of the six a server entry: server overrides
+            an export unconditionally and would put every concurrent run on
+            one database and one Redis index.
+
+            To measure the suite under a different value of a pinned variable:
+
+             1. vendor/bin/phpunit -c <copy>.xml, with the copy edited and
+                placed in this directory (bootstrap resolves against the
+                configuration file's own directory, so a copy elsewhere dies
+                before any test runs). A real measurement and a real exit code.
+             2. Edit this file. A real measurement; it leaves a tracked diff,
+                which is the right price.
+             3. config()->set() inside the test that is about the difference.
+             4. php artisan test <path> with a configuration option naming a
+                copy. The copy is read, so the results are real, but the exit
+                code is not: the command already passes its own configuration
+                option, PHPUnit warns that the option was given twice, and its
+                default failOnPhpunitWarning turns that into exit 1 on a run
+                whose summary says passed. The warning itself may never be
+                printed. Do not use this one for anything the exit code decides.
+        -->
+        <env name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
+        <env name="BCRYPT_ROUNDS" value="4" force="true"/>
+        <env name="BROADCAST_CONNECTION" value="null" force="true"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
 
         <!--
             Tests run against PostgreSQL, not SQLite.
@@ -42,13 +94,40 @@
             IP and capacity allocation. None of that behaves identically on
             SQLite, and a green suite on an engine the platform never deploys
             to would be worse than no suite at all.
+
+            The connection is pinned; the address of the database it opens is
+            not (see the note at the top of this block).
         -->
-        <env name="DB_CONNECTION" value="pgsql"/>
+        <env name="DB_CONNECTION" value="pgsql" force="true"/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_PORT" value="5432"/>
         <env name="DB_DATABASE" value="lynomia_test"/>
         <env name="DB_USERNAME" value="lynomia"/>
         <env name="DB_URL" value=""/>
+
+        <!--
+            The Redis index a run uses when it exports none. A default, not a
+            pin, for the same reason as the database: an exported REDIS_DB is
+            how a run chooses its own index.
+
+            Its value is 0, the default config/database.php already falls back
+            to, so the general Redis connection (cache, queue and locks outside
+            the queue harness) is where it would be without this entry. It is
+            not what WorkerHarness and ConsolePermitConcurrencyTest fell back to
+            without it, which was 15: with this entry they use 0 too. No single
+            value could preserve both, since both read the same variable, and 0
+            is the better of the two: 15 is the index every run that forgot the
+            variable used to land on, and these suites flush the whole index.
+            The entry is here at all so that the rule in
+            ThePhpunitPinsHoldAgainstAnExportedVariableTest covers REDIS_DB:
+            without it, a server entry for REDIS_DB would be a name in neither
+            list, checked by nothing.
+
+            A value in .env.testing does not reach a phpunit run for any name
+            in this block, pinned or not: this entry is applied first and
+            dotenv never overwrites. REDIS_DB is chosen by exporting it.
+        -->
+        <env name="REDIS_DB" value="0"/>
 
         <!--
             Pinned here rather than left to a dotenv file.
@@ -64,24 +143,24 @@
             client looks like the SPA rather than a third-party site; that only
             works if the host it names is one Sanctum considers stateful.
         -->
-        <env name="APP_URL" value="http://localhost"/>
-        <env name="FRONTEND_URL" value="http://localhost:5173"/>
-        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1"/>
-        <env name="SESSION_DOMAIN" value="localhost"/>
+        <env name="APP_URL" value="http://localhost" force="true"/>
+        <env name="FRONTEND_URL" value="http://localhost:5173" force="true"/>
+        <env name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1" force="true"/>
+        <env name="SESSION_DOMAIN" value="localhost" force="true"/>
 
-        <env name="MAIL_MAILER" value="array"/>
-        <env name="QUEUE_CONNECTION" value="sync"/>
-        <env name="SESSION_DRIVER" value="array"/>
+        <env name="MAIL_MAILER" value="array" force="true"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
 
         <!-- Fake providers are the only providers permitted in the test suite. -->
-        <env name="COMPUTE_PROVIDER" value="fake"/>
-        <env name="DEDICATED_PROVIDER" value="fake"/>
-        <env name="HOSTING_PROVIDER" value="fake"/>
-        <env name="DNS_PROVIDER" value="fake"/>
-        <env name="PAYMENT_PROVIDER" value="fake"/>
-        <env name="BACKUP_PROVIDER" value="fake"/>
+        <env name="COMPUTE_PROVIDER" value="fake" force="true"/>
+        <env name="DEDICATED_PROVIDER" value="fake" force="true"/>
+        <env name="HOSTING_PROVIDER" value="fake" force="true"/>
+        <env name="DNS_PROVIDER" value="fake" force="true"/>
+        <env name="PAYMENT_PROVIDER" value="fake" force="true"/>
+        <env name="BACKUP_PROVIDER" value="fake" force="true"/>
 
-        <env name="BILLING_DEFAULT_CURRENCY" value="KWD"/>
+        <env name="BILLING_DEFAULT_CURRENCY" value="KWD" force="true"/>
 
         <!--
             Registration fails closed when the legal documents are not
@@ -89,11 +168,42 @@
             reserved .test TLD and the versions are obviously synthetic: these
             stand in for documents that do not exist, and nothing here should
             ever be mistaken for a real published policy. The tests that prove
-            the fail-closed behaviour unset these for themselves.
+            the fail-closed behaviour unset these for themselves, at run time,
+            which a pin does not prevent: it acts once, before the first test.
         -->
-        <env name="LEGAL_TERMS_URL" value="https://legal.lynomia.test/terms"/>
-        <env name="LEGAL_TERMS_VERSION" value="test-terms-1"/>
-        <env name="LEGAL_AUP_URL" value="https://legal.lynomia.test/acceptable-use"/>
-        <env name="LEGAL_AUP_VERSION" value="test-aup-1"/>
+        <env name="LEGAL_TERMS_URL" value="https://legal.lynomia.test/terms" force="true"/>
+        <env name="LEGAL_TERMS_VERSION" value="test-terms-1" force="true"/>
+        <env name="LEGAL_AUP_URL" value="https://legal.lynomia.test/acceptable-use" force="true"/>
+        <env name="LEGAL_AUP_VERSION" value="test-aup-1" force="true"/>
+
+        <!--
+            The other half of every pin above: the same names and values, in
+            $_SERVER, which is where Laravel's env() looks first. Exactly the
+            forced names, no more and no fewer.
+        -->
+        <server name="APP_ENV" value="testing"/>
+        <server name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <server name="BCRYPT_ROUNDS" value="4"/>
+        <server name="BROADCAST_CONNECTION" value="null"/>
+        <server name="CACHE_STORE" value="array"/>
+        <server name="DB_CONNECTION" value="pgsql"/>
+        <server name="APP_URL" value="http://localhost"/>
+        <server name="FRONTEND_URL" value="http://localhost:5173"/>
+        <server name="SANCTUM_STATEFUL_DOMAINS" value="localhost,localhost:5173,127.0.0.1"/>
+        <server name="SESSION_DOMAIN" value="localhost"/>
+        <server name="MAIL_MAILER" value="array"/>
+        <server name="QUEUE_CONNECTION" value="sync"/>
+        <server name="SESSION_DRIVER" value="array"/>
+        <server name="COMPUTE_PROVIDER" value="fake"/>
+        <server name="DEDICATED_PROVIDER" value="fake"/>
+        <server name="HOSTING_PROVIDER" value="fake"/>
+        <server name="DNS_PROVIDER" value="fake"/>
+        <server name="PAYMENT_PROVIDER" value="fake"/>
+        <server name="BACKUP_PROVIDER" value="fake"/>
+        <server name="BILLING_DEFAULT_CURRENCY" value="KWD"/>
+        <server name="LEGAL_TERMS_URL" value="https://legal.lynomia.test/terms"/>
+        <server name="LEGAL_TERMS_VERSION" value="test-terms-1"/>
+        <server name="LEGAL_AUP_URL" value="https://legal.lynomia.test/acceptable-use"/>
+        <server name="LEGAL_AUP_VERSION" value="test-aup-1"/>
     </php>
 </phpunit>

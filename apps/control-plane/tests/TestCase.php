@@ -7,6 +7,7 @@ namespace Tests;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Lynomia\Modules\Shared\Domain\Contracts\HostResolver;
 use Tests\Support\StaticHostResolver;
+use Tests\Support\TestDatabaseGuard;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -34,5 +35,28 @@ abstract class TestCase extends BaseTestCase
          * CSRF and cookie behaviour would go untested.
          */
         $this->withHeader('Origin', (string) config('app.url'));
+    }
+
+    /**
+     * Refuses a database that is not a test database before any trait runs.
+     *
+     * This is where Laravel runs `RefreshDatabase`, `DatabaseMigrations` and
+     * `DatabaseTruncation`, so a refusal here comes before their first
+     * statement: `migrate:fresh` drops every table in whatever the default
+     * connection names, and `DB_DATABASE` is deliberately left overridable by
+     * an exported variable. {@see TestDatabaseGuard} holds the four
+     * conditions and why each is needed; a class that redeclares this method
+     * below here would run the traits without it, which
+     * `TheTestSuiteRefusesToDropAnythingButATestDatabaseTest` refuses.
+     *
+     * @return array<class-string, class-string>
+     */
+    protected function setUpTraits()
+    {
+        if (TestDatabaseGuard::destroys($this->traitsUsedByTest ?? class_uses_recursive(static::class))) {
+            TestDatabaseGuard::refuseAnythingButATestDatabase($this->app);
+        }
+
+        return parent::setUpTraits();
     }
 }
