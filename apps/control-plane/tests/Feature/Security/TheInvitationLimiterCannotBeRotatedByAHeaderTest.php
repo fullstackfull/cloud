@@ -17,10 +17,10 @@ use Tests\TestCase;
 
 /**
  * The invitation limiter bounds how much mail an account sends to addresses
- * it chooses: one budget an hour, per account. Where that mail goes is a
- * separate control — the per-address cooldown ResendInvitation and
- * InviteMember hold, pinned by OneInboxWaitsOutTheInvitationCooldownTest — and
- * nothing here tests it.
+ * it chooses: one budget an hour, per account. How often it may go to one
+ * address is a separate control — the per-address cooldown ResendInvitation
+ * and InviteMember hold, pinned by OneAddressWaitsOutTheInvitationCooldownTest
+ * — and nothing here tests it.
  *
  * It used to be keyed on the raw `X-Lynomia-Customer` request header. The
  * fallback to the user fired only when the header was ABSENT, never when it

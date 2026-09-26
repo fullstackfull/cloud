@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Testing\TestResponse;
+use Lynomia\Modules\Identity\Application\Actions\ResendInvitation;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
+use Lynomia\Modules\Identity\Domain\Exceptions\MembershipRefusedException;
 use Lynomia\Modules\Identity\Infrastructure\Mail\InvitationMail;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerInvitation;
@@ -19,7 +21,8 @@ use PHPUnit\Framework\Attributes\Test;
 use Tests\Feature\Team\TeamApiTestCase;
 
 /**
- * One account cannot put its whole invitation budget into one inbox.
+ * One account mails one address at most once per cooldown, whichever road the
+ * mail takes.
  *
  * The `team-invitations` limiter bounds how much an account sends in an hour
  * and nothing about where. Before the cooldown, an owner who invited one
@@ -31,15 +34,23 @@ use Tests\Feature\Team\TeamApiTestCase;
  *
  * Each road is driven over HTTP, inside the wait and after it, and the refusal
  * is checked for what it must NOT do as well as for its code: no mail, and on
- * a resend no new token, no new expiry and no count.
+ * a resend no new token, no new expiry and no count. The clock is the
+ * address's last mail from this account: a resend restarts it, the invite
+ * road reads it from every earlier offer to the address — the latest of them,
+ * not the first — and an offer that was accepted or declined counts as much
+ * as one that was withdrawn.
  *
- * **What this does not cover:** two requests racing each other. Both actions
- * compare under a row lock and say why. The withdraw-and-invite case pins
- * that InviteMember takes its lock; nothing here pins that ResendInvitation
- * compares the row it locked rather than the one it was handed, and nothing
- * can make two requests race, because PHPUnit runs one at a time.
+ * **What this does not cover:** an inbox reached through several addresses.
+ * `victim+1@` and `victim+2@` are two addresses to this code, each with a wait
+ * of its own, and which addresses deliver to one mailbox is not something it
+ * can know; the hourly budget is all that bounds those. Nor two requests
+ * racing each other. Both actions compare under a row lock and say why. The
+ * withdraw-and-invite case pins that InviteMember takes its lock, and
+ * `a_resend_compares_the_row_it_locked_not_the_one_it_was_handed` pins that
+ * ResendInvitation reads the time from the row it locked; nothing can make two
+ * requests race, because PHPUnit runs one at a time.
  */
-final class OneInboxWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
+final class OneAddressWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
 {
     private const string VICTIM = 'victim@example.test';
 
@@ -153,6 +164,165 @@ final class OneInboxWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
     }
 
     /**
+     * The second withdraw-and-invite waits for the second mail.
+     *
+     * After one cycle the address has two earlier offers: one whose wait is
+     * over and one whose wait has only just begun. Reading the earliest of
+     * them would reopen the loop after the first wait — every cycle from then
+     * on compared against a mail long past — so the refusal names the later
+     * one's time, and the address is mailed a third time only once it passes.
+     */
+    #[Test]
+    public function a_repeated_withdraw_and_invite_waits_for_the_latest_mail_not_the_first(): void
+    {
+        [$customer, $owner] = $this->accountWithOwner();
+        $firstMailedAt = CarbonImmutable::now();
+
+        $this->invite($owner, $customer)->assertCreated();
+        $this->withdraw($owner, $customer);
+
+        $secondMailedAt = $firstMailedAt->addMinutes(10);
+        $this->travelTo($secondMailedAt);
+
+        $this->invite($owner, $customer)->assertCreated();
+        $this->withdraw($owner, $customer);
+
+        $this->invite($owner, $customer)
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'membership.invitation_sent_too_recently')
+            ->assertJsonPath('error.details.retry_at', $secondMailedAt->addMinutes(10)->toAtomString());
+
+        Mail::assertQueuedCount(2);
+        $this->assertSame(2, CustomerInvitation::query()->where('customer_id', $customer->getKey())->count());
+
+        $this->travelTo($secondMailedAt->addMinutes(10)->subSecond());
+        $this->invite($owner, $customer)->assertStatus(409);
+        Mail::assertQueuedCount(2);
+
+        $this->travelTo($secondMailedAt->addMinutes(10));
+        $this->invite($owner, $customer)->assertCreated();
+        Mail::assertQueuedCount(3);
+    }
+
+    /**
+     * A resend restarts the clock the invite road reads, not only its own.
+     *
+     * The offer is resent the moment its first wait is over and then withdrawn
+     * straight away. The address was mailed just now, by the resend; inviting
+     * it again is compared with that, not with when the offer was made.
+     */
+    #[Test]
+    public function withdrawing_right_after_a_resend_waits_for_the_resend(): void
+    {
+        [$customer, $owner] = $this->accountWithOwner();
+        $madeAt = CarbonImmutable::now();
+
+        $offer = CustomerInvitation::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'email' => self::VICTIM,
+            'last_sent_at' => $madeAt,
+        ]);
+
+        $resentAt = $madeAt->addMinutes(10);
+        $this->travelTo($resentAt);
+
+        $this->resend($owner, $customer, $offer)->assertOk();
+        $this->withdraw($owner, $customer);
+
+        $this->invite($owner, $customer)
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'membership.invitation_sent_too_recently')
+            ->assertJsonPath('error.details.retry_at', $resentAt->addMinutes(10)->toAtomString());
+
+        Mail::assertQueuedCount(1);
+    }
+
+    /**
+     * Accepted and declined offers have given up the address's slot as surely
+     * as a withdrawn one, and the address was mailed all the same.
+     *
+     * Each was mailed five minutes ago. No member of the account has the
+     * accepted one's address, as after the member it made has been removed,
+     * and the declined one never made a member. Inviting either address
+     * inside the wait is refused, nothing is queued and no row is written;
+     * once the wait is over, both go.
+     */
+    #[Test]
+    public function an_accepted_or_declined_offer_holds_its_address_to_the_wait(): void
+    {
+        [$customer, $owner] = $this->accountWithOwner();
+        $mailedAt = CarbonImmutable::now()->subMinutes(5);
+
+        CustomerInvitation::factory()->withToken(str_repeat('a', 64))->create([
+            'customer_id' => $customer->getKey(),
+            'email' => 'accepted@example.test',
+            'last_sent_at' => $mailedAt,
+            'accepted_at' => CarbonImmutable::now()->subMinute(),
+        ]);
+        CustomerInvitation::factory()->withToken(str_repeat('b', 64))->create([
+            'customer_id' => $customer->getKey(),
+            'email' => 'declined@example.test',
+            'last_sent_at' => $mailedAt,
+            'declined_at' => CarbonImmutable::now()->subMinute(),
+        ]);
+
+        foreach (['accepted@example.test', 'declined@example.test'] as $address) {
+            $this->invite($owner, $customer, $address)
+                ->assertStatus(409)
+                ->assertJsonPath('error.code', 'membership.invitation_sent_too_recently')
+                ->assertJsonPath('error.details.retry_at', $mailedAt->addMinutes(10)->toAtomString());
+        }
+
+        Mail::assertNothingQueued();
+        Mail::assertNothingSent();
+        $this->assertSame(2, CustomerInvitation::query()->where('customer_id', $customer->getKey())->count());
+
+        $this->travelTo($mailedAt->addMinutes(10));
+
+        foreach (['accepted@example.test', 'declined@example.test'] as $address) {
+            $this->invite($owner, $customer, $address)->assertCreated();
+        }
+
+        Mail::assertQueuedCount(2);
+    }
+
+    /**
+     * The time is read from the row the resend locked, not from the copy it
+     * was handed.
+     *
+     * The copy is what route-model binding loaded before the lock. Another
+     * resend committing in between — here, the row's `last_sent_at` moved to
+     * now behind the copy's back — leaves the copy an hour stale; compared
+     * with that, the resend would go, and the address would get two mails
+     * inside one wait. It must be refused, and write nothing.
+     */
+    #[Test]
+    public function a_resend_compares_the_row_it_locked_not_the_one_it_was_handed(): void
+    {
+        [$customer] = $this->accountWithOwner();
+
+        $offer = CustomerInvitation::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'email' => self::VICTIM,
+            'last_sent_at' => CarbonImmutable::now()->subHour(),
+        ]);
+
+        /** @var CustomerInvitation $stale */
+        $stale = CustomerInvitation::query()->findOrFail($offer->getKey());
+        CustomerInvitation::query()->whereKey($offer->getKey())->update(['last_sent_at' => CarbonImmutable::now()]);
+        $before = $this->rowOf($offer);
+
+        try {
+            app(ResendInvitation::class)->execute($stale);
+            $this->fail('A resend compared the copy it was handed, an hour stale, and mailed an address mailed just now.');
+        } catch (MembershipRefusedException $refused) {
+            $this->assertSame('membership.invitation_sent_too_recently', $refused->errorCode());
+        }
+
+        $this->assertSame($before, $this->rowOf($offer));
+    }
+
+    /**
      * The clock is this account's, and another account can neither be held to
      * it nor learn from it that the address was just invited.
      *
@@ -220,13 +390,13 @@ final class OneInboxWaitsOutTheInvitationCooldownTest extends TeamApiTestCase
         Mail::assertQueuedCount(1);
     }
 
-    private function invite(User $user, Customer $customer): TestResponse
+    private function invite(User $user, Customer $customer, string $address = self::VICTIM): TestResponse
     {
         $this->startAFreshRequest();
 
         return $this->actingAs($user)
             ->withHeaders($this->actingFor($customer))
-            ->postJson('/api/v1/team/invitations', ['email' => self::VICTIM, 'role' => CustomerRole::Member->value]);
+            ->postJson('/api/v1/team/invitations', ['email' => $address, 'role' => CustomerRole::Member->value]);
     }
 
     private function withdraw(User $user, Customer $customer): void
