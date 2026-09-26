@@ -287,13 +287,15 @@ class ProvisioningJob extends Model
      *
      * F-15. What establishes that a machine found at the identity later is
      * this job's own build is that it carries a name a create under the
-     * identity was SENT with, so this list holds exactly those names and is
+     * identity was SENT with, so this list holds every such name and is
      * written by the one caller that sends, at the last moment before it
      * does. A name reserved but never sent is not in it, and there is no
      * instant at which a create has been sent under a name the list does not
-     * hold. The one name it can hold that was not sent is that of a worker
-     * which died between this statement and the call — the safe direction: a
-     * machine carrying it is taken to be possibly this build's, not built
+     * hold. What it can hold that was not sent is a name written for a
+     * create that never left: its worker died between this statement and the
+     * call, or the call failed before its request went. No record written
+     * before a send can exclude that, and it errs the safe way: a machine
+     * carrying the name is taken to be possibly this build's, not built
      * around.
      *
      * Appended only when absent, and cleared only by a repoint, which keeps

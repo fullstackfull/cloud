@@ -11,12 +11,15 @@ use Illuminate\Support\Facades\Schema;
  *
  * What establishes that a machine found at the reserved id is this build's
  * and not a stranger's is the name the hypervisor reports for it, compared
- * exactly against the names a create under the id was actually sent with.
- * Written by its own statement immediately before each create is sent — not
- * with the id, which is reserved before an attempt knows whether it will
- * send anything — so the list holds no name that was only reserved, holds
- * nothing until a create has been sent, and there is no instant at which the
- * platform has called with a name it has not recorded.
+ * exactly against the names recorded here as ones a create under the id was
+ * sent with. Written by its own statement immediately before each create is
+ * sent — not with the id, which is reserved before an attempt knows whether
+ * it will send anything — so the list holds no name that was only reserved,
+ * holds nothing until a create is about to be sent, and there is no instant
+ * at which the platform has called with a name it has not recorded. (A
+ * create that never left after its name was written — its worker died, or
+ * it failed before its request went — leaves a name nothing was sent with;
+ * a machine carrying it is taken to be possibly this build's, the safe way.)
  *
  * A list rather than a single value, and append-only: the comparison is
  * against every name a create under this identity sent, not only the latest.

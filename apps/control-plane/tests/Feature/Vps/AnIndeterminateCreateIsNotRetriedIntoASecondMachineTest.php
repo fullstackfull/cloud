@@ -7,20 +7,27 @@ namespace Tests\Feature\Vps;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Compute\Application\Actions\PollProviderTasks;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
+use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Compute\Infrastructure\Providers\FakeComputeProvider;
 use Lynomia\Modules\Ipam\Domain\Enums\IpAddressStatus;
 use Lynomia\Modules\Ipam\Infrastructure\Models\IpAddress;
+use Lynomia\Modules\Provisioning\Application\Actions\DetectStaleJobs;
+use Lynomia\Modules\Provisioning\Application\Jobs\RunProvisioningJob;
 use Lynomia\Modules\Provisioning\Domain\Enums\FailureClass;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
+use Lynomia\Modules\Provisioning\Domain\StateMachines\ProvisioningJobStateMachine;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Vps\Application\Handlers\CreateVpsHandler;
 use PHPUnit\Framework\Attributes\Test;
+use ReflectionMethod;
+use RuntimeException;
 use Tests\Feature\Vps\Concerns\DrivesVpsCreatesThroughTheOperatorPath;
 use Tests\TestCase;
 
@@ -42,12 +49,14 @@ use Tests\TestCase;
  * name a create under it is sent with immediately before it is sent, and
  * makes every attempt look under the identity before it builds. What the look
  * finds, and what each finding licenses, is what the rest of this file pins —
- * including that nothing found before any create was sent is claimed, on a
- * first attempt, under an identity a repoint gave, after attempts that sent
- * nothing, and at a pinned id on a first attempt. The one place the row
- * cannot show that nothing was sent — a pinned id on a job attempted before,
- * whose earlier attempt may have sent a create without recording it — has
- * its own test, and its residual is the handler's to state.
+ * including that nothing found while no create is recorded as sent is
+ * claimed: on a first attempt, under an identity a repoint gave, after
+ * attempts that sent nothing, and at a pinned id on a first attempt and on a
+ * second whose first is shown to have run after sends were recorded. The one
+ * place a name is judged as sent with none recorded — a pinned id on a job
+ * whose earlier attempts are not all shown to have run after sends were
+ * recorded, so that one of them may have sent a create without recording it —
+ * has its own tests, and its residual is the handler's to state.
  * The repoint that a stranger's machine licenses has its own file; the bound
  * on the payload that the ownership rule rests on has two (a behavioural pin
  * in this band, and a static census in the Provisioning band that fails on a
@@ -86,6 +95,33 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
             'the retry built a second machine beside the one the first attempt built: the customer now has one '
             .'billed server and one orphan holding an address.',
         );
+
+        // Counted at the hypervisor's door as well as in its fleet: a second
+        // create sent under the same id lands on the same (node, id) in the
+        // simulator and would leave the fleet at one machine.
+        $this->assertCount(1, $this->hypervisor->creates, 'the retry sent a second create');
+    }
+
+    #[Test]
+    public function a_lost_answer_is_recorded_against_the_identity_it_was_about(): void
+    {
+        /*
+         * The finding a lost answer leaves, and the attempt's own record,
+         * each name the identity the create was sent under — as every finding
+         * about an identity does, so that each says on its own which machine
+         * it is about.
+         */
+        $job = $this->createJob();
+
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(FailureClass::Timeout, $job->failure_class);
+        $this->assertNotNull($job->reserved_provider_id);
+        $this->assertSame($job->reserved_provider_id, $job->result['error']['reserved_provider_id'] ?? null);
+
+        $record = $job->attemptRecords()->where('attempt_number', 1)->firstOrFail();
+        $this->assertSame($job->reserved_provider_id, $record->response_metadata['reserved_provider_id'] ?? null);
     }
 
     #[Test]
@@ -456,15 +492,18 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
          * sent a create under it with the payload's name and recorded
          * nothing. Here that attempt is the job's first: it sent the create,
          * its answer was lost, and it left the job for review with nothing
-         * reserved and nothing recorded, exactly as the create did before
-         * F-15. The machine it built is at the pinned id. The operator's
-         * retry is the job's second attempt, and a machine at the pinned id
-         * carrying the payload's name and this build's shape is taken to be
-         * this build's — and the operator is told why, without being told a
-         * create under the id is recorded as sent.
+         * reserved, nothing recorded and no finding stamped with it, exactly
+         * as the create and the engine did before F-15. The machine it built
+         * is at the pinned id. The operator's retry is the job's second
+         * attempt, and a machine at the pinned id carrying the payload's name
+         * and this build's shape is taken to be this build's — and the
+         * operator is told why, without being told a create under the id is
+         * recorded as sent.
          *
-         * Only a job attempted before: see
-         * a_first_attempt_at_an_id_pinned_on_the_payload_claims_nothing_there.
+         * Only where an earlier attempt is not shown to have run after sends
+         * were recorded: see
+         * a_first_attempt_at_an_id_pinned_on_the_payload_claims_nothing_there
+         * and the two second attempts after it.
          */
         $job = $this->createJob(['vm_id' => 4242], [
             'status' => ProvisioningJobStatus::NeedsReview,
@@ -530,6 +569,261 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
         // builds elsewhere, and it is not refused.
         $this->repointAsOperator($job)->assertOk();
         $this->retryAsOperator($job)->assertOk();
+    }
+
+    #[Test]
+    public function a_second_attempt_at_a_pinned_id_whose_first_held_an_identity_and_sent_nothing_claims_nothing_there(): void
+    {
+        /*
+         * The round-five verification's reproduction, kept. The job's only
+         * earlier attempt reserved the pinned id — which only the create that
+         * records every create it sends does — and stopped at an exhausted
+         * pool, which the engine retries by itself, having sent nothing. A
+         * stranger then takes the id, named as the payload names this build's
+         * machine and shaped as its plan. It used to be claimed on the second
+         * attempt: FOUND_ITS_OWN_BUILD with the stranger's id as this job's
+         * provider reference, retry and repoint both refused, and the operator
+         * told that a create may have been sent, on a job that had sent none.
+         */
+        $job = $this->createJob(['vm_id' => 55555]);
+        $free = IpAddress::query()->where('status', IpAddressStatus::Available)->pluck('id');
+        IpAddress::query()->whereIn('id', $free)->update(['status' => IpAddressStatus::Unavailable]);
+
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(ProvisioningJobStatus::Queued, $job->status, (string) $job->last_error);
+        $this->assertSame('55555', $job->reserved_provider_id);
+        $this->assertNull($job->reserved_provider_hostnames);
+
+        IpAddress::query()->whereIn('id', $free)->update(['status' => IpAddressStatus::Available]);
+        $this->aMachineShapedAsThisBuildAt('55555', name: 'web-01');
+
+        $this->runWorker($job);
+
+        $this->assertTheSecondAttemptClaimedNothingAtThePinnedId($job);
+    }
+
+    #[Test]
+    public function a_second_attempt_at_a_pinned_id_whose_first_held_an_identity_and_was_swept_claims_nothing_there(): void
+    {
+        /*
+         * The identity on its own, where the finding shows nothing: the first
+         * attempt reserved the pinned id and its worker died before it sent
+         * anything, and the stale sweep moved the job to review under a
+         * finding of the sweep's. The identity the job holds is what shows
+         * that the first attempt ran this create, which records every create
+         * it sends; none is recorded, so none was sent.
+         */
+        $job = $this->createJob(['vm_id' => 55555]);
+
+        $this->runWorkerThatDiesAtTheLook($job);
+
+        DB::table('provisioning_jobs')->where('id', $job->id)->update(['started_at' => now()->subDay()]);
+        app(DetectStaleJobs::class)->execute();
+
+        $job->refresh();
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->status);
+        $this->assertSame(DetectStaleJobs::ERROR_CODE, $job->result['error']['code'] ?? null);
+        $this->assertSame('55555', $job->reserved_provider_id);
+        $this->assertNull($job->reserved_provider_hostnames);
+
+        $this->aMachineShapedAsThisBuildAt('55555', name: 'web-01');
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $this->assertTheSecondAttemptClaimedNothingAtThePinnedId($job);
+    }
+
+    #[Test]
+    public function a_second_attempt_at_a_pinned_id_whose_first_left_the_engines_finding_claims_nothing_there(): void
+    {
+        /*
+         * The same, where the first attempt stopped before it reserved
+         * anything — no node had room, which the engine also retries by
+         * itself — so nothing is held. What shows that attempt ran after sends
+         * were recorded is the finding the job carries: the engine that ran
+         * it wrote it, stamped with it, and the engine has stamped its
+         * findings only since sends were recorded. It recorded every create it
+         * sent, and it sent none.
+         */
+        $job = $this->createJob(['vm_id' => 55555]);
+        DB::table('compute_nodes')->where('id', $this->node->id)->update(['status' => NodeStatus::Maintenance->value]);
+
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(ProvisioningJobStatus::Queued, $job->status, (string) $job->last_error);
+        $this->assertSame(FailureClass::Capacity, $job->failure_class);
+        $this->assertNull($job->reserved_provider_id);
+        $this->assertSame(1, $job->result['error']['attempt'] ?? null);
+
+        DB::table('compute_nodes')->where('id', $this->node->id)->update(['status' => NodeStatus::Active->value]);
+        $this->aMachineShapedAsThisBuildAt('55555', name: 'web-01');
+
+        $this->runWorker($job);
+
+        $this->assertTheSecondAttemptClaimedNothingAtThePinnedId($job);
+    }
+
+    #[Test]
+    public function a_finding_the_stale_sweep_stamped_does_not_show_what_the_attempt_recorded(): void
+    {
+        /*
+         * The stale sweep stamps its finding with the attempt it is about, and
+         * it did not run that attempt. Here the first attempt is one made
+         * before sends were recorded: it sent a create under the pinned id and
+         * its worker died, leaving the job running with nothing reserved and
+         * nothing recorded, and the machine it built at the id. The sweep —
+         * running after sends were recorded — moves the job to review,
+         * stamping its finding with attempt 1. Read as the engine's own, that
+         * finding would call the machine a stranger's, and the repoint it
+         * licensed would build a second machine beside this build's own.
+         */
+        $job = $this->createJob(['vm_id' => 4242], [
+            'status' => ProvisioningJobStatus::Running,
+            'attempts' => 1,
+            'started_at' => now()->subDay(),
+        ]);
+        $this->aMachineShapedAsThisBuildAt('4242', name: 'web-01');
+
+        app(DetectStaleJobs::class)->execute();
+
+        $job->refresh();
+        $this->assertSame(ProvisioningJobStatus::NeedsReview, $job->status);
+        $this->assertSame(DetectStaleJobs::ERROR_CODE, $job->result['error']['code'] ?? null);
+        $this->assertSame(1, $job->result['error']['attempt'] ?? null);
+
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $this->assertTheSecondAttemptTookThePayloadsNameAsSent($job, '4242');
+        $this->repointAsOperator($job)->assertStatus(409);
+    }
+
+    #[Test]
+    public function a_finding_the_task_poller_stamped_does_not_show_what_the_attempt_recorded(): void
+    {
+        /*
+         * The task poller, like the sweep, stamps a finding about an attempt
+         * it did not run. No route on the platform today runs a job again
+         * after the poller has written one — it writes one only on a job whose
+         * create was answered, and a retry of that job is refused — so this
+         * state is written directly: the rule that a finding shows what an
+         * attempt recorded only when the engine that ran it wrote it does not
+         * lean on that.
+         */
+        $job = $this->createJob(['vm_id' => 4242], [
+            'attempts' => 1,
+            'result' => ['error' => [
+                'code' => PollProviderTasks::TASK_FAILED,
+                'class' => FailureClass::Permanent->value,
+                'attempt' => 1,
+            ]],
+        ]);
+        $this->aMachineShapedAsThisBuildAt('4242', name: 'web-01');
+
+        $this->runWorker($job);
+
+        $this->assertTheSecondAttemptTookThePayloadsNameAsSent($job, '4242');
+    }
+
+    #[Test]
+    public function a_finding_written_before_findings_were_stamped_does_not_show_what_the_attempt_recorded(): void
+    {
+        /*
+         * Before sends were recorded, the engine wrote its finding as a code
+         * and a class, with no attempt stamp. The first attempt here left one,
+         * for a create whose answer was lost: it ran before sends were
+         * recorded, and an unstamped finding is not read as showing
+         * otherwise, whatever its code.
+         */
+        $job = $this->createJob(['vm_id' => 4242], [
+            'status' => ProvisioningJobStatus::NeedsReview,
+            'attempts' => 1,
+            'failure_class' => FailureClass::Timeout,
+            'result' => ['error' => ['code' => 'compute.provider_request_failed', 'class' => FailureClass::Timeout->value]],
+        ]);
+        $this->aMachineShapedAsThisBuildAt('4242', name: 'web-01');
+
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $this->assertTheSecondAttemptTookThePayloadsNameAsSent($job, '4242');
+    }
+
+    #[Test]
+    public function a_pinned_id_on_a_third_attempt_is_judged_as_if_its_name_had_been_sent(): void
+    {
+        /*
+         * The handler's declared residual, pinned so that closing it is a
+         * decision and not an accident. From a job's third attempt on, which
+         * code each earlier attempt ran is not read, and at a pinned id with
+         * no name recorded the payload's name is judged as sent — here
+         * although both earlier attempts held the identity and stopped at an
+         * exhausted pool, having sent nothing. The operator is told how many
+         * attempts there were, and to confirm the machine at the node.
+         */
+        $job = $this->createJob(['vm_id' => 55555]);
+        $free = IpAddress::query()->where('status', IpAddressStatus::Available)->pluck('id');
+        IpAddress::query()->whereIn('id', $free)->update(['status' => IpAddressStatus::Unavailable]);
+
+        $this->runWorker($job);
+        $this->runWorker($job);
+
+        $this->assertSame(ProvisioningJobStatus::Queued, $job->refresh()->status, (string) $job->last_error);
+        IpAddress::query()->whereIn('id', $free)->update(['status' => IpAddressStatus::Available]);
+        $this->aMachineShapedAsThisBuildAt('55555', name: 'web-01');
+
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(3, $job->attempts);
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->result['error']['code'] ?? null);
+        $this->assertTrue($job->result['response']['payload_name_taken_as_sent'] ?? null);
+        $this->assertStringContainsString('attempted 2 times before', (string) $job->last_error);
+        $this->assertStringContainsString('confirm it at the node', (string) $job->last_error);
+        $this->assertSame([], $this->hypervisor->creates);
+    }
+
+    #[Test]
+    public function a_name_recorded_as_sent_at_a_pinned_id_is_judged_as_recorded_not_as_the_payloads(): void
+    {
+        /*
+         * The payload's name is judged as sent only while none is recorded.
+         * Here creates under the pinned id have been sent — each recorded,
+         * each lost before the cluster acted on it — and on the third attempt
+         * a machine of that name is there. The name matched is one recorded as
+         * sent, and the operator is told so; not that no create is recorded,
+         * which is what the pinned judgement would say. A third attempt,
+         * because on a second one whose first recorded its send the pinned
+         * judgement is ruled out on other grounds as well.
+         */
+        $job = $this->createJob(['vm_id' => 4242]);
+        $this->hypervisor->loseTheRequestToCreates = true;
+
+        try {
+            $this->runWorker($job);
+            $this->retryAsOperator($job)->assertOk();
+            $this->runWorker($job);
+        } finally {
+            $this->hypervisor->loseTheRequestToCreates = false;
+        }
+
+        $job->refresh();
+        $this->assertSame(['web-01'], $job->reserved_provider_hostnames);
+        $this->aMachineShapedAsThisBuildAt('4242', name: 'web-01');
+
+        $this->retryAsOperator($job)->assertOk();
+        $this->runWorker($job);
+
+        $job->refresh();
+        $this->assertSame(3, $job->attempts);
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->result['error']['code'] ?? null);
+        $this->assertFalse($job->result['response']['payload_name_taken_as_sent'] ?? null);
+        $this->assertStringContainsString('A create under provider identity 4242 was sent by this build with the name "web-01"', (string) $job->last_error);
+        $this->assertStringNotContainsString('No create under the id is recorded as sent', (string) $job->last_error);
+        $this->assertCount(2, $this->hypervisor->creates);
     }
 
     #[Test]
@@ -825,5 +1119,87 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
         $this->assertNull($this->hypervisor->fleet->getVm('pve-01', (string) $job->reserved_provider_id));
 
         $this->retryAsOperator($job)->assertOk();
+    }
+
+    /**
+     * One attempt whose worker is killed after it has reserved the job's
+     * identity and before it has sent anything: at its look under the
+     * identity. The job is left running with the attempt counted, the
+     * identity held, and nothing settled or recorded as sent — for the stale
+     * sweep to find. The claim is reached by reflection for the reason
+     * runWorkerThatDiesAfterBuilding() gives: the engine catches every
+     * throwable, and a dead worker catches nothing.
+     */
+    private function runWorkerThatDiesAtTheLook(ProvisioningJob $job): void
+    {
+        $engine = new RunProvisioningJob((string) $job->getKey());
+        $claim = new ReflectionMethod($engine, 'claim');
+
+        /** @var ProvisioningJob $claimed */
+        $claimed = $claim->invoke($engine, app(ProvisioningJobStateMachine::class));
+
+        $death = new RuntimeException('the worker was killed');
+        $this->hypervisor->atTheMomentOfLook = static function () use ($death): void {
+            throw $death;
+        };
+
+        try {
+            app(CreateVpsHandler::class)->execute($claimed);
+            $this->fail('The attempt did not look under its identity, so there was nothing for the worker to die at.');
+        } catch (RuntimeException $e) {
+            $this->assertSame($death, $e, 'The attempt failed for another reason: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * The job's second attempt found a machine at pinned id 55555, named as
+     * the payload names this build's machine and shaped as its plan, and
+     * claimed nothing: its one earlier attempt is shown to have run after
+     * sends were recorded, and none is recorded, so none was sent and the
+     * machine is somebody else's whatever it is called.
+     */
+    private function assertTheSecondAttemptClaimedNothingAtThePinnedId(ProvisioningJob $job): void
+    {
+        $job->refresh();
+        $this->assertSame(2, $job->attempts);
+        $this->assertSame(CreateVpsHandler::IDENTITY_TAKEN, $job->result['error']['code'] ?? null, (string) $job->last_error);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_OTHERWISE, $job->result['error']['reason'] ?? null);
+        $this->assertTrue($job->result['response']['pinned_on_the_payload'] ?? null);
+        $this->assertFalse($job->result['response']['payload_name_taken_as_sent'] ?? null);
+        $this->assertArrayNotHasKey('provider_reference', $job->result ?? []);
+        $this->assertStringContainsString('no create under this identity has been sent yet', (string) $job->last_error);
+        $this->assertStringNotContainsString('pinned', (string) $job->last_error);
+        $this->assertSame([], $this->hypervisor->creates);
+        $this->assertNull($job->reserved_provider_hostnames);
+
+        $row = collect($this->actingAs($this->operator())->getJson('/api/admin/provisioning/needs-review')->assertOk()->json('data'))
+            ->firstWhere('id', $job->id);
+        $this->assertNotNull($row, 'the job is not on the review list');
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_OTHERWISE, $row['error_reason'] ?? null);
+        $this->assertNull($row['provider_reference'] ?? null, 'a job that built nothing is offered the stranger\'s machine to adopt');
+
+        // Nothing of this build's is at the id, so the way out that builds
+        // elsewhere is not refused.
+        $this->repointAsOperator($job)->assertOk();
+    }
+
+    /**
+     * The job's second attempt found a machine at the pinned id named as the
+     * payload names this build's machine, with no name recorded and its one
+     * earlier attempt not shown to have run after sends were recorded: the
+     * payload's name was judged as sent, the machine taken to be this
+     * build's, and nothing new built.
+     */
+    private function assertTheSecondAttemptTookThePayloadsNameAsSent(ProvisioningJob $job, string $pinned): void
+    {
+        $job->refresh();
+        $this->assertSame(2, $job->attempts);
+        $this->assertSame(CreateVpsHandler::FOUND_ITS_OWN_BUILD, $job->result['error']['code'] ?? null, (string) $job->last_error);
+        $this->assertSame(CreateVpsHandler::REASON_NAMED_AS_CALLED, $job->result['error']['reason'] ?? null);
+        $this->assertTrue($job->result['response']['payload_name_taken_as_sent'] ?? null);
+        $this->assertSame($pinned, $job->result['provider_reference'] ?? null);
+        $this->assertStringContainsString('its first attempt', (string) $job->last_error);
+        $this->assertSame([], $this->hypervisor->creates);
+        $this->assertCount(1, $this->hypervisor->everyMachine());
     }
 }
