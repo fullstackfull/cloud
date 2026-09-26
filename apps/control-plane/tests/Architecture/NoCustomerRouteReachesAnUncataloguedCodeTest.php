@@ -11,8 +11,10 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
 /**
- * No class a customer route can reach declares an error code the customer
- * catalogue has no sentence for.
+ * No class a customer route can reach declares, in one of the five spellings
+ * listed below, an error code the customer catalogue has no sentence for —
+ * except a class reached only through a queued job that catches it, named in
+ * EXCUSED_BEHIND_A_QUEUED_CATCH with the checks that excuse must still pass.
  *
  * ===========================================================================
  * WHY
@@ -36,11 +38,16 @@ use RecursiveIteratorIterator;
  * EXACTLY WHAT IT READS
  * ===========================================================================
  *
- * CODES. Every `.php` file under `src/`, for two spellings only: a string
- * literal passed as the first argument of `->as('a.b')`, and a string literal
- * returned by `return 'a.b';`, where the literal is two or more dot-separated
- * lower-case words. A code built any other way — concatenated, held in a
- * constant or an enum, passed to a constructor — is NOT read. A code is
+ * CODES. Every `.php` file under `src/`, comments removed, for five
+ * spellings only (CODE_SPELLINGS), each a string literal of two or more
+ * dot-separated lower-case words: the first argument of `->as('a.b')`;
+ * `return 'a.b';`; `$errorCode = 'a.b'` or `$code = 'a.b'` (a property
+ * default, a parameter default or an assignment); `->errorCode = 'a.b'`; and
+ * the named argument `errorCode: 'a.b'`. A code built any other way —
+ * concatenated, held in a constant or an enum, passed positionally to a
+ * constructor or a method, assigned to a property or variable of another
+ * name — is NOT read. The last two spellings also read codes that are never
+ * thrown (a ProvisioningResult's `errorCode:`), which only makes it redder. A code is
  * uncatalogued when `lang/en/errors.php`, flattened on dots, has no key for
  * it. The class that declares it is the one declared in the file it was
  * found in.
@@ -65,14 +72,74 @@ use RecursiveIteratorIterator;
  * may never actually run on a customer request, which is the direction this
  * gate is allowed to be wrong in.
  *
- * Measured at round three's base: 230 codes read, 26 uncatalogued, declared
- * by 9 classes; the walk reaches 940 classes and none of the 9. The known
+ * EXCUSES. A class in EXCUSED_BEHIND_A_QUEUED_CATCH is not an offence while
+ * all of these hold, and each is checked here: its catcher implements
+ * ShouldQueue; the catcher's source catches `Throwable` (and, for an
+ * exception, the class by its short name); no file under `src/` calls the
+ * catcher through `Catcher::dispatchSync(`, `Catcher::dispatchNow(`,
+ * `dispatch_sync(new Catcher` or `(new Catcher(...))->handle(` (other ways
+ * of running it inside the request are not read); and with
+ * the catcher taken out of the graph, the walk no longer reaches the class —
+ * so every path found runs through the queue. What is NOT checked is that the
+ * catch's `try` spans every throw site inside the catcher; that is the
+ * excuse's stated reason, read by a person.
+ *
+ * Measured at round three's base, with the five spellings: 277 codes read,
+ * 38 uncatalogued, declared by 12 classes; the walk reaches 940 classes,
+ * among them 3 of the 12 — HandlerNotRegisteredException,
+ * ProvisioningFailedException and FakeProvisioningHandler — each only
+ * through RunProvisioningJob and each excused. (With the first two
+ * spellings alone it read 230 codes, 26 uncatalogued, 9 classes, none
+ * reached; the verifier found the two exceptions it could not see.) The known
  * customer refusal CheckoutRejectedException is reached (through PlaceOrder),
  * which is what shows the walk walks.
  */
 final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
 {
     private const string ROOT = __DIR__.'/../..';
+
+    /**
+     * The spellings of a code this gate reads, each capturing a literal of two
+     * or more dot-separated lower-case words. Nothing else is read.
+     */
+    private const array CODE_SPELLINGS = [
+        // ->as('a.b')
+        "/->as\\(\\s*'([a-z_]+(?:\\.[a-z_]+)+)'/",
+        // return 'a.b';
+        "/return\\s+'([a-z_]+(?:\\.[a-z_]+)+)'\\s*;/",
+        // $errorCode = 'a.b' / $code = 'a.b': a property default, a
+        // parameter default or an assignment to a variable of that name
+        "/\\$(?:errorCode|code)\\s*=\\s*'([a-z_]+(?:\\.[a-z_]+)+)'/",
+        // ->errorCode = 'a.b'
+        "/->errorCode\\s*=\\s*'([a-z_]+(?:\\.[a-z_]+)+)'/",
+        // errorCode: 'a.b' (a named argument)
+        "/\\berrorCode:\\s*'([a-z_]+(?:\\.[a-z_]+)+)'/",
+    ];
+
+    /**
+     * Classes the walk reaches only through a queued job that catches what
+     * they raise, so nothing they raise reaches an HTTP response.
+     *
+     * RunProvisioningJob wraps `$handlers->get($job->kind)->execute($job)` in
+     * one `try`: HandlerNotRegisteredException (the registry's `get`),
+     * ProvisioningFailedException (a handler's classified failure) and every
+     * other Throwable are caught there and recorded on the job row as a
+     * ProvisioningResult. A customer route only ever DISPATCHES the job.
+     * FakeProvisioningHandler's `fake.capacity` is a ProvisioningResult's
+     * code, returned into that same `try`, never thrown.
+     *
+     * @var array<class-string, class-string> excused class => its catcher
+     */
+    private const array EXCUSED_BEHIND_A_QUEUED_CATCH = [
+        'Lynomia\\Modules\\Provisioning\\Domain\\Exceptions\\HandlerNotRegisteredException' => self::PROVISIONING_WORKER,
+        'Lynomia\\Modules\\Provisioning\\Domain\\Exceptions\\ProvisioningFailedException' => self::PROVISIONING_WORKER,
+        'Lynomia\\Modules\\Provisioning\\Infrastructure\\Handlers\\FakeProvisioningHandler' => self::PROVISIONING_WORKER,
+    ];
+
+    private const string PROVISIONING_WORKER = 'Lynomia\\Modules\\Provisioning\\Application\\Jobs\\RunProvisioningJob';
+
+    /** @var array<string, list<string>>|null */
+    private static ?array $edges = null;
 
     /** @var array<string, string>|null fully-qualified class => file */
     private static ?array $classes = null;
@@ -86,7 +153,7 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
         $offending = [];
 
         foreach ($uncatalogued as $class => $codes) {
-            if (array_key_exists($class, $reached)) {
+            if (array_key_exists($class, $reached) && ! self::excused($class)) {
                 $offending[] = sprintf(
                     '%s (%s), reached by: %s',
                     $class,
@@ -106,6 +173,25 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
     }
 
     #[Test]
+    public function every_excuse_still_holds_and_is_still_needed(): void
+    {
+        $classes = self::classes();
+        $uncatalogued = self::uncataloguedCodesByClass();
+        $reached = self::reachedFromCustomerRoutes();
+
+        foreach (self::EXCUSED_BEHIND_A_QUEUED_CATCH as $class => $catcher) {
+            // Still needed: an excuse for a class that is catalogued or
+            // unreached is one nobody will notice going stale.
+            $this->assertArrayHasKey($class, $uncatalogued, "{$class} is excused but declares no uncatalogued code; remove the excuse.");
+            $this->assertArrayHasKey($class, $reached, "{$class} is excused but the walk no longer reaches it; remove the excuse.");
+
+            $this->assertTrue(self::excused($class), "The excuse for {$class} behind {$catcher} no longer holds: ".self::whyNotExcused($class));
+        }
+
+        $this->assertArrayHasKey(self::PROVISIONING_WORKER, $classes);
+    }
+
+    #[Test]
     public function the_scan_and_the_walk_are_not_empty(): void
     {
         // Floors, so the gate above cannot pass by reading nothing.
@@ -120,6 +206,67 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
         $this->assertArrayNotHasKey('Lynomia\\Modules\\Provisioning\\Application\\Actions\\RetryProvisioningJob', $reached);
     }
 
+    private static function excused(string $class): bool
+    {
+        return self::whyNotExcused($class) === null;
+    }
+
+    /**
+     * Why the class's excuse does not hold, or null when it does (and when
+     * it has none, a reason saying so).
+     */
+    private static function whyNotExcused(string $class): ?string
+    {
+        $catcher = self::EXCUSED_BEHIND_A_QUEUED_CATCH[$class] ?? null;
+
+        if ($catcher === null) {
+            return 'it has no excuse';
+        }
+
+        $classes = self::classes();
+
+        if (! isset($classes[$catcher])) {
+            return "its catcher {$catcher} does not exist";
+        }
+
+        $source = self::withoutComments((string) file_get_contents($classes[$catcher]));
+
+        if (preg_match('/\\bimplements\\b[^{]*\\bShouldQueue\\b/', $source) !== 1) {
+            return 'its catcher is not queued';
+        }
+
+        if (preg_match('/catch\\s*\\(\\s*\\\\?Throwable\\s+\\$/', $source) !== 1) {
+            return 'its catcher does not catch Throwable';
+        }
+
+        $short = substr($class, (int) strrpos($class, '\\') + 1);
+
+        if (str_ends_with($short, 'Exception') && preg_match('/catch\\s*\\([^)]*\\b'.preg_quote($short, '/').'\\b/', $source) !== 1) {
+            return "its catcher does not catch {$short}";
+        }
+
+        $catcherShort = substr($catcher, (int) strrpos($catcher, '\\') + 1);
+
+        foreach (self::phpFilesUnder('src') as $file) {
+            $code = self::withoutComments((string) file_get_contents($file));
+
+            if (preg_match('/\\b'.$catcherShort.'::(?:dispatchSync|dispatchNow)\\(|dispatch_sync\\(\\s*new\\s+\\\\?(?:[A-Za-z\\\\]+\\\\)?'.$catcherShort.'\\b/', $code) === 1) {
+                return "{$file} runs {$catcherShort} synchronously";
+            }
+
+            if (preg_match('/\\(\\s*new\\s+\\\\?(?:[A-Za-z\\\\]+\\\\)?'.$catcherShort.'\\b[^;]*\\)\\s*->handle\\(/', $code) === 1) {
+                return "{$file} calls {$catcherShort}'s handle() directly";
+            }
+        }
+
+        if (array_key_exists($class, self::reachedFromCustomerRoutes($catcher))) {
+            return 'the walk reaches it without passing through '.$catcherShort.': '
+                .implode(' <- ', self::pathTo($class, self::reachedFromCustomerRoutes($catcher)));
+        }
+
+        return null;
+    }
+
     /**
      * @return array<string, list<string>> code => files it was read in
      */
@@ -130,10 +277,14 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
         foreach (self::phpFilesUnder('src') as $file) {
             $source = self::withoutComments((string) file_get_contents($file));
 
-            preg_match_all("/->as\\(\\s*'([a-z_]+(?:\\.[a-z_]+)+)'/", $source, $asMatches);
-            preg_match_all("/return\\s+'([a-z_]+(?:\\.[a-z_]+)+)'\\s*;/", $source, $returnMatches);
+            $found = [];
 
-            foreach ([...$asMatches[1], ...$returnMatches[1]] as $code) {
+            foreach (self::CODE_SPELLINGS as $spelling) {
+                preg_match_all($spelling, $source, $matches);
+                array_push($found, ...$matches[1]);
+            }
+
+            foreach ($found as $code) {
                 $codes[$code][] = $file;
             }
         }
@@ -170,7 +321,7 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
      *
      * @return array<string, string|null>
      */
-    private static function reachedFromCustomerRoutes(): array
+    private static function reachedFromCustomerRoutes(?string $without = null): array
     {
         $classes = self::classes();
         $edges = self::edges();
@@ -182,7 +333,7 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
             preg_match_all('/Lynomia(?:\\\\[A-Za-z0-9_]+)+/', (string) file_get_contents($routeFile), $matches);
 
             foreach ($matches[0] as $name) {
-                if (isset($classes[$name]) && ! array_key_exists($name, $reached)) {
+                if (isset($classes[$name]) && $name !== $without && ! array_key_exists($name, $reached)) {
                     $reached[$name] = null;
                     $queue[] = $name;
                 }
@@ -193,7 +344,7 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
             $class = array_shift($queue);
 
             foreach ($edges[$class] ?? [] as $next) {
-                if (! array_key_exists($next, $reached)) {
+                if ($next !== $without && ! array_key_exists($next, $reached)) {
                     $reached[$next] = $class;
                     $queue[] = $next;
                 }
@@ -223,6 +374,10 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
      */
     private static function edges(): array
     {
+        if (self::$edges !== null) {
+            return self::$edges;
+        }
+
         $classes = self::classes();
         $edges = [];
         $implementedBy = [];
@@ -282,7 +437,7 @@ final class NoCustomerRouteReachesAnUncataloguedCodeTest extends TestCase
             array_push($edges[$event], ...$listeners);
         }
 
-        return array_map(static fn (array $to): array => array_values(array_unique($to)), $edges);
+        return self::$edges = array_map(static fn (array $to): array => array_values(array_unique($to)), $edges);
     }
 
     /**

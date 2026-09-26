@@ -29,11 +29,16 @@ use Tests\TestCase;
  * provisioning.adoption_*, repoint_*, retry_*, build_may_exist, rbac.*) have
  * none. Whether one of them could reach a customer route was not established.
  *
- * Established now, twice over:
+ * Answered now, in two ways of different strength:
  *
- *  - by route analysis: `NoCustomerRouteReachesAnUncataloguedCodeTest` walks
- *    from the classes the customer route files name to the classes that
- *    declare those codes, and reaches none of them;
+ *  - by route analysis, for the codes it can read:
+ *    `NoCustomerRouteReachesAnUncataloguedCodeTest` walks from the classes the
+ *    customer route files name to the classes that declare an uncatalogued
+ *    code in one of five literal spellings. It reaches none of the 24/26
+ *    above; it does reach HandlerNotRegisteredException and
+ *    ProvisioningFailedException, only through the queued RunProvisioningJob
+ *    that catches them, and excuses those on checks it re-runs. A code spelled
+ *    any other way is not read;
  *  - by construction, here: on `api/v1/*` the renderer no longer offers the
  *    exception's sentence as the fallback at all, so a code that one day does
  *    reach a customer is answered with `errors.request_failed`, translated,

@@ -56,6 +56,30 @@ final class TheSimulatorsDefaultFleetCanHoldAMachineTest extends TestCase
     }
 
     #[Test]
+    public function an_inactive_pool_adds_nothing_to_a_nodes_disk(): void
+    {
+        // The default fleet's pools are all active, so this rule needs a
+        // node of its own: a pool the node reports but cannot use holds no
+        // machine, and counting it would let the scheduler place onto disk
+        // that is not there — the real adapter skips it too.
+        config()->set('compute.fake.nodes', [[
+            'name' => 'pve-77',
+            'online' => true,
+            'cpu_cores' => 16,
+            'memory_total_mib' => 65536,
+            'storages' => [
+                ['name' => 'local-nvme', 'class' => 'nvme', 'total_gib' => 1000, 'available_gib' => 800],
+                ['name' => 'old-sata', 'class' => 'hdd', 'total_gib' => 5000, 'available_gib' => 5000, 'active' => false],
+            ],
+        ]]);
+
+        $node = (new FakeComputeProvider)->listNodes()[0];
+
+        $this->assertSame(1000, $node->storageTotalGib, 'An inactive pool was counted in the node\'s disk.');
+        $this->assertSame(800, $node->storageAvailableGib);
+    }
+
+    #[Test]
     public function a_node_synced_from_the_default_fleet_can_hold_a_machine(): void
     {
         $cluster = ComputeCluster::factory()->create();

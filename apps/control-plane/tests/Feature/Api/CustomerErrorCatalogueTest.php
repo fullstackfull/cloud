@@ -76,10 +76,14 @@ final class CustomerErrorCatalogueTest extends TestCase
      *
      * Kept as a named list rather than folded into the derivation, so that a
      * second module claiming the same exemption is a decision somebody makes
-     * here. The claim is no longer only asserted: the uncatalogued codes these
-     * classes declare are held off the customer routes by
-     * NoCustomerRouteReachesAnUncataloguedCodeTest, which walks from the
-     * customer route files and says exactly what it reads.
+     * here. Part of the claim is now checked:
+     * NoCustomerRouteReachesAnUncataloguedCodeTest walks from the customer
+     * route files and refuses a reachable class that declares an uncatalogued
+     * code in one of the five literal spellings it reads — a code spelled any
+     * other way is not seen. Two Provisioning exceptions it does see reached,
+     * HandlerNotRegisteredException and ProvisioningFailedException, are
+     * excused there, because they are reached only through RunProvisioningJob,
+     * a queued job that catches them.
      */
     private const array OPERATOR_ONLY_EXCEPTIONS = ['Provisioning'];
 

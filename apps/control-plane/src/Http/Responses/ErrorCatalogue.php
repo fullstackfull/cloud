@@ -27,7 +27,11 @@ use Illuminate\Support\Facades\Lang;
  * tests/Feature/Api/CustomerErrorCatalogueTest.php requires an entry for every
  * code the customer modules can raise, and
  * tests/Architecture/NoCustomerRouteReachesAnUncataloguedCodeTest.php refuses
- * a customer route that can reach a class raising an uncatalogued one.
+ * a customer route that its over-approximate walk finds can reach a class
+ * declaring an uncatalogued code in one of the five literal spellings it
+ * reads (its docblock lists them; a code built any other way is unseen),
+ * unless that class is reached only through a queued job that catches it and
+ * is named there as an excuse the gate re-checks.
  *
  * Context values are offered to the sentence as `:placeholders`. Only what the
  * sentence names is used, so a context that carries an internal identifier

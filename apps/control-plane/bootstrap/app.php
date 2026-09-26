@@ -178,8 +178,9 @@ $app = Application::configure(basePath: dirname(__DIR__))
              * with the catalogue's generic sentence, never the exception's
              * own: that sentence is the engineer's and may name a node, a job
              * or a provider. Everywhere else — the operator API, whose readers
-             * are staff — it stays the fallback. Which uncatalogued codes a
-             * customer route can reach at all is held separately, by
+             * are staff — it stays the fallback. Whether a customer route can
+             * reach a class declaring an uncatalogued code is checked,
+             * for the literal spellings it reads, by
              * NoCustomerRouteReachesAnUncataloguedCodeTest.
              */
             $customer = $request->is('api/v1', 'api/v1/*');
