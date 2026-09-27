@@ -17,6 +17,7 @@ use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -170,6 +171,31 @@ final class MoneyPathsTakeTheirLocksInOneOrderTest extends TestCase
         });
 
         $this->assertSame(['invoices'], array_values(array_unique($order)), 'A replay locked more than its invoice: '.implode(', ', $order));
+
+        // R4: the same key on a different invoice is not a replay of it. It
+        // is refused, rather than answered "nothing moved" for an invoice
+        // that is still owed.
+        /** @var Invoice $other */
+        $other = Invoice::factory()->create([
+            'customer_id' => $customer->id,
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+            'subtotal_minor' => 1_000,
+            'total_minor' => 1_000,
+            'amount_paid_minor' => 0,
+            'amount_refunded_minor' => 0,
+        ]);
+
+        try {
+            app(PayInvoiceFromWallet::class)->execute($customer, $other, 'pay-once');
+            $this->fail('A key that paid one invoice answered for another.');
+        } catch (IdempotencyKeyConflictException $e) {
+            $this->assertSame('wallet.idempotency_key_conflict', $e->errorCode());
+            $this->assertSame(409, $e->httpStatus());
+        }
+
+        $this->assertSame(InvoiceStatus::Open, $other->refresh()->status);
+        $this->assertSame(0, $other->amount_paid_minor);
     }
 
     #[Test]

@@ -17,6 +17,7 @@ use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
+use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\WalletPaymentRefusedException;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
@@ -114,6 +115,18 @@ final readonly class PayInvoiceFromWallet
              */
             if ($wallet !== null) {
                 $replay = $this->ledger->entryPostedUnder($wallet, $idempotencyKey);
+
+                if ($replay !== null && (string) $replay->invoice_id !== (string) $locked->getKey()) {
+                    // The same key on a different invoice is not a repeat of
+                    // the same request (R4): refused, as the ledger refuses a
+                    // key reused for a different entry.
+                    throw IdempotencyKeyConflictException::forAnotherInvoice(
+                        (string) $wallet->getKey(),
+                        $idempotencyKey,
+                        (string) $replay->getKey(),
+                        (string) $locked->getKey(),
+                    );
+                }
 
                 if ($replay !== null) {
                     /*

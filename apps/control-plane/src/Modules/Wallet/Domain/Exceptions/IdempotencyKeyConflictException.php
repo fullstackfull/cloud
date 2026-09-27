@@ -45,6 +45,28 @@ final class IdempotencyKeyConflictException extends DomainException
         ]);
     }
 
+    /**
+     * The key already paid a different invoice. Answering the repeat with the
+     * first request's outcome would report this invoice paid - a 200 saying
+     * nothing moved - while it is still owed.
+     */
+    public static function forAnotherInvoice(string $walletId, string $idempotencyKey, string $existingEntryId, string $invoiceId): self
+    {
+        $exception = new self(sprintf(
+            'Idempotency key "%s" already paid another invoice (wallet entry %s), not invoice %s.',
+            $idempotencyKey,
+            $existingEntryId,
+            $invoiceId,
+        ));
+
+        return $exception->withContext([
+            'wallet_id' => $walletId,
+            'idempotency_key' => $idempotencyKey,
+            'existing_entry_id' => $existingEntryId,
+            'invoice_id' => $invoiceId,
+        ]);
+    }
+
     public function errorCode(): string
     {
         return 'wallet.idempotency_key_conflict';
