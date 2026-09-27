@@ -36,6 +36,24 @@ final class InvoiceNotPayableException extends DomainException
         return $exception->withContext(['invoice_id' => $invoiceId]);
     }
 
+    /**
+     * The invoice bills a plan change that can no longer be delivered - the
+     * package behind a hosting plan was withdrawn after the change was
+     * accepted, say - so taking the money would buy nothing (F-07, asked
+     * again at payment as an order is). The customer is told no more than
+     * that; the reason is logged for an operator.
+     */
+    public static function becauseItsPlanChangeCannotBeDelivered(string $invoiceId): self
+    {
+        $exception = new self(sprintf(
+            'Invoice %s bills a plan change that cannot be delivered now and cannot receive a payment.',
+            $invoiceId,
+        ));
+        $exception->errorCode = 'invoice.plan_change_not_deliverable';
+
+        return $exception->withContext(['invoice_id' => $invoiceId]);
+    }
+
     public static function forStatus(string $invoiceId, InvoiceStatus $status): self
     {
         $exception = new self(sprintf(

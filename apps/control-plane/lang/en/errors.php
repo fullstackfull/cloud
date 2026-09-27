@@ -145,6 +145,7 @@ return [
         'not_payable' => 'This invoice cannot be paid in its current state.',
         'overpayment_refused' => 'That is more than the invoice asks for.',
         'paid_cannot_be_voided' => 'A paid invoice cannot be voided.',
+        'plan_change_not_deliverable' => 'The plan change this invoice is for cannot be made right now, so it cannot be paid. Nothing has been charged.',
         'payment_not_settleable' => 'This payment cannot be applied to the invoice.',
         'refund_exceeds_payment' => 'A refund cannot exceed what was paid.',
         'subscription_ended' => 'The subscription this invoice was for has ended, so it can no longer be paid.',

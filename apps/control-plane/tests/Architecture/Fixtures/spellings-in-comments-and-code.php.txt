@@ -1,0 +1,10 @@
+<?php
+
+// Read by EveryEnumCaseHasAProducerTest::a_spelling_kept_only_in_a_comment_does_not_hold_an_excuse.
+// Not loaded; the .txt suffix keeps it out of every PHP scanner.
+
+// Only.InALineComment
+# Only.InAHashComment
+/* Only.InABlockComment */
+/** Only.InADocComment */
+$written = 'In.Code';

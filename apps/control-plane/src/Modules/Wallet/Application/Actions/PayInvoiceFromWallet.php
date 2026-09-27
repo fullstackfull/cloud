@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Wallet\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\DTOs\InvoiceSettlement;
 use Lynomia\Modules\Billing\Application\Queries\TheSubscriptionAnInvoiceBills;
@@ -16,6 +17,7 @@ use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Shared\Domain\ValueObjects\Money;
+use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\WalletPaymentRefusedException;
@@ -98,6 +100,7 @@ final readonly class PayInvoiceFromWallet
     public function __construct(
         private WalletLedger $ledger,
         private SettleInvoice $settle,
+        private PlanChangeDelivery $planChanges,
     ) {}
 
     /**
@@ -170,6 +173,21 @@ final readonly class PayInvoiceFromWallet
             // an invoice of it left open is not paid for nothing (O-1, N-3).
             if (TheSubscriptionAnInvoiceBills::hasEnded($locked)) {
                 throw InvoiceNotPayableException::becauseItsSubscriptionHasEnded((string) $locked->getKey());
+            }
+
+            // Nor is a plan change that can no longer be delivered paid for
+            // from the wallet: the question the card payment asks
+            // (StartInvoicePayment), F-07.
+            $refused = $this->planChanges->refusalForTheInvoice($locked);
+
+            if ($refused !== null) {
+                Log::warning('A wallet payment was refused because the plan change its invoice bills can no longer be delivered.', [
+                    'invoice_id' => (string) $locked->getKey(),
+                    'customer_id' => (string) $locked->customer_id,
+                    'reason' => $refused,
+                ]);
+
+                throw InvoiceNotPayableException::becauseItsPlanChangeCannotBeDelivered((string) $locked->getKey());
             }
 
             $due = $locked->amountDue();

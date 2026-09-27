@@ -55,14 +55,46 @@ final class OperatorController
         /** @var User $actor */
         $actor = $request->user();
 
-        $operator = $invite->execute(
+        $invited = $invite->execute(
             $actor,
             $request->string('email')->value(),
             $request->string('name')->value(),
             $request->roles(),
         );
 
-        return response()->json(['data' => self::describe($operator->load('roles'))], Response::HTTP_CREATED);
+        $described = self::describe($invited->operator->load('roles'));
+
+        if ($actor->hasRole(Role::SuperAdmin->value)) {
+            /*
+             * Whether the address already had a login — a customer account,
+             * perhaps one somebody else registered — which was promoted, and
+             * had every credential it held taken away, rather than a new
+             * login created. A super admin may know that an address has a
+             * login.
+             */
+            return response()->json(['data' => [
+                ...$described,
+                'promoted_existing_account' => $invited->promotedAnExistingLogin,
+            ]], Response::HTTP_CREATED);
+        }
+
+        /*
+         * Anybody else holding `role.manage` gets a response that does not
+         * distinguish a promoted login from a new one: the flag is null, the
+         * name is the one they supplied rather than the one the login holds
+         * (a registrant's own choice, for a promoted one), and `created_at`
+         * is null rather than the login's creation date. `has_signed_in` and
+         * `two_factor_enabled` are false either way, because promotion clears
+         * both; `id` differs as any two ids do. This is about this response
+         * only: GET /api/admin/operators lists every operator's stored name
+         * and creation date to the same people, a promoted one included.
+         */
+        return response()->json(['data' => [
+            ...$described,
+            'name' => $request->string('name')->value(),
+            'created_at' => null,
+            'promoted_existing_account' => null,
+        ]], Response::HTTP_CREATED);
     }
 
     public function updateRoles(

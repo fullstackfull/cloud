@@ -479,6 +479,12 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
                 'amount_paid_minor' => $fixture['due'],
                 'paid_at' => now(),
             ]);
+            // And its settlement heard in the same instant. A downgrade made
+            // while a paid upgrade is still undelivered is refused
+            // (previous_change_pending, X1) - after the locks this race is
+            // about, but before the wallet and the plan it goes on to take -
+            // and the race is about the downgrade going the whole way.
+            $hold->table('subscription_plan_changes')->where('proration_invoice_id', $fixture['x'])->update(['delivered_at' => now()]);
             $hold->commit();
         } finally {
             if ($hold->transactionLevel() > 0) {

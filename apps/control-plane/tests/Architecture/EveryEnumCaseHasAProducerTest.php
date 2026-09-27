@@ -324,6 +324,22 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         ));
     }
 
+    /**
+     * The excuse checks read a file's code with its comments left out; this
+     * holds that against a fixture, so narrowing the filter goes red here.
+     */
+    #[Test]
+    public function a_spelling_kept_only_in_a_comment_does_not_hold_an_excuse(): void
+    {
+        $fixture = 'tests/Architecture/Fixtures/spellings-in-comments-and-code.php.txt';
+
+        $this->assertTrue(self::fileSays($fixture, 'In.Code'), 'The positive control: a spelling in code is found.');
+
+        foreach (['Only.InALineComment', 'Only.InAHashComment', 'Only.InABlockComment', 'Only.InADocComment'] as $spelling) {
+            $this->assertFalse(self::fileSays($fixture, $spelling), "{$spelling} survives only in a comment and was read as code.");
+        }
+    }
+
     #[Test]
     public function no_excuse_outlives_what_it_excuses(): void
     {

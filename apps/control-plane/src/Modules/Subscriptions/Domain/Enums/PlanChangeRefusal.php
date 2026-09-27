@@ -88,6 +88,27 @@ enum PlanChangeRefusal: string
      */
     case OutOfStock = 'out_of_stock';
 
+    /**
+     * The change could not be delivered: what the provider half needs for the
+     * target plan is not there (PlanChangeDelivery) - a hosting plan with no
+     * single package on sale, or a change of shape nothing can make.
+     *
+     * The rule checkout applies to the same plan (`checkout.not_deliverable`),
+     * on the plan-change path. Without it the upgrade was accepted, paid and
+     * billed at the new price for ever, and nothing reached the panel (F-07).
+     * The customer is told the plan is unavailable, and nothing about why.
+     */
+    case NotDeliverable = 'not_deliverable';
+
+    /**
+     * The last change was paid for and is still being delivered: its
+     * invoice is paid and its settlement has not yet been heard
+     * (PlanChangeDelivery::aPaidChangeAwaitsDelivery()). A change made in
+     * that window used to be accepted, and made the paid one look superseded
+     * when the subscription ended (X1).
+     */
+    case PreviousChangePending = 'previous_change_pending';
+
     /** The account already holds as many of this plan as it may (`per_customer_limit`). */
     case PerCustomerLimit = 'per_customer_limit';
 
