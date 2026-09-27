@@ -2425,6 +2425,11 @@ return [
             'panel_licensed' => ['type' => 'boolean'],
             'accepts_new_accounts' => ['type' => ['boolean', 'null']],
             'version' => ['type' => ['string', 'null']],
+            // Returned by the node list (not by the create or update
+            // response), so not required.
+            'reconciled_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconcile_attempted_at' => ['$ref' => '#/components/schemas/Timestamp'],
+            'reconcile_error' => ['type' => ['string', 'null'], 'description' => 'Why the reconciliation sweep\'s last attempt could not read this node\'s account listing, if it could not; null once one is read. While it is set, nothing on the node is being compared with the platform\'s records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first.'],
         ],
     ],
     'AdminDedicatedStock' => [
@@ -2935,6 +2940,7 @@ return [
             'verification_task_id' => ['type' => ['string', 'null']],
             'verification_started_at' => ['$ref' => '#/components/schemas/Timestamp'],
             'in_review_since' => ['$ref' => '#/components/schemas/Timestamp'],
+            'review' => ['type' => 'string', 'description' => 'Names this review: the interrupted operation and its attempt. A verdict sends it back as `review`, and is refused (409 `backup.review_changed`) if the row is in a different review by then.'],
         ],
     ],
     'AdminBackupVerdict' => [

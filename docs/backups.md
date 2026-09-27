@@ -164,9 +164,12 @@ review tells the customer the backup needs review, since the archive stops being
 for restore until it is settled.
 
 Settling one: `GET /api/admin/backups/needs-review` lists the rows, the operation each
-interrupted and whether it can be settled there; `POST /api/admin/backups/{backup}/resolve`
-takes `verdict` (`completed` or `failed`) and the `evidence` read at the provider, under
-`backup.manage`, audited in the same transaction. An interrupted restore becomes
+interrupted, whether it can be settled there, and a `review` token naming the review;
+`POST /api/admin/backups/{backup}/resolve` takes `verdict` (`completed` or `failed`), the
+`evidence` read at the provider and that `review` token (all three required), under
+`backup.manage`, audited in the same transaction. A verdict whose token no longer names
+the row's review — settled meanwhile, and back in review for a later attempt — is refused
+(409 `backup.review_changed`) and writes nothing. An interrupted restore becomes
 `restored` or returns to `succeeded`; an interrupted verification becomes `verified` or
 `failed` (unreadable). A backup that never reported its archive, a deletion with an
 unknown outcome, and a row with no recorded interruption are refused: a verdict does not

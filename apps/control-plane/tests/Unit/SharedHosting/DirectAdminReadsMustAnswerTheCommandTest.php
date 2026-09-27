@@ -133,6 +133,85 @@ final class DirectAdminReadsMustAnswerTheCommandTest extends TestCase
     /**
      * @return iterable<string, array{string}>
      */
+    public static function listingsWhoseElementsAreNotNames(): iterable
+    {
+        yield 'a list nested in the list' => ['list[][]=bob'];
+        yield 'a keyed field nested in the list' => ['list[0][name]=bob'];
+        yield 'a nested element beside a name' => ['list[]=alice&list[][]=bob'];
+        yield 'two names joined by a comma in one element' => ['list[]=bob,alice'];
+        yield 'two names joined by a newline in one element' => ['list[]=bob%0Aalice'];
+        yield 'two names joined by a space in one element' => ['list[]=bob%20alice'];
+        yield 'two names joined by a tab in one element' => ['list[]=bob%09alice'];
+        yield 'two names joined by a carriage return in one element' => ['list[]=bob%0Dalice'];
+        yield 'two names joined by a semicolon in one element' => ['list[]=alice&list[]=bob;carol'];
+        yield 'two names joined by a bar in one element' => ['list[]=bob%7Calice'];
+        yield 'a control character inside a name' => ['list[]=bob%00alice'];
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function unusualButSingleNames(): iterable
+    {
+        yield 'capital letters' => ['Admin', 'Admin'];
+        yield 'an underscore' => ['web_1', 'web_1'];
+        yield 'a leading digit' => ['1abc', '1abc'];
+        yield 'a dot' => ['a.b', 'a.b'];
+        yield 'a hyphen' => ['a-b', 'a-b'];
+        yield 'longer than any panel limit the platform names' => [str_repeat('a', 40), str_repeat('a', 40)];
+        yield 'surrounding whitespace, trimmed' => ['%20bob%0A', 'bob'];
+    }
+
+    /**
+     * The other side of the refusal: what is refused is what is ambiguous — an
+     * element that is not a string, or a name holding a separator, whitespace
+     * or a control character, which could be two names read as one. A single
+     * token is one name, however unusual, and is read as that account: if
+     * the platform does not know it, reconciliation shows it as drift, which
+     * an operator sees. Refusing it instead used to make the whole node's
+     * listing unreadable over one oddly named account.
+     */
+    #[Test]
+    #[DataProvider('unusualButSingleNames')]
+    public function a_single_name_however_unusual_is_read_as_that_account(string $encoded, string $name): void
+    {
+        $this->fakeBodies(['CMD_API_SHOW_USERS' => 'list[]=alice&list[]='.$encoded]);
+
+        $accounts = (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node());
+
+        $this->assertSame(['alice', $name], array_map(static fn ($a): string => $a->username, $accounts));
+    }
+
+    /**
+     * An element of the listing is an account only when it is one name. One
+     * that is not a string used to be filtered out without a word — so
+     * `list[][]=bob` was an empty node, and every live account on it missing
+     * to reconciliation — and one that is two names joined by a comma or a
+     * newline was read as a single account whose name no account has, so
+     * both real ones were missing and a stranger was reported in their
+     * place. Either way the listing is not read; it is refused, as any other
+     * unreadable read is.
+     */
+    #[Test]
+    #[DataProvider('listingsWhoseElementsAreNotNames')]
+    public function a_listing_with_an_element_that_is_not_one_account_name_is_refused(string $body): void
+    {
+        $this->fakeBodies(['CMD_API_SHOW_USERS' => $body]);
+
+        try {
+            $result = (new DirectAdminHostingProvider(new SecretRedactor))->listAccounts($this->node());
+        } catch (HostingProviderException $refusal) {
+            $this->assertStringContainsString('is not one account name', $refusal->getMessage());
+
+            return;
+        }
+
+        $this->fail('A listing with an element that is not one account name was read as: '.json_encode($result));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
     public static function emptyListings(): iterable
     {
         yield 'an empty value' => ['list='];

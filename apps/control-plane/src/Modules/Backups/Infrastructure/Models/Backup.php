@@ -312,6 +312,39 @@ class Backup extends Model
      */
     public function recordPoll(): void
     {
+        $this->writeOnTheAttemptItRead(['last_polled_at' => now(), 'poll_count' => $this->poll_count + 1]);
+    }
+
+    /**
+     * Write the handle a restore's provider call returned, if the row is
+     * still on the restore that call started — or refuse, as a race.
+     *
+     * The handle arrives after the call, and the call can outlive its
+     * attempt: the row handed to a person once its window passed, settled,
+     * and another restore started. As a plain save it landed on that next
+     * restore, and the sweep then polled this call's task and settled the
+     * next restore by it (F-09). The attempt this copy read is the one
+     * the restore action moved to `restoring`, with no handle yet.
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    public function recordRestoreHandle(string $taskId): void
+    {
+        $this->writeOnTheAttemptItRead(['restore_task_id' => $taskId]);
+    }
+
+    /**
+     * Write `$values` only where the compare-and-set in
+     * {@see self::transitionTo()} would write: the state and the attempt this
+     * copy last read or wrote. Otherwise nothing is written and the refusal
+     * says it was a race.
+     *
+     * @param  array<string, mixed>  $values
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    private function writeOnTheAttemptItRead(array $values): void
+    {
         $expected = BackupState::from((string) $this->getRawOriginal('state'));
 
         $query = $this->onTheAttemptItRead(
@@ -319,10 +352,7 @@ class Backup extends Model
             $this->attemptColumns($expected),
         );
 
-        $polledAt = now();
-        $count = $this->poll_count + 1;
-
-        if ($query->update(['last_polled_at' => $polledAt, 'poll_count' => $count]) === 0) {
+        if ($query->update($values) === 0) {
             $stored = static::query()->whereKey($this->getKey())->toBase()->value('state');
 
             throw $stored === $expected->value
@@ -330,8 +360,7 @@ class Backup extends Model
                 : IllegalBackupTransitionException::movedUnderneath((string) $this->getKey(), $expected, is_string($stored) ? $stored : null, $expected);
         }
 
-        $this->forceFill(['last_polled_at' => $polledAt, 'poll_count' => $count])
-            ->syncOriginalAttributes(['last_polled_at', 'poll_count']);
+        $this->forceFill($values)->syncOriginalAttributes(array_keys($values));
     }
 
     /**
@@ -370,6 +399,39 @@ class Backup extends Model
         $this->compareAndSet(BackupState::NeedsReview, $next, [...$attributes, 'quarantined_from' => null]);
 
         return $next;
+    }
+
+    /**
+     * What names the review this copy read, for a verdict to be bound to.
+     *
+     * The operator's verdict is given hours after they read the review, and
+     * the settling request reads the row afresh, so the compare-and-set in
+     * {@see self::settleReview()} compares against a copy read a moment ago,
+     * not the one the operator looked at. The review list hands out this
+     * token and the verdict carries it back; the settling action compares it
+     * with the row it has locked.
+     *
+     * It is the review's attempt, as {@see self::attemptColumns()} names it
+     * for `needs_review` — which operation was interrupted, and that
+     * operation's handle and start — digested with the row's id. So it tells
+     * two reviews of one archive apart exactly as far as those columns do:
+     * two attempts of one operation, both without a handle, started in the
+     * same stored instant and both lost, would read the same. Null for a row
+     * not in review.
+     */
+    public function reviewToken(): ?string
+    {
+        if ($this->getRawOriginal('state') !== BackupState::NeedsReview->value) {
+            return null;
+        }
+
+        $read = [(string) $this->getKey()];
+
+        foreach ($this->attemptColumns(BackupState::NeedsReview) as $column) {
+            $read[$column] = $this->getRawOriginal($column);
+        }
+
+        return hash('sha256', (string) json_encode($read));
     }
 
     /**

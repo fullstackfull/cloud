@@ -161,7 +161,7 @@ final readonly class ReconcileBackup
              * A restore that was recorded and whose handle has not arrived:
              * the request is still inside its provider call, or its process
              * died between the `Restoring` transition and the write of
-             * `restore_task_id`, which are deliberately two saves so that a
+             * `restore_task_id`, which are deliberately two writes so that a
              * crash still leaves evidence a restore was started.
              *
              * That transition clears any previous attempt's handle in the same

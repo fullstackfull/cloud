@@ -1305,10 +1305,13 @@ return [
     'api.admin.backups.resolve' => [
         'tag' => 'Operator',
         'summary' => 'Record a verdict on a restore or verification the platform lost track of',
-        'description' => 'For a row in `needs_review` whose interrupted operation was a restore or a verification, and no other (422 otherwise). `completed` or `failed`, with what the operator read at the provider: a restore becomes `restored` or returns to `succeeded` with the archive intact; a verification becomes `verified` or `failed` (unreadable). Audited in the same transaction, and the customer is told the outcome under the same key the poller would have used. Nothing here calls a provider.',
+        'description' => 'For a row in `needs_review` whose interrupted operation was a restore or a verification, and no other (422 otherwise). `completed` or `failed`, with what the operator read at the provider: a restore becomes `restored` or returns to `succeeded` with the archive intact; a verification becomes `verified` or `failed` (unreadable). `review` is the token the review list gave for the row: the verdict is about that review, and if the row has since been settled and gone back to review for a later attempt it is refused (409 `backup.review_changed`) and nothing is written. Audited in the same transaction, and the customer is told the outcome under the same key the poller would have used. Nothing here calls a provider.',
         'permission' => 'backup.manage',
-        'body' => ['verdict', 'evidence'],
+        'body' => ['verdict', 'evidence', 'review'],
         'response' => $one('AdminBackupVerdict'),
+        'errors' => [
+            409 => 'The row is in a different review from the one the verdict names. `backup.review_changed`; nothing was written. Read the list again.',
+        ],
     ],
     /* ---------------------------------------------------------------------
      | The estate an operator configures

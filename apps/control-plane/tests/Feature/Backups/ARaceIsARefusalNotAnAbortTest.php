@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Backups;
 
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileBackup;
 use Lynomia\Modules\Backups\Application\Actions\ReconcileBackupInventory;
+use Lynomia\Modules\Backups\Application\Actions\RequestBackupDeletion;
 use Lynomia\Modules\Backups\Application\Actions\RestoreBackupFiles;
 use Lynomia\Modules\Backups\Application\Actions\RestoreServiceBackup;
 use Lynomia\Modules\Backups\Application\Actions\VerifyStoredArchives;
@@ -75,6 +78,116 @@ final class ARaceIsARefusalNotAnAbortTest extends VpsApiTestCase
         $this->assertSame(BackupState::Restoring, $row->state);
         $this->assertNotNull($row->restore_task_id);
         $this->assertNull($row->verification_task_id);
+    }
+
+    /**
+     * The sweep reads the row again under a lock, and the lock ends with that
+     * read. Its count of the attempt — `verification_requested_at` and
+     * `verification_attempts`, written before the provider is asked — comes
+     * after, and used to be a plain save: a restore started in between got a
+     * verification attempt counted against it, and the datastore was asked to
+     * verify an archive the sweep no longer had any business with.
+     */
+    #[Test]
+    public function a_restore_landing_after_the_verify_sweep_read_the_row_is_not_counted_as_its_attempt(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $archive = $this->archive($customer, $machine);
+        $datastore = $this->interleaving($machine);
+
+        // The sweep reads the cluster after its locked read of the row.
+        $fired = false;
+        ComputeCluster::retrieved(function () use (&$fired, $archive, $machine): void {
+            if ($fired) {
+                return;
+            }
+            $fired = true;
+            app(RestoreServiceBackup::class)->execute(Backup::query()->findOrFail($archive->id), $machine->fresh(), $machine->hostname);
+        });
+
+        $sweep = app(VerifyStoredArchives::class)->execute();
+
+        $this->assertTrue($fired);
+        $this->assertSame(1, $sweep->skipped, 'Somebody else\'s row now, and counted as such.');
+        $this->assertSame(0, $datastore->verificationsStarted, 'The datastore was not asked about a row that left the sweep.');
+
+        $row = $archive->refresh();
+        $this->assertSame(BackupState::Restoring, $row->state);
+        $this->assertSame(0, $row->verification_attempts, 'No verification attempt was made on this row\'s behalf.');
+        $this->assertNull($row->verification_requested_at);
+    }
+
+    /**
+     * The same write in the branch for an archive whose cluster is gone,
+     * which also records why: a deletion requested in between is not an
+     * archive the sweep failed to read back.
+     */
+    #[Test]
+    public function a_deletion_requested_after_the_verify_sweep_read_an_orphan_is_not_counted_as_its_attempt(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $orphan = $this->archive($customer, $machine, ['cluster_id' => null]);
+
+        // The sweep's lookup of the (missing) cluster, after its locked read.
+        $fired = false;
+        DB::listen(function (QueryExecuted $query) use (&$fired, $orphan): void {
+            if ($fired || ! str_contains($query->sql, 'compute_clusters')) {
+                return;
+            }
+            $fired = true;
+            app(RequestBackupDeletion::class)->execute(Backup::query()->findOrFail($orphan->id), RequestBackupDeletion::BY_RETENTION);
+        });
+
+        $sweep = app(VerifyStoredArchives::class)->execute();
+
+        $this->assertTrue($fired);
+        $this->assertSame(1, $sweep->skipped);
+
+        $row = $orphan->refresh();
+        $this->assertSame(BackupState::DeleteRequested, $row->state);
+        $this->assertSame(0, $row->verification_attempts);
+        $this->assertNull($row->verification_requested_at);
+        $this->assertNull($row->failure_reason, 'A sentence about a verification that was never attempted.');
+    }
+
+    /**
+     * Two sweeps that overlap both read the row waiting, under the lock one
+     * after the other. The count each writes is compared with the count it
+     * read, so the second finds the first's attempt already counted and
+     * leaves the row alone: the datastore is asked once, and the attempt is
+     * counted once. Without that comparison, a datastore that refuses was
+     * asked twice and the archive spent two of its attempts on one run.
+     */
+    #[Test]
+    public function two_overlapping_verify_sweeps_ask_once_and_count_once(): void
+    {
+        [$customer] = $this->accountWithOwner();
+        $machine = $this->machineFor($customer);
+        $archive = $this->archive($customer, $machine);
+        $datastore = $this->interleaving($machine);
+        $datastore->refuseVerification = true;
+
+        // The second sweep runs after the first has read the row and before
+        // it has counted its attempt.
+        $fired = false;
+        ComputeCluster::retrieved(function () use (&$fired): void {
+            if ($fired) {
+                return;
+            }
+            $fired = true;
+            app(VerifyStoredArchives::class)->execute();
+        });
+
+        app(VerifyStoredArchives::class)->execute();
+
+        $this->assertTrue($fired);
+        $this->assertSame(1, $datastore->verificationsStarted, 'Two overlapping sweeps asked twice.');
+
+        $row = $archive->refresh();
+        $this->assertSame(BackupState::Succeeded, $row->state);
+        $this->assertSame(1, $row->verification_attempts, 'One run, one attempt.');
     }
 
     #[Test]

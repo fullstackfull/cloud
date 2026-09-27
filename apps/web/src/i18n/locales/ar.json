@@ -1185,6 +1185,7 @@
       "accounts": "الحسابات",
       "unhealthy": "غير سليمة",
       "unlicensed": "بلا ترخيص",
+      "notReconciled": "الحسابات لم تُقارَن",
       "computeNodes": "عقد الحوسبة",
       "hostingNodes": "عقد الاستضافة",
       "noNodes": "لا عقد حوسبة مُعلَنة.",

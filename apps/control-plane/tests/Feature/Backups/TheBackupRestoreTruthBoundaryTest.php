@@ -451,7 +451,11 @@ final class TheBackupRestoreTruthBoundaryTest extends VpsApiTestCase
          * through the transition a second time: two workers racing on one row,
          * or a redelivered settlement, land exactly here.
          */
-        $backup->refresh()->transitionTo(BackupState::Restoring, ['restore_started_at' => now()]);
+        // The same restore: its own handle and its own start, which the key
+        // carries. `now()` here was a later second whenever the loop above
+        // crossed one, and that is a second attempt, rightly announced again.
+        $settled = $backup->refresh();
+        $settled->transitionTo(BackupState::Restoring, ['restore_started_at' => $settled->restore_started_at]);
 
         app(ReconcileBackup::class)->execute($backup->refresh());
 

@@ -242,7 +242,7 @@ paths:
         - "Operator"
       summary: "Record a verdict on a restore or verification the platform lost track of"
       description: |-
-        For a row in `needs_review` whose interrupted operation was a restore or a verification, and no other (422 otherwise). `completed` or `failed`, with what the operator read at the provider: a restore becomes `restored` or returns to `succeeded` with the archive intact; a verification becomes `verified` or `failed` (unreadable). Audited in the same transaction, and the customer is told the outcome under the same key the poller would have used. Nothing here calls a provider.
+        For a row in `needs_review` whose interrupted operation was a restore or a verification, and no other (422 otherwise). `completed` or `failed`, with what the operator read at the provider: a restore becomes `restored` or returns to `succeeded` with the archive intact; a verification becomes `verified` or `failed` (unreadable). `review` is the token the review list gave for the row: the verdict is about that review, and if the row has since been settled and gone back to review for a later attempt it is refused (409 `backup.review_changed`) and nothing is written. Audited in the same transaction, and the customer is told the outcome under the same key the poller would have used. Nothing here calls a provider.
 
         Requires the `backup.manage` permission.
       parameters:
@@ -263,6 +263,8 @@ paths:
                 verdict:
                   description: "See the endpoint description; validated server-side."
                 evidence:
+                  description: "See the endpoint description; validated server-side."
+                review:
                   description: "See the endpoint description; validated server-side."
       security:
         - sessionCookie: []
@@ -308,6 +310,12 @@ paths:
           headers:
             Retry-After:
               "$ref": "#/components/headers/RetryAfter"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Error"
+        409:
+          description: "The row is in a different review from the one the verdict names. `backup.review_changed`; nothing was written. Read the list again."
           content:
             "application/json":
               schema:
@@ -20188,6 +20196,9 @@ components:
           "$ref": "#/components/schemas/Timestamp"
         in_review_since:
           "$ref": "#/components/schemas/Timestamp"
+        review:
+          type: "string"
+          description: "Names this review: the interrupted operation and its attempt. A verdict sends it back as `review`, and is refused (409 `backup.review_changed`) if the row is in a different review by then."
     AdminBackupInReviewPage:
       type: "object"
       required:
@@ -20809,6 +20820,15 @@ components:
           type:
             - "string"
             - "null"
+        reconciled_at:
+          "$ref": "#/components/schemas/Timestamp"
+        reconcile_attempted_at:
+          "$ref": "#/components/schemas/Timestamp"
+        reconcile_error:
+          type:
+            - "string"
+            - "null"
+          description: "Why the reconciliation sweep's last attempt could not read this node's account listing, if it could not; null once one is read. While it is set, nothing on the node is being compared with the platform's records. `reconciled_at` is when they last were; `reconcile_attempted_at` is when the sweep last asked, and the sweep asks the least recently asked node first."
     AdminHostingNodePage:
       type: "object"
       required:

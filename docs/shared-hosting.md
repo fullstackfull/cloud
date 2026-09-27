@@ -113,6 +113,17 @@ had a working website rested entirely on its own record of having built one.
 | The two disagree about whether the account is switched off | `suspension_mismatch` | critical |
 | `account_count` disagrees with the rows | `spec_mismatch` on the node | warning |
 
+A node whose listing cannot be read — the panel does not answer, or the adapter refuses
+the listing as ambiguous (an element that is not a name, or a name holding a separator,
+whitespace or a control character that could be two names run together) — records no
+drift: an outage is not data loss. It is not silent either. The attempt is stamped
+(`reconcile_attempted_at`), the refusal is kept on the node (`reconcile_error`, shown as
+"Accounts not compared" on the Control Center's hosting node list and returned by
+`GET /api/admin/infrastructure/hosting-nodes`), and a warning is logged. `reconciled_at`
+still says when the accounts were last actually compared. The sweep asks the least
+recently *asked* node first, so an unreadable node waits behind the others rather than
+holding the front of every run.
+
 **Nothing is repaired.** Not at the panel and not in the platform's own rows.
 An account whose provenance nobody knows must not be handed to a customer as
 theirs, and one the platform cannot see must not be terminated on the strength

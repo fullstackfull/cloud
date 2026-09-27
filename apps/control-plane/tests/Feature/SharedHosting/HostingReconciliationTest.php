@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Feature\SharedHosting;
 
+use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
+use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Provisioning\Domain\Enums\DriftKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ResourceDrift;
+use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Lynomia\Modules\SharedHosting\Application\Actions\ReconcileHostingNodes;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\CreateAccountRequest;
 use Lynomia\Modules\SharedHosting\Domain\DTOs\RemoteAccount;
@@ -238,6 +242,58 @@ final class HostingReconciliationTest extends TestCase
         $this->assertSame(0, $outcome['nodes']);
         $this->assertSame(0, ResourceDrift::query()->count());
         $this->assertNull($this->node->fresh()?->reconciled_at);
+    }
+
+    /**
+     * A node whose listing cannot be read is not drift — but it is not
+     * nothing either. It used to be skipped without a word: no log, no
+     * record, and `reconciled_at` left null, which is exactly what put it at
+     * the front of the next sweep. A batch's worth of such nodes held the
+     * front for ever, and every other node's accounts went unchecked.
+     */
+    #[Test]
+    public function a_node_whose_listing_is_refused_is_recorded_and_does_not_hold_the_front_of_the_sweep(): void
+    {
+        config()->set('hosting.reconcile_batch', 1);
+
+        // A node checked yesterday, and one whose panel will not be read.
+        $this->node->forceFill(['reconciled_at' => now()->subDay(), 'reconcile_attempted_at' => now()->subDay()])->save();
+        $refusing = HostingNode::factory()->create([
+            'panel' => HostingPanel::Fake,
+            'status' => HostingNodeStatus::Active,
+            'account_count' => 0,
+            'hostname' => FakeHostingProvider::PROVIDER_FAILURE_MARKER.'-b.example.test',
+        ]);
+        $this->atPanel('strayone');
+
+        Log::spy();
+
+        $first = app(ReconcileHostingNodes::class)->execute();
+        $second = app(ReconcileHostingNodes::class)->execute();
+
+        $this->assertSame(0, $first['nodes'], 'The refusing node was asked first, and could not be read.');
+        $this->assertSame(1, $second['nodes'], 'The next sweep moved on to the node behind it.');
+        $this->assertSame(1, ResourceDrift::query()->where('provider_reference', 'strayone')->count());
+        $this->assertSame(now()->getTimestamp(), $this->node->fresh()?->reconciled_at?->getTimestamp());
+
+        $refused = $refusing->fresh();
+        $this->assertNotNull($refused);
+        $this->assertNull($refused->reconciled_at, 'Nothing was compared on it.');
+        $this->assertNotNull($refused->reconcile_attempted_at, 'It was asked, and it goes to the back.');
+        $this->assertNotNull($refused->reconcile_error);
+        Log::shouldHaveReceived('warning')->withArgs(
+            static fn (string $message, array $context): bool => ($context['node'] ?? null) === $refusing->slug,
+        )->once();
+
+        // And an operator reading the node list sees it.
+        $this->seed(RolePermissionSeeder::class);
+        $operator = User::factory()->create();
+        $operator->syncRoles([Role::SuperAdmin->value]);
+        $listed = collect($this->actingAs($operator)->getJson('/api/admin/infrastructure/hosting-nodes')->assertOk()->json('data'))
+            ->firstWhere('id', $refusing->id);
+        $this->assertSame($refused->reconcile_error, $listed['reconcile_error'] ?? null);
+        $this->assertNull($listed['reconciled_at']);
+        $this->assertNotNull($listed['reconcile_attempted_at']);
     }
 
     #[Test]

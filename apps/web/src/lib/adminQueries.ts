@@ -341,6 +341,13 @@ export interface AdminHostingNode {
   disk_used_mib: number | null
   disk_total_mib: number | null
   load_average: number | null
+  last_synced_at: string | null
+  /** When the node's accounts were last compared with the panel's. */
+  reconciled_at: string | null
+  /** When the reconciliation sweep last asked, read or not. */
+  reconcile_attempted_at: string | null
+  /** Why that attempt could not be read, if it could not; null once one is. */
+  reconcile_error: string | null
 }
 
 export function useAdminHostingNodes(page: number) {

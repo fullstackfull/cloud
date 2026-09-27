@@ -46,11 +46,15 @@ A row in `needs_review` whose `quarantined_from` is `restoring` or `verifying` i
 operation the platform stopped watching after `backups.max_poll_hours`. The archive is
 not the problem; the platform's knowledge is.
 
-1. `GET /api/admin/backups/needs-review` for the row, its task id and when it started.
+1. `GET /api/admin/backups/needs-review` for the row, its task id, when it started, and
+   its `review` token.
 2. Read that task's log on the hypervisor or the datastore. A restore may still be
    running: while the row is in review, no other restore of that machine will start.
-3. `POST /api/admin/backups/{backup}/resolve` with `verdict` `completed` or `failed` and
-   the `evidence` you read. It is audited, and the customer is told the outcome.
+3. `POST /api/admin/backups/{backup}/resolve` with `verdict` `completed` or `failed`, the
+   `evidence` you read, and the `review` token from step 1 (required). It is audited, and
+   the customer is told the outcome. If the row has been settled and gone back to review
+   for a later attempt since you read it, the verdict is refused (409
+   `backup.review_changed`) and nothing is written: start again at step 1.
 
 ## What not to do
 

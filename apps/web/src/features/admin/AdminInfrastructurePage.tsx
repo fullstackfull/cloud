@@ -140,7 +140,26 @@ export function AdminInfrastructurePage() {
         </span>
       ),
     },
-    { key: 'status', header: t('admin.infrastructure.status'), cell: (node) => <StatusBadge status={node.status} /> },
+    {
+      key: 'status',
+      header: t('admin.infrastructure.status'),
+      cell: (node) => (
+        <span className="flex items-center gap-2">
+          <StatusBadge status={node.status} />
+          {node.reconcile_error === null ? null : (
+            /*
+              A node whose account listing could not be read is not compared
+              with the platform's records at all: nothing on it is reported
+              missing, and nothing is reported as fine either. The reason is
+              the adapter's, in its words.
+            */
+            <span title={node.reconcile_error}>
+              <Badge tone="warning">{t('admin.infrastructure.notReconciled')}</Badge>
+            </span>
+          )}
+        </span>
+      ),
+    },
     {
       key: 'accounts',
       header: t('admin.infrastructure.accounts'),

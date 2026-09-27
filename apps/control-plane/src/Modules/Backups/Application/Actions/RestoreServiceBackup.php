@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Backups\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Backups\Domain\Enums\BackupState;
 use Lynomia\Modules\Backups\Domain\Enums\FileRestoreState;
 use Lynomia\Modules\Backups\Domain\Exceptions\BackupProviderException;
@@ -234,8 +235,28 @@ final readonly class RestoreServiceBackup
          * finds the archive if the restore goes wrong, which is exactly when
          * it is needed — and the table's unique index on (provider,
          * provider_task_id) could reject the write outright.
+         *
+         * And only onto this attempt ({@see Backup::recordRestoreHandle()}).
+         * The call can outlive the attempt it started: past `max_poll_hours`
+         * a handleless row goes to a person, who may settle it, and another
+         * restore may start. This handle written onto that one — as a plain
+         * save did — is the sweep polling this task and settling that
+         * restore by it. Refused, the handle is not lost: it is logged with
+         * the row, for the person who has to find a restore the platform no
+         * longer holds a row for.
          */
-        $backup->forceFill(['restore_task_id' => $operation->taskId])->save();
+        try {
+            $backup->recordRestoreHandle($operation->taskId);
+        } catch (IllegalBackupTransitionException $raced) {
+            if (! $raced->wasRaced()) {
+                throw $raced;
+            }
+
+            Log::warning('A restore handle arrived after its attempt had ended; it was not written onto the row as it now stands.', [
+                'backup_id' => $backup->getKey(),
+                'restore_task_id' => $operation->taskId,
+            ]);
+        }
 
         return $backup->refresh();
     }

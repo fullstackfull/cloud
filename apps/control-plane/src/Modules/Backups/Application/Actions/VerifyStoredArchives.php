@@ -192,11 +192,11 @@ final readonly class VerifyStoredArchives
              * the attempt is what the attempt limit needs to end it, and the
              * stamp moves it behind archives nobody has asked about yet.
              */
-            $backup->forceFill([
-                'verification_requested_at' => now(),
-                'verification_attempts' => $backup->verification_attempts + 1,
+            if (! $this->countAttempt($backup, [
                 'failure_reason' => 'the cluster this backup was taken on no longer exists, so the archive cannot be read back',
-            ])->save();
+            ])) {
+                return VerificationAttempt::Superseded;
+            }
 
             return VerificationAttempt::Refused;
         }
@@ -219,10 +219,9 @@ final readonly class VerifyStoredArchives
          * evidence that the attempt happened; a counter raised afterwards
          * would let a provider that kills the worker be asked for ever.
          */
-        $backup->forceFill([
-            'verification_requested_at' => now(),
-            'verification_attempts' => $backup->verification_attempts + 1,
-        ])->save();
+        if (! $this->countAttempt($backup)) {
+            return VerificationAttempt::Superseded;
+        }
 
         try {
             $operation = $provider->startVerification(
@@ -275,6 +274,46 @@ final readonly class VerifyStoredArchives
         }
 
         return VerificationAttempt::Started;
+    }
+
+    /**
+     * Count this attempt against the archive — only if the row is still the
+     * one the locked read above found waiting, with the count it read.
+     *
+     * The lock ends with that read, and this write comes after it. As a plain
+     * save it landed on whatever the row had become: a restore started in
+     * between had a verification attempt (and, for an orphan, a sentence about
+     * verification) written onto it, and the datastore was then asked to
+     * verify an archive the sweep no longer had any business with. Compared
+     * on the count as well, so of two overlapping sweeps that both read the
+     * row waiting, one counts the attempt and asks, and the other is refused.
+     * Refused, nothing is written and nothing is asked: the row is whoever
+     * moved it's.
+     *
+     * @param  array<string, mixed>  $also  written in the same statement
+     */
+    private function countAttempt(Backup $backup, array $also = []): bool
+    {
+        $values = [
+            'verification_requested_at' => now(),
+            'verification_attempts' => $backup->verification_attempts + 1,
+            ...$also,
+        ];
+
+        $written = Backup::query()
+            ->whereKey($backup->getKey())
+            ->where('state', BackupState::Succeeded->value)
+            ->whereNull('verified')
+            ->where('verification_attempts', $backup->verification_attempts)
+            ->update($values);
+
+        if ($written === 0) {
+            return false;
+        }
+
+        $backup->forceFill($values)->syncOriginalAttributes(array_keys($values));
+
+        return true;
     }
 
     /**
