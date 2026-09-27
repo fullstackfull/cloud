@@ -170,7 +170,10 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
          * wallet: the order WhatAnInvoiceStillHolds declares for a paid
          * invoice taken after a subscription.
          */
-        DB::transaction(function () use ($change, $event): void {
+        // Read before the subscription's lock, never under it (B2).
+        $runs = $this->delivery->whatTheMachineRuns(Subscription::query()->find($change->subscription_id));
+
+        DB::transaction(function () use ($change, $event, $runs): void {
             /** @var Subscription|null $subscription */
             $subscription = Subscription::query()->lockForUpdate()->find($change->subscription_id);
 
@@ -213,7 +216,7 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
              */
             $refusal = $recorded->delivered_at !== null || $superseded
                 ? null
-                : $this->delivery->refusalForTheChange($recorded);
+                : $this->delivery->refusalForTheChange($recorded, $runs);
 
             if ($refusal !== null) {
                 /** @var Invoice $invoice */

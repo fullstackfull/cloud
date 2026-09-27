@@ -13,6 +13,7 @@ use Lynomia\Modules\Billing\Application\Queries\WhatAnInvoiceStillHolds;
 use Lynomia\Modules\Billing\Domain\Enums\TransactionStatus;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Payments\Domain\Enums\TransactionKind;
 use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
@@ -104,14 +105,38 @@ final readonly class PayInvoiceFromWallet
     ) {}
 
     /**
+     * The machine the plan change this invoice bills would resize, as the
+     * hypervisor reports it; null when it bills none, or it cannot be read.
+     * A provider call: taken outside every transaction.
+     */
+    public function whatTheMachineRuns(Invoice $invoice): ?VmResources
+    {
+        return $this->planChanges->whatTheMachineRunsForTheInvoice($invoice);
+    }
+
+    /**
+     * @param  VmResources|false|null  $runs  that reading, taken by a caller before its own transaction;
+     *                                        false to take it here
+     *
      * @throws WalletPaymentRefusedException
      * @throws InvoiceNotPayableException
      */
-    public function execute(Customer $customer, Invoice $invoice, string $idempotencyKey): InvoiceSettlement
+    public function execute(Customer $customer, Invoice $invoice, string $idempotencyKey, VmResources|false|null $runs = false): InvoiceSettlement
     {
         $ledgerKey = self::ledgerKey($customer, $idempotencyKey);
 
-        return DB::transaction(function () use ($customer, $invoice, $idempotencyKey, $ledgerKey): InvoiceSettlement {
+        /*
+         * The machine a plan change's invoice pays for is read from the
+         * hypervisor before the invoice's lock, never under it (B2), and the
+         * capacity question below asks with that reading. A caller that
+         * opens a transaction of its own around this one reads first
+         * (whatTheMachineRuns()) and passes it; false: read here.
+         */
+        if ($runs === false) {
+            $runs = $this->whatTheMachineRuns($invoice);
+        }
+
+        return DB::transaction(function () use ($customer, $invoice, $idempotencyKey, $ledgerKey, $runs): InvoiceSettlement {
             /** @var Invoice $locked */
             $locked = Invoice::query()->whereKey($invoice->getKey())->lockForUpdate()->firstOrFail();
 
@@ -178,7 +203,7 @@ final readonly class PayInvoiceFromWallet
             // Nor is a plan change that can no longer be delivered paid for
             // from the wallet: the question the card payment asks
             // (StartInvoicePayment), F-07.
-            $refused = $this->planChanges->refusalForTheInvoice($locked);
+            $refused = $this->planChanges->refusalForTheInvoice($locked, $runs);
 
             if ($refused !== null) {
                 Log::warning('A wallet payment was refused because the plan change its invoice bills can no longer be delivered.', [

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Handlers;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
+use Lynomia\Modules\Compute\Application\Services\CapacityLocks;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
@@ -77,6 +79,7 @@ final readonly class DestroyVpsHandler implements ProvisioningHandler
         private IpAllocator $addresses,
         private ReleaseNodeCapacity $capacity,
         private SecretRedactor $redactor,
+        private CapacityLocks $locks,
     ) {}
 
     public function kind(): ProvisioningJobKind
@@ -117,16 +120,37 @@ final readonly class DestroyVpsHandler implements ProvisioningHandler
         }
 
         $addresses = $this->releaseTheAddresses($machine);
-        $capacity = $this->releaseTheCapacity($machine);
 
         /*
+         * The capacity and the row go together, under a lock on the machine's
+         * row taken first - the lock a resize restates the machine's
+         * commitment under (MachineCommitment::restate()). A resize's restate
+         * is then wholly before this release, which gives back what it wrote,
+         * or after the row is gone, and writes nothing. Released outside that
+         * lock, a resize that settled between this release and the delete
+         * found nothing live and committed the machine again under a key of
+         * its own, for a machine this job had just removed (D7-1, round
+         * seven).
+         *
          * The row goes last. Everything above is keyed on it — the assignments
          * by the machine, the reservation by the service — so a worker that
          * died halfway through leaves a machine row whose redelivery finds the
          * releases already done and idempotent, rather than an orphaned
          * address nothing can be traced back to.
          */
-        $machine->delete();
+        $capacity = DB::transaction(function () use ($machine): int {
+            $locked = VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->first();
+
+            if ($locked === null) {
+                // Another delivery of this destroy finished first.
+                return 0;
+            }
+
+            $released = $this->releaseTheCapacity($locked);
+            $locked->delete();
+
+            return $released;
+        });
 
         return ProvisioningResult::succeeded(
             metadata: [
@@ -221,10 +245,30 @@ final readonly class DestroyVpsHandler implements ProvisioningHandler
     {
         $released = 0;
 
+        /*
+         * Every live reservation of the service is released in this one
+         * transaction (execute()), so they are locked in the one order every
+         * capacity path takes (ReserveNodeCapacity's class docblock): the
+         * reservation rows ascending by id, then every node they are on,
+         * then every pool, each ascending by id (CapacityLocks) - before the
+         * first release takes any of them. Released one by one, each release
+         * locking its own node and pool, two reservations on different nodes
+         * took node, pool, node, pool, which another path taking both nodes
+         * first could deadlock against.
+         */
+        /** @var list<NodeCapacityReservation> $reservations */
         $reservations = NodeCapacityReservation::query()
             ->where('service_id', $machine->service_id)
             ->whereNull('released_at')
-            ->get();
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->all();
+
+        $this->locks->nodesThenPools(
+            array_values(array_map(static fn (NodeCapacityReservation $r): string => (string) $r->node_id, $reservations)),
+            array_values(array_filter(array_map(static fn (NodeCapacityReservation $r): ?string => $r->storage_id, $reservations))),
+        );
 
         foreach ($reservations as $reservation) {
             $node = ComputeNode::query()->find($reservation->node_id);

@@ -147,7 +147,7 @@ final readonly class StartInvoicePayment
     private function assertWhatItBuysCanStillBeDelivered(Invoice $invoice): void
     {
         if ($invoice->order_id === null) {
-            $refused = $this->planChanges->refusalForTheInvoice($invoice);
+            $refused = $this->planChanges->refusalForTheInvoice($invoice, $this->planChanges->whatTheMachineRunsForTheInvoice($invoice));
 
             if ($refused !== null) {
                 Log::warning('A payment was refused because the plan change its invoice bills can no longer be delivered.', [

@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Vps\Application\Handlers;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ProvisioningHandler;
@@ -38,6 +39,26 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  * is the one that runs next to the provider call.
  *
  * ---------------------------------------------------------------------------
+ * The machine is looked at before it is changed
+ * ---------------------------------------------------------------------------
+ *
+ * The change asked of the hypervisor is worked out from the machine as the
+ * hypervisor reports it just before, not from the row: F-15's "look before
+ * you act", for a resize. A disk growth is a growth, not a size (the provider
+ * contract, and the Proxmox adapter's "+"), so a growth worked out from the
+ * row was applied twice whenever the row was behind the machine - an
+ * indeterminate 40 -> 400 GiB growth that landed went to review, the
+ * operator's retry grew it by 360 again, and the customer had 760 GiB and
+ * paid for 400 (D7-2, round seven). Now a disk already at or above the
+ * target is not grown, vCPU and memory already at the target are not sent,
+ * and a machine already the target shape is a success whose row and
+ * commitment are settled to what the hypervisor reported. A machine the
+ * hypervisor reports no such machine for is not resized and nothing is
+ * committed (`vps.machine_not_found`, transient); a read that fails is the
+ * same, nothing having been asked. What is not reported (a figure the
+ * adapter could not read) is taken from the row.
+ *
+ * ---------------------------------------------------------------------------
  * The row moves after the provider does
  * ---------------------------------------------------------------------------
  *
@@ -64,7 +85,8 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *    FailureClass Capacity, code `compute.node_capacity_exceeded` - and
  *    nothing is grown or committed. Only what grows is asked about: a shrink
  *    is never refused (NodeCapacityPolicy::assessGrowth()), and a target no
- *    larger than the machine in any dimension is recorded without asking
+ *    larger in any dimension than the machine as the hypervisor reported it
+ *    just before (the look above) is recorded without asking
  *    (MachineCommitment::grows()) - a machine with no live commitment is
  *    committed whole, which read a pure shrink of it as growth (N3);
  *  - once the hypervisor has confirmed and the machine row holds the shape
@@ -72,11 +94,26 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *    locks, which is where a shrink gives its difference back;
  *  - a refusal the hypervisor gave (nothing changed) sets it back to the
  *    machine row, read the same way; an outcome that is unknown leaves it
- *    raised, because the machine may have grown and the job goes to a person.
+ *    raised, because the machine may have grown and the job goes to a person;
+ *  - a resize the hypervisor accepted whose machine then cannot be read back
+ *    (`vps.resize_unverified`) is settled to what is known: the machine is
+ *    either the shape read just before the resize or the shape the accepted
+ *    change makes of it, so the commitment is set to the larger of the two,
+ *    per dimension, and any excess the ceiling held above both is given
+ *    back. It used to be left at the ceiling, and nothing settled it after
+ *    (the failure is permanent). The row is not written - nothing confirmed
+ *    the shape - and a retry, which looks at the machine first, settles both
+ *    to what the hypervisor then reports.
  *
  * Nothing serialises two resizes of one machine, which is why the settling
  * restatements read the row under the lock rather than use the model this
- * job holds (MachineCommitment::asRecorded()).
+ * job holds (MachineCommitment::asRecorded()). A destroy is serialised with
+ * every restatement by the machine row's lock (MachineCommitment::restate()):
+ * a restatement that finds the row gone writes nothing, and the resize ends
+ * `vps.unknown_machine`, rather than committing a machine that no longer
+ * exists (D7-1, round seven) - at each of its four restatements: the
+ * ceiling, the settle after a refusal, the settle of an unverified resize
+ * and the settle of a confirmed one (and the already-correct settle).
  *
  * The reservation row carries the machine's shape throughout, so the destroy
  * (which gives back what the row records) gives back what is held.
@@ -157,32 +194,76 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
             );
         }
 
+        try {
+            $provider = $this->computeProviders->for($cluster);
+
+            // Looked at before it is changed (the class docblock).
+            $actual = $provider->getVm($node->provider_name, (string) $machine->provider_id);
+        } catch (ComputeProviderException $e) {
+            // Only a read: nothing was asked of the machine and nothing is committed.
+            return ProvisioningResult::failed(
+                FailureClass::Transient,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: $this->redactor->redact($e->context()),
+            );
+        }
+
+        if ($actual === null) {
+            return ProvisioningResult::failed(
+                FailureClass::Transient,
+                'vps.machine_not_found',
+                'The hypervisor reports no such machine, so nothing was resized.',
+                metadata: ['virtual_machine_id' => $machineId, 'node' => $node->provider_name],
+            );
+        }
+
+        $currentVcpu = $actual->vcpu ?? $machine->vcpu;
+        $currentMemory = $actual->memoryMib ?? $machine->memory_mib;
+        $currentDisk = $actual->diskGib ?? $machine->disk_gib;
+        $runs = new VmResources($currentVcpu, $currentMemory, $currentDisk);
+
         /*
          * The disk field is a growth, not a size. The provider contract says
          * so and the Proxmox adapter's "+" prefix depends on it: an absolute
          * value smaller than the current one silently truncates, and one
-         * larger would be applied twice on a retry.
+         * larger would be applied twice on a retry. So it is measured from
+         * the disk the hypervisor reports now, and a disk already at or past
+         * the target is not grown again.
          */
-        $diskGrowth = $targetDisk === null || $targetDisk === $machine->disk_gib
+        $diskGrowth = $targetDisk === null || $targetDisk <= $currentDisk
             ? null
-            : $targetDisk - $machine->disk_gib;
+            : $targetDisk - $currentDisk;
 
         $request = new ResizeVmRequest(
-            vcpu: $targetVcpu === $machine->vcpu ? null : $targetVcpu,
-            memoryMib: $targetMemory === $machine->memory_mib ? null : $targetMemory,
+            vcpu: $targetVcpu === $currentVcpu ? null : $targetVcpu,
+            memoryMib: $targetMemory === $currentMemory ? null : $targetMemory,
             diskGib: $diskGrowth,
         );
 
         if ($request->isEmpty()) {
             /*
              * The machine is already the shape the plan sells — a retry after
-             * a successful resize, or a plan change that only moved the price.
-             * Answered as a success: the state the caller wanted is the state
-             * that exists. A commitment left raised by an earlier attempt
-             * that stopped after the machine was written is settled to it.
+             * a resize that landed (its answer lost, or its settle not
+             * reached), or a plan change that only moved the price. Answered
+             * as a success: the state the caller wanted is the state that
+             * exists. The row is written to what the hypervisor reports, and
+             * a commitment left raised by an earlier attempt is settled to
+             * it.
              */
-            if ($this->commitment->heldBy($machine, $node) !== null) {
-                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
+            $recorded = [$machine->vcpu, $machine->memory_mib, $machine->disk_gib];
+            $machine->vcpu = $currentVcpu;
+            $machine->memory_mib = $currentMemory;
+            $machine->disk_gib = $currentDisk;
+            $rewritten = $recorded !== [$machine->vcpu, $machine->memory_mib, $machine->disk_gib];
+
+            if ($rewritten) {
+                $machine->save();
+            }
+
+            if (($rewritten || $this->commitment->heldBy($machine, $node) !== null)
+                && ! $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false)) {
+                return $this->goneWhileResizing($machineId);
             }
 
             return ProvisioningResult::succeeded(
@@ -198,13 +279,18 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
          * asks about too).
          */
         try {
-            $this->commitment->restate(
+            if (! $this->commitment->restate(
                 $machine,
                 $node,
                 $this->commitment->ceiling($machine, $targetVcpu, $targetMemory, $targetDisk),
-                // A shrink is recorded, never refused (MachineCommitment::grows()).
-                refuse: $this->commitment->grows($machine, $targetVcpu, $targetMemory, $targetDisk),
-            );
+                // A shrink is recorded, never refused (MachineCommitment::grows()),
+                // measured from the machine as the hypervisor reported it above.
+                refuse: $this->commitment->grows($machine, $targetVcpu, $targetMemory, $targetDisk, $runs),
+                // Only what the ceiling adds above what the machine runs is asked.
+                alreadyRuns: $runs,
+            )) {
+                return $this->goneWhileResizing($machineId);
+            }
         } catch (NodeCapacityExceededException $e) {
             // See the class docblock for what this comes to for a paid upgrade.
             return ProvisioningResult::failed(
@@ -216,21 +302,21 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         }
 
         try {
-            $provider = $this->computeProviders->for($cluster);
-
             $operation = $provider->resizeVm($node->provider_name, (string) $machine->provider_id, $request);
         } catch (ComputeProviderException $e) {
             /*
              * Indeterminate becomes a TIMEOUT, which the engine escalates and
              * never retries. A resize the platform stopped waiting for may
-             * have grown the disk; repeating it would grow it again, and the
-             * customer would be billed for one upgrade and given two. Its
-             * commitment stays raised, for the same reason: the machine may
-             * be the larger shape. A refusal changed nothing, so the
-             * commitment goes back to the machine as recorded.
+             * have grown the disk; an operator's retry looks at the machine
+             * before it grows anything (the class docblock), so it does not
+             * grow it again. Its commitment stays raised, for the same
+             * reason: the machine may be the larger shape. A refusal changed
+             * nothing, so the commitment goes back to the machine as
+             * recorded.
              */
-            if (! $e->isIndeterminate()) {
-                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
+            if (! $e->isIndeterminate()
+                && ! $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false)) {
+                return $this->goneWhileResizing($machineId);
             }
 
             return ProvisioningResult::failed(
@@ -243,14 +329,41 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
 
         // Read back rather than assumed. This is the step that makes the
         // difference between "we asked" and "the machine is that size".
-        $state = $provider->getVm($node->provider_name, (string) $machine->provider_id);
+        try {
+            $state = $provider->getVm($node->provider_name, (string) $machine->provider_id);
+            $unread = $state === null ? 'the hypervisor reported no such machine' : null;
+        } catch (ComputeProviderException $e) {
+            $state = null;
+            $unread = $this->redactor->redactString($e->getMessage());
+        }
 
         if ($state === null) {
+            /*
+             * Settled to what is known (the class docblock): the shape read
+             * before the resize or the one the accepted change makes, the
+             * larger per dimension. Not left at the ceiling.
+             */
+            $known = new VmResources(
+                vcpu: max($currentVcpu, $request->vcpu ?? $currentVcpu),
+                memoryMib: max($currentMemory, $request->memoryMib ?? $currentMemory),
+                diskGib: $currentDisk + ($diskGrowth ?? 0),
+            );
+
+            if (! $this->commitment->restate($machine, $node, $known, refuse: false)) {
+                return $this->goneWhileResizing($machineId);
+            }
+
             return ProvisioningResult::failed(
                 FailureClass::Permanent,
                 'vps.resize_unverified',
                 'The machine could not be read back after the resize.',
-                metadata: ['virtual_machine_id' => $machineId],
+                metadata: [
+                    'virtual_machine_id' => $machineId,
+                    'reason' => (string) $unread,
+                    'committed_vcpu' => $known->vcpu,
+                    'committed_memory_mib' => $known->memoryMib,
+                    'committed_disk_gib' => $known->diskGib,
+                ],
             );
         }
 
@@ -262,7 +375,9 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         // The commitment is now the machine as the hypervisor confirmed it:
         // a shrink gives its difference back here. Recorded, not refused -
         // the machine is this size whatever the node says.
-        $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
+        if (! $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false)) {
+            return $this->goneWhileResizing($machineId);
+        }
 
         return ProvisioningResult::succeeded(
             remoteJobId: $operation->taskId,
@@ -273,6 +388,21 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
                 'memory_mib' => $machine->memory_mib,
                 'disk_gib' => $machine->disk_gib,
             ],
+        );
+    }
+
+    /**
+     * The machine's row went while this resize ran - a destroy removed it
+     * (MachineCommitment::restate() found it gone under its lock) - so
+     * nothing was committed for it.
+     */
+    private function goneWhileResizing(string $machineId): ProvisioningResult
+    {
+        return ProvisioningResult::failed(
+            FailureClass::Permanent,
+            'vps.unknown_machine',
+            'The virtual machine was removed while it was being resized, so nothing is committed for it.',
+            metadata: ['virtual_machine_id' => $machineId],
         );
     }
 

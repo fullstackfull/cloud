@@ -257,6 +257,68 @@ final class AResizeMovesTheNodeCommitmentTest extends TestCase
         $this->assertSame(16384, NodeCapacityReservation::query()->whereNull('released_at')->sole()->memory_mib);
     }
 
+    #[Test]
+    public function a_resize_whose_machine_cannot_be_read_back_is_settled_to_what_is_known(): void
+    {
+        /*
+         * vps.resize_unverified is permanent, and it used to leave the
+         * commitment at the ceiling the growth raised it to - here the 16 /
+         * 65536 / 400 an earlier unknown outcome left held - with nothing to
+         * settle it after. What is known: the machine was 2 / 4096 / 40 just
+         * before this resize (looked at), and the hypervisor accepted a change
+         * to 2 / 8192 / 40. The machine is one of the two.
+         */
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->failResizesWith = ComputeProviderException::requestFailed('fake', 'resize_vm', [], indeterminate: true);
+        $this->resize($machine, vcpu: 16, memoryMib: 65536, diskGib: 400);
+        $this->assertNodeHolds(vms: 1, vcpu: 16, memoryMib: 65536, diskGib: 400);
+        $this->hypervisor->failResizesWith = null;
+
+        $this->hypervisor->afterAResize = function (): void {
+            $this->hypervisor->reportNoMachines = true;
+        };
+        $resize = $this->resize($machine->refresh(), vcpu: 2, memoryMib: 8192, diskGib: 40);
+
+        $this->assertSame(FailureClass::Permanent, $resize->failure_class);
+        $this->assertSame('vps.resize_unverified', $resize->result['error']['code'] ?? null);
+        $this->assertNodeHolds(vms: 1, vcpu: 2, memoryMib: 8192, diskGib: 40);
+        $this->assertSame(40, $this->poolCommitted());
+        $this->assertSame([2, 8192, 40], $this->liveShape());
+        // Nothing confirmed the shape, so the row is as it was.
+        $this->assertSame(4096, $machine->refresh()->memory_mib);
+    }
+
+    #[Test]
+    public function a_resize_whose_read_back_fails_is_settled_to_what_is_known(): void
+    {
+        $machine = $this->aBuiltMachine();
+        $this->hypervisor->failResizesWith = ComputeProviderException::requestFailed('fake', 'resize_vm', [], indeterminate: true);
+        $this->resize($machine, vcpu: 16, memoryMib: 65536, diskGib: 400);
+        $this->hypervisor->failResizesWith = null;
+
+        // A shrink of memory whose read-back fails: the machine may still be
+        // the 4096 it was, so that is what stays committed - not 65536.
+        $this->hypervisor->afterAResize = function (): void {
+            $this->hypervisor->failReadsWith = ComputeProviderException::requestFailed('fake', 'get_vm', [], indeterminate: true);
+        };
+        $resize = $this->resize($machine->refresh(), vcpu: 1, memoryMib: 2048, diskGib: 80);
+        $this->hypervisor->failReadsWith = null;
+
+        $this->assertSame('vps.resize_unverified', $resize->result['error']['code'] ?? null);
+        $this->assertNodeHolds(vms: 1, vcpu: 2, memoryMib: 4096, diskGib: 80);
+        $this->assertSame([2, 4096, 80], $this->liveShape());
+    }
+
+    /**
+     * @return array{int, int, int}
+     */
+    private function liveShape(): array
+    {
+        $live = NodeCapacityReservation::query()->whereNull('released_at')->sole();
+
+        return [(int) $live->vcpu, (int) $live->memory_mib, (int) $live->disk_gib];
+    }
+
     private function aBuiltMachine(): VirtualMachine
     {
         $job = $this->createJob();

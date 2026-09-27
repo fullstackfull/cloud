@@ -83,9 +83,12 @@ the address configured, and waiting does not tell it. `GET
 the timeout closed. Look at the provider for that job's machine, then either:
 
 - **adopt** it (`POST /api/admin/infrastructure/ip-addresses/{address}/adopt`) when the
-  machine is there — the address stays with it, as an assignment that names no machine,
-  and **it never comes back to the pool**: nothing on the platform ends an assignment that
-  names no machine; or
+  machine is there — the address stays with it, as an assignment on the service's VPS
+  machine record when the service has one (an adopted VPS build does, once the build job
+  itself is adopted — do that first), and destroying that machine later brings the
+  address back through quarantine as any other machine's does. With no machine record
+  the assignment names no machine, and **it never comes back to the pool**: nothing on
+  the platform ends an assignment that names no machine; or
 - **release** it (`POST /api/admin/infrastructure/ip-addresses/{address}/release`) when
   the machine demonstrably does not exist — the address is available again at once.
 

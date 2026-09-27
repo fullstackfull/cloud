@@ -1049,16 +1049,17 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
     }
 
     #[Test]
-    public function adopting_a_vps_leaves_it_unmanaged_and_its_address_in_quarantine(): void
+    public function adopting_a_vps_records_its_machine_and_leaves_its_address_in_quarantine(): void
     {
         /*
-         * A characterization, not an endorsement. Adoption is generic and
-         * shared with shared hosting: it records the job and delivers the
-         * service, and it creates no machine row and commits no address — the
-         * address it would need was quarantined when the first attempt timed
-         * out. The runbook tells the operator so and what to do about it by
-         * hand; this test is what makes that paragraph a measurement, and
-         * closing either gap breaks it and points at the paragraph.
+         * Adoption records the job and delivers the service, and for a VPS
+         * build it now writes the machine's row from what the hypervisor
+         * reports (D7-3, round seven: this test used to characterise the row
+         * as missing, which left the machine unmanageable). It still commits
+         * no address — the address it would need was quarantined when the
+         * first attempt timed out, and waits for a person. The runbook says
+         * so; this test is what makes that paragraph a measurement, and
+         * closing the address gap breaks it and points at the paragraph.
          */
         $job = $this->createJob();
 
@@ -1069,7 +1070,8 @@ final class AnIndeterminateCreateIsNotRetriedIntoASecondMachineTest extends Test
         $this->adoptAsOperator($job, (string) $job->refresh()->reserved_provider_id)->assertOk();
 
         $this->assertSame(ServiceStatus::Active, $job->service()->firstOrFail()->status);
-        $this->assertSame(0, VirtualMachine::query()->count());
+        $machine = VirtualMachine::query()->sole();
+        $this->assertSame([$job->service_id, (string) $job->reserved_provider_id, (string) $this->node->id], [$machine->service_id, $machine->provider_id, $machine->node_id]);
         $this->assertSame(1, IpAddress::query()->where('status', IpAddressStatus::Quarantined)->count());
         $this->assertSame(0, IpAddress::query()->where('status', IpAddressStatus::Assigned)->count());
     }

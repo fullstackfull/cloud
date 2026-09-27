@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Fixture\Clock;
 
 use Carbon\Carbon;
+use Closure;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\Attributes\SetUp;
 use Illuminate\Foundation\Testing\Wormhole;
@@ -2878,5 +2879,418 @@ final class RunnerReachesTheTraitsTest extends TestCase
     public function clean_the_traits_set_up_through_an_overridden_runner(): void
     {
         $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Round seven: a test-now setter given a callable, hand comparisons, assertThat
+// with constraint factories, and a clock read handed to a helper.
+final class RoundSevenReadsTest extends TestCase
+{
+    #[Test]
+    public function clean_a_test_now_closure_returning_a_fixed_time(): void
+    {
+        Carbon::setTestNow(function () {
+            if ($this->early) {
+                return Carbon::parse('2026-01-01 00:00:00');
+            }
+
+            return new CarbonImmutable('2026-01-02 00:00:00');
+        });
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_a_test_now_arrow_function_returning_a_fixed_time(): void
+    {
+        Carbon::setTestNow(static fn () => new DateTimeImmutable('2026-01-01 00:00:00'));
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_a_test_now_closure_that_steps(): void
+    {
+        Carbon::setTestNow(static fn (CarbonImmutable $now) => $now->addSecond());
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_a_test_now_closure_after_a_pin(): void
+    {
+        $this->freezeSecond();
+        Carbon::setTestNow(static function () use ($clock) {
+            return $clock->next();
+        });
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_a_test_now_closure_that_sometimes_returns_another_time(): void
+    {
+        Carbon::setTestNow(function () {
+            if ($this->early) {
+                return Carbon::parse('2026-01-01 00:00:00');
+            }
+
+            return Carbon::parse('+1 minute');
+        });
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_a_test_now_first_class_callable(): void
+    {
+        Carbon::setTestNow($this->clock(...));
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // Disclosed: a callable held in a variable is not seen as one.
+    #[Test]
+    public function clean_a_test_now_variable_pins(): void
+    {
+        Carbon::setTestNow($clock);
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_a_hand_comparison_failing_in_else(): void
+    {
+        if ($row->day === now()->toDateString()) {
+            $this->addToAssertionCount(1);
+        } else {
+            $this->fail('the day moved');
+        }
+    }
+
+    #[Test]
+    public function found_a_hand_comparison_in_an_elseif(): void
+    {
+        if ($row === null) {
+            $this->markTestIncomplete();
+        } elseif ($row->day !== now()->toDateString()) {
+            self::fail('the day moved');
+        }
+    }
+
+    #[Test]
+    public function clean_a_hand_comparison_then_fail_frozen(): void
+    {
+        $this->freezeSecond();
+        if ($row->at != now()) {
+            $this->fail('moved');
+        }
+    }
+
+    #[Test]
+    public function clean_a_hand_comparison_without_fail(): void
+    {
+        if ($row->day !== now()->toDateString()) {
+            $this->markTestSkipped('another day');
+        }
+    }
+
+    #[Test]
+    public function found_a_static_constraint(): void
+    {
+        $this->assertThat($row->at, self::identicalTo(now()));
+    }
+
+    #[Test]
+    public function clean_a_bound_constraint(): void
+    {
+        $this->assertThat($row->at, $this->greaterThan(now()->subMinute()));
+    }
+
+    #[Test]
+    public function found_a_clock_read_handed_to_a_helper(): void
+    {
+        $this->run();
+        $this->expectStamp(now());
+    }
+
+    #[Test]
+    public function found_a_clock_read_handed_to_an_assert_named_helper(): void
+    {
+        $this->assertStampedAt($row, now()->toDateString());
+    }
+
+    #[Test]
+    public function found_a_clock_read_handed_to_a_helper_by_name(): void
+    {
+        // Named for its second parameter: bound by position, it would bind the first.
+        $this->expectLater(expected: now()->toDateString());
+    }
+
+    #[Test]
+    public function clean_a_clock_read_handed_to_a_helper_called_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->expectStamp(now());
+    }
+
+    #[Test]
+    public function clean_a_stored_value_handed_to_a_helper(): void
+    {
+        $this->expectStamp($row->at);
+    }
+
+    #[Test]
+    public function clean_a_bound_parameter_does_not_leak_out_of_the_helper(): void
+    {
+        $this->forgetsTheStamp(now());
+        $this->assertSame($at, $row->at);
+    }
+
+    #[Test]
+    public function found_a_clock_read_handed_through_two_helpers(): void
+    {
+        $this->passesTheStampOn(now());
+    }
+
+    #[Test]
+    public function clean_a_clock_read_handed_to_a_variadic_parameter(): void
+    {
+        $this->expectEach(now());
+    }
+
+    #[Test]
+    public function found_a_clock_read_handed_on_by_a_helper_that_pins_first(): void
+    {
+        $this->outerPinning(now());
+    }
+
+    #[Test]
+    public function found_a_clock_read_handed_to_a_helper_that_pins_first(): void
+    {
+        $this->checkAfterPinning(now());
+    }
+
+    #[Test]
+    public function clean_a_pinned_clock_read_handed_to_a_helper_that_lets_go(): void
+    {
+        $this->freezeSecond();
+        $this->checkAfterLettingGo(now());
+    }
+
+    #[Test]
+    public function found_a_test_now_closure_from_callable(): void
+    {
+        Carbon::setTestNow(Closure::fromCallable([$this, 'clock']));
+        $this->assertEquals(now(), $row->at);
+    }
+
+    // Disclosed: a closure returned by a call is read as a value, and pins.
+    #[Test]
+    public function clean_a_test_now_closure_returned_by_a_method_pins(): void
+    {
+        Carbon::setTestNow($this->steppingClock());
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_a_test_now_closure_whose_nested_closure_returns_anything(): void
+    {
+        Carbon::setTestNow(function () {
+            $later = static function () {
+                return Carbon::parse('+1 minute');
+            };
+
+            return Carbon::parse('2026-01-01 00:00:00');
+        });
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function found_a_native_clock_read_handed_to_a_helper_even_frozen(): void
+    {
+        $this->freezeSecond();
+        $this->expectStamp(time());
+    }
+
+    private function clock(): CarbonImmutable
+    {
+        return CarbonImmutable::now();
+    }
+
+    private function expectStamp($at): void
+    {
+        $this->assertSame($at, $this->row->at);
+    }
+
+    private function assertStampedAt($row, $day): void
+    {
+        $this->assertSame($day, $row->day);
+    }
+
+    private function expectLater($unused = null, $expected = null): void
+    {
+        $this->assertSame($expected, $this->row->day);
+    }
+
+    private function outerPinning($when): void
+    {
+        $this->freezeSecond();
+        $this->expectStamp($when);
+    }
+
+    private function checkAfterPinning($at): void
+    {
+        $this->freezeSecond();
+        $this->assertSame($at, $this->row->at);
+    }
+
+    private function checkAfterLettingGo($at): void
+    {
+        Carbon::setTestNow();
+        $this->assertSame($at, $this->row->at);
+    }
+
+    private function steppingClock(): Closure
+    {
+        return static fn () => CarbonImmutable::now();
+    }
+
+    private function forgetsTheStamp($at): void
+    {
+        $this->log($at);
+    }
+
+    private function passesTheStampOn($stamp): void
+    {
+        $this->expectStamp($stamp);
+    }
+
+    private function expectEach(...$stamps): void
+    {
+        $this->assertSame($stamps, $this->row->stamps);
+    }
+}
+
+// A test-now setter given a closure that steps, in a shared setUp(): not a pin.
+final class SteppingClockInSetUpTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Carbon::setTestNow(static fn (CarbonImmutable $now) => $now->addMillisecond());
+    }
+
+    #[Test]
+    public function found_a_test_now_closure_in_a_shared_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// CONSTRAINT_METHODS, FAIL_METHODS, and assertThat's compared positions.
+final class RoundSevenElementsTest extends TestCase
+{
+    #[Test]
+    public function found_constraint_method__equalTo(): void
+    {
+        $this->assertThat($row->at, self::equalTo(now()));
+    }
+
+    #[Test]
+    public function found_constraint_method__identicalTo(): void
+    {
+        $this->assertThat($row->at, $this->identicalTo(now()));
+    }
+
+    #[Test]
+    public function found_constraint_method__equalToCanonicalizing(): void
+    {
+        $this->assertThat($row->days, $this->equalToCanonicalizing([now()->toDateString()]));
+    }
+
+    #[Test]
+    public function found_constraint_method__equalToIgnoringCase(): void
+    {
+        $this->assertThat($row->day, $this->equalToIgnoringCase(now()->format('D')));
+    }
+
+    #[Test]
+    public function found_constraint_method__stringContains(): void
+    {
+        $this->assertThat($row->line, $this->stringContains(now()->toDateString()));
+    }
+
+    #[Test]
+    public function found_constraint_method__stringStartsWith(): void
+    {
+        $this->assertThat($row->line, $this->stringStartsWith(now()->toDateString()));
+    }
+
+    #[Test]
+    public function found_constraint_method__stringEndsWith(): void
+    {
+        $this->assertThat($row->line, $this->stringEndsWith(now()->toDateString()));
+    }
+
+    #[Test]
+    public function found_constraint_method__matchesRegularExpression(): void
+    {
+        $this->assertThat($row->line, $this->matchesRegularExpression('/'.now()->toDateString().'/'));
+    }
+
+    #[Test]
+    public function found_constraint_method__containsEqual(): void
+    {
+        $this->assertThat($row->days, $this->containsEqual(now()->toDateString()));
+    }
+
+    #[Test]
+    public function found_constraint_method__containsIdentical(): void
+    {
+        $this->assertThat($row->days, $this->containsIdentical(now()->toDateString()));
+    }
+
+    #[Test]
+    public function found_constraint_method__arrayHasKey(): void
+    {
+        $this->assertThat($row->byDay, $this->arrayHasKey(now()->toDateString()));
+    }
+
+    #[Test]
+    public function found_constraint_method__logicalNot(): void
+    {
+        $this->assertThat($row->at, $this->logicalNot(identicalTo(now())));
+    }
+
+    #[Test]
+    public function found_constraint_method__logicalAnd(): void
+    {
+        $this->assertThat($row->at, $this->logicalAnd($this->isInstanceOf(Carbon::class), identicalTo(now())));
+    }
+
+    #[Test]
+    public function found_constraint_method__logicalOr(): void
+    {
+        $this->assertThat($row->at, $this->logicalOr($this->isNull(), identicalTo(now())));
+    }
+
+    #[Test]
+    public function found_constraint_method__logicalXor(): void
+    {
+        $this->assertThat($row->at, $this->logicalXor($this->isNull(), identicalTo(now())));
+    }
+
+    #[Test]
+    public function found_fail_method__fail(): void
+    {
+        if ($row->day !== now()->toDateString()) {
+            $this->fail('the day moved');
+        }
+    }
+
+    #[Test]
+    public function found_equality__assertThat__0(): void
+    {
+        $this->assertThat(now()->toDateString(), $this->anything());
+    }
+
+    #[Test]
+    public function found_equality__assertThat__1(): void
+    {
+        $this->assertThat($row->at, identicalTo(now()));
     }
 }

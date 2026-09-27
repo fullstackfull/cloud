@@ -141,7 +141,15 @@ final readonly class ApplyPlanChange
          * made again. The resize job row is written inside it too; the job is
          * only dispatched once the transaction commits.
          */
-        return DB::transaction(function () use ($subscription, $plan, $price, $actor): PlanChangeOutcome {
+        /*
+         * The machine is read from the hypervisor before the transaction and
+         * its locks, and the quote under them asks with that reading: a
+         * hypervisor read under the subscription's lock held it, and the
+         * orders' and invoices', for as long as the hypervisor took (B2).
+         */
+        $runs = $this->quotes->whatTheMachineRuns($subscription);
+
+        return DB::transaction(function () use ($subscription, $plan, $price, $actor, $runs): PlanChangeOutcome {
             /*
              * The subscription row is the mutex for everything below: a second
              * change for the same subscription waits here, and then finds the
@@ -165,7 +173,7 @@ final readonly class ApplyPlanChange
              */
             $this->collected->lockTheInvoicesItDrawsOn($locked);
 
-            $quote = $this->quotes->execute($locked, $plan, $price);
+            $quote = $this->quotes->execute($locked, $plan, $price, runs: $runs);
 
             if (! $quote->isAvailable()) {
                 /*

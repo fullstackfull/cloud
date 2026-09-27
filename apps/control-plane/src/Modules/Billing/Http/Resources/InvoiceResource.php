@@ -207,7 +207,18 @@ final class InvoiceResource extends JsonResource
             return true;
         }
 
-        return app(PlanChangeDelivery::class)->refusalForTheInvoice($this->resource) === null;
+        /*
+         * One hypervisor read per open plan-change invoice on the page, taken
+         * here, outside any transaction. That is at most one per machine: a
+         * subscription holds at most one open plan-change invoice (a change
+         * is refused while one is open - QuotePlanChange's
+         * invoice_outstanding), and the page is bounded by its per_page. Not
+         * read, the answer would be the stricter one, and could say not
+         * payable of an invoice the payment, which reads, would take.
+         */
+        $delivery = app(PlanChangeDelivery::class);
+
+        return $delivery->refusalForTheInvoice($this->resource, $delivery->whatTheMachineRunsForTheInvoice($this->resource)) === null;
     }
 
     /**

@@ -9,6 +9,7 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -62,8 +63,15 @@ use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
  *  - VPS, when the shape changes: the service has a machine to resize, and
  *    its node and pool can hold its growth - the refusal the resize itself
  *    makes before it grows the machine, asked as a dry run
- *    (growthTheNodeCannotHold()); a target no larger than the machine in any
- *    dimension is not asked, as the resize does not ask it. The target plan's
+ *    (growthTheNodeCannotHold()). Growth is measured as the resize measures
+ *    it, from the machine as the hypervisor reports it (a target no larger
+ *    than that in any dimension is not asked, and only what the target adds
+ *    above what the machine runs is), and, when the hypervisor cannot be
+ *    read, asked as if the machine ran nothing beyond what its commitment
+ *    holds - the stricter answer, so a quote that passes is a change the
+ *    resize does not refuse for capacity (MachineCommitment::
+ *    whyTheGrowthWouldNotFit()). The hypervisor is read before any lock
+ *    (whatTheMachineRuns()), never under one. The target plan's
  *    placement (cluster, address pool, image, a node in
  *    service), which checkout asks before building a new machine, is not
  *    asked: a resize is applied to the machine where it already runs and
@@ -101,8 +109,10 @@ final readonly class PlanChangeDelivery
      * deliver.
      *
      * @param  PlanResources  $current  what the service runs now, as QuotePlanChange reads it
+     * @param  VmResources|null  $runs  the VPS machine as the hypervisor reported it, read before any lock
+     *                                  (whatTheMachineRuns()); null asks the stricter question
      */
-    public function refusal(Subscription $subscription, Plan $plan, PlanResources $current): ?string
+    public function refusal(Subscription $subscription, Plan $plan, PlanResources $current, ?VmResources $runs = null): ?string
     {
         $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
 
@@ -126,7 +136,7 @@ final readonly class PlanChangeDelivery
 
             return $machine === null
                 ? 'the service has no virtual machine to resize'
-                : $this->growthTheNodeCannotHold($machine, PlanResources::fromArray($plan->resources ?? []));
+                : $this->growthTheNodeCannotHold($machine, PlanResources::fromArray($plan->resources ?? []), $runs);
         }
 
         return 'nothing can change the shape of this product in place';
@@ -140,10 +150,12 @@ final readonly class PlanChangeDelivery
      * (MachineCommitment::whyTheGrowthWouldNotFit(), over
      * RestateNodeCommitment::whyItWouldNotFit()): the growth is measured from
      * the machine's live capacity commitment as ResizeVpsHandler finds it -
-     * to the larger, per dimension, of what is held and the target - and
-     * held to the node's ceilings on what grows (NodeCapacityPolicy::assessGrowth())
+     * to the larger, per dimension, of what is held and the target - less
+     * what the machine is read at the hypervisor to run already, and held to
+     * the node's ceilings on what grows (NodeCapacityPolicy::assessGrowth())
      * and to the pool's uncommitted space. So the quote and the resize ask one
-     * question. This used to measure from the machine's recorded shape
+     * question; when the hypervisor cannot be read the quote asks the
+     * stricter one (the class docblock). This used to measure from the machine's recorded shape
      * against the node alone: a machine whose commitment is held raised was
      * refused a change the resize would take without asking for anything,
      * and a growth its pool could not hold was sold and then refused at the
@@ -153,9 +165,9 @@ final readonly class PlanChangeDelivery
      * under the locks, and a growth that fits here and not there is refused
      * there as capacity (ResizeVpsHandler's class docblock).
      */
-    private function growthTheNodeCannotHold(VirtualMachine $machine, PlanResources $target): ?string
+    private function growthTheNodeCannotHold(VirtualMachine $machine, PlanResources $target, ?VmResources $runs): ?string
     {
-        $reason = $this->commitment->whyTheGrowthWouldNotFit($machine, $target->vcpu, $target->memoryMib, $target->diskGib);
+        $reason = $this->commitment->whyTheGrowthWouldNotFit($machine, $target->vcpu, $target->memoryMib, $target->diskGib, $runs);
 
         return $reason === null ? null : 'the node or pool the machine runs on cannot hold its growth: '.$reason;
     }
@@ -164,7 +176,7 @@ final readonly class PlanChangeDelivery
      * The same question for the plan change a proration invoice bills, asked
      * when it is paid. Null for an invoice that bills no recorded plan change.
      */
-    public function refusalForTheInvoice(Invoice $invoice): ?string
+    public function refusalForTheInvoice(Invoice $invoice, ?VmResources $runs = null): ?string
     {
         if ($invoice->order_id !== null || $invoice->subscription_id === null) {
             return null;
@@ -173,7 +185,7 @@ final readonly class PlanChangeDelivery
         /** @var PlanChange|null $change */
         $change = PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->first();
 
-        return $change === null ? null : $this->refusalForTheChange($change);
+        return $change === null ? null : $this->refusalForTheChange($change, $runs);
     }
 
     /**
@@ -182,7 +194,7 @@ final readonly class PlanChangeDelivery
      * is heard ({@see ResizeOnPlanChangeSettlement}), because a card payment
      * is captured after it was opened and the answer can change in between.
      */
-    public function refusalForTheChange(PlanChange $change): ?string
+    public function refusalForTheChange(PlanChange $change, ?VmResources $runs = null): ?string
     {
         if ($change->to_plan_id === null) {
             return null;
@@ -202,7 +214,58 @@ final readonly class PlanChangeDelivery
             return 'the plan this change moves onto no longer exists';
         }
 
-        return $this->refusal($subscription, $plan, $this->runningBefore($subscription, $change));
+        return $this->refusal($subscription, $plan, $this->runningBefore($subscription, $change), $runs);
+    }
+
+    /**
+     * The VPS machine behind this subscription as the hypervisor reports it
+     * now (MachineCommitment::whatItRuns()), for the capacity question;
+     * null when there is none, it is not a VPS, or it cannot be read.
+     *
+     * A provider call, so taken before any transaction or lock and passed to
+     * the refusal asked under them: ApplyPlanChange before the subscription's
+     * lock, PayInvoiceFromWallet (or the controller around it, before the
+     * audit's transaction) before the invoice's, ResizeOnPlanChangeSettlement
+     * before the subscription's, and once per request where a request asks
+     * about several plans (QuotePlanChange::options()). Asked under those
+     * locks it held them for as long as the hypervisor took (B2, the
+     * verification of round seven D). What a reading older than the lock can
+     * cost is stated at MachineCommitment::whyTheGrowthWouldNotFit().
+     */
+    public function whatTheMachineRuns(?Subscription $subscription): ?VmResources
+    {
+        if ($subscription === null) {
+            return null;
+        }
+
+        $service = Service::query()->where('subscription_id', $subscription->getKey())->first();
+
+        if ($service === null || $service->kind !== ProductKind::Vps->value) {
+            return null;
+        }
+
+        /** @var VirtualMachine|null $machine */
+        $machine = VirtualMachine::query()->where('service_id', $service->getKey())->first();
+
+        return $machine === null ? null : $this->commitment->whatItRuns($machine);
+    }
+
+    /**
+     * whatTheMachineRuns() for the subscription a plan change's invoice
+     * bills; null for an invoice that bills no recorded plan change, which
+     * asks nothing of it.
+     */
+    public function whatTheMachineRunsForTheInvoice(Invoice $invoice): ?VmResources
+    {
+        if ($invoice->order_id !== null || $invoice->subscription_id === null) {
+            return null;
+        }
+
+        if (! PlanChange::query()->where('proration_invoice_id', $invoice->getKey())->exists()) {
+            return null;
+        }
+
+        return $this->whatTheMachineRuns(Subscription::query()->find($invoice->subscription_id));
     }
 
     /**
@@ -227,8 +290,10 @@ final readonly class PlanChangeDelivery
      *
      *  - A VPS with a machine: the machine's row (virtual_machines) - the
      *    shape the hypervisor confirmed, written by every resize that
-     *    completes (ResizeVpsHandler), and the shape the resize itself reads
-     *    to decide what grows and whether the disk would shrink.
+     *    completes (ResizeVpsHandler), and the shape the resize refuses a
+     *    disk shrink against. What grows, and whether the node can hold it,
+     *    the resize measures from the machine as the hypervisor reports it,
+     *    and so does the capacity question here (growthTheNodeCannotHold()).
      *  - Otherwise the service's own recorded allocation where it has one,
      *    and else the plan given (the subscription's, or the one the change
      *    left).

@@ -6,6 +6,7 @@ namespace Tests\Feature\Vps;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
+use Lynomia\Modules\Compute\Application\Services\CapacityLocks;
 use Lynomia\Modules\Compute\Domain\Contracts\ComputeProvider;
 use Lynomia\Modules\Compute\Domain\DTOs\CreateVmRequest;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
@@ -260,6 +261,7 @@ final class DestroyVpsHandlerTest extends TestCase
             app(IpAllocator::class),
             app(ReleaseNodeCapacity::class),
             app(SecretRedactor::class),
+            app(CapacityLocks::class),
         ))->execute($job);
     }
 
