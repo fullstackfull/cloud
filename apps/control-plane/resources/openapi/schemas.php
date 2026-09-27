@@ -2474,12 +2474,12 @@ return [
     'AdminOperator' => [
         'type' => 'object',
         'additionalProperties' => false,
-        'description' => 'Somebody who may operate the platform. Staff only: a customer login holds the baseline customer role and never appears here. No password state and no two-factor secret — whether two-factor is enabled is published, what it is is not.',
+        'description' => 'Somebody who may operate the platform. Staff only: a customer login holds the baseline customer role and never appears here; a customer who was made an operator holds both and appears with its staff roles only. No password state and no two-factor secret — whether two-factor is enabled is published, what it is is not.',
         'properties' => [
             'id' => ['$ref' => '#/components/schemas/Ulid'],
             'name' => ['type' => 'string'],
             'email' => ['type' => 'string'],
-            'roles' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'roles' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'The staff roles the login holds, in the platform\'s order of roles. `customer` is never listed: a customer who was made an operator keeps it, and it is not operator authority.'],
             'is_privileged' => ['type' => 'boolean'],
             'has_signed_in' => ['type' => 'boolean', 'description' => 'False for an invited operator who has not followed their one-time link yet.'],
             'two_factor_enabled' => ['type' => 'boolean'],
@@ -2489,9 +2489,9 @@ return [
     'AdminInvitedOperator' => [
         'type' => 'object',
         'additionalProperties' => false,
-        'description' => 'The operator an invitation created or promoted, as AdminOperator describes one, plus — for a super admin only — whether the address already had a login; any other caller gets a response that does not distinguish the two (see promoted_existing_account). An existing login — a customer account, perhaps one somebody else registered, since registration asks for no proof of the mailbox — is promoted with every credential it held taken away: its password is replaced by one nobody knows, its sessions, remember-me token and personal access tokens are revoked and its second factor is cleared, and the reset link the invitation mails is the only way in. Its customer memberships stay with the login, which from then on belongs to whoever proves the mailbox.',
+        'description' => 'The operator an invitation created or promoted, as AdminOperator describes one, plus — for a super admin only — whether the address already had a login; any other caller gets a response that does not distinguish the two (see promoted_existing_account). An existing login — a customer account, perhaps one somebody else registered, since registration asks for no proof of the mailbox — is promoted with every credential it held taken away: its password is replaced by one nobody knows, its sessions, remember-me token and personal access tokens are revoked and its second factor is cleared, and the reset link the invitation mails is the only way in. Its customer memberships and its customer role stay with the login, which from then on belongs to whoever proves the mailbox: the staff roles are added beside the customer role, not put in its place. The address of a deleted login is invited the same way: the login is restored and promoted, without any staff role it held when it was deleted.',
         'properties' => [
-            'id' => ['$ref' => '#/components/schemas/Ulid'],
+            'id' => ['oneOf' => [['$ref' => '#/components/schemas/Ulid'], ['type' => 'null']], 'description' => 'The login\'s id for a super admin; null for any other caller, because an id is a ULID whose first ten characters are the time the login was made, which would date a promoted login.'],
             'name' => ['type' => 'string', 'description' => 'The login\'s stored name for a super admin; for any other caller, the name supplied in the request.'],
             'email' => ['type' => 'string'],
             'roles' => ['type' => 'array', 'items' => ['type' => 'string']],
@@ -2499,7 +2499,7 @@ return [
             'has_signed_in' => ['type' => 'boolean', 'description' => 'False for an invited operator who has not followed their one-time link yet — a promoted login included, whatever sign-ins it had before.'],
             'two_factor_enabled' => ['type' => 'boolean'],
             'created_at' => ['$ref' => '#/components/schemas/Timestamp'],
-            'promoted_existing_account' => ['type' => ['boolean', 'null'], 'description' => 'True when the address already had a login that was promoted, false when a new one was created. Null unless the caller is a super admin. For any other caller the whole response is the same for a promoted login as for a new one: `name` is the name supplied in the request, `created_at` is null, and `has_signed_in` and `two_factor_enabled` are false (promotion clears both). The operator list still shows every operator\'s stored name and creation date to the same callers, a promoted one included.'],
+            'promoted_existing_account' => ['type' => ['boolean', 'null'], 'description' => 'True when the address already had a login that was promoted, false when a new one was created. Null unless the caller is a super admin. For any other caller the whole response — status and body — is the same for a promoted login as for a new one: the status is 201 either way, `id` and `created_at` are null, `name` is the name supplied in the request, `roles` lists the staff roles given (a promoted customer keeps its customer role, which is not listed), and `has_signed_in` and `two_factor_enabled` are false (promotion clears both). The operator list still shows every operator\'s id, stored name and creation date to the same callers, a promoted one included.'],
         ],
     ],
     'AdminRole' => [

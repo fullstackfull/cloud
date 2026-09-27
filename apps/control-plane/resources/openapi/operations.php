@@ -1495,7 +1495,7 @@ return [
     'api.admin.operators.index' => [
         'tag' => 'Operator',
         'summary' => 'The people who operate the platform',
-        'description' => 'Staff only — a customer login holds the baseline customer role and never appears here.',
+        'description' => 'Staff only — a customer login holds the baseline customer role and never appears here; a customer who was made an operator appears with its staff roles only.',
         'permission' => 'role.manage',
         'query' => ['q'],
         'response' => $many('AdminOperator'),
@@ -1503,7 +1503,7 @@ return [
     'api.admin.operators.store' => [
         'tag' => 'Operator',
         'summary' => 'Add an operator',
-        'description' => 'No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.',
+        'description' => 'No password is chosen: the person takes the account over through the one-time reset link the platform already issues, so there is never a moment when a credential somebody else picked opens an operator account. An address with an existing login that holds no staff role — a customer account, which anybody may have registered without proving the mailbox — is promoted, and every credential that login held is taken away before the roles land: password, sessions, remember-me token, personal access tokens and second factor. The staff roles are added beside its customer role, which it keeps. A deleted login\'s address is invited the same way: the login is restored, without any staff role it held when it was deleted, and promoted. Its address stays as verified as it was; completing the reset proves the mailbox and verifies it. An address that already holds a staff role is refused rather than silently re-roled. The roles go on through the same path a role change uses, so an invitation cannot hand out authority a direct change would have refused.',
         'permission' => 'role.manage',
         'body' => ['email', 'name', 'roles'],
         'response' => $one('AdminInvitedOperator', 201),
@@ -1511,7 +1511,7 @@ return [
     'api.admin.operators.roles' => [
         'tag' => 'Operator',
         'summary' => 'Change what an operator may do',
-        'description' => 'Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else\'s, so it becomes an operator only through an invitation, which takes them away first.',
+        'description' => 'Refusals, each an escalation if it were allowed: your own account is never yours to re-role (grant, use, revoke is the shortest escalation there is), a role you do not hold is not yours to grant or to take away, the last principal who can administer the platform cannot be stripped of it — the console bootstrap refuses once one exists, so a deployment that loses its last administrator has no supported way back — and a login that holds no staff role is not given one here (`rbac.not_an_operator`): its credentials may be somebody else\'s, so it becomes an operator only through an invitation, which takes them away first. The roles given are the login\'s staff roles from now on; the customer role is never given or taken here, so a customer who was made an operator and is given no roles is a customer again.',
         'permission' => 'role.manage',
         'body' => ['roles'],
         'response' => $one('AdminOperator'),
