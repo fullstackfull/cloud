@@ -17,6 +17,7 @@ use Lynomia\Modules\Infrastructure\Domain\Contracts\DeploymentController;
 use Lynomia\Modules\Infrastructure\Infrastructure\Deployment\DeploymentControllerFactory;
 use Lynomia\Modules\Provisioning\Domain\Contracts\DestructiveOperationLedger;
 use Lynomia\Modules\Provisioning\Domain\Contracts\HandlerRegistry;
+use Lynomia\Modules\Provisioning\Domain\Contracts\ReservationsFollowAnAdoption;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ResourceReservationReleaser;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Infrastructure\Registries\ProvisioningHandlerRegistry;
@@ -39,6 +40,7 @@ use Lynomia\Modules\Vps\Application\Handlers\RestartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StartVpsHandler;
 use Lynomia\Modules\Vps\Application\Handlers\StopVpsHandler;
 use Lynomia\Modules\Vps\Infrastructure\IpamReservationReleaser;
+use Lynomia\Modules\Vps\Infrastructure\NodeCapacityFollowsAnAdoption;
 use Lynomia\Modules\Vps\Infrastructure\NodeCapacityReleaser;
 use Lynomia\Modules\Vps\Infrastructure\VpsReinstallLedger;
 use Lynomia\Support\Provisioning\EveryDestructiveOperationLedger;
@@ -136,6 +138,14 @@ final class InfrastructureServiceProvider extends ServiceProvider
             $app->make(IpamReservationReleaser::class),
             $app->make(NodeCapacityReleaser::class),
         ]));
+
+        /*
+         * What an adoption moves to where the adopted resource is. One
+         * implementation: only a VPS build's node commitment is placed
+         * somewhere an adoption can contradict (D5); an address is the
+         * machine's wherever it runs.
+         */
+        $this->app->bind(ReservationsFollowAnAdoption::class, NodeCapacityFollowsAnAdoption::class);
 
         /*
          * The same composition, for the question an operator retry has to ask

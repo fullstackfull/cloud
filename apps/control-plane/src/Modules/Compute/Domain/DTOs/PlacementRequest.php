@@ -24,6 +24,11 @@ final readonly class PlacementRequest
      * @param  list<string>  $affinityNodeIds  Restricts placement to these nodes — a licence tied to a
      *                                         socket, or a machine that must sit beside its pair.
      * @param  list<string>  $excludedNodeIds  Nodes a retry already failed on.
+     * @param  string|null  $reservationKey  The key this placement commits under
+     *                                       (ReserveNodeCapacity). A live commitment under it is this build's own,
+     *                                       carried from an earlier attempt, and is not counted against the node and
+     *                                       pool it holds: the retry would otherwise find no room on the one node its
+     *                                       own commitment fills (D3).
      */
     public function __construct(
         public string $clusterId,
@@ -33,5 +38,6 @@ final readonly class PlacementRequest
         public CpuArchitecture $architecture = CpuArchitecture::X86_64,
         public array $affinityNodeIds = [],
         public array $excludedNodeIds = [],
+        public ?string $reservationKey = null,
     ) {}
 }

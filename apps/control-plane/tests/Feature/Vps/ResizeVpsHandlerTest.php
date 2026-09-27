@@ -19,6 +19,7 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
 use Lynomia\Modules\Vps\Application\Handlers\ResizeVpsHandler;
+use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -92,8 +93,9 @@ final class ResizeVpsHandlerTest extends TestCase
         $this->assertSame(80, $state->diskGib);
 
         // And the platform's record follows the hypervisor rather than the
-        // request: a shape that is wrong is capacity accounting that has
-        // drifted, and the next customer placed on this node is placed on a lie.
+        // request: a shape that is wrong is a record that says the customer
+        // has what they do not. (What the node is charged follows the shape
+        // too: AResizeMovesTheNodeCommitmentTest.)
         $machine = $this->machine->fresh();
         $this->assertSame(4, $machine?->vcpu);
         $this->assertSame(80, $machine->disk_gib);
@@ -167,7 +169,7 @@ final class ResizeVpsHandlerTest extends TestCase
      */
     private function resize(array $target): ProvisioningResult
     {
-        $handler = new ResizeVpsHandler($this->providers, app(SecretRedactor::class));
+        $handler = new ResizeVpsHandler($this->providers, app(SecretRedactor::class), app(MachineCommitment::class));
 
         /** @var ProvisioningJob $job */
         $job = ProvisioningJob::factory()->create([

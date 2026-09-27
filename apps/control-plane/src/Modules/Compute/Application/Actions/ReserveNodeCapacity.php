@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Compute\Application\Actions;
 
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Compute\Application\Services\CapacityLocks;
 use Lynomia\Modules\Compute\Domain\Enums\CpuArchitecture;
 use Lynomia\Modules\Compute\Domain\Enums\PlacementRejectionReason;
 use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
@@ -37,17 +38,20 @@ use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
  * One lock order
  * ---------------------------------------------------------------------------
  *
- * Every path that commits or gives back capacity — this action, a move of a
- * keyed commitment to another node or pool (below), and ReleaseNodeCapacity —
- * locks in one order: the reservation row, then `compute_nodes` rows
- * ascending by id, then `compute_storages` rows ascending by id, and nothing
- * of an earlier kind after one of a later kind. A move done as a release and
- * then a reserve locked old node, old pool, new node, new pool, while a plain
- * reserve on the new node locks new node, then pool: the two could each hold
- * what the other waited for, and PostgreSQL would kill an order or a build.
- * So a move takes every row it will touch up front, in this order, before it
- * gives anything back; the release and reserve that follow re-lock rows the
- * transaction already holds. Pinned by CapacityPathsTakeTheirLocksInOneOrderTest.
+ * Every path that commits, gives back or rewrites capacity — this action, a
+ * move of a keyed commitment to another node or pool (below),
+ * ReleaseNodeCapacity, RestateNodeCommitment (a resize, an adoption) and the
+ * inventory sync, whose UPDATEs lock the rows they write — locks in one
+ * order: the reservation row, then `compute_nodes` rows ascending by id, then
+ * `compute_storages` rows ascending by id, and nothing of an earlier kind
+ * after one of a later kind (CapacityLocks takes the last two). A move done
+ * as a release and then a reserve locked old node, old pool, new node, new
+ * pool, while a plain reserve on the new node locks new node, then pool: the
+ * two could each hold what the other waited for, and PostgreSQL would kill an
+ * order or a build. So a move takes every row it will touch up front, in this
+ * order, before it gives anything back; the release and reserve that follow
+ * re-lock rows the transaction already holds. Pinned by
+ * CapacityPathsTakeTheirLocksInOneOrderTest.
  */
 final readonly class ReserveNodeCapacity
 {
@@ -55,6 +59,7 @@ final readonly class ReserveNodeCapacity
         private NodeCapacityPolicy $policy,
         private CustomerNodeCensus $census,
         private ReleaseNodeCapacity $release,
+        private CapacityLocks $locks,
     ) {}
 
     /**
@@ -101,22 +106,33 @@ final readonly class ReserveNodeCapacity
              * the old one is given back and this one taken, in this one
              * transaction, so a refusal below leaves the old one standing as
              * it was.
+             *
+             * Read under its lock, and only so. The move's other rows are
+             * chosen from the row as locked: a row read without the lock
+             * may be moved by another worker holding the same build before
+             * the lock is taken, and a move that locked the node and pool
+             * the row used to name then gave back on the node it names now,
+             * locking that node after the pools - out of order (D4).
              */
             if ($reservationKey !== null) {
-                $existing = NodeCapacityReservation::query()
+                $held = NodeCapacityReservation::query()
                     ->where('reservation_key', $reservationKey)
                     ->whereNull('released_at')
+                    ->lockForUpdate()
                     ->first();
 
-                if ($existing !== null) {
-                    if ($existing->node_id === (string) $node->getKey() && $existing->storage_id === $storageId) {
+                if ($held !== null) {
+                    if ($held->node_id === (string) $node->getKey() && $held->storage_id === $storageId) {
                         /** @var ComputeNode $alreadyCommitted */
-                        $alreadyCommitted = ComputeNode::query()->findOrFail($existing->node_id);
+                        $alreadyCommitted = ComputeNode::query()->findOrFail($held->node_id);
 
                         return $alreadyCommitted;
                     }
 
-                    $this->lockForAMove($reservationKey, $existing, $node, $storageId);
+                    $this->locks->nodesThenPools(
+                        [(string) $held->node_id, (string) $node->getKey()],
+                        [$held->storage_id, $storageId],
+                    );
                     $this->release->execute($node, $resources, reservationKey: $reservationKey);
                 }
             }
@@ -229,38 +245,6 @@ final readonly class ReserveNodeCapacity
 
             return $locked;
         });
-    }
-
-    /**
-     * Takes every row a move touches, in the one order (the class docblock):
-     * the reservation, then both nodes ascending by id, then both pools
-     * ascending by id. One statement per row, in an order PHP chose, so the
-     * order does not depend on how the database sorts the ids.
-     */
-    private function lockForAMove(string $reservationKey, NodeCapacityReservation $existing, ComputeNode $node, ?string $storageId): void
-    {
-        NodeCapacityReservation::query()
-            ->where('reservation_key', $reservationKey)
-            ->whereNull('released_at')
-            ->lockForUpdate()
-            ->first();
-
-        $nodeIds = array_values(array_unique([(string) $existing->node_id, (string) $node->getKey()]));
-        sort($nodeIds, SORT_STRING);
-
-        foreach ($nodeIds as $id) {
-            ComputeNode::query()->lockForUpdate()->find($id);
-        }
-
-        $storageIds = array_values(array_unique(array_filter(
-            [(string) $existing->storage_id, (string) $storageId],
-            static fn (string $id): bool => $id !== '',
-        )));
-        sort($storageIds, SORT_STRING);
-
-        foreach ($storageIds as $id) {
-            ComputeStorage::query()->lockForUpdate()->find($id);
-        }
     }
 
     /**

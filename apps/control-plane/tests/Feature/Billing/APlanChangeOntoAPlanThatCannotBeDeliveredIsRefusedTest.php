@@ -14,9 +14,12 @@ use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
+use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
 use Lynomia\Modules\Compute\Domain\Services\NodeCapacityPolicy;
+use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -188,6 +191,46 @@ final class APlanChangeOntoAPlanThatCannotBeDeliveredIsRefusedTest extends TestC
         $this->assertSame(['not_deliverable'], $this->optionFor($subscription, (string) $large->getKey())['refusals'], 'A disk growth the node cannot hold was offered.');
 
         $node->forceFill(['allocated_storage_gib' => 0])->save();
+        $this->assertSame([], $this->optionFor($subscription, (string) $large->getKey())['refusals']);
+    }
+
+    #[Test]
+    public function the_quote_asks_the_resizes_own_question_of_a_commitment_held_raised(): void
+    {
+        /*
+         * The machine runs as 2/4096/40, but its commitment is held at
+         * 16/65536/400 (a larger resize whose outcome is unknown). The resize
+         * to 4/8192/80 commits the larger of the two and asks the node for
+         * nothing more, so it is delivered however full the node is. The
+         * quote measured the growth from the machine's recorded shape and
+         * refused it on a node with 1 GiB to spare.
+         */
+        [$subscription, $large, $node] = $this->vpsSubscriptionOnANode();
+        $machine = VirtualMachine::query()->where('node_id', $node->getKey())->sole();
+        app(ReserveNodeCapacity::class)->execute($node, new VmResources(16, 65_536, 400), reservationKey: 'build-1', serviceId: (string) $machine->service_id);
+        $node->refresh()->forceFill(['allocated_memory_mib' => app(NodeCapacityPolicy::class)->schedulableMemoryMib($node) - 1_024])->save();
+
+        $this->assertSame([], $this->optionFor($subscription, (string) $large->getKey())['refusals']);
+    }
+
+    #[Test]
+    public function the_quote_refuses_a_disk_growth_the_machines_pool_cannot_hold(): void
+    {
+        /*
+         * The node has disk to spare; the pool the machine's disk is in has
+         * 10 GiB uncommitted and the growth is 40. The resize refuses it as
+         * capacity before it grows anything - after the money moved, when
+         * the quote asked the node alone.
+         */
+        [$subscription, $large, $node] = $this->vpsSubscriptionOnANode();
+        $machine = VirtualMachine::query()->where('node_id', $node->getKey())->sole();
+        $pool = ComputeStorage::factory()->onNode($node)->create(['provider_name' => 'local-nvme', 'total_gib' => 50, 'available_gib' => 50]);
+        $machine->forceFill(['storage_name' => 'local-nvme'])->save();
+        app(ReserveNodeCapacity::class)->execute($node, new VmResources(2, 4_096, 40), storageId: (string) $pool->getKey(), reservationKey: 'build-1', serviceId: (string) $machine->service_id);
+
+        $this->assertSame(['not_deliverable'], $this->optionFor($subscription, (string) $large->getKey())['refusals']);
+
+        $pool->forceFill(['total_gib' => 200, 'available_gib' => 200])->save();
         $this->assertSame([], $this->optionFor($subscription, (string) $large->getKey())['refusals']);
     }
 

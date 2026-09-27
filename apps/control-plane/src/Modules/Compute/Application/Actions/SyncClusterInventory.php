@@ -7,6 +7,7 @@ namespace Lynomia\Modules\Compute\Application\Actions;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\DTOs\ClusterInventorySyncResult;
+use Lynomia\Modules\Compute\Application\Services\CapacityLocks;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteNodeState;
 use Lynomia\Modules\Compute\Domain\DTOs\RemoteStorageState;
 use Lynomia\Modules\Compute\Domain\Enums\NodeStatus;
@@ -17,6 +18,7 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
+use Throwable;
 
 /**
  * Refreshes what the platform believes about a cluster's hardware.
@@ -42,12 +44,31 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  *    Deleting it would cascade its machines' node_id to null and lose the only
  *    record of where a customer's server is — at the exact moment, a node that
  *    dropped off the API, when that record matters most.
+ *
+ * ---------------------------------------------------------------------------
+ * One lock order
+ * ---------------------------------------------------------------------------
+ *
+ * The pass writes node and pool rows, and an UPDATE locks the row it writes
+ * until the transaction ends. It wrote them in the order the cluster reported
+ * them - node A, the pool A reports, node B - while a reservation on node B
+ * locks node B and then the pool: each held what the other waited for, and
+ * PostgreSQL killed one, 3 times out of 3 either way round (D1, round six).
+ * So the pass keeps the order every capacity path keeps (ReserveNodeCapacity's
+ * class docblock): every node of the cluster is locked, ascending by id,
+ * before any is written; every node is written (and a missing one flagged)
+ * before any pool; and every pool is locked, ascending by id, before any is
+ * written. A reservation then waits for the sync, or the sync for it, and
+ * both finish. A pass that fails all the same - the database stopped it -
+ * records why in last_sync_error, as a failure at the provider does, and is
+ * re-thrown.
  */
 final readonly class SyncClusterInventory
 {
     public function __construct(
         private ComputeProviderFactory $providers,
         private SecretRedactor $redactor,
+        private CapacityLocks $locks,
     ) {}
 
     /**
@@ -74,20 +95,52 @@ final readonly class SyncClusterInventory
             throw $e;
         }
 
+        try {
+            return $this->write($cluster, $reported);
+        } catch (Throwable $e) {
+            $this->recordTheFailure($cluster, $e);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param  list<RemoteNodeState>  $reported
+     */
+    private function write(ComputeCluster $cluster, array $reported): ClusterInventorySyncResult
+    {
         return DB::transaction(function () use ($cluster, $reported): ClusterInventorySyncResult {
             $counts = ['nodes_created' => 0, 'nodes_updated' => 0, 'storages_created' => 0, 'storages_updated' => 0];
             $seen = [];
 
+            // Every node first, ascending by id (the class docblock).
+            $this->locks->nodesThenPools(
+                ComputeNode::query()->where('cluster_id', $cluster->getKey())->pluck('id')->map(static fn (mixed $id): string => (string) $id)->all(),
+                [],
+            );
+
+            /** @var list<array{0: ComputeNode, 1: RemoteNodeState}> $written */
+            $written = [];
+
             foreach ($reported as $remote) {
                 $node = $this->upsertNode($cluster, $remote, $counts);
                 $seen[] = $node->provider_name;
+                $written[] = [$node, $remote];
+            }
 
+            $missing = $this->flagMissingNodes($cluster, $seen);
+
+            // Then every pool, ascending by id, and only then written.
+            $this->locks->nodesThenPools(
+                [],
+                ComputeStorage::query()->where('cluster_id', $cluster->getKey())->pluck('id')->map(static fn (mixed $id): string => (string) $id)->all(),
+            );
+
+            foreach ($written as [$node, $remote]) {
                 foreach ($remote->storages as $storage) {
                     $this->upsertStorage($cluster, $node, $storage, $counts);
                 }
             }
-
-            $missing = $this->flagMissingNodes($cluster, $seen);
 
             $cluster->fill([
                 'last_synced_at' => now(),
@@ -104,6 +157,25 @@ final readonly class SyncClusterInventory
                 missingNodes: $missing,
             );
         });
+    }
+
+    /**
+     * Written with a statement of its own, not through the model: the pass
+     * that failed may have stamped the model before it was rolled back, and
+     * saving the model would write that stamp as if the pass had succeeded.
+     * A failure to record is not allowed to hide the failure being recorded
+     * (the caller re-throws that one).
+     */
+    private function recordTheFailure(ComputeCluster $cluster, Throwable $e): void
+    {
+        $error = $this->redactor->redactString($e->getMessage());
+
+        try {
+            ComputeCluster::query()->whereKey($cluster->getKey())->update(['last_sync_error' => $error]);
+            $cluster->forceFill(['last_sync_error' => $error])->syncOriginalAttribute('last_sync_error');
+        } catch (Throwable) {
+            // The original failure is re-thrown by the caller.
+        }
     }
 
     /**

@@ -8,8 +8,6 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\ProductKind;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
-use Lynomia\Modules\Compute\Domain\Services\NodeCapacityPolicy;
-use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Application\Services\LocalPlacementFeasibility;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
@@ -22,6 +20,7 @@ use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettle
 use Lynomia\Modules\Subscriptions\Domain\ValueObjects\PlanResources;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\PlanChange;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
+use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
 
 /**
  * Whether a plan change can be delivered, and whether one has been.
@@ -53,8 +52,9 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    existing account onto another package on its own node and places
  *    nothing new.
  *  - VPS, when the shape changes: the service has a machine to resize, and
- *    the node it runs on can hold its growth (growthTheNodeCannotHold(), the
- *    ceilings NodeCapacityPolicy holds a placement to). The target plan's
+ *    its node and pool can hold its growth - the refusal the resize itself
+ *    makes before it grows the machine, asked as a dry run
+ *    (growthTheNodeCannotHold()). The target plan's
  *    placement (cluster, address pool, image, a node in
  *    service), which checkout asks before building a new machine, is not
  *    asked: a resize is applied to the machine where it already runs and
@@ -80,7 +80,7 @@ final readonly class PlanChangeDelivery
 {
     public function __construct(
         private HostingPackageForPlan $packages,
-        private NodeCapacityPolicy $capacity,
+        private MachineCommitment $commitment,
     ) {}
 
     /**
@@ -121,58 +121,31 @@ final readonly class PlanChangeDelivery
     }
 
     /**
-     * Why the node the machine runs on cannot hold its growth to the target
-     * shape; null when it can, or when the machine does not grow.
+     * Why the machine's node or pool cannot hold its growth to the target
+     * shape; null when they can, or when the machine does not grow.
      *
-     * A resize grows the machine where it runs, so the node must hold the
-     * growth: the ceilings a placement is held to (NodeCapacityPolicy) and
-     * only those - usable memory, the capacity threshold on it, the CPU
-     * overcommit ceiling and the node's storage - against what the node has
-     * committed plus the growth. Status, health and architecture are not
-     * asked: the machine is already there. A growth the node cannot hold is
-     * a resize that fails as capacity with the money held; it is refused
-     * before the money moves instead.
+     * The resize's own refusal, asked as a dry run
+     * (MachineCommitment::whyTheGrowthWouldNotFit(), over
+     * RestateNodeCommitment::whyItWouldNotFit()): the growth is measured from
+     * the machine's live capacity commitment as ResizeVpsHandler finds it -
+     * to the larger, per dimension, of what is held and the target - and
+     * held to the node's ceilings on what grows (NodeCapacityPolicy::assessGrowth())
+     * and to the pool's uncommitted space. So the quote and the resize ask one
+     * question. This used to measure from the machine's recorded shape
+     * against the node alone: a machine whose commitment is held raised was
+     * refused a change the resize would take without asking for anything,
+     * and a growth its pool could not hold was sold and then refused at the
+     * resize, with the money moved.
      *
-     * The growth is measured from the machine's recorded shape.
-     *
-     * INTEGRATION SEAM: this is the arithmetic of
-     * NodeCapacityPolicy::assessGrowth() (round six, group D), which this
-     * base does not yet have. When both are merged this method's body
-     * becomes that call - growth from the machine's held capacity commitment
-     * where D records one - so the quote and the resize ask one question.
+     * A courtesy read, as a quote is: the answer that holds is the resize's,
+     * under the locks, and a growth that fits here and not there is refused
+     * there as capacity (ResizeVpsHandler's class docblock).
      */
     private function growthTheNodeCannotHold(VirtualMachine $machine, PlanResources $target): ?string
     {
-        $vcpu = max(0, ($target->vcpu ?? $machine->vcpu) - $machine->vcpu);
-        $memory = max(0, ($target->memoryMib ?? $machine->memory_mib) - $machine->memory_mib);
-        $disk = max(0, ($target->diskGib ?? $machine->disk_gib) - $machine->disk_gib);
+        $reason = $this->commitment->whyTheGrowthWouldNotFit($machine, $target->vcpu, $target->memoryMib, $target->diskGib);
 
-        if ($vcpu === 0 && $memory === 0 && $disk === 0) {
-            return null;
-        }
-
-        /** @var ComputeNode|null $node */
-        $node = $machine->node()->first();
-
-        if ($node === null) {
-            return 'the machine is on no node to grow on';
-        }
-
-        $memoryAfter = $node->allocated_memory_mib + $memory;
-
-        if ($memoryAfter > $node->usableMemoryMib() || $memoryAfter > $this->capacity->schedulableMemoryMib($node)) {
-            return 'the node the machine runs on cannot hold its memory growth';
-        }
-
-        if ($node->allocated_cpu_cores + $vcpu > $node->usableCpuCores()) {
-            return 'the node the machine runs on cannot hold its vCPU growth';
-        }
-
-        if ($node->allocated_storage_gib + $disk > $node->storage_gib) {
-            return 'the node the machine runs on cannot hold its disk growth';
-        }
-
-        return null;
+        return $reason === null ? null : 'the node or pool the machine runs on cannot hold its growth: '.$reason;
     }
 
     /**

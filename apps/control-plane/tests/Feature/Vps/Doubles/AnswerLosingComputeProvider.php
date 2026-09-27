@@ -81,6 +81,9 @@ final class AnswerLosingComputeProvider implements ComputeProvider
      */
     public bool $reportNoFigures = false;
 
+    /** When set, every resize fails with this before the fleet is touched. */
+    public ?ComputeProviderException $failResizesWith = null;
+
     public function __construct(public readonly FakeComputeProvider $fleet = new FakeComputeProvider) {}
 
     public function name(): string
@@ -148,6 +151,10 @@ final class AnswerLosingComputeProvider implements ComputeProvider
 
     public function resizeVm(string $nodeName, string $providerId, ResizeVmRequest $request): VmOperation
     {
+        if ($this->failResizesWith !== null) {
+            throw $this->failResizesWith;
+        }
+
         return $this->fleet->resizeVm($nodeName, $providerId, $request);
     }
 

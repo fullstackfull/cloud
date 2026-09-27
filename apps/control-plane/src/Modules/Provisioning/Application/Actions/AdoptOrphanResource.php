@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Provisioning\Application\Actions;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Provisioning\Domain\Contracts\ReservationsFollowAnAdoption;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobStatus;
 use Lynomia\Modules\Provisioning\Domain\Enums\ServiceStatus;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
@@ -36,6 +37,13 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
  *  - a reference another job already claims is refused, because two jobs
  *    pointing at one machine means the next termination deletes a server
  *    somebody else is still paying for.
+ *
+ * And what the job holds follows the resource (ReservationsFollowAnAdoption):
+ * a build's node commitment is moved to the node the adopted machine is on,
+ * in this transaction, and the adoption's record says where it went. An
+ * adoption that left it where the last attempt was placed left one node
+ * charged for a machine it does not run and the machine's own node charged
+ * nothing (D5, round six).
  */
 final readonly class AdoptOrphanResource
 {
@@ -43,6 +51,7 @@ final readonly class AdoptOrphanResource
         private ProvisioningJobStateMachine $jobStates,
         private ServiceStateMachine $serviceStates,
         private TransitionService $transitionService,
+        private ReservationsFollowAnAdoption $reservations,
     ) {}
 
     /**
@@ -87,6 +96,12 @@ final readonly class AdoptOrphanResource
                 'finding' => $result['error'] ?? null,
             ];
             unset($result['error']);
+
+            $capacity = $this->reservations->follow($locked, $providerReference);
+
+            if ($capacity !== []) {
+                $result['adoption']['capacity'] = $capacity;
+            }
 
             $locked->status = ProvisioningJobStatus::Succeeded;
             $locked->remote_job_id = $remoteJobId ?? $locked->remote_job_id;

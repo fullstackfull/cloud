@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Vps\Application\Handlers;
 
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
+use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Provisioning\Domain\Contracts\ProvisioningHandler;
@@ -14,6 +15,7 @@ use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
 use Lynomia\Modules\Provisioning\Domain\ValueObjects\ProvisioningResult;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
+use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
 
 /**
  * Makes a machine the size the customer now pays for.
@@ -42,14 +44,58 @@ use Lynomia\Modules\Shared\Infrastructure\Logging\SecretRedactor;
  * The machine's recorded shape is written only once the hypervisor has
  * confirmed it, and this is the opposite order from the power handler. A power
  * state that is briefly wrong is a display problem; a shape that is wrong is
- * capacity accounting that has drifted — the node believes it has memory it
- * does not, and the next customer placed on it is placed on a lie.
+ * a record that says the customer has what they do not.
+ *
+ * ---------------------------------------------------------------------------
+ * The commitment moves before the machine does
+ * ---------------------------------------------------------------------------
+ *
+ * Changing the row was all this used to do: the node's allocated_* figures,
+ * its pool's committed_gib and the machine's capacity reservation went on
+ * describing the machine as it was bought. A grown machine oversold its node
+ * - the re-audit grew 4096 MiB to 65536 on a 131072 MiB node that still read
+ * 4096, and placed an 80000 MiB machine beside it - and a destroy gave back
+ * the old figures (D2). So, through RestateNodeCommitment, in the one lock
+ * order:
+ *
+ *  - before the hypervisor is asked, the commitment is raised to cover the
+ *    larger of what it holds (as locked) and the target, on the machine's
+ *    node and pool. A growth the node or pool cannot hold is refused there -
+ *    FailureClass Capacity, code `compute.node_capacity_exceeded` - and
+ *    nothing is grown or committed. Only what grows is asked about: a shrink
+ *    is never refused (NodeCapacityPolicy::assessGrowth());
+ *  - once the hypervisor has confirmed and the machine row holds the shape
+ *    read back, the commitment is set to the machine row as read under its
+ *    locks, which is where a shrink gives its difference back;
+ *  - a refusal the hypervisor gave (nothing changed) sets it back to the
+ *    machine row, read the same way; an outcome that is unknown leaves it
+ *    raised, because the machine may have grown and the job goes to a person.
+ *
+ * Nothing serialises two resizes of one machine, which is why the settling
+ * restatements read the row under the lock rather than use the model this
+ * job holds (MachineCommitment::asRecorded()).
+ *
+ * The reservation row carries the machine's shape throughout, so the destroy
+ * (which gives back what the row records) gives back what is held.
+ *
+ * What a paid upgrade that cannot fit comes to: the money moved when the
+ * proration invoice was paid, before this job ran (ResizeOnPlanChangeSettlement).
+ * A capacity refusal is retried by the engine with its backoff - a node
+ * fills and empties, and room made by a destroy is room this job can use -
+ * and when the attempts run out the job stops in review, never failed: the
+ * upgrade stays on the operator's list and on lynomia_plan_change_total until
+ * a person grows the machine or returns the money. It is never reported done
+ * and never grown onto room the node does not have. The plan-change quote
+ * asks the same refusal before the money moves (PlanChangeDelivery, through
+ * MachineCommitment::whyTheGrowthWouldNotFit()), so this is reached only when
+ * the room went between the quote and the resize.
  */
 final readonly class ResizeVpsHandler implements ProvisioningHandler
 {
     public function __construct(
         private ComputeProviderFactory $computeProviders,
         private SecretRedactor $redactor,
+        private MachineCommitment $commitment,
     ) {}
 
     public function kind(): ProvisioningJobKind
@@ -124,10 +170,34 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
              * The machine is already the shape the plan sells — a retry after
              * a successful resize, or a plan change that only moved the price.
              * Answered as a success: the state the caller wanted is the state
-             * that exists.
+             * that exists. A commitment left raised by an earlier attempt
+             * that stopped after the machine was written is settled to it.
              */
+            if ($this->commitment->heldBy($machine, $node) !== null) {
+                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
+            }
+
             return ProvisioningResult::succeeded(
                 metadata: ['virtual_machine_id' => $machineId, 'already_correct' => true],
+            );
+        }
+
+        /*
+         * The growth is committed before anything grows: the larger of what
+         * is held (as locked) and the target, so neither the old shape nor
+         * the new one is ever running on room nobody committed
+         * (MachineCommitment::ceiling(), the growth the plan-change quote
+         * asks about too).
+         */
+        try {
+            $this->commitment->restate($machine, $node, $this->commitment->ceiling($machine, $targetVcpu, $targetMemory, $targetDisk), refuse: true);
+        } catch (NodeCapacityExceededException $e) {
+            // See the class docblock for what this comes to for a paid upgrade.
+            return ProvisioningResult::failed(
+                FailureClass::Capacity,
+                $e->errorCode(),
+                $e->getMessage(),
+                metadata: $this->redactor->redact([...$e->context(), 'virtual_machine_id' => $machineId]),
             );
         }
 
@@ -140,8 +210,15 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
              * Indeterminate becomes a TIMEOUT, which the engine escalates and
              * never retries. A resize the platform stopped waiting for may
              * have grown the disk; repeating it would grow it again, and the
-             * customer would be billed for one upgrade and given two.
+             * customer would be billed for one upgrade and given two. Its
+             * commitment stays raised, for the same reason: the machine may
+             * be the larger shape. A refusal changed nothing, so the
+             * commitment goes back to the machine as recorded.
              */
+            if (! $e->isIndeterminate()) {
+                $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
+            }
+
             return ProvisioningResult::failed(
                 $e->isIndeterminate() ? FailureClass::Timeout : FailureClass::Transient,
                 $e->errorCode(),
@@ -167,6 +244,11 @@ final readonly class ResizeVpsHandler implements ProvisioningHandler
         $machine->memory_mib = $state->memoryMib ?? $targetMemory ?? $machine->memory_mib;
         $machine->disk_gib = $state->diskGib ?? $targetDisk ?? $machine->disk_gib;
         $machine->save();
+
+        // The commitment is now the machine as the hypervisor confirmed it:
+        // a shrink gives its difference back here. Recorded, not refused -
+        // the machine is this size whatever the node says.
+        $this->commitment->restate($machine, $node, $this->commitment->asRecorded($machine), refuse: false);
 
         return ProvisioningResult::succeeded(
             remoteJobId: $operation->taskId,

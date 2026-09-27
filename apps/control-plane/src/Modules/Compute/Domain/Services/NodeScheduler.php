@@ -15,6 +15,7 @@ use Lynomia\Modules\Compute\Domain\ValueObjects\ScoreComponent;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeCluster;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
+use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 
 /**
  * Decides which hypervisor a machine goes on.
@@ -44,6 +45,16 @@ use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
  * preference: a customer who buys three machines for redundancy and gets three
  * on one node has bought none, and neither they nor the platform finds out
  * until the node fails.
+ *
+ * A build that already holds a live commitment (PlacementRequest::$reservationKey)
+ * is measured without it: its own commitment is taken off the node and the
+ * pool it holds before either is assessed, because it is this machine's and
+ * not somebody else's. Counted as somebody else's, a machine that fills more
+ * than half of its node could never be placed there again, and the retry of
+ * a build refused by a transient fault ran out of attempts in review with
+ * the order paid (D3). Nothing is written: the node and pool are measured as
+ * copies, and ReserveNodeCapacity keeps the commitment where it is when the
+ * retry lands on the same node and pool.
  */
 final readonly class NodeScheduler
 {
@@ -102,12 +113,13 @@ final readonly class NodeScheduler
             ->get()
             ->all();
 
-        $storages = $this->storagesFor($request->clusterId);
+        $held = $this->heldBy($request);
+        $storages = $this->withoutItsOwnCommitment($this->storagesFor($request->clusterId), $held);
 
         /** @var list<PlacementRejection> $rejections */
         $rejections = [];
 
-        /** @var list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage}> $eligible */
+        /** @var list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage, machines: int}> $eligible */
         $eligible = [];
 
         foreach ($nodes as $node) {
@@ -135,7 +147,8 @@ final readonly class NodeScheduler
                 continue;
             }
 
-            $assessment = $this->policy->assess($node, $request->resources, $request->architecture);
+            $measured = $this->measuredWithoutItsOwnCommitment($node, $held);
+            $assessment = $this->policy->assess($measured, $request->resources, $request->architecture);
 
             if (! $assessment->fits) {
                 $rejections[] = new PlacementRejection(
@@ -163,7 +176,7 @@ final readonly class NodeScheduler
                 continue;
             }
 
-            $eligible[] = ['node' => $node, 'assessment' => $assessment, 'storage' => $storage];
+            $eligible[] = ['node' => $node, 'assessment' => $assessment, 'storage' => $storage, 'machines' => $measured->vm_count];
         }
 
         $affinityCounts = $this->census->countByNode(
@@ -202,7 +215,7 @@ final readonly class NodeScheduler
     }
 
     /**
-     * @param  list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage}>  $eligible
+     * @param  list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage, machines: int}>  $eligible
      * @param  array<string, int>  $affinityCounts
      * @return list<NodeScore>
      */
@@ -214,7 +227,7 @@ final readonly class NodeScheduler
         // candidate?", so that the answer stays meaningful whether the fleet
         // holds ten machines or ten thousand.
         $busiest = max(array_map(
-            static fn (array $candidate): int => $candidate['node']->vm_count,
+            static fn (array $candidate): int => $candidate['machines'],
             $eligible,
         ));
 
@@ -222,6 +235,7 @@ final readonly class NodeScheduler
 
         foreach ($eligible as $candidate) {
             $node = $candidate['node'];
+            $machines = $candidate['machines'];
             $assessment = $candidate['assessment'];
             $customerVms = $affinityCounts[(string) $node->getKey()] ?? 0;
 
@@ -255,9 +269,9 @@ final readonly class NodeScheduler
                 ),
                 new ScoreComponent(
                     'spread',
-                    $busiest < 1 ? 1.0 : 1 - ($node->vm_count / $busiest),
+                    $busiest < 1 ? 1.0 : 1 - ($machines / $busiest),
                     $weights['spread'],
-                    sprintf('%d machines here against %d on the busiest candidate', $node->vm_count, $busiest),
+                    sprintf('%d machines here against %d on the busiest candidate', $machines, $busiest),
                 ),
                 new ScoreComponent(
                     // Decays rather than drops to zero, so that a customer who
@@ -293,10 +307,10 @@ final readonly class NodeScheduler
      * re-applying it at commit time would refuse an order the scheduler
      * deliberately allowed.
      *
-     * @param  list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage}>  $eligible
+     * @param  list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage, machines: int}>  $eligible
      * @param  list<PlacementRejection>  $rejections
      * @param  array<string, int>  $affinityCounts
-     * @return array{0: list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage}>, 1: list<PlacementRejection>, 2: int|null}
+     * @return array{0: list<array{node: ComputeNode, assessment: CapacityAssessment, storage: ComputeStorage, machines: int}>, 1: list<PlacementRejection>, 2: int|null}
      */
     private function applyAntiAffinity(array $eligible, array $rejections, array $affinityCounts, int $limit): array
     {
@@ -333,6 +347,68 @@ final readonly class NodeScheduler
         }
 
         return [$kept, $rejections, $limit];
+    }
+
+    /**
+     * This build's own live commitment, when it holds one.
+     */
+    private function heldBy(PlacementRequest $request): ?NodeCapacityReservation
+    {
+        if ($request->reservationKey === null || $request->reservationKey === '') {
+            return null;
+        }
+
+        /** @var NodeCapacityReservation|null $held */
+        $held = NodeCapacityReservation::query()
+            ->where('reservation_key', $request->reservationKey)
+            ->whereNull('released_at')
+            ->first();
+
+        return $held;
+    }
+
+    /**
+     * The node as it would be without this build's own commitment: a copy,
+     * never saved, so a figure lowered here can never be written back.
+     */
+    private function measuredWithoutItsOwnCommitment(ComputeNode $node, ?NodeCapacityReservation $held): ComputeNode
+    {
+        if ($held === null || $held->node_id !== (string) $node->getKey()) {
+            return $node;
+        }
+
+        $measured = clone $node;
+        $measured->allocated_cpu_cores = max(0, $node->allocated_cpu_cores - $held->vcpu);
+        $measured->allocated_memory_mib = max(0, $node->allocated_memory_mib - $held->memory_mib);
+        $measured->allocated_storage_gib = max(0, $node->allocated_storage_gib - $held->disk_gib);
+        $measured->vm_count = max(0, $node->vm_count - 1);
+
+        return $measured;
+    }
+
+    /**
+     * The cluster's pools, the one this build's commitment is held in
+     * measured without it (a copy, as for the node).
+     *
+     * @param  list<ComputeStorage>  $storages
+     * @return list<ComputeStorage>
+     */
+    private function withoutItsOwnCommitment(array $storages, ?NodeCapacityReservation $held): array
+    {
+        if ($held === null || $held->storage_id === null) {
+            return $storages;
+        }
+
+        return array_map(static function (ComputeStorage $storage) use ($held): ComputeStorage {
+            if ((string) $storage->getKey() !== $held->storage_id) {
+                return $storage;
+            }
+
+            $measured = clone $storage;
+            $measured->committed_gib = max(0, (int) $storage->committed_gib - $held->disk_gib);
+
+            return $measured;
+        }, $storages);
     }
 
     /**

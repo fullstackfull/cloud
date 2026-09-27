@@ -55,6 +55,20 @@ final class ACreateRetriedOnAnotherNodeTest extends TestCase
         $job = $this->createJob();
 
         $this->refuseTheFirstCreateOn('pve-01');
+        DB::table('provisioning_jobs')->where('id', $job->id)->update(['next_attempt_at' => null]);
+        $this->runWorker($job);
+        $this->assertSame(ProvisioningJobStatus::Queued, $job->fresh()->status);
+
+        /*
+         * pve-01 leaves placement between the attempts, so the retry goes
+         * elsewhere. This used to need nothing: the scheduler counted the
+         * build's own commitment against pve-01, which made it look busier
+         * than pve-02 - the defect that kept a retry off the one node that
+         * could hold it (D3, ARetryIsPlacedOnTheNodeItsOwnReservationHoldsTest).
+         * Measured without it the two nodes are alike, and the retry would
+         * rightly stay where its commitment already is.
+         */
+        $this->node->forceFill(['status' => NodeStatus::Maintenance])->save();
         $this->drive($job);
 
         $this->assertSame(ProvisioningJobStatus::Succeeded, $job->fresh()->status);
