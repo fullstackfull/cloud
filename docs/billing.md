@@ -88,8 +88,10 @@ in between. A change the settlement refuses is **returned**, not delivered as no
 what the invoice holds is credited to the customer's wallet against the invoice, the
 subscription goes back to the plan and the recurring amount it came from (a paid upgrade
 stops holding its unit of that plan, so the plan may have sold it in the window: the return
-is made all the same, exceeding the plan's `stock_limit` by at most the change's units, and
-the audit entry records by how much as `plan_stock_exceeded_by`), the change is
+is made all the same, adding at most the change's units to the plan's claims, and the audit
+entry records the plan's whole excess over its `stock_limit` after the return as
+`plan_stock_exceeded_by` - which includes any excess it already had, as when an operator
+lowered `stock_limit` below the units held), the change is
 recorded `returned_at` with its `return_reason`, and a `subscription.plan_changed` audit
 entry with the reason `plan_change_not_deliverable_at_settlement` names the invoice, the
 refusal and the amount returned (`ReturnAPlanChangeNoLongerDeliverable`), and the customer

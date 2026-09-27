@@ -58,9 +58,12 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *    that plan's shape. A paid upgrade stops counting its unit against the
  *    plan it left, so that plan may have sold the unit in the window; the
  *    subscription goes back all the same, because that is what it runs. The
- *    plan's stock_limit is then exceeded, by at most the change's units, and
- *    the audit entry and the log say by how much (`plan_stock_exceeded_by`,
- *    stockExceededBy()) - it used to be exceeded silently (F-06's residue).
+ *    return adds at most the change's units to the plan's claims, so it can
+ *    put the plan over its stock_limit; the audit entry and the log record
+ *    the plan's whole excess after the return (`plan_stock_exceeded_by`,
+ *    stockExceededBy()), which includes any excess the plan already had - an
+ *    operator can lower stock_limit below the units held. It used to be
+ *    exceeded silently (F-06's residue).
  *  - The change's record says it was returned and why (`returned_at`,
  *    `return_reason`), which is what keeps it from reading as a paid change
  *    awaiting delivery (PlanChangeDelivery::aPaidChangeAwaitsDelivery()).
@@ -210,9 +213,12 @@ final readonly class ReturnAPlanChangeNoLongerDeliverable
      * (PlanCapacity::claimed()), so that plan can have sold the unit between
      * the payment and this settlement. The return is not refused for it: the
      * customer held that plan, and the machine or account never left its
-     * shape. So the stock may be exceeded, by at most this change's units -
-     * recorded here, for an operator, rather than left silent (F-06's
-     * residue, the re-audit after round six).
+     * shape. The return adds at most this change's units to the plan's
+     * claims. The figure is the plan's whole excess after it, not the part
+     * the return caused: a plan whose stock_limit an operator lowered below
+     * the units already held was over it before, and that is counted too.
+     * Recorded for an operator rather than left silent (F-06's residue, the
+     * re-audit after round six).
      */
     private function stockExceededBy(string $planId): int
     {

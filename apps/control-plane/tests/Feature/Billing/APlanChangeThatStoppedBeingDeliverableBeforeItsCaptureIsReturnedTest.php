@@ -266,9 +266,9 @@ final class APlanChangeThatStoppedBeingDeliverableBeforeItsCaptureIsReturnedTest
          * the unit between the payment and the settlement. The return puts
          * the subscription back on it all the same - it is the plan the
          * customer already held, and the service never left its shape - so
-         * the plan's stock_limit is exceeded, by at most the change's units.
-         * Not refused, and not silent: the audit entry and the log say by
-         * how much.
+         * the plan goes over its stock_limit. Not refused, and not silent:
+         * the audit entry and the log record the plan's whole excess after
+         * the return (here only what the return added).
          */
         $starter = $this->sharedHostingPlan('starter', stockLimit: 1);
         $this->buySharedHosting($this->customer, $starter);
@@ -297,6 +297,36 @@ final class APlanChangeThatStoppedBeingDeliverableBeforeItsCaptureIsReturnedTest
 
         $entry = AuditEntry::query()->where('context->reason', 'plan_change_not_deliverable_at_settlement')->sole();
         $this->assertSame(1, $entry->context['plan_stock_exceeded_by'] ?? null, 'The plan was put over its stock limit and nothing said so.');
+    }
+
+    #[Test]
+    public function the_excess_recorded_is_the_plans_whole_excess_not_only_what_the_return_added(): void
+    {
+        /*
+         * An operator lowered the plan's stock_limit below the units already
+         * held. The return adds one unit; the plan is then over by two, and
+         * two is what is recorded - the figure is the plan's excess after the
+         * return, not a bound on what the return caused.
+         */
+        $starter = $this->sharedHostingPlan('starter', stockLimit: 2);
+        $this->buySharedHosting(Customer::factory()->create(['currency' => 'KWD', 'country' => 'KW']), $starter);
+        $this->buySharedHosting($this->customer, $starter);
+        $subscription = Subscription::query()->where('customer_id', $this->customer->getKey())->sole();
+        [$planId, $priceId] = $this->operatorPutsAPlanOnSale($subscription);
+        $package = $this->operatorMapsAPackage($planId);
+
+        $this->changePlan($subscription, $planId, $priceId)->assertOk();
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->where('subscription_id', $subscription->getKey())->where('status', InvoiceStatus::Open->value)->sole();
+        Event::fakeFor(fn () => app(SettleInvoice::class)->execute($invoice, Transaction::factory()->forCustomer($this->customer)->amount(Money::ofMinor($invoice->total_minor, 'KWD'))->create()), [InvoicePaid::class]);
+
+        $starter->forceFill(['stock_limit' => 0])->save();
+        $this->actingAs($this->operator)->deleteJson('/api/admin/catalogue/hosting-packages/'.$package)->assertOk();
+        $this->redeliverTheSettlementOf($invoice->fresh() ?? $invoice);
+
+        $this->assertSame((string) $starter->getKey(), (string) $subscription->fresh()?->plan_id);
+        $entry = AuditEntry::query()->where('context->reason', 'plan_change_not_deliverable_at_settlement')->sole();
+        $this->assertSame(2, $entry->context['plan_stock_exceeded_by'] ?? null);
     }
 
     #[Test]

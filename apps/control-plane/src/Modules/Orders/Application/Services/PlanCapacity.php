@@ -138,8 +138,11 @@ final readonly class PlanCapacity
      * withdrawal - therefore always finds its unit. A paid change returned at
      * its settlement (ReturnAPlanChangeNoLongerDeliverable) may not: the plan
      * can have sold the unit between the payment and the settlement, and the
-     * return is made all the same, exceeding stock_limit by at most the
-     * change's units and recording by how much.
+     * return is made all the same. The return adds at most the change's
+     * units to the plan's claims; the plan can be over its stock_limit by
+     * more than that when it already was (an operator can lower stock_limit
+     * below the units held), and what is recorded is the plan's whole excess
+     * after the return.
      */
     public function claimed(string $planId, ?Customer $customer = null): int
     {
