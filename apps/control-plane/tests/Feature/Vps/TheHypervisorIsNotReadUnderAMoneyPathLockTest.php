@@ -20,6 +20,7 @@ use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Product;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Domain\DTOs\ResizeVmRequest;
+use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use Lynomia\Modules\Compute\Infrastructure\Models\VirtualMachine;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
@@ -36,6 +37,7 @@ use Lynomia\Modules\Subscriptions\Application\Listeners\ResizeOnPlanChangeSettle
 use Lynomia\Modules\Subscriptions\Application\Queries\PlanChangeDelivery;
 use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 use Lynomia\Modules\Vps\Application\Services\MachineCommitment;
+use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use PHPUnit\Framework\Attributes\Test;
@@ -181,6 +183,115 @@ final class TheHypervisorIsNotReadUnderAMoneyPathLockTest extends BillingApiTest
 
         $this->assertSame(FailureClass::Capacity, $resize->refresh()->failure_class, (string) $resize->last_error);
         $this->assertSame(2048, $this->hypervisor->fleet->getVm('pve-01', (string) $machine->provider_id)?->memoryMib, 'The machine was grown onto room the node does not have.');
+    }
+
+    /*
+     * The payment and the settlement ask with a reading of their own.
+     *
+     * A paid-for upgrade 2 / 4096 -> 4 / 8192 on a machine with no live
+     * commitment, on a node that fits the 4096 MiB above what the machine
+     * runs but not 8192 MiB from nothing. Asked with the reading, every path
+     * takes the change; asked without one (the stricter question) every
+     * path refuses it - so each of these fails if its path stops passing
+     * its reading on.
+     */
+
+    #[Test]
+    public function the_invoice_is_payable_on_its_page_and_on_the_list_when_its_machine_is_read(): void
+    {
+        [, $user, , $invoice] = $this->aPaidUpgradeOnATightNode();
+
+        $this->assertTrue($this->actingAs($user)->getJson('/api/v1/invoices/'.$invoice->id)->assertOk()->json('data.is_payable'));
+        $listed = collect($this->actingAs($user)->getJson('/api/v1/invoices')->assertOk()->json('data'))->firstWhere('id', (string) $invoice->id);
+        $this->assertTrue($listed['is_payable'] ?? null);
+    }
+
+    #[Test]
+    public function the_card_payment_asks_with_its_reading(): void
+    {
+        [, $user, , $invoice] = $this->aPaidUpgradeOnATightNode();
+
+        $this->actingAs($user)->postJson('/api/v1/invoices/'.$invoice->id.'/payments')->assertCreated();
+    }
+
+    #[Test]
+    public function the_wallet_payment_asks_with_its_reading_through_the_route(): void
+    {
+        [$customer, $user, , $invoice] = $this->aPaidUpgradeOnATightNode();
+        $this->creditTheWalletFor($customer, $invoice);
+
+        $this->actingAs($user)->withHeaders(['Idempotency-Key' => 'b2-route-1'])
+            ->postJson('/api/v1/invoices/'.$invoice->id.'/wallet-credit')->assertOk();
+        $this->assertSame(InvoiceStatus::Paid, $invoice->refresh()->status);
+    }
+
+    #[Test]
+    public function the_wallet_payment_called_without_a_reading_takes_its_own(): void
+    {
+        [$customer, , , $invoice] = $this->aPaidUpgradeOnATightNode();
+        $this->creditTheWalletFor($customer, $invoice);
+
+        app(PayInvoiceFromWallet::class)->execute($customer, $invoice->fresh(), 'b2-direct-1');
+
+        $this->assertSame(InvoiceStatus::Paid, $invoice->refresh()->status);
+    }
+
+    #[Test]
+    public function the_settlement_asks_with_its_reading_and_queues_the_resize(): void
+    {
+        [$customer, , $subscription, $invoice] = $this->aPaidUpgradeOnATightNode();
+
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid((string) $invoice->id, (string) $customer->id, null, (string) $subscription->id, CarbonImmutable::now()));
+
+        $this->assertSame(1, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count(), 'The settlement returned a change it could deliver.');
+    }
+
+    #[Test]
+    public function the_same_upgrade_unread_is_refused_by_every_path(): void
+    {
+        // The control: without a reading, the stricter question refuses it.
+        [$customer, $user, $subscription, $invoice] = $this->aPaidUpgradeOnATightNode();
+        $this->hypervisor->failReadsWith = ComputeProviderException::requestFailed('fake', 'get_vm', ['provider_message' => 'node unreachable']);
+
+        $this->assertFalse($this->actingAs($user)->getJson('/api/v1/invoices/'.$invoice->id)->assertOk()->json('data.is_payable'));
+        $this->assertNotSame(201, $this->actingAs($user)->postJson('/api/v1/invoices/'.$invoice->id.'/payments')->status());
+        $this->assertNotNull(app(PlanChangeDelivery::class)->refusalForTheInvoice($invoice->fresh()));
+        app(ResizeOnPlanChangeSettlement::class)->handle(new InvoicePaid((string) $invoice->id, (string) $customer->id, null, (string) $subscription->id, CarbonImmutable::now()));
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count());
+        $this->hypervisor->failReadsWith = null;
+    }
+
+    /**
+     * An upgrade's open invoice, 2 / 4096 -> 4 / 8192, whose machine then has
+     * no live commitment on a node that holds 4096 MiB more but not 8192.
+     *
+     * @return array{Customer, User, Subscription, Invoice}
+     */
+    private function aPaidUpgradeOnATightNode(): array
+    {
+        [$customer, $user] = $this->accountWithOwner();
+        $this->customer = $customer;
+        $small = $this->plan('small', ['vcpu' => 2, 'memory_mib' => 4096, 'disk_gib' => 160], 9_000);
+        $large = $this->plan('large', ['vcpu' => 4, 'memory_mib' => 8192, 'disk_gib' => 160], 30_000);
+        $subscription = $this->paidSubscriptionOn($customer, $small);
+        $this->builtMachineFor($subscription, $small);
+        $this->changePlan($user, $subscription, $large, 'b2-up-read-01')->assertOk();
+
+        /** @var Invoice $invoice */
+        $invoice = Invoice::query()->where('subscription_id', $subscription->id)->where('status', InvoiceStatus::Open->value)->sole();
+
+        NodeCapacityReservation::query()->update(['released_at' => now()]);
+        DB::table('compute_nodes')->where('id', $this->node->id)->update([
+            'memory_mib' => 7000, 'memory_headroom_percent' => 10, 'allocated_memory_mib' => 0, 'allocated_cpu_cores' => 0, 'vm_count' => 0,
+        ]);
+
+        return [$customer, $user, $subscription, $invoice];
+    }
+
+    private function creditTheWalletFor(Customer $customer, Invoice $invoice): void
+    {
+        $ledger = app(WalletLedger::class);
+        $ledger->credit(wallet: $ledger->walletFor($customer, 'KWD'), amount: Money::ofMinor($invoice->fresh()->total_minor, 'KWD'), kind: WalletTransactionKind::Topup, description: 'b2');
     }
 
     /**
