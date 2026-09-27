@@ -53,13 +53,20 @@ use Tests\Support\UnpinnedClockAssertions;
  * test in source order from the pin state its set-up leaves (the class's,
  * its parents' and its traits', within `tests/`), follows `$this->helper()`
  * calls into code in `tests/`, and reports an equality assertion — or an
- * `assertTrue`/`assertFalse` of an equality — whose compared value is made
+ * `assertTrue`/`assertFalse` of an equality, or a hand comparison (an `if`
+ * on an equality with a `fail()` in a branch) — whose compared value is made
  * from a clock read where the clock is not pinned. PHP's own clock
  * (`time()`, `date()`, `new DateTime()`) is reported pinned or not, because
  * freezing does not reach it.
  *
+ * A `Carbon::setTestNow()` given a closure pins only when every value the
+ * closure returns is a fixed time; any other callable replaces a pin rather
+ * than being one. Until round seven any closure counted as a pin, and one in
+ * a shared `setUp()` hid every test of its class from the walk.
+ *
  * It does **not** follow a clock read through a variable, whatever the
- * variable holds. A variable read on an unpinned clock and never handed to
+ * variable holds, other than a helper's parameter the read was handed as
+ * (followed into that helper's walk since round seven). A variable read on an unpinned clock and never handed to
  * the code — read before the code ran or after it — is the shape, and is
  * not seen. Measured at `02d7364` with variables followed, the walk
  * reported five more tests (`ApiTokenIssuanceTest`,
@@ -233,6 +240,29 @@ final class NoAssertionComparesAClockReadOnAnUnpinnedClockTest extends TestCase
         'found_a_trait_set_up_the_class_overrides' => 'setUp<Trait>() is resolved on the class',
         'clean_before_on_set_up_is_ignored' => '#[Before] on setUp() is ignored',
         'clean_the_traits_set_up_through_an_overridden_runner' => 'an overridden setUpTraits() reaches the traits through parent::setUpTraits()',
+        'clean_a_test_now_closure_returning_a_fixed_time' => 'a test-now setter given a closure every return of which is a fixed time pins',
+        'clean_a_test_now_arrow_function_returning_a_fixed_time' => 'a test-now setter given an arrow function returning a fixed time pins',
+        'found_a_test_now_closure_that_steps' => 'a test-now setter given any other closure does not pin',
+        'found_a_test_now_closure_after_a_pin' => 'a test-now setter given any other closure lets go of an earlier pin',
+        'found_a_test_now_closure_that_sometimes_returns_another_time' => 'one return that is not a fixed time is enough to not pin',
+        'found_a_test_now_first_class_callable' => 'a test-now setter given a first-class callable does not pin',
+        'found_a_test_now_closure_in_a_shared_set_up' => 'a stepping test-now closure in setUp() does not blind the class\'s tests',
+        'clean_a_test_now_variable_pins' => 'a callable held in a variable is not seen (disclosed): a variable pins',
+        'found_a_hand_comparison_failing_in_else' => 'a hand comparison reads fail() in any branch of the if',
+        'found_a_hand_comparison_in_an_elseif' => 'an elseif condition is a hand comparison',
+        'clean_a_hand_comparison_then_fail_frozen' => 'a hand comparison is judged in the state at its condition',
+        'clean_a_hand_comparison_without_fail' => 'an if that calls no fail() is not an assertion',
+        'found_a_static_constraint' => 'a constraint factory called statically flows',
+        'clean_a_bound_constraint' => 'a bound constraint is not a flow',
+        'found_a_clock_read_handed_to_a_helper' => 'a clock read handed to a helper binds the parameter it is given as',
+        'found_a_clock_read_handed_to_an_assert_named_helper' => 'a helper named assert* that is not an equality is followed with its bindings',
+        'found_a_clock_read_handed_to_a_helper_by_name' => 'a named argument binds the parameter of that name',
+        'clean_a_clock_read_handed_to_a_helper_called_frozen' => 'a bound parameter is judged in the caller\'s state',
+        'clean_a_stored_value_handed_to_a_helper' => 'a parameter handed no clock read is not bound',
+        'clean_a_bound_parameter_does_not_leak_out_of_the_helper' => 'a binding lasts for the helper\'s walk only',
+        'found_a_clock_read_handed_through_two_helpers' => 'a bound parameter handed on binds the next helper\'s parameter',
+        'clean_a_clock_read_handed_to_a_variadic_parameter' => 'a variadic parameter is not bound',
+        'found_a_native_clock_read_handed_to_a_helper_even_frozen' => 'a bound parameter carries PHP\'s own clock as such',
     ];
 
     private static ?UnpinnedClockAssertions $suite = null;

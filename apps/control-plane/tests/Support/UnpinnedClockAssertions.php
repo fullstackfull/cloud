@@ -29,6 +29,8 @@ use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Function_;
+use PhpParser\Node\Stmt\If_;
+use PhpParser\Node\Stmt\Return_;
 use PhpParser\Node\Stmt\Trait_;
 use PhpParser\Node\Stmt\TraitUse;
 use PhpParser\NodeFinder;
@@ -108,10 +110,21 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *    callback), `$this->travel($n)->u()` for `u` in {@see self::WORMHOLE_UNITS}
  *    (with no callback), and `C::s($t)` for `C` in {@see self::TEST_NOW_CLASSES}
  *    and `s` in {@see self::TEST_NOW_SETTERS} with an argument that is not
- *    `null`;
+ *    `null` and not a callable, or that is a closure or arrow function every
+ *    `return` of which (none in a function or class nested in it) is a
+ *    **fixed time**: `C::p('…')` for `C` in {@see self::CLOCK_CLASSES} and `p`
+ *    in {@see self::STATIC_PARSERS}, or `new C('…')` for `C` in
+ *    {@see self::CLOCK_CONSTRUCTORS} or {@see self::NATIVE_CONSTRUCTORS}, with
+ *    a literal first that is neither blank nor relative;
  *  - **unpins**: `$this->m()` for `m` in {@see self::UNPIN_METHODS},
  *    `C::m()` for each pair in {@see self::UNPIN_STATICS}, and a
- *    {@see self::TEST_NOW_SETTERS} call with no argument or `null`;
+ *    {@see self::TEST_NOW_SETTERS} call with no argument or `null`, or with
+ *    any other closure or arrow function, or a first-class callable
+ *    (`$this->clock(...)`): Carbon then answers every read from the callable,
+ *    which may step or read the real clock, so it replaces a pin rather than
+ *    being one. A `setTestNow(<closure>)` in a shared `setUp()` used to count
+ *    as a pin and hid every test of the class from the walk. A callable held
+ *    in a variable is not seen as one: `setTestNow($clock)` pins;
  *  - **the callback forms**: a {@see self::PIN_METHODS} call or a Wormhole unit
  *    given a closure at the callback position walks the closure's body
  *    pinned, and leaves the clock unpinned after it (the framework clears it);
@@ -143,6 +156,13 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *    {@see self::PREDICATE_PREFIXES}) that reads the clock as below; through
  *    the nodes in {@see self::PREDICATE_CONNECTIVES} (either side) and
  *    {@see self::PREDICATE_NEGATIONS}.
+ *
+ * A **hand comparison** is one too: an `if` whose condition, or one of whose
+ * `elseif` conditions, is an equality read as a predicate's argument is, and
+ * one of whose branches (the `if`, an `elseif` or the `else`, at any depth)
+ * calls a method or function named in {@see self::FAIL_METHODS} —
+ * `if ($row->day !== now()->toDateString()) { $this->fail(); }`. It is judged
+ * in the state at its condition, and reported as `fail`.
  *
  * A **clock read** is:
  *
@@ -183,16 +203,29 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *  - a child of a node in {@see self::FLOW_NODES} (an array element, an index,
  *    an operand of any binary operator, a cast, a ternary's branch, a `match`
  *    arm, an interpolated part, a unary sign, a clone);
- *  - an argument of a call of a plain function (`sprintf`, `json_encode`), of a
- *    static call on a {@see self::CLOCK_CLASSES} class (`Carbon::parse(now())`),
- *    or of a method in {@see self::COMBINE_METHODS} or beginning with an
- *    element of {@see self::COMBINE_PREFIXES} (`diffInDays(now())`, `eq(now())`).
+ *  - an argument of a call of a plain function (`sprintf`, `json_encode`,
+ *    PHPUnit's function-style `identicalTo()`), of a static call on a
+ *    {@see self::CLOCK_CLASSES} class (`Carbon::parse(now())`), of a method in
+ *    {@see self::COMBINE_METHODS} or beginning with an element of
+ *    {@see self::COMBINE_PREFIXES} (`diffInDays(now())`, `eq(now())`), or of a
+ *    PHPUnit constraint factory in {@see self::CONSTRAINT_METHODS}, on any
+ *    receiver, static or not (`$this->identicalTo(now())`, so that
+ *    `assertThat($x, $this->identicalTo(now()))` is read through
+ *    {@see self::EQUALITY}'s `assertThat`);
+ *  - a **parameter of a helper** the walk follows, when the call's argument
+ *    for it carries a clock read: bound by position (not to a variadic
+ *    parameter) or by name, never from an unpacked argument, for the walk of
+ *    that helper and nothing else. `$this->assertStampedAt(now(), $row)` and
+ *    `$this->expectStamp(now())`, each comparing its parameter with an
+ *    equality assertion inside, are read there, in the state of the call. A
+ *    parameter the helper assigns again is still read as the clock read.
  *
  * ===========================================================================
  * WHAT IT CANNOT SEE
  * ===========================================================================
  *
- *  - **A clock read held in a variable**, whenever it was read.
+ *  - **A clock read held in a variable**, whenever it was read, other than
+ *    a helper's parameter it was handed as (above).
  *    `$expected = now()->addDay();` and, later, `assertSame($expected, …)` is
  *    not read. That covers the variable the test handed the code as input
  *    (not the shape), and equally a variable read on an unpinned clock
@@ -207,9 +240,15 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *    loop, or a `try` counts from its position on whether or not the branch
  *    runs, and a closure's body is judged where it is written, not where it
  *    is called.
- *  - **A clock read passed through any other method call**
- *    (`$this->expectedFor(now())`, `$builder->where('at', now())`) does not
- *    flow; neither does one inside a closure argument.
+ *  - **A clock read passed through any other call** — a method that is not
+ *    a helper in the set, a combining method, a constraint factory or a
+ *    plain function (`$builder->where('at', now())`) — does not flow; neither
+ *    does one inside a closure argument, and neither does a helper's return
+ *    value (`$this->expectedFor(now())` handed to an assertion).
+ *  - **Other hand comparisons**: a comparison followed by `throw`, a
+ *    ternary or `match` that calls `fail()`, `$ok or $this->fail()`, and a
+ *    `fail()` reached through a helper the branch calls are not read. A
+ *    constraint built with `new` (`new IsIdentical(now())`) is not read.
  *  - **Clock reads spelled any other way**: `Carbon::parse(null)`, a static
  *    reader called through a variable class or an alias, a Carbon macro, a
  *    clock read through `app('clock')` or a service.
@@ -263,6 +302,7 @@ final class UnpinnedClockAssertions
         'assertSeeText' => [0],
         'assertDontSee' => [0],
         'assertSessionHas' => [1],
+        'assertThat' => [0, 1],
     ];
 
     /** Assertions whose one argument is a condition. */
@@ -290,6 +330,21 @@ final class UnpinnedClockAssertions
 
     /** In a predicate, prefixes of Carbon methods that are an equality (`isSameDay`, `isCurrentMonth`). */
     public const array PREDICATE_PREFIXES = ['isSame', 'isCurrent'];
+
+    /**
+     * PHPUnit constraint factories whose arguments flow into the constraint,
+     * on any receiver or none, static or not. `equalTo` is read as an element
+     * of {@see self::COMBINE_METHODS}; a bound (`greaterThan`,
+     * `equalToWithDelta`) is not listed, as bound assertions are not.
+     */
+    public const array CONSTRAINT_METHODS = [
+        'identicalTo', 'equalToCanonicalizing', 'equalToIgnoringCase', 'stringContains', 'stringStartsWith',
+        'stringEndsWith', 'matchesRegularExpression', 'containsEqual', 'containsIdentical', 'arrayHasKey',
+        'logicalNot', 'logicalAnd', 'logicalOr', 'logicalXor',
+    ];
+
+    /** A call of one of these in a branch of an `if` whose condition is an equality makes a hand comparison. */
+    public const array FAIL_METHODS = ['fail'];
 
     /** Functions that read the clock, which freezing reaches. */
     public const array CLOCK_FUNCTIONS = ['now', 'today'];
@@ -455,6 +510,8 @@ final class UnpinnedClockAssertions
         'PREDICATE_NEGATIONS' => ['found', 'predicate_negation'],
         'PREDICATE_METHODS' => ['found', 'predicate_method'],
         'PREDICATE_PREFIXES' => ['found', 'predicate_prefix'],
+        'CONSTRAINT_METHODS' => ['found', 'constraint_method'],
+        'FAIL_METHODS' => ['found', 'fail_method'],
         'CLOCK_FUNCTIONS' => ['found', 'clock_function'],
         'CLOCK_CLASSES' => ['found', 'clock_class'],
         'CLOCK_STATICS' => ['found', 'clock_static'],
@@ -521,12 +578,21 @@ final class UnpinnedClockAssertions
     private bool $inTraitSetUpRunner = false;
 
     /**
+     * The parameters of the helper being walked that were handed a clock
+     * read, => whether it was PHP's own. Empty outside a helper.
+     *
+     * @var array<string, bool>
+     */
+    private static array $bound = [];
+
+    /**
      * @param  array<string, string>  $sources  path => PHP source
      */
     public function __construct(array $sources)
     {
         $parser = (new ParserFactory)->createForHostVersion();
         $finder = new NodeFinder;
+        self::$bound = [];
 
         foreach ($sources as $path => $source) {
             $ast = $parser->parse($source) ?? [];
@@ -625,6 +691,10 @@ final class UnpinnedClockAssertions
             return false;
         }
 
+        if ($expr instanceof Variable && is_string($expr->name) && array_key_exists($expr->name, self::$bound)) {
+            return ! $nativeOnly || self::$bound[$expr->name];
+        }
+
         if ($expr instanceof FuncCall) {
             $fn = $expr->name instanceof Name ? strtolower($expr->name->getLast()) : null;
             if ($expr->isFirstClassCallable() || $fn === null) {
@@ -644,6 +714,10 @@ final class UnpinnedClockAssertions
 
         if ($expr instanceof StaticCall) {
             $class = $expr->class instanceof Name ? $expr->class->getLast() : null;
+            if ($expr->name instanceof Identifier && in_array($expr->name->toString(), self::CONSTRAINT_METHODS, true)
+                && ! $expr->isFirstClassCallable()) {
+                return self::anyArgumentReadsClock($expr->getArgs(), $nativeOnly);
+            }
             if (! in_array($class, self::CLOCK_CLASSES, true) || $expr->isFirstClassCallable()) {
                 return false;
             }
@@ -688,7 +762,7 @@ final class UnpinnedClockAssertions
                 return true;
             }
 
-            return self::named($method, self::COMBINE_METHODS, self::COMBINE_PREFIXES)
+            return (self::named($method, self::COMBINE_METHODS, self::COMBINE_PREFIXES) || in_array($method, self::CONSTRAINT_METHODS, true))
                 && self::anyArgumentReadsClock($args, $nativeOnly);
         }
 
@@ -1172,6 +1246,10 @@ final class UnpinnedClockAssertions
             return $this->call($node, $pinned, $owner);
         }
 
+        if ($node instanceof If_) {
+            return $this->ifStatement($node, $pinned, $owner);
+        }
+
         foreach ($node->getSubNodeNames() as $name) {
             $pinned = $this->walk($node->$name, $pinned, $owner);
         }
@@ -1211,6 +1289,10 @@ final class UnpinnedClockAssertions
                 $pinned = $this->walk($args, $pinned, $owner);
                 $value = $args[0]->value ?? null;
                 if ($value === null || self::isNull($value)) {
+                    return false;
+                }
+                if (self::isCallable($value) && ! self::returnsAFixedTime($value)) {
+                    // Carbon answers every read from the callable: not a pin.
                     return false;
                 }
                 $this->pins++;
@@ -1269,13 +1351,188 @@ final class UnpinnedClockAssertions
                 $key = $method[1].'::'.$name;
                 if (! in_array($key, $this->stack, true) && count($this->stack) < 12) {
                     $this->stack[] = $key;
+                    $caller = self::$bound;
+                    self::$bound = self::bindings($method[0], $args);
                     $pinned = $this->walk($method[0]->stmts ?? [], $pinned, $method[1]);
+                    self::$bound = $caller;
                     array_pop($this->stack);
                 }
             }
         }
 
         return $pinned;
+    }
+
+    /**
+     * The helper's parameters its call hands a clock read, as the class
+     * docblock binds them, read in the caller's own bindings.
+     *
+     * @param  list<Arg>  $args
+     * @return array<string, bool>
+     */
+    private static function bindings(ClassMethod $method, array $args): array
+    {
+        $bound = [];
+
+        foreach ($args as $i => $arg) {
+            if ($arg->unpack) {
+                continue;
+            }
+
+            $param = null;
+            if ($arg->name !== null) {
+                foreach ($method->params as $candidate) {
+                    if ($candidate->var instanceof Variable && $candidate->var->name === $arg->name->toString()) {
+                        $param = $candidate;
+                    }
+                }
+            } elseif (isset($method->params[$i]) && ! $method->params[$i]->variadic) {
+                $param = $method->params[$i];
+            }
+
+            if ($param === null || ! $param->var instanceof Variable || ! is_string($param->var->name)) {
+                continue;
+            }
+
+            if (self::readsClock($arg->value, true)) {
+                $bound[$param->var->name] = true;
+            } elseif (self::readsClock($arg->value)) {
+                $bound[$param->var->name] = false;
+            }
+        }
+
+        return $bound;
+    }
+
+    private static function isCallable(Expr $value): bool
+    {
+        if ($value instanceof Closure || $value instanceof ArrowFunction) {
+            return true;
+        }
+
+        return ($value instanceof MethodCall || $value instanceof NullsafeMethodCall || $value instanceof StaticCall || $value instanceof FuncCall)
+            && $value->isFirstClassCallable();
+    }
+
+    /**
+     * Does this closure or arrow function return a fixed time from every
+     * `return` (the class docblock)? Any other callable does not.
+     */
+    private static function returnsAFixedTime(Expr $callable): bool
+    {
+        if ($callable instanceof ArrowFunction) {
+            return self::isAFixedTime($callable->expr);
+        }
+
+        if (! $callable instanceof Closure) {
+            return false;
+        }
+
+        $returns = [];
+        $collect = static function (array $nodes) use (&$collect, &$returns): void {
+            foreach ($nodes as $node) {
+                if ($node instanceof Closure || $node instanceof ArrowFunction || $node instanceof Function_ || $node instanceof ClassLike) {
+                    continue;
+                }
+                if ($node instanceof Return_) {
+                    $returns[] = $node->expr;
+                }
+                if ($node instanceof Node) {
+                    foreach ($node->getSubNodeNames() as $name) {
+                        $child = $node->$name;
+                        $collect(is_array($child) ? $child : [$child]);
+                    }
+                }
+            }
+        };
+        $collect($callable->stmts);
+
+        if ($returns === []) {
+            return false;
+        }
+
+        foreach ($returns as $returned) {
+            if ($returned === null || ! self::isAFixedTime($returned)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function isAFixedTime(Expr $expr): bool
+    {
+        if ($expr instanceof StaticCall) {
+            $fixedBy = $expr->class instanceof Name && in_array($expr->class->getLast(), self::CLOCK_CLASSES, true)
+                && $expr->name instanceof Identifier && in_array($expr->name->toString(), self::STATIC_PARSERS, true);
+        } elseif ($expr instanceof New_) {
+            $fixedBy = $expr->class instanceof Name
+                && (in_array($expr->class->getLast(), self::CLOCK_CONSTRUCTORS, true) || in_array($expr->class->getLast(), self::NATIVE_CONSTRUCTORS, true));
+        } else {
+            return false;
+        }
+
+        if (! $fixedBy || $expr->isFirstClassCallable()) {
+            return false;
+        }
+
+        $first = $expr->getArgs()[0]->value ?? null;
+
+        return $first instanceof String_ && trim($first->value) !== '' && ! self::isRelative($first, true);
+    }
+
+    /**
+     * An `if` walked as the generic walk would (condition, branch, each
+     * `elseif`'s condition and branch, `else`), with each condition read as
+     * a hand comparison when a branch calls fail() (the class docblock).
+     */
+    private function ifStatement(If_ $node, bool $pinned, string $owner): bool
+    {
+        $branches = [$node->stmts];
+        foreach ($node->elseifs as $elseif) {
+            $branches[] = $elseif->stmts;
+        }
+        $branches[] = $node->else->stmts ?? [];
+        $fails = false;
+        foreach ($branches as $branch) {
+            $fails = $fails || (new NodeFinder)->findFirst($branch, static function (Node $n): bool {
+                if (! ($n instanceof MethodCall || $n instanceof NullsafeMethodCall || $n instanceof StaticCall || $n instanceof FuncCall)) {
+                    return false;
+                }
+                $name = $n->name instanceof Identifier ? $n->name->toString() : ($n->name instanceof Name ? $n->name->getLast() : null);
+
+                return in_array($name, self::FAIL_METHODS, true);
+            }) !== null;
+        }
+
+        $pinned = $this->walk($node->cond, $pinned, $owner);
+        $this->handComparison($node->cond, $fails, $pinned, $owner);
+        $pinned = $this->walk($node->stmts, $pinned, $owner);
+        foreach ($node->elseifs as $elseif) {
+            $pinned = $this->walk($elseif->cond, $pinned, $owner);
+            $this->handComparison($elseif->cond, $fails, $pinned, $owner);
+            $pinned = $this->walk($elseif->stmts, $pinned, $owner);
+        }
+
+        return $this->walk($node->else, $pinned, $owner);
+    }
+
+    private function handComparison(Expr $condition, bool $fails, bool $pinned, string $owner): void
+    {
+        if (! $fails) {
+            return;
+        }
+
+        $native = self::isEqualityWithAClockRead($condition, true);
+        if ($native || (! $pinned && self::isEqualityWithAClockRead($condition, false))) {
+            $this->findings[] = [
+                'test' => $this->test,
+                'file' => $this->classes[$owner]['file'] ?? $this->file,
+                'line' => $condition->getStartLine(),
+                'assertion' => self::FAIL_METHODS[0],
+                'native' => $native,
+            ];
+        }
     }
 
     /**
