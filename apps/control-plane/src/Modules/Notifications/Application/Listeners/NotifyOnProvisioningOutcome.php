@@ -6,6 +6,7 @@ namespace Lynomia\Modules\Notifications\Application\Listeners;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Notifications\Application\Actions\NotifyCustomer;
 use Lynomia\Modules\Notifications\Domain\Enums\NotificationType;
 use Lynomia\Modules\Provisioning\Domain\Enums\ProvisioningJobKind;
@@ -14,6 +15,7 @@ use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobNeedsReview;
 use Lynomia\Modules\Provisioning\Domain\Events\ProvisioningJobSucceeded;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\ProvisioningJob;
 use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
+use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
 
 /**
  * Tells a customer what happened to the thing they bought.
@@ -89,9 +91,38 @@ final class NotifyOnProvisioningOutcome implements ShouldQueue
             type: $type,
             idempotencyKey: 'provisioning-succeeded:'.$event->provisioningJobId,
             subject: $service,
-            data: ['service' => $this->label($service), 'image' => ''],
+            data: ['service' => $this->label($service), 'image' => '', 'plan' => $this->planName($event->provisioningJobId, $service)],
             link: '/services',
         );
+    }
+
+    /**
+     * The name of the plan a plan change moved onto, in both languages, for
+     * `plan_change_completed` (":service is now on the :plan plan"). Read off
+     * the job - a resize and a package change carry the plan they deliver
+     * (QueuePlanChangeAtProvider) - and otherwise off the plan the
+     * service's subscription is on. Nothing used to send it, and the customer
+     * read ":plan" in the title.
+     *
+     * @return array<string, string>|string
+     */
+    private function planName(string $provisioningJobId, Service $service): array|string
+    {
+        /** @var array<string, mixed>|null $payload */
+        $payload = ProvisioningJob::query()->whereKey($provisioningJobId)->value('payload');
+        $planId = is_array($payload) && is_string($payload['plan_id'] ?? null) ? $payload['plan_id'] : null;
+
+        /** @var Plan|null $plan */
+        $plan = $planId !== null ? Plan::query()->find($planId) : null;
+
+        if ($plan === null && $service->subscription_id !== null) {
+            $planId = Subscription::query()->whereKey($service->subscription_id)->value('plan_id');
+            $plan = is_string($planId) ? Plan::query()->find($planId) : null;
+        }
+
+        $name = $plan?->name;
+
+        return is_array($name) && $name !== [] ? array_map('strval', $name) : '';
     }
 
     public function failed(ProvisioningJobFailed $event): void
