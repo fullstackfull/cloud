@@ -11,6 +11,7 @@ use Illuminate\Testing\TestResponse;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
@@ -110,6 +111,11 @@ final class AnUnpaidPlanChangeCanBeWithdrawnByTheCustomerTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.is_payable', false)
             ->assertJsonPath('data.plan_change_withdrawable', true);
+
+        // And the list says the same, from its once-per-page read.
+        $listed = collect($this->actingAs($this->user)->getJson('/api/v1/invoices')->assertOk()->json('data'))->firstWhere('id', (string) $invoice->getKey());
+        $this->assertFalse($listed['is_payable']);
+        $this->assertTrue($listed['plan_change_withdrawable']);
 
         $card = $this->actingAs($this->user)->postJson('/api/v1/invoices/'.$invoice->getKey().'/payments')
             ->assertStatus(409)
@@ -227,6 +233,77 @@ final class AnUnpaidPlanChangeCanBeWithdrawnByTheCustomerTest extends TestCase
         $stranger = Customer::factory()->create(['currency' => 'KWD']);
         $theirs = Invoice::factory()->create(['customer_id' => $stranger->getKey(), 'currency' => 'KWD', 'status' => InvoiceStatus::Open, 'subtotal_minor' => 100, 'total_minor' => 100]);
         $this->withdraw($theirs)->assertNotFound();
+    }
+
+    #[Test]
+    public function a_member_who_may_not_pay_may_not_withdraw(): void
+    {
+        // billing.pay, the permission a plan change needs: a technical
+        // contact or a read-only member moves no plan and no money.
+        [$subscription, $large] = $this->vpsSubscriptionOnANode();
+        $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large))->assertOk();
+        $invoice = $this->openInvoiceOf($subscription);
+
+        foreach ([CustomerRole::Technical, CustomerRole::Member] as $role) {
+            $member = User::factory()->create();
+            $this->customer->members()->create(['user_id' => $member->id, 'role' => $role, 'accepted_at' => now()]);
+
+            $this->actingAs($member)->postJson('/api/v1/invoices/'.$invoice->getKey().'/withdraw-plan-change')->assertForbidden();
+        }
+
+        $this->assertSame(InvoiceStatus::Open, $invoice->fresh()?->status);
+        $this->assertSame((string) $large->getKey(), (string) $subscription->fresh()?->plan_id);
+    }
+
+    #[Test]
+    public function another_open_invoice_of_the_subscription_is_not_withdrawn_in_the_changes_place(): void
+    {
+        /*
+         * Only the invoice that bills the unpaid change withdraws it. Another
+         * invoice open on the same subscription (an operator's, say) voided
+         * instead would void a bill that is not the change's and put back
+         * nothing - the change's own invoice still open, the plan unpaid.
+         */
+        [$subscription, $large] = $this->vpsSubscriptionOnANode();
+        $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large))->assertOk();
+        $upgrade = $this->openInvoiceOf($subscription);
+
+        /** @var Invoice $other */
+        $other = Invoice::factory()->create([
+            'customer_id' => $this->customer->getKey(),
+            'subscription_id' => $subscription->getKey(),
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+            'subtotal_minor' => 500,
+            'total_minor' => 500,
+        ]);
+
+        $this->actingAs($this->user)->getJson('/api/v1/invoices/'.$other->getKey())->assertOk()->assertJsonPath('data.plan_change_withdrawable', false);
+        $this->withdraw($other)->assertStatus(409)->assertJsonPath('error.code', 'invoice.plan_change_not_withdrawable');
+
+        $this->assertSame(InvoiceStatus::Open, $other->fresh()?->status);
+        $this->assertSame(InvoiceStatus::Open, $upgrade->fresh()?->status);
+        $this->assertSame((string) $large->getKey(), (string) $subscription->fresh()?->plan_id);
+    }
+
+    #[Test]
+    public function the_change_of_a_subscription_that_has_ended_is_not_withdrawn(): void
+    {
+        /*
+         * An ended subscription is not put back on a plan (the void's restore
+         * does not move an ended one): withdrawing would void the invoice and
+         * restore nothing. Its open invoices are the wind-up's to withdraw.
+         * Reached in the moment between the end and the wind-up's void.
+         */
+        [$subscription, $large] = $this->vpsSubscriptionOnANode();
+        $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large))->assertOk();
+        $invoice = $this->openInvoiceOf($subscription);
+
+        $subscription->fresh()?->forceFill(['status' => SubscriptionStatus::Cancelled, 'ended_at' => now()])->save();
+
+        $this->actingAs($this->user)->getJson('/api/v1/invoices/'.$invoice->getKey())->assertOk()->assertJsonPath('data.plan_change_withdrawable', false);
+        $this->withdraw($invoice)->assertStatus(409)->assertJsonPath('error.code', 'invoice.plan_change_not_withdrawable');
+        $this->assertSame(InvoiceStatus::Open, $invoice->fresh()?->status);
     }
 
     // -----------------------------------------------------------------
