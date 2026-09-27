@@ -132,7 +132,7 @@ Skeptics and the five-product matrix follow.
 
 | Band | Scope | Status | Commit |
 |---|---|---|---|
-| A | F-07 (c); cancelled/ended subscription invoices; downgrade credit vs card refund; lapse vs refund in flight; refund/settle deadlock; discounted credit; pending refunds never settle | repaired; re-verifying with a trial merge | `06d52e0` |
+| A | F-07 (c); cancelled/ended subscription invoices; downgrade credit vs card refund; lapse vs refund in flight; refund/settle deadlock; discounted credit; pending refunds never settle | upheld with reservations after two repairs; merged | `b70eb6f` |
 | B | customer role editable into operator permissions; bootstrap race; cached configuration | upheld with reservations; merged; Horizon staff gate added `841f05b` | `12b1a03` |
 | C | F-09 stale restore handle; file restore of unreadable archives and deletion under it; F-26 production guard | upheld with reservations; merged `8afa8c6`; runbook `6837954` | `ad9af6a` |
 | D | operator retry after released capacity; stranger elsewhere in the cluster; network-less customer subnets | upheld with reservations after one repair; merged | `fb1518c` |
