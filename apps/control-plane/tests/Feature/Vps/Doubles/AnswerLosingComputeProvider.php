@@ -84,6 +84,18 @@ final class AnswerLosingComputeProvider implements ComputeProvider
     /** When set, every resize fails with this before the fleet is touched. */
     public ?ComputeProviderException $failResizesWith = null;
 
+    /**
+     * When set, run once, after a resize has reached the fleet and before it
+     * is answered: how a test makes the machine unreadable just after it
+     * was resized.
+     *
+     * @var ?Closure(): void
+     */
+    public ?Closure $afterAResize = null;
+
+    /** When set, every read of a machine reports no such machine, as a node that lost track of it does. */
+    public bool $reportNoMachines = false;
+
     public function __construct(public readonly FakeComputeProvider $fleet = new FakeComputeProvider) {}
 
     public function name(): string
@@ -155,7 +167,15 @@ final class AnswerLosingComputeProvider implements ComputeProvider
             throw $this->failResizesWith;
         }
 
-        return $this->fleet->resizeVm($nodeName, $providerId, $request);
+        $operation = $this->fleet->resizeVm($nodeName, $providerId, $request);
+
+        if ($this->afterAResize !== null) {
+            $after = $this->afterAResize;
+            $this->afterAResize = null;
+            $after();
+        }
+
+        return $operation;
     }
 
     public function destroyVm(string $nodeName, string $providerId, bool $purge = true): VmOperation
@@ -195,7 +215,7 @@ final class AnswerLosingComputeProvider implements ComputeProvider
             $look($nodeName, $providerId);
         }
 
-        $machine = $this->fleet->getVm($nodeName, $providerId);
+        $machine = $this->reportNoMachines ? null : $this->fleet->getVm($nodeName, $providerId);
 
         if ($machine === null || ! $this->reportNoFigures) {
             return $machine;

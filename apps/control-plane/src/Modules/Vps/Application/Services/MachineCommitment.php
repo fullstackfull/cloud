@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Vps\Application\Services;
 
 use Closure;
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Actions\RestateNodeCommitment;
 use Lynomia\Modules\Compute\Domain\Exceptions\NodeCapacityExceededException;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
@@ -60,23 +61,49 @@ final readonly class MachineCommitment
     }
 
     /**
+     * Restates the machine's commitment, under a lock on the machine's row
+     * taken first; false, with nothing written, when the row is gone.
+     *
+     * The row is locked before anything else, and read again under that
+     * lock: DestroyVpsHandler gives the capacity back and deletes the row
+     * under the same lock, so a restatement is either wholly before a
+     * destroy's release (which then gives back what it wrote) or after the
+     * row is gone (and writes nothing). Without it, a destroy that ran
+     * between a resize's write of the machine row and its settle released
+     * the commitment and deleted the row, and the settle - finding nothing
+     * live under the service - committed the machine again under a key of
+     * its own (keyFor()): the node went on holding 1 machine and 4 / 8192 /
+     * 80 for a machine that no longer existed, and nothing released it
+     * (D7-1, round seven). The reservation it restates is found under the
+     * lock too, so a key read before a destroy is never written again after
+     * it. The lock order is the machine row, then the capacity rows in
+     * RestateNodeCommitment's own order - the order the destroy takes them.
+     *
      * @param  VmResources|Closure(NodeCapacityReservation|null): VmResources  $shape
      *
      * @throws NodeCapacityExceededException when $refuse and the node or pool cannot hold an increase
      */
-    public function restate(VirtualMachine $machine, ComputeNode $node, VmResources|Closure $shape, bool $refuse): void
+    public function restate(VirtualMachine $machine, ComputeNode $node, VmResources|Closure $shape, bool $refuse): bool
     {
-        $held = $this->heldBy($machine, $node);
+        return DB::transaction(function () use ($machine, $node, $shape, $refuse): bool {
+            if (VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->first(['id']) === null) {
+                return false;
+            }
 
-        $this->commitment->execute(
-            reservationKey: $this->keyFor($held, $machine),
-            node: $node,
-            storageId: $this->poolFor($held, $machine, $node),
-            shape: $shape,
-            refuseWhatDoesNotFit: $refuse,
-            serviceId: $machine->service_id,
-            customerId: $held?->customer_id,
-        );
+            $held = $this->heldBy($machine, $node);
+
+            $this->commitment->execute(
+                reservationKey: $this->keyFor($held, $machine),
+                node: $node,
+                storageId: $this->poolFor($held, $machine, $node),
+                shape: $shape,
+                refuseWhatDoesNotFit: $refuse,
+                serviceId: $machine->service_id,
+                customerId: $held?->customer_id,
+            );
+
+            return true;
+        });
     }
 
     /**

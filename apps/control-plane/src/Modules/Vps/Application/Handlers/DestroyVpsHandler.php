@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Lynomia\Modules\Vps\Application\Handlers;
 
+use Illuminate\Support\Facades\DB;
 use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Domain\Exceptions\ComputeProviderException;
 use Lynomia\Modules\Compute\Infrastructure\ComputeProviderFactory;
@@ -117,16 +118,37 @@ final readonly class DestroyVpsHandler implements ProvisioningHandler
         }
 
         $addresses = $this->releaseTheAddresses($machine);
-        $capacity = $this->releaseTheCapacity($machine);
 
         /*
+         * The capacity and the row go together, under a lock on the machine's
+         * row taken first - the lock a resize restates the machine's
+         * commitment under (MachineCommitment::restate()). A resize's restate
+         * is then wholly before this release, which gives back what it wrote,
+         * or after the row is gone, and writes nothing. Released outside that
+         * lock, a resize that settled between this release and the delete
+         * found nothing live and committed the machine again under a key of
+         * its own, for a machine this job had just removed (D7-1, round
+         * seven).
+         *
          * The row goes last. Everything above is keyed on it — the assignments
          * by the machine, the reservation by the service — so a worker that
          * died halfway through leaves a machine row whose redelivery finds the
          * releases already done and idempotent, rather than an orphaned
          * address nothing can be traced back to.
          */
-        $machine->delete();
+        $capacity = DB::transaction(function () use ($machine): int {
+            $locked = VirtualMachine::query()->whereKey($machine->getKey())->lockForUpdate()->first();
+
+            if ($locked === null) {
+                // Another delivery of this destroy finished first.
+                return 0;
+            }
+
+            $released = $this->releaseTheCapacity($locked);
+            $locked->delete();
+
+            return $released;
+        });
 
         return ProvisioningResult::succeeded(
             metadata: [

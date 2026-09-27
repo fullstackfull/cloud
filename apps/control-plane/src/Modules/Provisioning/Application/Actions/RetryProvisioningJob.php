@@ -47,7 +47,11 @@ use Lynomia\Modules\Provisioning\Infrastructure\Models\Service;
  *    is reserved on the job before the provider is called, so the retried
  *    attempt asks for the same one and looks under it before it builds. If
  *    it finds this build's machine it settles carrying it as the provider
- *    reference, and from then on this refusal holds.
+ *    reference, and from then on this refusal holds. A resize whose answer
+ *    was lost is the same kind of case, closed the same way: requeued here,
+ *    and the resize reads the machine's shape from the hypervisor before it
+ *    grows anything, so a growth that landed is not applied twice
+ *    (ResizeVpsHandler; D7-2, round seven).
  *  - **A job that has destroyed data.** A reinstall past the destructive line
  *    cannot be undone by running it again, and running it again lands a second
  *    installation on top of whatever the first one wrote.
