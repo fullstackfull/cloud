@@ -254,6 +254,9 @@ final class HostingReconciliationTest extends TestCase
     #[Test]
     public function a_node_whose_listing_is_refused_is_recorded_and_does_not_hold_the_front_of_the_sweep(): void
     {
+        // The stamps below are compared with the clock, so it is held still:
+        // a sweep that crossed a second boundary made this red.
+        $this->freezeSecond();
         config()->set('hosting.reconcile_batch', 1);
 
         // A node checked yesterday, and one whose panel will not be read.
