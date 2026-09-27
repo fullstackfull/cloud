@@ -18,8 +18,10 @@ use Lynomia\Modules\Identity\Domain\Enums\CustomerRole;
 use Lynomia\Modules\Identity\Infrastructure\Models\CustomerMember;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Identity\Infrastructure\Notifications\QueuedResetPassword;
+use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
+use Spatie\Permission\Models\Role as SpatieRole;
 use Symfony\Component\HttpFoundation\Cookie;
 use Tests\TestCase;
 
@@ -267,7 +269,25 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
         ]);
         $this->assertSame([], $roleless->getRoleNames()->all());
 
-        $seen = $this->whatDelegatesAreTold(['registered-customer@lynomia.test', 'role-less-login@lynomia.test']);
+        // A login holding a role row the enum does not declare, and a
+        // permission given to it directly — neither of which a delegate holds.
+        SpatieRole::create(['name' => 'legacy', 'guard_name' => 'web']);
+        $odd = User::factory()->create(['email' => 'odd-login@lynomia.test']);
+        $odd->syncRoles(['legacy']);
+        $odd->givePermissionTo(Permission::CustomerViewAny->value);
+
+        $seen = $this->whatDelegatesAreTold(['registered-customer@lynomia.test', 'role-less-login@lynomia.test', 'odd-login@lynomia.test']);
+
+        // The odd login holds exactly what the invitation gave: the unknown
+        // role went with the role change, the direct permission with the
+        // credentials, and the revocation is on the record.
+        $odd = $odd->fresh();
+        $this->assertSame([Role::Support->value], $odd?->getRoleNames()->all());
+        $this->assertSame([], $odd?->getDirectPermissions()->pluck('name')->all());
+        $this->assertSame(
+            [Permission::CustomerViewAny->value],
+            AuditEntry::query()->where('action', AuditAction::OperatorInvited)->where('subject_id', $odd?->id)->sole()->context['direct_permissions_revoked'] ?? null,
+        );
 
         $this->assertSame(201, $seen['registered-customer@lynomia.test']['status']);
         $body = json_decode($seen['registered-customer@lynomia.test']['body'], true);
@@ -391,6 +411,39 @@ final class AnInvitationTakesTheAccountFromWhoeverRegisteredTheAddressTest exten
             ->putJson('/api/admin/operators/'.$login->id.'/roles', ['roles' => [Role::Noc->value]])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'rbac.not_an_operator');
+    }
+
+    /**
+     * Only `customer` is kept by a role change. A role row the enum does not
+     * declare — no route creates one; a seeder or a SQL client could — is
+     * replaced like any other, as it was before `customer` was kept: a super
+     * admin removes it, and a delegate who does not hold it is refused.
+     */
+    #[Test]
+    public function a_role_change_still_removes_a_role_the_platform_does_not_declare(): void
+    {
+        SpatieRole::create(['name' => 'legacy', 'guard_name' => 'web']);
+        $admin = User::factory()->create(['email_verified_at' => now()]);
+        $admin->syncRoles([Role::SuperAdmin->value]);
+
+        $target = User::factory()->create();
+        $target->syncRoles([Role::Customer->value, Role::Noc->value, 'legacy']);
+
+        $delegate = User::factory()->create(['email_verified_at' => now()]);
+        $delegate->syncRoles([Role::Noc->value]);
+        $delegate->givePermissionTo('role.manage');
+        $this->actingAs($delegate)
+            ->putJson('/api/admin/operators/'.$target->id.'/roles', ['roles' => [Role::Noc->value]])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'rbac.role_not_yours_to_remove');
+        $this->assertTrue($target->fresh()?->hasRole('legacy'));
+
+        $this->app['auth']->forgetGuards();
+        $this->actingAs($admin)
+            ->putJson('/api/admin/operators/'.$target->id.'/roles', ['roles' => [Role::Support->value]])
+            ->assertOk()
+            ->assertJsonPath('data.roles', [Role::Support->value]);
+        $this->assertEqualsCanonicalizing([Role::Customer->value, Role::Support->value], $target->fresh()?->getRoleNames()->all());
     }
 
     /**
