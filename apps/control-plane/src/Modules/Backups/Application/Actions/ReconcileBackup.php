@@ -124,7 +124,9 @@ final readonly class ReconcileBackup
      * before — while this one was asking the provider is not written over:
      * the race is a refusal, and the row as it now stands is returned. A
      * sweep that loaded the row during an earlier restore has polled that
-     * restore's task, and that is no answer about a later one (F-09).
+     * restore's task, and that is no answer about a later one (F-09). The
+     * record that it asked ({@see Backup::recordPoll()}) is held to the same
+     * condition, so it does not land on the later restore either.
      */
     public function execute(Backup $backup): Backup
     {
@@ -196,8 +198,9 @@ final readonly class ReconcileBackup
         } catch (BackupProviderException $e) {
             if ($e->isIndeterminate()) {
                 // Not knowing is the normal condition of a poller. Record that
-                // we asked, and ask again later.
-                $backup->forceFill(['last_polled_at' => now(), 'poll_count' => $backup->poll_count + 1])->save();
+                // we asked, and ask again later — on the attempt this copy
+                // read, or not at all.
+                $backup->recordPoll();
 
                 return $this->giveUpIfOverdue($backup, $operation);
             }
@@ -208,7 +211,9 @@ final readonly class ReconcileBackup
             return $this->quarantine($backup, $operation, $this->redactor->redactString($e->getMessage()));
         }
 
-        $backup->forceFill(['last_polled_at' => now(), 'poll_count' => $backup->poll_count + 1])->save();
+        // Only on the attempt this copy read: a sweep holding an earlier
+        // restore's copy has asked about that restore, not a later one.
+        $backup->recordPoll();
 
         if ($state->isRunning()) {
             return $this->giveUpIfOverdue($backup, $operation);

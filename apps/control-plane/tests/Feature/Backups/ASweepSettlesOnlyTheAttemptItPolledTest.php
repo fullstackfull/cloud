@@ -70,6 +70,8 @@ final class ASweepSettlesOnlyTheAttemptItPolledTest extends VpsApiTestCase
         $this->assertNotNull($row->restore_task_id);
         $this->assertNotSame($firstTask, $row->restore_task_id);
         $this->assertNull($row->restored_at);
+        $this->assertSame(0, $row->poll_count, 'The stale sweep\'s poll of the first restore is not a poll of the second.');
+        $this->assertNull($row->last_polled_at, 'The second restore keeps its place at the front of the next sweep.');
         $this->assertSame(1, $this->notifications($customer, NotificationType::RestoreCompleted), 'Only the first restore has completed.');
         $this->assertSame('backup.restore_in_flight', $this->aThirdRestore($archive, $machine), 'The machine is still held by the second restore.');
 
@@ -92,6 +94,8 @@ final class ASweepSettlesOnlyTheAttemptItPolledTest extends VpsApiTestCase
         $this->assertSame(BackupState::Restoring, $row->state, 'The first restore\'s failure is not the second\'s.');
         $this->assertNotSame($firstTask, $row->restore_task_id);
         $this->assertNull($row->failure_reason);
+        $this->assertSame(0, $row->poll_count, 'The stale sweep\'s poll of the first restore is not a poll of the second.');
+        $this->assertNull($row->last_polled_at, 'The second restore keeps its place at the front of the next sweep.');
         $this->assertSame(1, $this->notifications($customer, NotificationType::RestoreFailed));
         $this->assertSame('backup.restore_in_flight', $this->aThirdRestore($archive, $machine));
 
@@ -165,6 +169,34 @@ final class ASweepSettlesOnlyTheAttemptItPolledTest extends VpsApiTestCase
         $row = $archive->refresh();
         $this->assertSame(BackupState::NeedsReview, $row->state, 'A verdict on the first restore is not one on the second.');
         $this->assertSame('UPID:fake-restore:second', $row->restore_task_id);
+        $this->assertNull($row->restored_at);
+    }
+
+    #[Test]
+    public function the_attempt_compared_is_the_one_the_copy_read_not_one_assigned_to_it_since(): void
+    {
+        // One clock, so the two attempts share a start and only the handle
+        // differs.
+        $this->freezeTime();
+        [, , $archive] = $this->anArchive();
+
+        $archive->transitionTo(BackupState::Restoring, ['restore_task_id' => 'UPID:fake-restore:first', 'restore_started_at' => now()]);
+        $stale = Backup::query()->findOrFail($archive->id);
+
+        $fresh = Backup::query()->findOrFail($archive->id);
+        $fresh->transitionTo(BackupState::Restored, ['restored_at' => now()]);
+        $fresh->transitionTo(BackupState::Restoring, ['restore_task_id' => null, 'restore_started_at' => now(), 'restored_at' => null]);
+        $fresh->forceFill(['restore_task_id' => 'UPID:fake-restore:second'])->save();
+
+        // A caller that assigns the current handle to its old copy, in memory
+        // only, has not read the second attempt; it is still the first one's
+        // copy, and what it learned is about the first.
+        $stale->restore_task_id = 'UPID:fake-restore:second';
+
+        $this->assertRaced(fn () => $stale->transitionTo(BackupState::Restored, ['restored_at' => now()]));
+
+        $row = $archive->refresh();
+        $this->assertSame(BackupState::Restoring, $row->state);
         $this->assertNull($row->restored_at);
     }
 

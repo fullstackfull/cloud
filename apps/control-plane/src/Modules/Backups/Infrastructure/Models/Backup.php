@@ -210,7 +210,7 @@ class Backup extends Model
 
             $attempt = $this->attemptColumns($expected);
 
-            if ($attempt !== [] && ! $this->stillOnTheAttemptItRead($attempt)) {
+            if ($attempt !== [] && ! $this->onTheAttemptItRead(static::query()->whereKey($this->getKey()), $attempt)->exists()) {
                 throw IllegalBackupTransitionException::attemptChanged(
                     (string) $this->getKey(),
                     $expected,
@@ -269,18 +269,19 @@ class Backup extends Model
     }
 
     /**
-     * Whether the locked row still carries the attempt this copy last read or
-     * wrote — its original values, not whatever a caller has since assigned.
+     * Narrow `$query` to a row that still carries the attempt this copy last
+     * read or wrote — its original values, not whatever a caller has since
+     * assigned.
      *
      * Compared by the database, so a timestamp reads equal whichever of its
      * spellings each side holds.
      *
+     * @param  Builder<Backup>  $query
      * @param  list<string>  $columns
+     * @return Builder<Backup>
      */
-    private function stillOnTheAttemptItRead(array $columns): bool
+    private function onTheAttemptItRead(Builder $query, array $columns): Builder
     {
-        $query = static::query()->whereKey($this->getKey());
-
         foreach ($columns as $column) {
             $read = $this->getRawOriginal($column);
 
@@ -291,7 +292,46 @@ class Backup extends Model
             }
         }
 
-        return $query->exists();
+        return $query;
+    }
+
+    /**
+     * Record that the provider was asked about this row, if the row is still
+     * on the operation and attempt this copy read — or refuse, as a race.
+     *
+     * The poll bookkeeping used to be a plain save. A sweep that loaded the
+     * row during one restore, and reached it after that restore had settled
+     * and another had started, stamped `last_polled_at` and a poll count on
+     * the new restore, which had never been asked about: it lost its place at
+     * the front of the next sweep (`last_polled_at nulls first`) and carried
+     * a count that was not its own. It is written only where the
+     * compare-and-set in {@see self::transitionTo()} would write, and the same
+     * refusal says why not (F-09).
+     *
+     * @throws IllegalBackupTransitionException
+     */
+    public function recordPoll(): void
+    {
+        $expected = BackupState::from((string) $this->getRawOriginal('state'));
+
+        $query = $this->onTheAttemptItRead(
+            static::query()->whereKey($this->getKey())->where('state', $expected->value),
+            $this->attemptColumns($expected),
+        );
+
+        $polledAt = now();
+        $count = $this->poll_count + 1;
+
+        if ($query->update(['last_polled_at' => $polledAt, 'poll_count' => $count]) === 0) {
+            $stored = static::query()->whereKey($this->getKey())->toBase()->value('state');
+
+            throw $stored === $expected->value
+                ? IllegalBackupTransitionException::attemptChanged((string) $this->getKey(), $expected, $this->attemptColumns($expected), $expected)
+                : IllegalBackupTransitionException::movedUnderneath((string) $this->getKey(), $expected, is_string($stored) ? $stored : null, $expected);
+        }
+
+        $this->forceFill(['last_polled_at' => $polledAt, 'poll_count' => $count])
+            ->syncOriginalAttributes(['last_polled_at', 'poll_count']);
     }
 
     /**
