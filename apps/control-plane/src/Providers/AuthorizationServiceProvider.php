@@ -37,8 +37,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Who may use the Horizon dashboard: an operator holding the capability,
-     * in every environment alike.
+     * Who may use the Horizon dashboard: an operator — a login holding a staff
+     * role — holding the capability, in every environment alike.
      *
      * ---------------------------------------------------------------------
      * What this replaces
@@ -125,6 +125,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
             }
 
             if ($user instanceof MustVerifyEmail && ! $user->hasVerifiedEmail()) {
+                return false;
+            }
+
+            // The same line the operator API draws (EnsureTheCallerIsStaff):
+            // a login that holds no staff role is not an operator, whatever
+            // permissions it has been given.
+            if (! $user->hasAnyRole(Role::staffRoleNames())) {
                 return false;
             }
 

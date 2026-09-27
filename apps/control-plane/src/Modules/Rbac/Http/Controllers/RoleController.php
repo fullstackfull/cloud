@@ -41,7 +41,9 @@ final class RoleController
                 return [
                     'name' => $role->name,
                     'label' => $known?->label() ?? $role->name,
-                    'is_staff_role' => $known?->isStaffRole() ?? true,
+                    // A role row the enum does not declare is not staff: the staff
+                    // gate (EnsureTheCallerIsStaff) does not let it through.
+                    'is_staff_role' => $known?->isStaffRole() ?? false,
                     /*
                      * Super Admin's authority comes from the Gate::before
                      * bypass and not from these rows, so the list is empty and

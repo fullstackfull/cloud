@@ -23,6 +23,7 @@ use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Component\HttpFoundation\Response;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -79,6 +80,7 @@ use Tests\TestCase;
 final class TheQueueDashboardIsGatedByCapabilityTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     /**
      * The 22 routes the gate was written for, exactly as the router registers
@@ -441,10 +443,27 @@ final class TheQueueDashboardIsGatedByCapabilityTest extends TestCase
      */
     private function userWithPermissions(array $permissions): User
     {
-        $user = User::factory()->create();
-        $user->givePermissionTo(array_map(static fn (Permission $p): string => $p->value, $permissions));
+        return $this->staffHoldingExactly($permissions);
+    }
 
-        return $user;
+    #[Test]
+    public function a_login_that_is_not_an_operator_is_refused_whatever_it_holds(): void
+    {
+        Bus::fake();
+
+        // A customer login, and a login with no role at all, each handed both
+        // queue permissions directly: neither is staff, so neither is let in.
+        $customer = User::factory()->create();
+        $customer->assignRole(Role::Customer->value);
+        $customer->givePermissionTo([Permission::ProvisioningView->value, Permission::ProvisioningRetry->value]);
+
+        $roleless = User::factory()->create();
+        $roleless->givePermissionTo([Permission::ProvisioningView->value, Permission::ProvisioningRetry->value]);
+
+        foreach (['a customer' => $customer, 'a login with no role' => $roleless] as $who => $user) {
+            $this->expectStatus(403, $this->actingAs($user)->getJson('/horizon/api/jobs/failed'), $who.' reading');
+            $this->expectStatus(403, $this->actingAs($user)->postJson('/horizon/api/jobs/retry/x'), $who.' retrying');
+        }
     }
 
     /**
