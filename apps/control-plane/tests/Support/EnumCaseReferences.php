@@ -148,8 +148,14 @@ use UnitEnum;
  *    method, closure or arrow function whose declared return type is `bool`
  *    (`->contains(static fn (string $r): bool => Role::tryFrom($r)?->
  *    isStaffRole() === true)`). Like an enum's own `canBecome()`, a `bool`
- *    answer cannot hand the case on. A body that writes the case through a
- *    by-reference `use (&$x)` or into a property would be misread as a read;
+ *    answer cannot hand the case on as its result. It can hand it on in the
+ *    body, and each of these is misread as a read: a body that writes the
+ *    case through a by-reference `use (&$x)` or into a property; a `bool`
+ *    method or function whose body passes the case to a call that keeps it
+ *    (`$this->store(Enum::from($v)); return true;`); a closure or arrow
+ *    function not declared `bool`, nested inside a `bool` body, that
+ *    returns or keeps it (the whole nested body is inside the range); and a
+ *    `bool` arrow function whose expression passes the case to such a call;
  *  - **over a property**: its one argument, after a `(string)` or `(int)`
  *    cast, is a single property fetch `$x->name` or `$x?->name`
  *    (`DeploymentKind::from($job->kind)`), read as a stored column being

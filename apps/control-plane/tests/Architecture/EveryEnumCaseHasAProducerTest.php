@@ -651,7 +651,7 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
 
     /**
      * `Rule::in()` of quoted strings is read as the literal `in:` rule is, on
-     * fixtures: three spellings read, and seven that are not (a comment, a
+     * fixtures: three spellings read, and eight that are not (a comment, a
      * variable, a value outside the enum, an enum case's `->value`, a call,
      * a second argument after the list, another class, another method).
      */
@@ -695,7 +695,9 @@ final class EveryEnumCaseHasAProducerTest extends TestCase
         yield 'inside a closure that does not return bool' => [$method('return $a->run(fn () => $row->set(Fixture::from($a)));'), 'value'];
         yield 'inside a method declared ?bool' => [$method('return Fixture::from($a) === Fixture::B;', '?bool'), 'value'];
         yield 'with ->value read off it' => [$method('return Fixture::from($a)->value;'), 'value'];
-        yield 'after a bool arrow function has ended' => [$method('return [array_filter($a, static fn ($x): bool => true), Fixture::from($a)];'), 'value'];
+        yield 'after a bool arrow function has ended at a )' => [$method('return [array_filter($a, static fn ($x): bool => true), Fixture::from($a)];'), 'value'];
+        yield 'after a bool arrow function has ended at a ,' => [$method('return [static fn ($x): bool => true, Fixture::from($a)];'), 'value'];
+        yield 'after a bool arrow function has ended at a ;' => [$method('$f = static fn ($x): bool => true; return Fixture::from($a);'), 'value'];
 
         yield 'inside a list filter\'s bool predicate' => [$method('return $a->contains(static fn (string $r): bool => Fixture::tryFrom($r) !== null);'), EnumCaseReferences::READ_IN_A_BOOL_BODY];
         yield 'inside a bool closure with use' => [$method('return array_filter($a, function (string $r) use ($row): bool { return Fixture::from($r) === $row; });'), EnumCaseReferences::READ_IN_A_BOOL_BODY];

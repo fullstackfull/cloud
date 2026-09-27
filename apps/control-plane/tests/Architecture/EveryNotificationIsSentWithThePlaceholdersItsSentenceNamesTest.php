@@ -81,8 +81,10 @@ use Tests\TestCase;
  * ({@see unusableLiterals()} says exactly which): a literal `null` and an
  * array literal that is not a translated name, both of which it drops, so the
  * placeholder is shown as written; and a translated name that names no `en`
- * or no `ar`, whose reader in that language gets the fallback language's
- * text. A test holds the dropped verdicts against RenderNotification itself.
+ * or no `ar`, whose reader in that language gets the fallback locale's text
+ * when the map has it and otherwise the placeholder (a map with no `en`, the
+ * fallback being English). A test holds the dropped verdicts against
+ * RenderNotification itself.
  *
  * What it does not know: whether a value computed at run time is null, empty
  * or an array RenderNotification drops (then the placeholder survives), what
@@ -169,6 +171,8 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
             'not a locale' => ['english' => 'Large', 'arabic' => 'كبير'],
             'null text' => ['en' => 'Large', 'ar' => null],
             'a number' => ['en' => 'Large', 'ar' => 1],
+            'a signed number' => ['en' => 'Large', 'ar' => -1],
+            'no english' => ['ar' => 'كبير'],
             'true' => ['en' => 'Large', 'ar' => true],
             'nested' => ['en' => ['Large'], 'ar' => 'كبير'],
             'no arabic' => ['en' => 'Large'],
@@ -193,10 +197,11 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
         $unusable = self::unusableLiterals($return->expr);
 
         $this->assertSame(
-            ['null', 'empty', 'unkeyed', 'integer keys', 'not a locale', 'null text', 'a number', 'true', 'nested', 'no arabic', 'upper-case null', 'unkeyed, written short'],
+            ['null', 'empty', 'unkeyed', 'integer keys', 'not a locale', 'null text', 'a number', 'a signed number', 'no english', 'true', 'nested', 'no arabic', 'upper-case null', 'unkeyed, written short'],
             array_keys($unusable),
         );
         $this->assertStringContainsString('reads the fallback', $unusable['no arabic']);
+        $this->assertStringContainsString('drops', $unusable['no english']);
 
         $this->assertSame(
             ['here sends '.NotificationType::PlanChangeCompleted->value.' with :plan as '.$unusable['null']],
@@ -410,10 +415,15 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
      *    translated name (a non-empty map of two-lowercase-letter locale to
      *    text): an empty array, an item with no key or an integer key, a
      *    key that is not two lowercase letters, or a value written as a
-     *    literal that is not a string (`null`, `true`, a number, an array);
+     *    literal that is not a string (`null`, `true`, a number, signed or
+     *    not, an array);
      *  - an array literal RenderNotification keeps as a translated name but
-     *    that names no `en` or no `ar`: a reader in the missing language
-     *    reads the fallback language's text inside their sentence.
+     *    that names no `en` or no `ar`. It reads the reader's locale, then
+     *    the fallback locale (`app.fallback_locale`), then null: a reader in
+     *    a missing locale reads the fallback locale's text inside their
+     *    sentence when the map has it, and otherwise gets null, which it
+     *    drops, so the placeholder is shown - as an English reader does of a
+     *    map with no `en` while the fallback is English.
      *
      * An array with a spread, or with a key that is not a string literal, is
      * not read. A value computed any other way (a variable, a call, an item
@@ -483,19 +493,47 @@ final class EveryNotificationIsSentWithThePlaceholdersItsSentenceNamesTest exten
 
             $locales[] = $item->key->value;
 
-            if (self::isNullConstant($item->value) || $item->value instanceof Array_ || $item->value instanceof Node\Scalar\Int_
-                || $item->value instanceof Node\Scalar\Float_ || self::isBoolConstant($item->value)) {
+            if (self::isNullConstant($item->value) || $item->value instanceof Array_ || self::isNumber($item->value) || self::isBoolConstant($item->value)) {
                 return sprintf('an array whose "%s" is not text, which is not a translated name; RenderNotification drops it, so the placeholder is shown', $item->key->value);
             }
         }
 
-        $absent = array_values(array_diff(['en', 'ar'], $locales));
+        if (! $readable) {
+            return null;
+        }
 
-        if ($readable && $absent !== []) {
-            return sprintf('a translated name with no "%s", so a reader in that language reads the fallback language\'s text', implode('" and no "', $absent));
+        // RenderNotification reads $value[$locale] ?? $value[fallback] ?? null.
+        $fallback = (string) config('app.fallback_locale');
+        $dropped = [];
+        $fallsBack = [];
+
+        foreach (array_diff(['en', 'ar'], $locales) as $absent) {
+            if ($absent !== $fallback && in_array($fallback, $locales, true)) {
+                $fallsBack[] = $absent;
+            } else {
+                $dropped[] = $absent;
+            }
+        }
+
+        if ($dropped !== []) {
+            return sprintf('a translated name with no "%s" and no text in the fallback locale "%s", so for a reader in "%s" it is null, which RenderNotification drops, so the placeholder is shown', implode('" or "', $dropped), $fallback, implode('" or "', $dropped));
+        }
+
+        if ($fallsBack !== []) {
+            return sprintf('a translated name with no "%s", so a reader in "%s" reads the fallback locale "%s" text inside their sentence', implode('" or "', $fallsBack), implode('" or "', $fallsBack), $fallback);
         }
 
         return null;
+    }
+
+    /** An integer or float literal, signed or not. */
+    private static function isNumber(Expr $expr): bool
+    {
+        if ($expr instanceof Expr\UnaryMinus || $expr instanceof Expr\UnaryPlus) {
+            $expr = $expr->expr;
+        }
+
+        return $expr instanceof Node\Scalar\Int_ || $expr instanceof Node\Scalar\Float_;
     }
 
     private static function isNullConstant(Expr $expr): bool

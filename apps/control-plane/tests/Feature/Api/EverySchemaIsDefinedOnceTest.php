@@ -42,10 +42,11 @@ use Tests\TestCase;
  * schema names are the keys of the two arrays as PHP loads them. The
  * envelopes are counted whether or not a path references them today.
  *
- * The behavioural half calls the two operator lists that publish a row
- * schema from schemas.php with additionalProperties false - hosting nodes
+ * The behavioural half calls two operator lists whose row schema in
+ * schemas.php has additionalProperties false - hosting nodes
  * (AdminHostingNode) and address pools (AdminIpPool) - and holds that every
- * field a row returns is one its published schema declares.
+ * field a row returns is one its published schema declares. Other lists with
+ * such a schema are not called here.
  */
 final class EverySchemaIsDefinedOnceTest extends TestCase
 {
