@@ -293,6 +293,15 @@ final readonly class MappingChain
      * uses it — the route refuses that); and rows written before the subnet
      * route refused are still there. This count is what reads all three.
      *
+     * And in a block that names a gateway (Subnet::hasGateway()). The subnet
+     * route accepts a customer block with none — a dedicated server's install
+     * profile can carry a default route of its own — but a VPS is given its
+     * default route from the block's gateway and nothing else, so a pass
+     * used to count addresses a build then configured with `gw=` empty. The
+     * allocator passes those blocks over for a VPS build by the same helper,
+     * and a build that meets one anyway refuses it
+     * (`vps.subnet_has_no_gateway`).
+     *
      * ===========================================================================
      * WHAT A PASS HERE STILL DOES NOT SAY
      * ===========================================================================
@@ -373,11 +382,11 @@ final readonly class MappingChain
                 CheckCategory::Mapping,
                 $target,
                 sprintf(
-                    '%d address(es) a customer machine can be given, across %d active address pool(s), and none of them is on a network a customer machine can be attached to (active, customer-facing, with a bridge), so every build would be refused.',
+                    '%d address(es) a customer machine can be given, across %d active address pool(s), and none of them is on a network a customer machine can be attached to (active, customer-facing, with a bridge) in a block with a gateway to route it by, so every build would be refused.',
                     $allocatable,
                     $active->count(),
                 ),
-                'Record a bridge on the customer-facing network the block is on, or register a block for allocation on a customer-facing network that has one; a registered block\'s network cannot be changed.',
+                'Record a bridge on the customer-facing network the block is on, or register a block for allocation, with its gateway, on a customer-facing network that has one; a registered block\'s network and gateway cannot be changed.',
             );
         }
 
@@ -392,7 +401,7 @@ final readonly class MappingChain
                 $attachable,
                 $active->count(),
                 $unattachable > 0
-                    ? sprintf(' %d more are in subnets on no network a customer machine can be attached to, and are not counted.', $unattachable)
+                    ? sprintf(' %d more are in subnets on no network a customer machine can be attached to, or with no gateway, and are not counted.', $unattachable)
                     : '',
             ),
             EvidenceClass::Configuration,

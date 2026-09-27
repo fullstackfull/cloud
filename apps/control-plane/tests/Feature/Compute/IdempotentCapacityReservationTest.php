@@ -9,6 +9,7 @@ use Lynomia\Modules\Compute\Application\Actions\ReleaseNodeCapacity;
 use Lynomia\Modules\Compute\Application\Actions\ReserveNodeCapacity;
 use Lynomia\Modules\Compute\Domain\ValueObjects\VmResources;
 use Lynomia\Modules\Compute\Infrastructure\Models\ComputeNode;
+use Lynomia\Modules\Compute\Infrastructure\Models\ComputeStorage;
 use Lynomia\Modules\Compute\Infrastructure\Models\NodeCapacityReservation;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -60,6 +61,35 @@ final class IdempotentCapacityReservationTest extends TestCase
         $this->assertSame(8192, (int) $node->allocated_memory_mib);
         $this->assertSame(1, $node->vm_count);
         $this->assertSame(1, NodeCapacityReservation::query()->count());
+    }
+
+    #[Test]
+    public function a_retry_on_the_same_node_in_another_pool_moves_the_pool_commitment(): void
+    {
+        /*
+         * The same node, another pool: the retry's placement chose a
+         * different storage. Returning the live reservation as already
+         * committed would leave the first pool charged for a disk that is
+         * not on it and the second holding one nobody charged it for.
+         */
+        $first = ComputeStorage::factory()->onNode($this->node)->create(['provider_name' => 'pool-a', 'total_gib' => 1000, 'available_gib' => 1000]);
+        $second = ComputeStorage::factory()->onNode($this->node)->create(['provider_name' => 'pool-b', 'total_gib' => 1000, 'available_gib' => 1000]);
+        $reserve = app(ReserveNodeCapacity::class);
+
+        $reserve->execute($this->node, $this->resources(), storageId: $first->id, reservationKey: 'job-abc');
+        $reserve->execute($this->node, $this->resources(), storageId: $second->id, reservationKey: 'job-abc');
+
+        $this->assertSame(0, (int) $first->fresh()->committed_gib, 'The first pool is still charged.');
+        $this->assertSame(80, (int) $second->fresh()->committed_gib, 'The pool the retry uses was not charged.');
+
+        // One machine on the node, once.
+        $node = $this->node->fresh();
+        $this->assertSame(1, $node->vm_count);
+        $this->assertSame(4, $node->allocated_cpu_cores);
+        $this->assertSame(80, (int) $node->allocated_storage_gib);
+
+        $live = NodeCapacityReservation::query()->whereNull('released_at')->sole();
+        $this->assertSame((string) $second->id, $live->storage_id);
     }
 
     #[Test]

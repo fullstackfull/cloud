@@ -51,7 +51,11 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * as the operator likes. The bridge is not required here: a dedicated server
  * is not attached by one, and a network's bridge can be recorded afterwards;
  * `mapping.network` counts only addresses on a segment that has one
- * (IpAllocator::customerAttachableCount()).
+ * (IpAllocator::customerAttachableCount()). Nor is the gateway: a dedicated
+ * server's install profile can carry a default route of its own. A VPS has
+ * nothing but the block's gateway to take one from, so the same count, the
+ * VPS build's reservation and the VPS sale pass over a block with none
+ * (Subnet::hasGateway()), and no route adds one once it is registered.
  *
  * ---------------------------------------------------------------------------
  * No two blocks in one realm share an address

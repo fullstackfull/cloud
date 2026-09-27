@@ -290,6 +290,32 @@ final class ReinstallVpsHandlerTest extends TestCase
     }
 
     #[Test]
+    public function a_machine_whose_subnet_has_no_gateway_is_refused_before_anything_is_destroyed(): void
+    {
+        /*
+         * A machine built on a block registered with no gateway, before the
+         * build refused one. Restating its network with `gw=` empty would
+         * bring the guest back with no default route: the customer's server,
+         * reinstalled into one nobody can reach. A dedicated server's profile
+         * can carry a default route; a VPS has nothing to take one from.
+         */
+        Subnet::query()->update(['gateway' => null]);
+
+        $result = $this->reinstall();
+
+        $this->assertFalse($result->successful);
+        $this->assertSame(FailureClass::Permanent, $result->failureClass);
+        $this->assertSame('vps.reinstall_gateway_missing', $result->errorCode);
+
+        $operation = VmReinstall::query()->sole();
+
+        $this->assertSame(ReinstallState::Failed, $operation->state);
+        $this->assertFalse($operation->destroyedData(), 'A refusal before the disk was touched was recorded as destructive.');
+        $this->assertNull($operation->destroyed_at);
+        $this->assertSame(PowerState::Running, $this->remote()?->powerState);
+    }
+
+    #[Test]
     public function an_image_that_is_not_staged_on_this_cluster_is_refused(): void
     {
         $elsewhere = VmTemplate::factory()->create([
