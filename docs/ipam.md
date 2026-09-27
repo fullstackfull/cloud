@@ -106,8 +106,15 @@ Four cases are handled differently, and each says so:
   whose scope serves customers — must name a network a customer machine may be attached to
   (active, customer-facing, not a platform segment), or it is refused with
   `422 infrastructure.subnet_has_no_customer_network`. No route attaches a network to a block
-  once it is registered, and a VPS build refuses, permanently, an address on no such segment
-  (`vps.network_not_attachable`). Held space, IPv6 and a management pool's blocks need none.
+  once it is registered, and a VPS build is never given an address on no such segment: it
+  reserves only from subnets whose network can carry a customer machine, so a pool holding
+  only such blocks fails every build as capacity (`ipam.pool_exhausted`) until it goes to
+  review (`vps.network_not_attachable` is left for a network that changed between the
+  reservation and the build). Checkout refuses to sell a VPS onto such a pool
+  (`checkout.not_deliverable`, asked through `IpAllocator::holdsACustomerAttachableHost`).
+  The bridge is not required at registration (a dedicated server is not attached by one);
+  once an active subnet is on a network, its bridge cannot be cleared
+  (`409 infrastructure.still_in_use`). Held space, IPv6 and a management pool's blocks need none.
 
 `infra:preflight`'s `mapping.network` passes only when the active pools hold at least one
 address the allocator could give a customer machine and a build could attach it at

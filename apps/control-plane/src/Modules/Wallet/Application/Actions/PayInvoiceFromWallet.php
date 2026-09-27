@@ -21,6 +21,7 @@ use Lynomia\Modules\Wallet\Domain\Exceptions\IdempotencyKeyConflictException;
 use Lynomia\Modules\Wallet\Domain\Exceptions\WalletPaymentRefusedException;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\Wallet;
+use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
 
 /**
  * Spends stored credit against an invoice.
@@ -126,7 +127,8 @@ final readonly class PayInvoiceFromWallet
              * the question safe to ask: two copies serialise on it.
              */
             if ($wallet !== null) {
-                $replay = $this->ledger->entryPostedUnder($wallet, $ledgerKey);
+                $replay = $this->ledger->entryPostedUnder($wallet, $ledgerKey)
+                    ?? $this->paymentPostedUnderTheRawKey($wallet, $idempotencyKey, (string) $locked->getKey());
 
                 if ($replay !== null && (string) $replay->invoice_id !== (string) $locked->getKey()) {
                     // The same key on a different invoice is not a repeat of
@@ -248,6 +250,28 @@ final readonly class PayInvoiceFromWallet
     public static function ledgerKey(Customer $customer, string $idempotencyKey): string
     {
         return sprintf('wallet-pay:%s:%s', $customer->getKey(), $idempotencyKey);
+    }
+
+    /**
+     * A payment of this invoice posted under the customer's raw key, before
+     * keys were namespaced: a retry of it is the replay it always was.
+     *
+     * Only a wallet payment of this same invoice counts. Anything else under
+     * the raw key - a platform posting whose key the customer's happens to
+     * match, or a payment of another invoice - is not this request's, and is
+     * not looked at: that is the collision the namespace exists to end (OX-1).
+     */
+    private function paymentPostedUnderTheRawKey(Wallet $wallet, string $idempotencyKey, string $invoiceId): ?WalletTransaction
+    {
+        $entry = $this->ledger->entryPostedUnder($wallet, $idempotencyKey);
+
+        if ($entry === null
+            || $entry->kind !== WalletTransactionKind::Payment
+            || (string) $entry->invoice_id !== $invoiceId) {
+            return null;
+        }
+
+        return $entry;
     }
 
     /**

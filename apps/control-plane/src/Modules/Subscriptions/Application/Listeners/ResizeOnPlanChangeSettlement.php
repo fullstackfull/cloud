@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Lynomia\Modules\Subscriptions\Application\Listeners;
 
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Lynomia\Modules\Audit\Domain\Enums\AuditAction;
 use Lynomia\Modules\Audit\Infrastructure\Models\AuditEntry;
@@ -136,31 +137,57 @@ final class ResizeOnPlanChangeSettlement implements ShouldQueue
             return;
         }
 
-        $subscription = Subscription::query()->find($change->subscription_id);
+        /*
+         * Decided under the subscription's lock, the lock the ending takes
+         * (WindUpAnEndedSubscription, through `$end`), so the two serialise:
+         * either this runs while the subscription is live and records the
+         * change delivered - and the wind-up keeps the money - or it runs
+         * after the end and returns it (hasEnded()). Read without the lock,
+         * a settlement and an ending could each see the other not yet done.
+         * The subscription, then (on the return) the paid invoice and the
+         * wallet: the order WhatAnInvoiceStillHolds declares for a paid
+         * invoice taken after a subscription.
+         */
+        DB::transaction(function () use ($change, $event): void {
+            /** @var Subscription|null $subscription */
+            $subscription = Subscription::query()->lockForUpdate()->find($change->subscription_id);
 
-        if ($subscription === null || $change->to_plan_id === null) {
-            Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
-                'invoice_id' => $event->invoiceId,
-                'subscription_id' => $change->subscription_id,
-            ]);
+            if ($subscription === null || $change->to_plan_id === null) {
+                Log::warning('A paid proration invoice names a subscription or a plan that no longer exists.', [
+                    'invoice_id' => $event->invoiceId,
+                    'subscription_id' => $change->subscription_id,
+                ]);
 
-            return;
-        }
+                return;
+            }
 
-        if ($this->hasEnded($subscription, $event)) {
-            return;
-        }
+            if ($this->hasEnded($subscription, $event)) {
+                return;
+            }
 
-        if ($this->aLaterChangeHasBeenSettled($change)) {
-            return;
-        }
+            /*
+             * Delivered: the settlement was heard while the subscription was
+             * live, whatever it queues below - a resize, nothing because a
+             * later change already decided the machine, or nothing because
+             * there was nothing to resize. What the end does not return
+             * (ReturnAnUpgradeTheEndPrevented).
+             */
+            PlanChange::query()
+                ->whereKey($change->getKey())
+                ->whereNull('delivered_at')
+                ->update(['delivered_at' => now()]);
 
-        $this->queueAtProvider->execute(
-            subscription: $subscription,
-            planId: $change->to_plan_id,
-            resources: PlanResources::fromArray($change->resources),
-            idempotencyKey: 'invoice:'.$event->invoiceId,
-        );
+            if ($this->aLaterChangeHasBeenSettled($change)) {
+                return;
+            }
+
+            $this->queueAtProvider->execute(
+                subscription: $subscription,
+                planId: (string) $change->to_plan_id,
+                resources: PlanResources::fromArray($change->resources),
+                idempotencyKey: 'invoice:'.$event->invoiceId,
+            );
+        });
     }
 
     /**

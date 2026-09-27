@@ -7,10 +7,13 @@ namespace Tests\Feature\Concurrency;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
+use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
+use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
 use Lynomia\Modules\Catalog\Domain\Enums\BillingPeriod;
@@ -234,6 +237,85 @@ final class ARenewalAndAPlanChangeDoNotDeadlockTest extends TestCase
         $this->assertSame(InvoiceStatus::Void, Invoice::query()->findOrFail($fixture['x'])->status);
         $this->assertSame($fixture['small'], Subscription::query()->findOrFail($fixture['sub'])->plan_id);
         $this->assertSame($fixture['small'], Subscription::query()->findOrFail($sibling)->plan_id);
+    }
+
+    #[Test]
+    public function a_cancellation_returning_a_paid_upgrade_and_a_second_capture_on_it_both_complete(): void
+    {
+        /*
+         * The round-five verifier's race: the wind-up of an immediate
+         * cancellation withdrew the subscription's open invoice (crediting
+         * the wallet) and only then returned the paid, undelivered upgrade
+         * (locking its invoice) - wallet, then invoice. SettleInvoice of a
+         * second capture on that upgrade locks the capture, the invoice, then
+         * the wallet (the surplus). 40P01, 3/3 - and worse, the deadlock was
+         * raised inside the wind-up's savepoint, caught and logged, and the
+         * aborted transaction then "committed" as a rollback: the
+         * cancellation reported success, the subscription stayed active and
+         * its open invoice stayed open.
+         *
+         * The wind-up now locks every invoice it will touch before the
+         * wallet, and a concurrency error inside its savepoints is rethrown.
+         *
+         * Deterministic: the settlement is stopped right after it locks the
+         * upgrade's invoice; the cancellation is let run until it waits on a
+         * row lock; the settlement is then released to credit the wallet.
+         */
+        $fixture = $this->upgradeLeftOpen();
+        $customer = Customer::query()->findOrFail($fixture['customer']);
+        $upgrade = Invoice::query()->findOrFail($fixture['x']);
+
+        // The upgrade paid, its settlement not heard (no resize queued).
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        // An open invoice of the same subscription, part paid: its withdrawal
+        // credits the wallet.
+        $open = Invoice::factory()->create([
+            'customer_id' => $customer->getKey(),
+            'subscription_id' => $fixture['sub'],
+            'currency' => 'KWD',
+            'status' => InvoiceStatus::Open,
+            'subtotal_minor' => 5_000,
+            'total_minor' => 5_000,
+            'amount_paid_minor' => 0,
+        ]);
+        app(SettleInvoice::class)->execute($open, Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(1_000, 'KWD'))->create());
+        app(WalletLedger::class)->walletFor($customer, 'KWD');
+
+        // A second capture on the paid upgrade, not yet settled.
+        $second = Transaction::factory()->forCustomer($customer)->amount(Money::ofMinor(500, 'KWD'))->create(['invoice_id' => $upgrade->getKey()]);
+
+        DB::select('SELECT pg_advisory_lock(?)', [self::VOID_BARRIER]);
+
+        try {
+            $settle = $this->start(
+                ['settle', (string) $upgrade->getKey(), (string) $second->getKey()],
+                ['RACER_PAUSE_AFTER' => '/from "invoices".*for update/i', 'RACER_PAUSE_LOCK' => (string) self::VOID_BARRIER],
+            );
+            $this->waitUntilWaitingOnAdvisory(1);
+
+            $cancel = $this->start(['cancel', $fixture['sub']]);
+            $this->waitUntil(fn (): bool => ! $cancel->isRunning() || $this->waiting() >= 1, 'The cancellation neither finished nor waited.');
+
+            DB::select('SELECT pg_advisory_unlock(?)', [self::VOID_BARRIER]);
+        } finally {
+            DB::select('SELECT pg_advisory_unlock_all()');
+        }
+
+        $this->assertNoDeadlock([$this->verdict($cancel), $this->verdict($settle)]);
+
+        // And the cancellation did what it said it did.
+        $this->assertSame(SubscriptionStatus::Cancelled, Subscription::query()->findOrFail($fixture['sub'])->status);
+        $this->assertSame(InvoiceStatus::Void, $open->fresh()?->status);
+
+        // Everything the customer handed over for nothing is in the wallet,
+        // once: the open invoice's 1.000, the upgrade and the second capture.
+        $ledger = app(WalletLedger::class);
+        $this->assertSame(
+            1_000 + $upgrade->fresh()->total_minor + 500,
+            $ledger->balance($ledger->walletFor($customer, 'KWD'))->minorUnits(),
+        );
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Tests\Feature\Billing;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
@@ -22,6 +23,7 @@ use Lynomia\Modules\Billing\Domain\Enums\InvoiceItemKind;
 use Lynomia\Modules\Billing\Domain\Enums\InvoiceStatus;
 use Lynomia\Modules\Billing\Domain\Enums\SubscriptionStatus;
 use Lynomia\Modules\Billing\Domain\Events\InvoicePaid;
+use Lynomia\Modules\Billing\Domain\Events\InvoiceVoided;
 use Lynomia\Modules\Billing\Domain\Exceptions\InvoiceNotPayableException;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\InvoiceItem;
@@ -63,6 +65,7 @@ use Lynomia\Modules\Wallet\Application\Actions\PayInvoiceFromWallet;
 use Lynomia\Modules\Wallet\Domain\Enums\WalletTransactionKind;
 use Lynomia\Modules\Wallet\Domain\Services\WalletLedger;
 use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
+use PDOException;
 use PHPUnit\Framework\Attributes\Test;
 use RuntimeException;
 use Tests\Support\ProviderThatWithdrawsTheInvoiceMidRefund;
@@ -882,6 +885,40 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
+    public function a_deadlock_inside_the_wind_up_fails_the_whole_ending_rather_than_vanishing(): void
+    {
+        /*
+         * The round-five verifier: a 40P01 raised inside the wind-up's
+         * per-invoice savepoint was caught and logged like any failure, but
+         * Laravel does not roll a nested transaction back to its savepoint on
+         * a concurrency error - the transaction is aborted - so the outer
+         * "commit" was a rollback and the cancellation answered success while
+         * nothing had ended. A concurrency error now fails the whole ending.
+         */
+        [, $upgrade] = $this->upgradePartPaidByCard(5_000);
+        $subscription = $this->subscriptionOf($upgrade);
+
+        Event::listen(InvoiceVoided::class, static function (): void {
+            throw new QueryException('pgsql', 'select 1', [], new PDOException('SQLSTATE[40P01]: Deadlock detected: 7 ERROR:  deadlock detected'));
+        });
+
+        $thrown = null;
+
+        try {
+            app(CancelSubscription::class)->execute($subscription, immediately: true);
+        } catch (Throwable $e) {
+            $thrown = $e;
+        }
+
+        // Laravel raises it out of a nested transaction as a DeadlockException
+        // (a real one leaves the PostgreSQL transaction aborted, so the
+        // caller's rollback undoes the ending; this stand-in cannot abort the
+        // test's transaction, so what is asserted is that it is not swallowed).
+        $this->assertNotNull($thrown, 'A deadlock inside the wind-up was swallowed and the cancellation reported success.');
+        $this->assertStringContainsString('deadlock detected', $thrown->getMessage());
+    }
+
+    #[Test]
     public function a_capture_recorded_but_not_yet_settled_when_the_subscription_ends_is_returned_once(): void
     {
         /*
@@ -1014,6 +1051,58 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
 
         $this->assertSame(0, $this->walletOf($customer));
         $this->assertSame(InvoiceStatus::Paid, $upgrade->fresh()?->status);
+    }
+
+    #[Test]
+    public function an_upgrade_whose_settlement_was_heard_while_live_is_kept_though_it_queued_nothing(): void
+    {
+        /*
+         * The round-five verifier: "delivered" was read off whether a resize
+         * job existed. An upgrade whose settlement ran while the subscription
+         * was live and queued nothing - here there is no machine to resize -
+         * was delivered all the same, and must not be returned at the end.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->changePlan($user, $subscription, $this->large, 'paid-live-no-job')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+        $this->assertSame(0, ProvisioningJob::query()->where('kind', ProvisioningJobKind::Resize)->count(), 'Precondition: nothing was queued.');
+        $this->assertNotNull(PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())->sole()->delivered_at);
+
+        app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+
+        $this->assertSame(0, $this->walletOf($customer), 'An upgrade delivered while the subscription was live was returned at its end.');
+    }
+
+    #[Test]
+    public function an_upgrade_a_later_change_superseded_is_not_returned_at_the_end(): void
+    {
+        /*
+         * Paid, its settlement not heard, and then another change made: that
+         * later change decided the machine (and a downgrade's credit is drawn
+         * on this invoice), so the upgrade was not left undelivered by the
+         * end and is not returned as if it were.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'superseded-up')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        $this->changePlan($user, $subscription->fresh(), $this->mid, 'superseded-down')->assertOk();
+
+        app(CancelSubscription::class)->execute($subscription->fresh(), immediately: true);
+
+        $this->assertSame(
+            0,
+            WalletTransaction::query()->where('invoice_id', $upgrade->getKey())->where('kind', WalletTransactionKind::Topup->value)->count(),
+            'A superseded upgrade was returned as if the end had prevented it.',
+        );
     }
 
     #[Test]

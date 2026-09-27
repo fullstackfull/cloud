@@ -40,8 +40,15 @@ use Lynomia\Modules\Subscriptions\Infrastructure\Models\Subscription;
  *  - the subscription has ended;
  *  - the invoice is paid and carries a proration line (an upgrade's, not a
  *    renewal's);
- *  - no resize or package change was queued for it - one was, and the upgrade
- *    was delivered, when its settlement was heard before the end;
+ *  - it was not delivered: its settlement was not heard while the
+ *    subscription was live. The settlement records that it was
+ *    (PlanChange::$delivered_at, under the subscription's lock), whatever it
+ *    queued - a settlement that queued nothing because nothing needed
+ *    resizing delivered the upgrade all the same. It used to be read off
+ *    whether a resize job existed, and such an upgrade was returned at the
+ *    end. For a change settled before `delivered_at` existed, and a
+ *    proration invoice with no recorded change, a resize or package-change
+ *    job keyed on the invoice still counts as delivered;
  *  - it is the subscription's newest plan change, when the change is
  *    recorded: an upgrade a later change superseded was settled by that
  *    change (its credit is drawn on this invoice), not left undelivered.
@@ -99,12 +106,20 @@ final readonly class ReturnAnUpgradeTheEndPrevented
     }
 
     /**
-     * Whether the settlement queued the resize (or the package change) this
-     * invoice paid for, under the key QueuePlanChangeAtProvider gives it.
+     * Whether the settlement was heard while the subscription was live
+     * (PlanChange::$delivered_at), or - for a change settled before that was
+     * recorded, or an invoice with no recorded change - queued the resize (or
+     * the package change) this invoice paid for, under the key
+     * QueuePlanChangeAtProvider gives it.
      */
     private function wasDelivered(Subscription $subscription, Invoice $invoice): bool
     {
-        return ProvisioningJob::query()
+        $delivered = PlanChange::query()
+            ->where('proration_invoice_id', $invoice->getKey())
+            ->whereNotNull('delivered_at')
+            ->exists();
+
+        return $delivered || ProvisioningJob::query()
             ->where('idempotency_key', 'like', sprintf('plan-change:%s:%%:invoice:%s', $subscription->getKey(), $invoice->getKey()))
             ->exists();
     }

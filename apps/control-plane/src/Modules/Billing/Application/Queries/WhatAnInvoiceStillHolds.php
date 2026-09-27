@@ -100,14 +100,26 @@ use Lynomia\Modules\Wallet\Infrastructure\Models\WalletTransaction;
  * restores - and it lapses only an invoice it locked before
  * the subscription: an upgrade that appeared after its unlocked read ends the
  * attempt unrenewed, for the next sweep, since locking it after the
- * subscription deadlocked with an operator's void of it); an ended subscription's wind-up (its invoices,
- * the subscription, the wallet); ApplyPlanChange (the subscription, its
- * orders, then the paid invoices a credit draws on, then - for a downgrade -
- * the wallet, then the plan it moves onto - the one invoice lock taken after
- * a subscription, and safe because nothing holding a paid invoice's lock
- * waits for a subscription or an order).
+ * subscription deadlocked with an operator's void of it); an ended
+ * subscription's wind-up (its open invoices, the subscription, its paid
+ * upgrades, then the wallet - every invoice it touches before the wallet);
+ * ResizeOnPlanChangeSettlement (the subscription, then - returning an
+ * upgrade the end prevented - the paid invoice and the wallet);
+ * ApplyPlanChange (the subscription, its orders, then the paid invoices a
+ * credit draws on, then - for a downgrade - the wallet, then the plan it
+ * moves onto).
  *
- * That last claim holds because the renewal and the wind-up, which find an
+ * Those three take an invoice lock after a subscription, against the order
+ * above, and only ever a paid one (ApplyPlanChange: every non-open one it
+ * draws on). That is safe because nothing holding a paid invoice's lock
+ * waits for a subscription or an order. The wind-up used to lock its paid
+ * upgrades only as it returned them, after it had already credited the
+ * wallet for an open invoice: wallet, then invoice, which deadlocked with
+ * SettleInvoice of a second capture on that upgrade (capture, invoice,
+ * wallet) - the round-five verifier's race, now raced in
+ * ARenewalAndAPlanChangeDoNotDeadlockTest.
+ *
+ * That claim holds because the renewal and the wind-up, which find an
  * open invoice by an unlocked read and lock it before the subscription, lock
  * it only while it is still open (LockAnInvoiceWhileOpen): locked by id, an
  * invoice paid in between was held paid while they waited for the

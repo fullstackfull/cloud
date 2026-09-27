@@ -13,7 +13,8 @@ declare(strict_types=1);
  *  - renew:  the instant to renew at (ISO 8601);
  *  - cancel: nothing more (an immediate cancellation);
  *  - change: the plan id, the price id and the id of the user making it;
- *  - void:   an invoice id (the operator's VoidInvoice).
+ *  - void:   an invoice id (the operator's VoidInvoice);
+ *  - settle: an invoice id, then a capture's id (SettleInvoice of it).
  * Optionally paused: with RACER_PAUSE_AFTER (a regular expression) and
  * RACER_PAUSE_LOCK (an advisory lock key) in the environment, the racer stops
  * after the first statement matching the expression until the test releases
@@ -29,11 +30,13 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\DB;
+use Lynomia\Modules\Billing\Application\Actions\SettleInvoice;
 use Lynomia\Modules\Billing\Application\Actions\VoidInvoice;
 use Lynomia\Modules\Billing\Infrastructure\Models\Invoice;
 use Lynomia\Modules\Catalog\Infrastructure\Models\Plan;
 use Lynomia\Modules\Catalog\Infrastructure\Models\PlanPrice;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Payments\Infrastructure\Models\Transaction;
 use Lynomia\Modules\Subscriptions\Application\Actions\ApplyPlanChange;
 use Lynomia\Modules\Subscriptions\Application\Actions\CancelSubscription;
 use Lynomia\Modules\Subscriptions\Application\Actions\RenewSubscription;
@@ -48,10 +51,10 @@ $app->make(Kernel::class)->bootstrap();
 // A downgrade queues a resize; nothing here is about the queue.
 config(['queue.default' => 'null']);
 
-// For `void` the second argument is the invoice's id.
+// For `void` and `settle` the second argument is the invoice's id.
 [$action, $subscriptionId] = [$argv[1], $argv[2]];
 
-$subscription = $action === 'void' ? null : Subscription::query()->findOrFail($subscriptionId);
+$subscription = in_array($action, ['void', 'settle'], true) ? null : Subscription::query()->findOrFail($subscriptionId);
 
 $pauseAfter = getenv('RACER_PAUSE_AFTER');
 $pauseLock = getenv('RACER_PAUSE_LOCK');
@@ -77,6 +80,7 @@ try {
         'renew' => $app->make(RenewSubscription::class)->execute($subscription, CarbonImmutable::parse($argv[3])),
         'cancel' => $app->make(CancelSubscription::class)->execute($subscription, immediately: true),
         'void' => $app->make(VoidInvoice::class)->execute(Invoice::query()->findOrFail($subscriptionId), 'an operator withdrew it'),
+        'settle' => $app->make(SettleInvoice::class)->execute(Invoice::query()->findOrFail($subscriptionId), Transaction::query()->findOrFail($argv[3])),
         'change' => $app->make(ApplyPlanChange::class)->execute(
             $subscription,
             Plan::query()->findOrFail($argv[3]),

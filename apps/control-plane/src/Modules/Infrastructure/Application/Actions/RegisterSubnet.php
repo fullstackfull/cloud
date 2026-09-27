@@ -61,7 +61,10 @@ use Lynomia\Modules\Ipam\Infrastructure\Models\Subnet;
  * only addresses on a segment that has one
  * (IpAllocator::customerAttachableCount()). Once an active subnet is on a
  * network, the bridge cannot be cleared (InventoryController::updateNetwork()),
- * so an estate that sells cannot silently become one no build can use.
+ * so an estate that sells cannot lose its bridge underneath the sale. That is
+ * the one thing held there: the network's other fields, and what happens to
+ * the subnets and addresses behind a pool, are checked at the next sale and
+ * the next build, not frozen.
  *
  * ---------------------------------------------------------------------------
  * No two blocks in one realm share an address
