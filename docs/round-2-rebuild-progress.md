@@ -137,3 +137,8 @@ Skeptics and the five-product matrix follow.
 | C | F-09 stale restore handle; file restore of unreadable archives and deletion under it; F-26 production guard | upheld with reservations; merged `8afa8c6`; runbook `6837954` | `ad9af6a` |
 | D | operator retry after released capacity; stranger elsewhere in the cluster; network-less customer subnets | upheld with reservations after one repair; merged | `fb1518c` |
 | E | F-23 enum gate self-references and by-value excuses; F-38 Ansible credential variables | upheld with reservations; merged `427c9be`; reservations `03e3919` | `06ff527` |
+
+All five round-four bands merged at `a6b583b`: backend 5,601 / 5,601, 690
+testsuites `skipped="0"`, exit 0; vitest 648 / 648, tsc and eslint clean;
+`make infra-validate` 0 and every infrastructure self-test green. An
+independent re-audit after round four is dispatched against `a6b583b`.
