@@ -12,6 +12,7 @@ namespace Fixture\Clock;
 
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Testing\Attributes\SetUp;
 use Illuminate\Foundation\Testing\Wormhole;
 use Illuminate\Support\Facades\Date;
 use PHPUnit\Framework\Attributes\Before;
@@ -578,7 +579,7 @@ final class PinnedBeforeTest extends TestCase
     }
 
     /** @test */
-    public function found_a_doc_tagged_test_let_go(): void
+    public function ignored_a_doc_tagged_method(): void
     {
         $this->travelBack();
         $this->assertSame(now()->toDateString(), $row->day);
@@ -1950,13 +1951,6 @@ final class ByElementTest extends ElementParent
         $this->assertEquals(now(), $row->at);
     }
 
-    // TEST_DOC_TAGS
-    /** @test */
-    public function found_test_doc_tag__test(): void
-    {
-        $this->assertEquals(now(), $row->at);
-    }
-
     // METHOD_CALLS
     #[Test]
     public function found_method_call__MethodCall(): void
@@ -2270,21 +2264,6 @@ final class BeforeAttributeBeforeTest extends TestCase
     }
 }
 
-final class BeforeDocTagBeforeTest extends TestCase
-{
-    /** @before */
-    public function holdIt(): void
-    {
-        $this->freezeSecond();
-    }
-
-    #[Test]
-    public function clean_before_doc_tag__before(): void
-    {
-        $this->assertEquals(now(), $row->at);
-    }
-}
-
 final class SetUpMethodSetupTest extends TestCase
 {
     protected function setUp(): void
@@ -2317,4 +2296,321 @@ final class TraitSetUpPrefixSetupTest extends TestCase
     {
         $this->assertEquals(now(), $row->at);
     }
+}
+
+trait HoldsItsClockByAttribute
+{
+    #[SetUp]
+    protected function holdByAttribute(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class TraitSetUpAttributeSetUpTest extends TestCase
+{
+    use HoldsItsClockByAttribute;
+
+    #[Test]
+    public function clean_trait_set_up_attribute__SetUp(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Set-up in the runtime's order (UnpinnedClockAssertions::setUpState() cites the lines).
+// A trait's #[Before] method is a #[Before] method of the class.
+trait HoldsTheClockBefore
+{
+    #[Before]
+    public function holdTheClock(): void
+    {
+        $this->freezeSecond();
+    }
+}
+
+final class BeforeInATraitTest extends TestCase
+{
+    use HoldsTheClockBefore;
+
+    #[Test]
+    public function clean_before_from_a_trait(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A trait's set-up runs inside parent::setUp(): what the class's setUp() does after it wins ...
+final class LetGoAfterTraitsTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function found_let_go_after_the_traits_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait LetsTheClockGo
+{
+    protected function setUpLetsTheClockGo(): void
+    {
+        $this->travelBack();
+    }
+}
+
+// ... and what it does before parent::setUp() is undone by a trait that lets go ...
+final class PinnedBeforeTheTraitsTest extends TestCase
+{
+    use LetsTheClockGo;
+
+    protected function setUp(): void
+    {
+        $this->freezeSecond();
+        parent::setUp();
+    }
+
+    #[Test]
+    public function found_pinned_before_a_trait_lets_go(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// ... but not what it does after.
+final class PinnedAfterTheTraitsTest extends TestCase
+{
+    use LetsTheClockGo;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_pinned_after_a_trait_lets_go(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A setUp() that never calls parent::setUp() never reaches the traits' set-up.
+final class NoParentSetUpTest extends TestCase
+{
+    use FreezesTheClock;
+
+    protected function setUp(): void
+    {
+    }
+
+    #[Test]
+    public function found_traits_not_set_up_without_parent_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// #[Before] methods run before setUp().
+final class BeforeRunsFirstTest extends TestCase
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function found_set_up_runs_after_before(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// PHPUnit lists #[Before] methods from the test class up and prepends each,
+// so a parent's run before the child's.
+abstract class LetsGoBefore extends TestCase
+{
+    #[Before]
+    public function letGo(): void
+    {
+        $this->travelBack();
+    }
+}
+
+final class HoldsAfterItsParentTest extends LetsGoBefore
+{
+    #[Before]
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function clean_a_childs_before_runs_after_its_parents(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A doc tag is not read: PHPUnit 12 reads attributes only.
+final class DocTaggedBeforeTest extends TestCase
+{
+    /** @before */
+    public function holdIt(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Test]
+    public function found_a_doc_tagged_before_does_not_pin(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class NullsafeWormholeTest extends TestCase
+{
+    // A Wormhole reached through a nullsafe call pins.
+    #[Test]
+    public function clean_a_nullsafe_wormhole(): void
+    {
+        $this->travel(1)?->days();
+        $this->assertEquals(now(), $row->at);
+    }
+
+    #[Test]
+    public function clean_a_wormhole_on_a_nullsafe_travel(): void
+    {
+        $this?->travel(1)->days();
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// class_uses_recursive() lists the topmost parent's traits first, so a
+// child's trait set-up runs after its parent's.
+abstract class ParentLetsGoInATrait extends TestCase
+{
+    use LetsTheClockGo;
+}
+
+final class ChildHoldsInATraitTest extends ParentLetsGoInATrait
+{
+    use FreezesTheClock;
+
+    #[Test]
+    public function clean_a_childs_trait_set_up_runs_after_its_parents(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// A static #[Before] method runs too.
+final class StaticBeforeTest extends TestCase
+{
+    #[Before]
+    public static function holdStatically(): void
+    {
+        Carbon::setTestNow('2026-01-01 00:00:00');
+    }
+
+    #[Test]
+    public function clean_a_static_before(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Hooks are ordered by priority, highest first: a negative #[Before] runs after setUp().
+final class LateBeforeTest extends TestCase
+{
+    #[Before(priority: -1)]
+    public function holdLate(): void
+    {
+        $this->freezeSecond();
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function clean_a_negative_priority_before_runs_after_set_up(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+final class EarlyBeforeTest extends TestCase
+{
+    #[Before(5)]
+    public function holdEarly(): void
+    {
+        $this->freezeSecond();
+    }
+
+    #[Before]
+    public function letGo(): void
+    {
+        $this->travelBack();
+    }
+
+    #[Test]
+    public function found_a_higher_priority_before_runs_first(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+// Tests are found in traits a trait uses, and in traits a parent uses.
+trait CarriesANestedTest
+{
+    #[Test]
+    public function found_in_a_nested_trait_test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+trait UsesATestCarrier
+{
+    use CarriesANestedTest;
+}
+
+final class UsesANestedTestTraitTest extends TestCase
+{
+    use UsesATestCarrier;
+}
+
+trait CarriesAParentsTest
+{
+    #[Test]
+    public function found_in_a_parents_trait_test(): void
+    {
+        $this->assertEquals(now(), $row->at);
+    }
+}
+
+abstract class ParentWithATestTrait extends TestCase
+{
+    use CarriesAParentsTest;
+}
+
+final class InheritsATraitTestTest extends ParentWithATestTrait
+{
 }

@@ -46,7 +46,7 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  * gate's verdict is only as good as this list.
  *
  * Every name it matches — function, method, property, constant, variable,
- * attribute, doc tag, parameter, prefix — and every node type a reading
+ * attribute, parameter, prefix — and every node type a reading
  * decision turns on is an element of one of the public constants below.
  * What is fixed in code, not in a constant, is the walk's own shape: which
  * node kinds it treats as calls, closures, nested functions and classes, the
@@ -68,15 +68,25 @@ use Tests\Architecture\NoAssertionComparesAClockReadOnAnUnpinnedClockTest;
  *
  * **Tests.** The public methods a non-abstract class runs — its own, and those
  * it inherits from its parents and traits in the set, as PHP resolves each
- * name — that carry `#[Test]`, a `@test` doc tag, or a name beginning `test`.
- * A test is named after the class that runs it.
+ * name — that carry an attribute in {@see self::TEST_ATTRIBUTES} or a name
+ * beginning with an element of {@see self::TEST_PREFIXES}. A doc tag
+ * (`@test`, `@before`) is not read: PHPUnit 12, which this repository runs,
+ * reads attributes only (its metadata parsers are `AttributeParser` and
+ * `CachingParser`). A test is named after the class that runs it.
  *
  * **The walk.** Each test is walked in source order, carrying one bit — is the
- * clock pinned here? It starts as whatever the class's set-up leaves it:
- * `setUp()` as resolved through the class, its traits and its parents (with
- * `parent::setUp()` followed), then every `setUp<TraitName>()` of the traits
- * the hierarchy uses (the methods Laravel's `setUpTraits()` calls), then every
- * `#[Before]`/`@before` method. Then, statement by statement:
+ * clock pinned here? It starts as whatever the class's set-up leaves it,
+ * walked in the order the runtime runs it ({@see self::setUpState()} cites the
+ * vendor lines): first every `#[Before]` method, its own, its traits' and its
+ * parents', in the reverse of PHPUnit's listing (class by class from the test
+ * class up), because PHPUnit prepends each before `setUp`, the whole list then
+ * ordered by `#[Before]` priority, highest first (so a negative priority runs
+ * after `setUp()`); then `setUp()` as
+ * resolved on the class, following `parent::setUp()`, and at the point that
+ * chain reaches a `setUp()` outside the set (Laravel's `TestCase::setUp()`)
+ * the traits' set-up — for each trait in `class_uses_recursive()` order,
+ * `setUp<Trait>()` and then its methods carrying `#[SetUp]` — before the rest
+ * of the class's `setUp()` runs. Then, statement by statement:
  *
  *  - **pins**: `$this->m()` for `m` in {@see self::PIN_METHODS} (with no
  *    callback), `$this->travel($n)->u()` for `u` in {@see self::WORMHOLE_UNITS}
@@ -374,20 +384,17 @@ final class UnpinnedClockAssertions
     /** Attributes, by short name, that make a public, non-static method a test. */
     public const array TEST_ATTRIBUTES = ['Test'];
 
-    /** Doc tags that make a public, non-static method a test. */
-    public const array TEST_DOC_TAGS = ['@test'];
-
     /** Attributes, by short name, of a method run before each test. */
     public const array BEFORE_ATTRIBUTES = ['Before'];
-
-    /** Doc tags of a method run before each test. */
-    public const array BEFORE_DOC_TAGS = ['@before'];
 
     /** The set-up method, resolved through the hierarchy. */
     public const array SET_UP_METHODS = ['setUp'];
 
     /** A trait's set-up method is this prefix and the trait's short name. */
     public const array TRAIT_SET_UP_PREFIXES = ['setUp'];
+
+    /** Attributes, by short name, of a trait method Laravel runs as set-up (`Illuminate\Foundation\Testing\Attributes\SetUp`). */
+    public const array TRAIT_SET_UP_ATTRIBUTES = ['SetUp'];
 
     /** Method-call nodes: a pin, an unpin, a helper, an implicit or combining Carbon method, a predicate method. */
     public const array METHOD_CALLS = [MethodCall::class, NullsafeMethodCall::class];
@@ -441,11 +448,10 @@ final class UnpinnedClockAssertions
         'MESSAGE_PARAMETERS' => ['clean', 'message_parameter'],
         'TEST_PREFIXES' => ['found', 'test_prefix'],
         'TEST_ATTRIBUTES' => ['found', 'test_attribute'],
-        'TEST_DOC_TAGS' => ['found', 'test_doc_tag'],
         'BEFORE_ATTRIBUTES' => ['clean', 'before_attribute'],
-        'BEFORE_DOC_TAGS' => ['clean', 'before_doc_tag'],
         'SET_UP_METHODS' => ['clean', 'set_up_method'],
         'TRAIT_SET_UP_PREFIXES' => ['clean', 'trait_set_up_prefix'],
+        'TRAIT_SET_UP_ATTRIBUTES' => ['clean', 'trait_set_up_attribute'],
         'METHOD_CALLS' => ['found', 'method_call'],
         'PROPERTY_FETCHES' => ['found', 'property_fetch'],
         'BLANK_LITERAL_PARSERS' => ['found', 'blank_literal_parser'],
@@ -469,6 +475,11 @@ final class UnpinnedClockAssertions
     private string $testClass = '';
 
     private string $file = '';
+
+    /** The class whose set-up is being walked, while it is. */
+    private ?string $traitSetUpFor = null;
+
+    private bool $traitSetUpRun = false;
 
     /**
      * @param  array<string, string>  $sources  path => PHP source
@@ -772,14 +783,13 @@ final class UnpinnedClockAssertions
             }
         }
 
-        return self::marked($method, self::TEST_ATTRIBUTES, self::TEST_DOC_TAGS);
+        return self::marked($method, self::TEST_ATTRIBUTES);
     }
 
     /**
      * @param  list<string>  $attributes
-     * @param  list<string>  $tags
      */
-    private static function marked(ClassMethod $method, array $attributes, array $tags): bool
+    private static function marked(ClassMethod $method, array $attributes): bool
     {
         foreach ($method->attrGroups as $group) {
             foreach ($group->attrs as $attr) {
@@ -789,56 +799,219 @@ final class UnpinnedClockAssertions
             }
         }
 
-        $doc = (string) $method->getDocComment()?->getText();
-        foreach ($tags as $tag) {
-            if (preg_match('/'.preg_quote($tag, '/').'\b/', $doc)) {
-                return true;
-            }
-        }
-
         return false;
     }
 
-    private static function isBefore(ClassMethod $method): bool
-    {
-        return self::marked($method, self::BEFORE_ATTRIBUTES, self::BEFORE_DOC_TAGS);
-    }
-
     /**
-     * The pin state a test of this class starts in.
+     * The pin state a test of this class starts in, in the order the runtime
+     * runs set-up:
+     *
+     *  1. every `#[Before]` method ({@see self::BEFORE_ATTRIBUTES}, static or
+     *     not) the class has — its own, its traits' and its parents' — in
+     *     PHPUnit's order: `Reflection::methodsDeclaredDirectlyInTestClass()`
+     *     lists them class by class from the test class up, and
+     *     `HookMethodCollection::add()` prepends each before `setUp`
+     *     (`defaultBefore()` is built with `$shouldPrepend = true`), so they run
+     *     in the reverse of that listing, before `setUp()`; the list is then
+     *     sorted by priority, highest first, so a `#[Before(priority: -1)]`
+     *     runs after `setUp()` (phpunit/src/Metadata/Api/HookMethods.php:61,94;
+     *     phpunit/src/Runner/HookMethod/HookMethodCollection.php:36,76,90);
+     *  2. `setUp()` as resolved on the class ({@see self::SET_UP_METHODS}), with
+     *     `parent::setUp()` followed; where that chain reaches a `setUp()`
+     *     outside the set — Laravel's `TestCase::setUp()`, which calls
+     *     `setUpTheTestEnvironment()` and so `setUpTraits()` — the traits'
+     *     set-up runs there (laravel/framework
+     *     src/Illuminate/Foundation/Testing/TestCase.php:69-76,
+     *     Concerns/InteractsWithTestCaseLifecycle.php:106,259-274): for each
+     *     trait in `class_uses_recursive()` order, `setUp<Trait>()` and then
+     *     every method of it carrying {@see self::TRAIT_SET_UP_ATTRIBUTES};
+     *     then the rest of the class's `setUp()`. A class with no `setUp()` in
+     *     the set runs the traits' set-up at that step.
      */
     private function setUpState(string $class): bool
     {
         $this->test = $class.'::setUp';
         $this->stack = [$this->test];
+        $this->traitSetUpFor = $class;
+        $this->traitSetUpRun = false;
         $pinned = false;
 
-        foreach (self::SET_UP_METHODS as $name) {
-            $setUp = $this->findMethod($class, $name);
-            if ($setUp !== null) {
-                $pinned = $this->walk($setUp[0]->stmts ?? [], $pinned, $setUp[1]);
+        // PHPUnit's hook list: each #[Before] prepended to setUp (priority 0),
+        // then sorted by priority, highest first (usort is stable).
+        $hooks = [];
+        foreach (array_reverse($this->beforeMethods($class)) as [$method, $declaredIn]) {
+            $hooks[] = [$method, $declaredIn, self::priority($method)];
+        }
+        $hooks[] = [null, null, 0];
+        usort($hooks, static fn (array $a, array $b): int => $b[2] <=> $a[2]);
+
+        foreach ($hooks as [$method, $declaredIn]) {
+            if ($method !== null) {
+                $pinned = $this->walk($method->stmts ?? [], $pinned, $declaredIn);
+
+                continue;
+            }
+
+            $ran = false;
+            foreach (self::SET_UP_METHODS as $name) {
+                $setUp = $this->findMethod($class, $name);
+                if ($setUp !== null) {
+                    $ran = true;
+                    $this->stack[] = $setUp[1].'::'.$name;
+                    $pinned = $this->walk($setUp[0]->stmts ?? [], $pinned, $setUp[1]);
+                    array_pop($this->stack);
+                }
+            }
+            if (! $ran) {
+                $pinned = $this->runTraitSetUps($pinned);
             }
         }
 
-        foreach ($this->hierarchyTraits($class) as $trait) {
-            $short = substr($trait, (int) strrpos('\\'.$trait, '\\'));
-            foreach (self::TRAIT_SET_UP_PREFIXES as $prefix) {
-                $method = $this->findMethod($trait, $prefix.$short);
-                if ($method !== null) {
-                    $pinned = $this->walk($method[0]->stmts ?? [], $pinned, $method[1]);
+        $this->traitSetUpFor = null;
+
+        return $pinned;
+    }
+
+    /**
+     * The `#[Before]` methods a class has, as PHPUnit lists them: class by
+     * class from the test class up, each class's own methods then those its
+     * traits give it, each name once (as PHP resolves it).
+     *
+     * @return list<array{0: ClassMethod, 1: string}>
+     */
+    private function beforeMethods(string $class): array
+    {
+        $listed = [];
+        $seen = [];
+        for ($c = $class; $c !== null && isset($this->classes[$c]); $c = $this->classes[$c]['parent']) {
+            $names = [];
+            foreach ($this->classes[$c]['node']->getMethods() as $method) {
+                $names[] = $method->name->toString();
+            }
+            foreach ($this->traitsOf($c) as $trait) {
+                foreach (isset($this->classes[$trait]) ? $this->classes[$trait]['node']->getMethods() : [] as $method) {
+                    $names[] = $method->name->toString();
+                }
+            }
+            foreach ($names as $name) {
+                if (isset($seen[strtolower($name)])) {
+                    continue;
+                }
+                $seen[strtolower($name)] = true;
+                $resolved = $this->findMethod($class, $name);
+                if ($resolved !== null && self::marked($resolved[0], self::BEFORE_ATTRIBUTES)) {
+                    $listed[] = $resolved;
                 }
             }
         }
 
-        for ($c = $class; $c !== null && isset($this->classes[$c]); $c = $this->classes[$c]['parent']) {
-            foreach ($this->classes[$c]['node']->getMethods() as $method) {
-                if (self::isBefore($method)) {
-                    $pinned = $this->walk($method->stmts ?? [], $pinned, $c);
+        return $listed;
+    }
+
+    /**
+     * A `#[Before]` method's priority: its `priority` argument, named or first,
+     * when that is an integer literal; otherwise 0, PHPUnit's default.
+     */
+    private static function priority(ClassMethod $method): int
+    {
+        foreach ($method->attrGroups as $group) {
+            foreach ($group->attrs as $attr) {
+                if (! in_array($attr->name->getLast(), self::BEFORE_ATTRIBUTES, true)) {
+                    continue;
+                }
+                foreach ($attr->args as $i => $arg) {
+                    if (($arg->name !== null && $arg->name->toString() === 'priority') || ($arg->name === null && $i === 0)) {
+                        $value = $arg->value;
+                        if ($value instanceof Node\Scalar\Int_) {
+                            return $value->value;
+                        }
+                        if ($value instanceof Expr\UnaryMinus && $value->expr instanceof Node\Scalar\Int_) {
+                            return -$value->expr->value;
+                        }
+                    }
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * Laravel's `setUpTraits()`, reached where the `parent::setUp()` chain
+     * leaves the set.
+     */
+    private function runTraitSetUps(bool $pinned): bool
+    {
+        if ($this->traitSetUpFor === null || $this->traitSetUpRun) {
+            return $pinned;
+        }
+        $this->traitSetUpRun = true;
+
+        foreach ($this->traitsInLaravelOrder($this->traitSetUpFor) as $trait) {
+            $short = substr($trait, (int) strrpos('\\'.$trait, '\\'));
+            foreach (self::TRAIT_SET_UP_PREFIXES as $prefix) {
+                $method = $this->findMethod($this->traitSetUpFor, $prefix.$short);
+                if ($method !== null) {
+                    $pinned = $this->walk($method[0]->stmts ?? [], $pinned, $method[1]);
+                }
+            }
+            foreach ($this->traitsOf($trait, true) as $source) {
+                foreach (isset($this->classes[$source]) ? $this->classes[$source]['node']->getMethods() : [] as $method) {
+                    if (self::marked($method, self::TRAIT_SET_UP_ATTRIBUTES)) {
+                        $pinned = $this->walk($method->stmts ?? [], $pinned, $source);
+                    }
                 }
             }
         }
 
         return $pinned;
+    }
+
+    /**
+     * `class_uses_recursive()`: the topmost parent's traits first, each trait
+     * followed by the traits it uses, each once.
+     *
+     * @return list<string>
+     */
+    private function traitsInLaravelOrder(string $class): array
+    {
+        $chain = [];
+        for ($c = $class; $c !== null && isset($this->classes[$c]); $c = $this->classes[$c]['parent']) {
+            $chain[] = $c;
+        }
+
+        $found = [];
+        foreach (array_reverse($chain) as $c) {
+            foreach ($this->traitsOf($c) as $trait) {
+                if (! in_array($trait, $found, true)) {
+                    $found[] = $trait;
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * Laravel's `trait_uses_recursive()`: the traits a class-like uses, then
+     * the traits each of those uses, each once; with $self, the class-like
+     * first.
+     *
+     * @return list<string>
+     */
+    private function traitsOf(string $classLike, bool $self = false, int $depth = 0): array
+    {
+        $direct = $this->classes[$classLike]['traits'] ?? [];
+        $found = $self ? [$classLike, ...$direct] : $direct;
+        foreach ($depth < 20 ? $direct : [] as $trait) {
+            foreach ($this->traitsOf($trait, false, $depth + 1) as $nested) {
+                if (! in_array($nested, $found, true)) {
+                    $found[] = $nested;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -941,8 +1114,8 @@ final class UnpinnedClockAssertions
             return $this->pinCall($args, self::PIN_METHODS[$name], $pinned, $owner);
         }
 
-        if ($call instanceof MethodCall && in_array($name, self::WORMHOLE_UNITS, true)
-            && $call->var instanceof MethodCall && self::isThis($call->var->var)
+        if (self::isOneOf($call, self::METHOD_CALLS) && in_array($name, self::WORMHOLE_UNITS, true)
+            && self::isOneOf($call->var, self::METHOD_CALLS) && self::isThis($call->var->var)
             && $call->var->name instanceof Identifier && in_array($call->var->name->toString(), self::TRAVEL_METHODS, true)) {
             $pinned = $this->walk($call->var->getArgs(), $pinned, $owner);
 
@@ -1010,6 +1183,9 @@ final class UnpinnedClockAssertions
                 default => $this->testClass,
             };
             $method = $this->findMethod($lookupFrom, $name);
+            if ($method === null && self::HELPER_SCOPES[$scope] === 'parent' && in_array($name, self::SET_UP_METHODS, true)) {
+                $pinned = $this->runTraitSetUps($pinned);
+            }
             if ($method !== null) {
                 $key = $method[1].'::'.$name;
                 if (! in_array($key, $this->stack, true) && count($this->stack) < 12) {
