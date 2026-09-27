@@ -13,8 +13,10 @@ use Lynomia\Modules\Domains\Infrastructure\Models\Domain;
 use Lynomia\Modules\Domains\Infrastructure\Models\DomainOperation;
 use Lynomia\Modules\Identity\Infrastructure\Models\Customer;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
+use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use PHPUnit\Framework\Attributes\Test;
+use Tests\Support\StaffHoldingExactly;
 use Tests\TestCase;
 
 /**
@@ -27,6 +29,7 @@ use Tests\TestCase;
 final class TheDomainQueuesAnOperatorWorksTest extends TestCase
 {
     use RefreshDatabase;
+    use StaffHoldingExactly;
 
     private Customer $customer;
 
@@ -141,14 +144,35 @@ final class TheDomainQueuesAnOperatorWorksTest extends TestCase
         $this->assertArrayHasKey('cost_minor', (array) $response->json('data.0'));
     }
 
+    /**
+     * A staff member holding every permission but `service.view_any` is
+     * refused both queues, and one holding only that permission reads both.
+     *
+     * Staff, not a login with no role: the /api/admin staff gate refuses a
+     * role-less login before any permission is read, so its 403 said nothing
+     * about the permission these routes name. With that login here, changing
+     * both routes to `catalog.view` stayed green (OX-2, re-audit of round
+     * four).
+     */
     #[Test]
     public function a_person_without_the_permission_cannot_read_either_queue(): void
     {
         $this->domain(DomainState::Indeterminate, 'private.test');
 
-        $nobody = User::factory()->create();
+        $everythingElse = array_values(array_filter(
+            Permission::cases(),
+            static fn (Permission $permission): bool => $permission !== Permission::ServiceViewAny,
+        ));
 
-        $this->actingAs($nobody)->getJson('/api/admin/domains')->assertForbidden();
-        $this->actingAs($nobody)->getJson('/api/admin/domains/operations')->assertForbidden();
+        $withoutIt = $this->staffHoldingExactly($everythingElse);
+
+        $this->actingAs($withoutIt)->getJson('/api/admin/domains')->assertForbidden();
+        $this->actingAs($withoutIt)->getJson('/api/admin/domains/operations')->assertForbidden();
+
+        // Positive control: that permission alone opens both.
+        $withIt = $this->staffHoldingExactly([Permission::ServiceViewAny]);
+
+        $this->actingAs($withIt)->getJson('/api/admin/domains')->assertOk();
+        $this->actingAs($withIt)->getJson('/api/admin/domains/operations')->assertOk();
     }
 }

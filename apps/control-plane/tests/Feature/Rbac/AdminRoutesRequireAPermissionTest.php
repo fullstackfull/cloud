@@ -6,8 +6,11 @@ namespace Tests\Feature\Rbac;
 
 use Illuminate\Routing\Route as RoutingRoute;
 use Illuminate\Support\Facades\Route;
+use Lynomia\Http\Middleware\ResolveActingCustomer;
 use Lynomia\Modules\Rbac\Domain\Enums\Permission;
 use PHPUnit\Framework\Attributes\Test;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Tests\Support\ReadsTheMiddlewareARouteRuns;
 use Tests\TestCase;
 
 /**
@@ -24,9 +27,22 @@ use Tests\TestCase;
  * nice-to-have" — it is an endpoint every operator reaches whatever their
  * role, and one step (the staff gate) from every customer. The only reliable
  * way to keep that from happening on a busy afternoon is to fail the build.
+ *
+ * What every test here reads, for each route whose URI starts `api/admin`:
+ * the middleware the router runs for it (ReadsTheMiddlewareARouteRuns —
+ * Router::gatherRouteMiddleware(): aliases resolved to classes with their
+ * parameters, `withoutMiddleware()` exclusions removed). Not what the route
+ * declares: Route::gatherMiddleware() kept a `permission:` entry that
+ * `->withoutMiddleware(...)` had removed from what runs, and missed one
+ * spelled by class name rather than alias (the OB5-2 class, re-audit of
+ * round four). A permission is an entry whose class is spatie's
+ * PermissionMiddleware; the acting-customer scope is an entry whose class is
+ * ResolveActingCustomer.
  */
 final class AdminRoutesRequireAPermissionTest extends TestCase
 {
+    use ReadsTheMiddlewareARouteRuns;
+
     #[Test]
     public function every_admin_route_names_the_permission_it_requires(): void
     {
@@ -37,13 +53,7 @@ final class AdminRoutesRequireAPermissionTest extends TestCase
                 continue;
             }
 
-            $declares = array_filter(
-                $route->gatherMiddleware(),
-                static fn ($middleware): bool => is_string($middleware)
-                    && str_starts_with($middleware, 'permission:'),
-            );
-
-            if ($declares === []) {
+            if ($this->parametersOf($route, PermissionMiddleware::class) === []) {
                 $unguarded[] = $this->describe($route);
             }
         }
@@ -70,12 +80,10 @@ final class AdminRoutesRequireAPermissionTest extends TestCase
                 continue;
             }
 
-            foreach ($route->gatherMiddleware() as $middleware) {
-                if (! is_string($middleware) || ! str_starts_with($middleware, 'permission:')) {
-                    continue;
-                }
+            foreach ($this->parametersOf($route, PermissionMiddleware::class) as $parameters) {
+                $names = $parameters === [] ? [''] : explode('|', $parameters[0]);
 
-                foreach (explode('|', substr($middleware, strlen('permission:'))) as $name) {
+                foreach ($names as $name) {
                     if (! in_array(trim($name), $known, true)) {
                         $unknown[] = $this->describe($route).' → '.trim($name);
                     }
@@ -99,7 +107,7 @@ final class AdminRoutesRequireAPermissionTest extends TestCase
                 continue;
             }
 
-            if (in_array('customer', $route->gatherMiddleware(), true)) {
+            if ($this->parametersOf($route, ResolveActingCustomer::class) !== []) {
                 $scoped[] = $this->describe($route);
             }
         }

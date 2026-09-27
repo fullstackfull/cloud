@@ -61,6 +61,11 @@ use Lynomia\Modules\Support\Http\Controllers\OperatorTicketController;
 |    every customer login read the operator list. The customer role's
 |    permissions are no longer editable, and this gate means a customer role
 |    that came to hold an operator permission some other way opens nothing.
+|    The same gate refuses a request authenticated by a personal access
+|    token — the customer-surface tokens POST /api/v1/me/api-tokens mints —
+|    whatever roles its holder has: an operator reaches this surface through
+|    the portal session, and before that check an infrastructure admin's own
+|    customer token, or a customer's token after promotion, opened it (OB5-1).
 |  - every route below names the permission it requires.
 |
 | Both are enforced by tests rather than by convention —

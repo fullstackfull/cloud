@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
+use Laravel\Sanctum\PersonalAccessToken;
 use Lynomia\Modules\Identity\Infrastructure\Models\User;
 use Lynomia\Modules\Rbac\Domain\Enums\Role;
 use Symfony\Component\HttpFoundation\Response;
@@ -35,6 +36,20 @@ use Symfony\Component\HttpFoundation\Response;
  * declared permission (`customer.impersonate`) with no route or action that
  * implements it.
  *
+ * A staff role is necessary, not sufficient: the request must also not have
+ * been authenticated by a personal access token (OB5-1, re-audit of round
+ * four). The operator surface is reached through the portal's Sanctum cookie
+ * session, which Sanctum represents as a TransientToken; the platform's only
+ * bearer tokens are the customer-surface ones IssueApiToken mints under
+ * POST /api/v1/me/api-tokens — abilities `*`, bound to one customer account —
+ * and `perf:token`'s unbound load-harness token. `auth:sanctum` accepts any of
+ * them here as readily as on /api/v1, so before this check an infrastructure
+ * admin's customer token read GET /api/admin/customers, and so did a token a
+ * customer minted before being promoted. Any Sanctum PersonalAccessToken is
+ * refused, bound or not; the rule is "no bearer token on /api/admin", which
+ * also covers a token minted before `customer_id` existed. The token keeps
+ * working on the customer API, which is what it was issued for.
+ *
  * Refuses with 403 `auth.forbidden` — the same code a permission refusal
  * carries, so the response says nothing a permission refusal would not.
  *
@@ -53,6 +68,10 @@ final class EnsureTheCallerIsStaff
         }
 
         if (! $user->hasAnyRole(Role::staffRoleNames())) {
+            throw new AuthorizationException;
+        }
+
+        if ($user->currentAccessToken() instanceof PersonalAccessToken) {
             throw new AuthorizationException;
         }
 
