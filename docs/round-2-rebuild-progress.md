@@ -216,3 +216,16 @@ All of round seven merged at `5a7fc6f`. Full backend suite there: 5,942/5,942,
 vitest 653/653, `tsc --noEmit` and `eslint --max-warnings=0` (these four at
 `bf36e3f`, whose difference from `5a7fc6f` is four files in `apps/control-plane/tests`).
 The re-audit after round seven is next, against `5a7fc6f`.
+
+### Round eight — fixing what the re-audit after round seven found
+
+The re-audit after round seven against `c4209fc` is recorded in
+`docs/independent-re-audit-after-round-7.md`: no numbered finding reproduces; the
+confirmed unnumbered items are listed there.
+
+| Group | Scope | Status | Commit |
+|---|---|---|---|
+| A | an unverified resize leaving the row stale (a downgrade credited with no resize); a resize answered with a running task; a missing disk figure growing twice; the withdraw route's permission oracle; a per-customer limit exceeded on a return | fixing | — |
+| B | interleaved invitations re-roling an operator; `roles: []` on a customer login; the promoted customer's reset mail | fixing | — |
+| C | a failed scheduled run counted twice; the scheduler and backup runbooks; overlapping hosting sweeps deadlocking | fixing | — |
+| E | the `NodeStatus` spelled excuses; `docs/api.md`; the `/activity` schema; the clock gate's callable sentence and its equality list | fixing | — |
