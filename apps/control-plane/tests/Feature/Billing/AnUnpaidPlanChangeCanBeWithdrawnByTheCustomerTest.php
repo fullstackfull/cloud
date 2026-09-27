@@ -239,12 +239,20 @@ final class AnUnpaidPlanChangeCanBeWithdrawnByTheCustomerTest extends TestCase
     public function a_member_who_may_not_pay_may_not_withdraw(): void
     {
         // billing.pay, the permission a plan change needs: a technical
-        // contact or a read-only member moves no plan and no money.
+        // contact or a read-only member moves no plan and no money. Nor does
+        // an administrator, who holds billing.view and not billing.pay - the
+        // one role here that tells the two permissions apart: with only the
+        // technical contact and the member (neither holds billing.view), the
+        // route could have asked billing.view and this stayed green (MN14,
+        // the re-audit after round seven).
         [$subscription, $large] = $this->vpsSubscriptionOnANode();
         $this->changePlan($subscription, (string) $large->getKey(), $this->priceOf($large))->assertOk();
         $invoice = $this->openInvoiceOf($subscription);
 
-        foreach ([CustomerRole::Technical, CustomerRole::Member] as $role) {
+        $this->assertContains('billing.view', CustomerRole::Administrator->permissions());
+        $this->assertNotContains('billing.pay', CustomerRole::Administrator->permissions());
+
+        foreach ([CustomerRole::Technical, CustomerRole::Member, CustomerRole::Administrator] as $role) {
             $member = User::factory()->create();
             $this->customer->members()->create(['user_id' => $member->id, 'role' => $role, 'accepted_at' => now()]);
 
