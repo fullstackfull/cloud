@@ -1207,6 +1207,30 @@ final class AnUpgradeNobodyPaidForIsNotBilledAsTheBiggerPlanTest extends Billing
     }
 
     #[Test]
+    public function a_paid_change_from_before_this_period_that_never_recorded_delivery_blocks_nothing(): void
+    {
+        /*
+         * `delivered_at` was added without a back-fill: a change settled
+         * before it existed that queued nothing looks undelivered for ever.
+         * Only the current period's changes are read, so such a row cannot
+         * hold the customer's plan changes past a renewal.
+         */
+        [$customer, $user] = $this->accountWithOwner();
+        $subscription = $this->paidSubscriptionOn($customer, $this->small);
+        $this->serviceWithMachine($customer, $subscription);
+        $this->changePlan($user, $subscription, $this->large, 'old-period-up')->assertOk();
+        $upgrade = $this->openUpgradeInvoice($subscription);
+
+        Event::fake([InvoicePaid::class]);
+        app(SettleInvoice::class)->execute($upgrade, Transaction::factory()->forCustomer($customer)->amount($upgrade->amountDue())->create());
+
+        PlanChange::query()->where('proration_invoice_id', $upgrade->getKey())
+            ->update(['changed_at' => CarbonImmutable::instance($subscription->fresh()->current_period_start)->subDay()]);
+
+        $this->changePlan($user, $subscription->fresh(), $this->xl, 'old-period-up-2')->assertOk();
+    }
+
+    #[Test]
     public function the_x1_sequence_returns_the_paid_upgrade_at_the_end(): void
     {
         // The re-audit's probe, over the route: paid, not yet heard, a second
